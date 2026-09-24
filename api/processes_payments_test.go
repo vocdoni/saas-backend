@@ -334,3 +334,68 @@ func TestDeleteDraftFailsClosedWhenSessionUnverifiable(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPending)
 }
+
+// TestBrandingChargedOncePerOrganization: branding is a once-per-organization add-on, but
+// the organization is only stamped as having paid it at fulfillment — so two drafts that
+// both select it and both check out before either pays would both be charged €149. The
+// live payment holds the claim in the meantime, and a failed payment releases it again.
+func TestBrandingChargedOncePerOrganization(t *testing.T) {
+	c := qt.New(t)
+	installFakePaymentGW(t)
+	adminToken := testCreateUser(t, "brandingpass1234")
+	orgAddress := testCreateOrganization(t, adminToken)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+
+	newBrandedProcess := func() string {
+		members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(15)...)
+		req := newVotingProcessRequest(orgAddress, memberIDs(members))
+		req.AddOns = db.ProcessAddOns{Branding: true}
+		created := requestAndParse[apicommon.CreateVotingProcessResponse](
+			t, http.MethodPost, adminToken, req, processesCreateEndpoint)
+		return created.ProcessID
+	}
+	// 15 voters + email 2FA = €15.15; branding adds €149
+	const plainCents = int64(1_515)
+	const withBrandingCents = plainCents + 14_900
+
+	first, second := newBrandedProcess(), newBrandedProcess()
+	checkoutReq := &apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}
+
+	// nothing is paid or in flight yet, so the first draft quoted carries branding
+	price := requestAndParse[apicommon.ProcessPriceResponse](
+		t, http.MethodGet, adminToken, nil, "processes", first, "price")
+	c.Assert(price.TotalCents, qt.Equals, withBrandingCents)
+	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](
+		t, http.MethodPost, adminToken, checkoutReq, "processes", first, "checkout")
+	c.Assert(checkout.AmountCents, qt.Equals, withBrandingCents)
+
+	// that open payment claims branding for the organization: the second draft still
+	// selects it, but it is no longer chargeable — not at quote time, not at checkout
+	price = requestAndParse[apicommon.ProcessPriceResponse](
+		t, http.MethodGet, adminToken, nil, "processes", second, "price")
+	c.Assert(price.TotalCents, qt.Equals, plainCents)
+	secondCheckout := requestAndParse[apicommon.ProcessCheckoutResponse](
+		t, http.MethodPost, adminToken, checkoutReq, "processes", second, "checkout")
+	c.Assert(secondCheckout.AmountCents, qt.Equals, plainCents)
+
+	// the claim is recorded on the payment, which is what fulfillment reads to decide
+	// whether to stamp the organization as having paid branding
+	oid, err := bson.ObjectIDFromHex(first)
+	c.Assert(err, qt.IsNil)
+	payment, err := testDB.ProcessPayment(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Branding, qt.IsTrue)
+	secondOID, err := bson.ObjectIDFromHex(second)
+	c.Assert(err, qt.IsNil)
+	secondPayment, err := testDB.ProcessPayment(secondOID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(secondPayment.Branding, qt.IsFalse)
+
+	// a failed payment releases the claim, so the second draft can carry branding again
+	released, err := testDB.MarkProcessPaymentFailed(oid, payment.CheckoutSessionID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(released, qt.IsTrue)
+	price = requestAndParse[apicommon.ProcessPriceResponse](
+		t, http.MethodGet, adminToken, nil, "processes", second, "price")
+	c.Assert(price.TotalCents, qt.Equals, withBrandingCents)
+}

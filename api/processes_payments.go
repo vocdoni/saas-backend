@@ -30,6 +30,8 @@ type paymentGateway interface {
 // processQuoteInput derives the pricing input from the draft state: census size, the 2FA
 // channels the census authenticates with, the selected add-ons (branding only while the
 // organization has not paid it yet), and the payer type (managed org -> integrator).
+// Branding is settled in full by processQuote, which also honours the claim a sibling
+// process's live payment holds on it — this function sees only the draft.
 func processQuoteInput(vp *db.VotingProcess, census *db.Census, org *db.Organization) pricing.QuoteInput {
 	payer := pricing.PayerStandard
 	if org.ManagedBy != (common.Address{}) {
@@ -57,6 +59,16 @@ func (a *API) processQuote(vp *db.VotingProcess) (pricing.Quote, pricing.QuoteIn
 		return pricing.Quote{}, pricing.QuoteInput{}, errors.ErrGenericInternalServerError.WithErr(err)
 	}
 	input := processQuoteInput(vp, census, org)
+	if input.Branding {
+		// branding is charged once per organization, but BrandingPaidAt is only stamped at
+		// fulfillment — so two drafts checked out before either pays would both carry it.
+		// A live payment on another process of the org already claims it.
+		claimed, err := a.db.OrgHasLiveBrandingPayment(vp.OrgAddress, vp.ID)
+		if err != nil {
+			return pricing.Quote{}, pricing.QuoteInput{}, errors.ErrGenericInternalServerError.WithErr(err)
+		}
+		input.Branding = !claimed
+	}
 	quote, err := pricing.Compute(input)
 	if err != nil {
 		return pricing.Quote{}, pricing.QuoteInput{}, errors.ErrMalformedBody.WithErr(err)
@@ -120,7 +132,7 @@ func (a *API) paymentDueForPublish(vp *db.VotingProcess) (*pricing.Quote, error)
 // The paid state is recorded afterwards; the wallet document itself is the authoritative
 // record, so a failure there only logs.
 func (a *API) debitManagedProcessWallet(vp *db.VotingProcess, org *db.Organization) error {
-	quote, _, err := a.processQuote(vp)
+	quote, input, err := a.processQuote(vp)
 	if err != nil {
 		return err
 	}
@@ -164,6 +176,7 @@ func (a *API) debitManagedProcessWallet(vp *db.VotingProcess, org *db.Organizati
 		OrgAddress:  vp.OrgAddress,
 		AmountCents: quote.TotalCents,
 		Currency:    "eur",
+		Branding:    input.Branding,
 	}
 	if paid != nil {
 		// keep the record's history across a top-up
@@ -177,7 +190,7 @@ func (a *API) debitManagedProcessWallet(vp *db.VotingProcess, org *db.Organizati
 	// stamp the once-per-organization branding add-on as paid when the debited quote
 	// carried it, so the org's next process is not charged branding again (conditional
 	// in the DB: only the first payment sets it).
-	if vp.AddOns.Branding {
+	if input.Branding {
 		if _, err := a.db.SetOrganizationBrandingPaid(vp.OrgAddress, time.Now()); err != nil {
 			log.Warnw("could not stamp organization branding-paid",
 				"processId", vp.ID.Hex(), "orgAddress", vp.OrgAddress.String(), "error", err)
@@ -306,7 +319,13 @@ func (a *API) refuseCensusGrowthBeyondPayment(
 	}
 	grown := *census
 	grown.Size += int64(added)
-	quote, err := pricing.Compute(processQuoteInput(vp, &grown, org))
+	input := processQuoteInput(vp, &grown, org)
+	// price the branding add-on as the payment priced it: BrandingPaidAt is stamped at
+	// fulfillment, so a fresh quote drops branding right after the payment that charged
+	// it — comparing that against the paid amount would hand the €149 back as free
+	// census growth.
+	input.Branding = payment.Branding
+	quote, err := pricing.Compute(input)
 	if err != nil {
 		errors.ErrMalformedBody.WithErr(err).Write(w)
 		return true
@@ -586,6 +605,7 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 		AmountCents:       quote.TotalCents,
 		Currency:          "eur",
 		RequestedBy:       user.Email,
+		Branding:          input.Branding,
 	}, previousSessionID)
 	if err != nil || !stored {
 		// the session exists but nothing references it: expire it so it can never be

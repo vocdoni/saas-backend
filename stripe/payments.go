@@ -288,10 +288,13 @@ func (s *Service) fulfillProcessPayment(session *stripeapi.CheckoutSession) erro
 // sets it) and hand the process to publication. Idempotent, so it is safe on a webhook
 // replay of a payment already recorded as paid.
 func (s *Service) afterProcessPaid(processID bson.ObjectID) {
-	if vp, err := s.db.VotingProcess(processID); err == nil && vp.AddOns.Branding {
-		if _, err := s.db.SetOrganizationBrandingPaid(vp.OrgAddress, time.Now()); err != nil {
+	// the payment record, not the draft, says whether branding was charged: a draft may
+	// select branding and still be quoted without it, because a sibling process's live
+	// payment already holds the organization's claim on it.
+	if payment, err := s.db.ProcessPayment(processID); err == nil && payment.Branding {
+		if _, err := s.db.SetOrganizationBrandingPaid(payment.OrgAddress, time.Now()); err != nil {
 			log.Warnw("could not stamp organization branding-paid",
-				"processId", processID.Hex(), "orgAddress", vp.OrgAddress.String(), "error", err)
+				"processId", processID.Hex(), "orgAddress", payment.OrgAddress.String(), "error", err)
 		}
 	}
 	if s.OnProcessPaid != nil {

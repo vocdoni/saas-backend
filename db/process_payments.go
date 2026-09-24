@@ -35,6 +35,34 @@ func (ms *MongoStorage) ProcessPayment(processID bson.ObjectID) (*ProcessPayment
 	return payment, nil
 }
 
+// OrgHasLiveBrandingPayment reports whether any process of the organization other than
+// exceptProcessID holds a live claim on the once-per-organization branding add-on: a
+// payment that carries branding and is pending, processing or paid. Organization
+// BrandingPaidAt is only stamped at fulfillment, so without this two drafts checked out
+// before either pays would both be quoted — and charged — for branding. A failed payment
+// releases the claim, which is what lets a second draft carry branding after the first
+// attempt fell through.
+func (ms *MongoStorage) OrgHasLiveBrandingPayment(orgAddress common.Address, exceptProcessID bson.ObjectID) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	err := ms.processPayments.FindOne(ctx, bson.M{
+		"orgAddress": orgAddress,
+		"branding":   true,
+		"status": bson.M{"$in": bson.A{
+			ProcessPaymentPending, ProcessPaymentProcessing, ProcessPaymentPaid,
+		}},
+		"_id": bson.M{"$ne": exceptProcessID},
+	}).Err()
+	switch err {
+	case nil:
+		return true, nil
+	case mongo.ErrNoDocuments:
+		return false, nil
+	default:
+		return false, fmt.Errorf("failed to look up organization branding payments: %w", err)
+	}
+}
+
 // SetProcessPaymentPending records a fresh open checkout session for a process, replacing
 // the payment document. It only succeeds while no payment exists yet or the existing one
 // is pending or failed; a processing or paid payment must never be replaced (that would

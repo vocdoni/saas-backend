@@ -795,10 +795,15 @@ type ProcessPayment struct {
 	Currency    string `json:"currency" bson:"currency"`
 	// RequestedBy is the email of the user who started the checkout; webhook
 	// fulfillment publishes the process acting as this user.
-	RequestedBy string    `json:"-" bson:"requestedBy,omitempty"`
-	PaidAt      time.Time `json:"paidAt,omitempty" bson:"paidAt,omitempty"`
-	CreatedAt   time.Time `json:"-" bson:"createdAt"`
-	UpdatedAt   time.Time `json:"-" bson:"updatedAt"`
+	RequestedBy string `json:"-" bson:"requestedBy,omitempty"`
+	// Branding records whether this payment carries the once-per-organization branding
+	// add-on. Organization.BrandingPaidAt is only stamped at fulfillment, so it is this
+	// flag that holds the claim in between: while the payment is live (pending,
+	// processing or paid) no other process of the organization is quoted branding.
+	Branding  bool      `json:"-" bson:"branding,omitempty"`
+	PaidAt    time.Time `json:"paidAt,omitempty" bson:"paidAt,omitempty"`
+	CreatedAt time.Time `json:"-" bson:"createdAt"`
+	UpdatedAt time.Time `json:"-" bson:"updatedAt"`
 }
 
 // Wallet is an integrator's prepaid EUR balance. AppliedKeys makes credits and debits
