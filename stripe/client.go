@@ -3,13 +3,13 @@ package stripe
 import (
 	"fmt"
 
-	stripeapi "github.com/stripe/stripe-go/v82"
-	stripeportalsession "github.com/stripe/stripe-go/v82/billingportal/session"
-	stripecheckoutsession "github.com/stripe/stripe-go/v82/checkout/session"
-	stripecustomer "github.com/stripe/stripe-go/v82/customer"
-	stripeprice "github.com/stripe/stripe-go/v82/price"
-	stripeproduct "github.com/stripe/stripe-go/v82/product"
-	stripewebhook "github.com/stripe/stripe-go/v82/webhook"
+	stripeapi "github.com/stripe/stripe-go/v86"
+	stripeportalsession "github.com/stripe/stripe-go/v86/billingportal/session"
+	stripecheckoutsession "github.com/stripe/stripe-go/v86/checkout/session"
+	stripecustomer "github.com/stripe/stripe-go/v86/customer"
+	stripeprice "github.com/stripe/stripe-go/v86/price"
+	stripeproduct "github.com/stripe/stripe-go/v86/product"
+	stripewebhook "github.com/stripe/stripe-go/v86/webhook"
 	"github.com/vocdoni/saas-backend/errors"
 )
 
@@ -168,7 +168,7 @@ func (c *Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeap
 			},
 		},
 		// UI mode is set to embedded, since the client is integrated in our UI
-		UIMode: stripeapi.String(string(stripeapi.CheckoutSessionUIModeCustom)),
+		UIMode: stripeapi.String(string(stripeapi.CheckoutSessionUIModeElements)),
 		// Automatic tax calculation is enabled
 		AutomaticTax: &stripeapi.CheckoutSessionAutomaticTaxParams{
 			Enabled: stripeapi.Bool(true),
