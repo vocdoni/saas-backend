@@ -83,6 +83,29 @@ func (a *API) legacyProcessByID(ctx context.Context, raw string) (*apicommon.Vot
 	return a.projectLegacyProcess(ctx, src)
 }
 
+// legacyProcessResultsByID projects one legacy record's per-question tallies onto the /processes
+// results shape. The projection already carries every question's chain tally, so this is the same
+// read reshaped. A nil response with a nil error means no legacy record owns the id.
+func (a *API) legacyProcessResultsByID(ctx context.Context, raw string) (*apicommon.VotingProcessResultsResponse, error) {
+	resp, err := a.legacyProcessByID(ctx, raw)
+	if err != nil || resp == nil {
+		return nil, err
+	}
+	entries := make([]apicommon.VotingProcessQuestionResults, 0, len(resp.Questions))
+	for i := range resp.Questions {
+		q := &resp.Questions[i]
+		if q.Results == nil {
+			continue
+		}
+		entries = append(entries, apicommon.VotingProcessQuestionResults{
+			QuestionID:      q.ID.Hex(),
+			UpstreamID:      q.UpstreamID,
+			QuestionResults: *q.Results,
+		})
+	}
+	return &apicommon.VotingProcessResultsResponse{ID: resp.ID, Questions: entries}, nil
+}
+
 // legacyProjectionError maps a projection failure onto its API error: a failed chain read is 50004,
 // anything else a storage failure.
 func legacyProjectionError(err error) errors.Error {
