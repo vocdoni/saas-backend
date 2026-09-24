@@ -23,6 +23,42 @@ var ErrInsufficientWalletBalance = fmt.Errorf("insufficient wallet balance")
 // The ledger insert that follows is the audit trail, deduplicated by a unique index on
 // its idempotency key; the wallet document stays authoritative for the balance.
 
+// walletAppliedKeysWindow bounds Wallet.AppliedKeys. The array only has to guard the window
+// between walletKeyApplied and the conditional write that follows it; the walletLedger unique
+// index is the permanent record of what was applied, so an older replay is caught there. An
+// unbounded $push instead reached the 16 MB document limit after a few hundred thousand
+// operations, and a wallet that can no longer be updated can neither be topped up nor debited.
+// ponytail: a fixed window, not a TTL — make it a lookup-only check if the array ever gets in
+// the way. Its one ceiling: a crash between the balance write and the ledger insert heals on
+// the retry only while the key is still inside the window.
+const walletAppliedKeysWindow = 5000
+
+// appliedKeysPush is the $push that records an applied key and keeps the array bounded.
+func appliedKeysPush(idempotencyKey string) bson.M {
+	return bson.M{"appliedKeys": bson.M{
+		"$each":  bson.A{idempotencyKey},
+		"$slice": -walletAppliedKeysWindow,
+	}}
+}
+
+// walletKeyApplied reports whether an operation was already applied to a wallet, by looking
+// it up in the ledger — written after the balance, so a row there means the balance moved.
+// This is what catches a replay of a key that has aged out of Wallet.AppliedKeys.
+func (ms *MongoStorage) walletKeyApplied(orgAddress common.Address, idempotencyKey string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	err := ms.walletLedger.FindOne(ctx,
+		bson.M{"orgAddress": orgAddress, "idempotencyKey": idempotencyKey}).Err()
+	switch err {
+	case nil:
+		return true, nil
+	case mongo.ErrNoDocuments:
+		return false, nil
+	default:
+		return false, fmt.Errorf("failed to look up wallet ledger entry: %w", err)
+	}
+}
+
 // Wallet returns an organization's prepaid wallet. An organization that never received a
 // top-up has an implicit empty wallet, not an error.
 func (ms *MongoStorage) Wallet(orgAddress common.Address) (*Wallet, error) {
@@ -48,15 +84,22 @@ func (ms *MongoStorage) CreditWallet(orgAddress common.Address, amountCents int6
 	if (orgAddress.Cmp(common.Address{}) == 0) || amountCents <= 0 || idempotencyKey == "" {
 		return ErrInvalidData
 	}
+	applied, err := ms.walletKeyApplied(orgAddress, idempotencyKey)
+	if err != nil {
+		return err
+	}
+	if applied {
+		return nil // already credited, by an attempt whose key may have left the window
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	filter := bson.M{"_id": orgAddress, "appliedKeys": bson.M{"$ne": idempotencyKey}}
 	update := bson.M{
 		"$inc":  bson.M{"balanceCents": amountCents},
-		"$push": bson.M{"appliedKeys": idempotencyKey},
+		"$push": appliedKeysPush(idempotencyKey),
 		"$set":  bson.M{"updatedAt": time.Now()},
 	}
-	_, err := ms.wallets.UpdateOne(ctx, filter, update, options.UpdateOne().SetUpsert(true))
+	_, err = ms.wallets.UpdateOne(ctx, filter, update, options.UpdateOne().SetUpsert(true))
 	if mongo.IsDuplicateKeyError(err) {
 		// The filter matched nothing, so the upsert attempted an insert that collided on
 		// _id. Two different causes: the key is already in appliedKeys (already credited),
@@ -104,6 +147,13 @@ func (ms *MongoStorage) DebitWalletForProcess(d WalletDebit) error {
 	}
 	orgAddress, amountCents := d.OrgAddress, d.AmountCents
 	idempotencyKey := fmt.Sprintf("%s:%d", d.ProcessID.Hex(), d.PriceCents)
+	applied, err := ms.walletKeyApplied(orgAddress, idempotencyKey)
+	if err != nil {
+		return err
+	}
+	if applied {
+		return nil // already debited at this price, possibly beyond the appliedKeys window
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	filter := bson.M{
@@ -113,7 +163,7 @@ func (ms *MongoStorage) DebitWalletForProcess(d WalletDebit) error {
 	}
 	update := bson.M{
 		"$inc":  bson.M{"balanceCents": -amountCents},
-		"$push": bson.M{"appliedKeys": idempotencyKey},
+		"$push": appliedKeysPush(idempotencyKey),
 		"$set":  bson.M{"updatedAt": time.Now()},
 	}
 	res, err := ms.wallets.UpdateOne(ctx, filter, update)

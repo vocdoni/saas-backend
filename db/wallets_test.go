@@ -1,7 +1,9 @@
 package db
 
 import (
+	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"testing"
 
@@ -207,4 +209,57 @@ func TestWalletConcurrentFirstCredits(t *testing.T) {
 	total, _, err := testDB.WalletLedger(testOrgAddress, 1, credits)
 	c.Assert(err, qt.IsNil)
 	c.Assert(total, qt.Equals, int64(credits))
+}
+
+// TestWalletAppliedKeysBounded pins the two halves of the idempotency guard: the in-document
+// key list stays bounded (an unbounded one eventually hits the 16 MB limit and freezes the
+// wallet), and a replay whose key has aged out of it is still caught — by the ledger, which
+// is the permanent record.
+func TestWalletAppliedKeysBounded(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	c.Assert(testDB.CreditWallet(testOrgAddress, 1_000, "cs_oldest"), qt.IsNil)
+
+	// fill the guard window in one write, standing in for the ~5000 operations it takes
+	pad := make(bson.A, 0, walletAppliedKeysWindow)
+	for i := range walletAppliedKeysWindow {
+		pad = append(pad, fmt.Sprintf("cs_pad_%d", i))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	_, err := testDB.wallets.UpdateOne(ctx, bson.M{"_id": testOrgAddress},
+		bson.M{"$push": bson.M{"appliedKeys": bson.M{"$each": pad}}})
+	c.Assert(err, qt.IsNil)
+
+	// the next credit applies and trims the window back to its ceiling, evicting cs_oldest
+	c.Assert(testDB.CreditWallet(testOrgAddress, 500, "cs_newest"), qt.IsNil)
+	wallet, err := testDB.Wallet(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.AppliedKeys, qt.HasLen, walletAppliedKeysWindow)
+	c.Assert(slices.Contains(wallet.AppliedKeys, "cs_oldest"), qt.IsFalse)
+	c.Assert(slices.Contains(wallet.AppliedKeys, "cs_newest"), qt.IsTrue)
+	c.Assert(wallet.BalanceCents, qt.Equals, int64(1_500))
+
+	// replaying the evicted top-up must not credit it twice
+	c.Assert(testDB.CreditWallet(testOrgAddress, 1_000, "cs_oldest"), qt.IsNil)
+	wallet, err = testDB.Wallet(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.BalanceCents, qt.Equals, int64(1_500))
+
+	// same for a debit: applied once, and a replay after its key aged out is a no-op
+	processID := bson.NewObjectID()
+	c.Assert(debitProcess(testOrgAddress, 400, processID), qt.IsNil)
+	_, err = testDB.wallets.UpdateOne(ctx, bson.M{"_id": testOrgAddress},
+		bson.M{"$set": bson.M{"appliedKeys": bson.A{}}})
+	c.Assert(err, qt.IsNil)
+	c.Assert(debitProcess(testOrgAddress, 400, processID), qt.IsNil)
+	wallet, err = testDB.Wallet(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.BalanceCents, qt.Equals, int64(1_100))
+
+	// one ledger row per applied operation, replays included
+	total, _, err := testDB.WalletLedger(testOrgAddress, 1, 10)
+	c.Assert(err, qt.IsNil)
+	c.Assert(total, qt.Equals, int64(3)) // two top-ups + one debit
 }
