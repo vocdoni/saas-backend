@@ -229,6 +229,10 @@ const (
 	processesCensusEndpoint = "/processes/{processId}/census"
 	// GET /processes/{processId}/validation publish-readiness dry-run (protected)
 	processesValidateEndpoint = "/processes/{processId}/validation"
+	// GET /processes/{processId}/metadata reads the process's editable textual metadata (public for a
+	// published process, manager/admin-only for a draft); PUT updates it — the only way to edit a
+	// published process, since every question's on-chain election is otherwise immutable
+	processesMetadataEndpoint = "/processes/{processId}/metadata"
 	// POST /processes/{processId}/check voter eligibility/status (public CSP)
 	processesCheckEndpoint = "/processes/{processId}/check"
 	// POST /processes/{processId}/publish to publish the process (one election per question)

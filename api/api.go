@@ -431,6 +431,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, processesCreateEndpoint, a.createVotingProcessHandler)
 		handle(r, http.MethodPost, processesCensusValidateEndpoint, a.validateProcessCensusHandler)
 		handle(r, http.MethodPut, processesEndpoint, a.updateVotingProcessHandler)
+		handle(r, http.MethodPut, processesMetadataEndpoint, a.updateVotingProcessMetadataHandler)
 		handle(r, http.MethodGet, processesValidateEndpoint, a.validateVotingProcessHandler)
 		handle(r, http.MethodPost, processesPublishEndpoint, a.publishVotingProcessHandler)
 		handle(r, http.MethodPut, processesQuestionsStatusEndpoint, a.setVotingProcessQuestionsStatusHandler)
@@ -488,6 +489,7 @@ func (a *API) initRouter() http.Handler {
 		// a manager/admin (or a voting:write API key) via optionalManager.
 		handle(r, http.MethodGet, processesCreateEndpoint, a.listVotingProcessesHandler)
 		handle(r, http.MethodGet, processesEndpoint, a.votingProcessInfoHandler)
+		handle(r, http.MethodGet, processesMetadataEndpoint, a.votingProcessMetadataHandler)
 		handle(r, http.MethodGet, processesQuestionEndpoint, a.votingProcessQuestionHandler)
 		handle(r, http.MethodGet, processesParticipantEndpoint, a.votingProcessParticipantHandler)
 		handle(r, http.MethodGet, processesResultsEndpoint, a.votingProcessResultsHandler)
