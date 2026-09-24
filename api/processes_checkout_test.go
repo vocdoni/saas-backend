@@ -432,6 +432,15 @@ func TestFreePublishRefusedOverOpenCheckout(t *testing.T) {
 
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
+
+	// the cancelled checkout gives way to the €0 envelope, or the census could grow for free
+	oid, err := bson.ObjectIDFromHex(pid)
+	c.Assert(err, qt.IsNil)
+	payment, err := testDB.ProcessPayment(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPaid)
+	c.Assert(payment.AmountCents, qt.Equals, pricing.Cents(0))
+	c.Assert(payment.CheckoutSessionID, qt.Equals, "")
 }
 
 func TestOrganizationProcessPayments(t *testing.T) {

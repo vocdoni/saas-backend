@@ -265,6 +265,7 @@ func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Re
 //	@Failure		400			{object}	errors.Error							"Invalid input data"
 //	@Failure		401			{object}	errors.Error							"Unauthorized"
 //	@Failure		404			{object}	errors.Error							"Process not found"
+//	@Failure		402			{object}	apicommon.ProcessCensusGrowthQuote		"The census would grow beyond the price paid; buy the difference"
 //	@Failure		409			{object}	errors.Error							"Process is not published"
 //	@Failure		500			{object}	errors.Error							"Internal server error"
 //	@Router			/processes/{processId}/census [put]
@@ -283,12 +284,6 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrDuplicateConflict.Withf("process is not published; edit the draft via PUT /processes/{processId}").Write(w)
 		return
 	}
-	census, err := a.db.Census(vp.CensusID.Hex())
-	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-
 	var req apicommon.AddCensusParticipantsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		errors.ErrMalformedBody.Withf("couldn't decode participant IDs").Write(w)
@@ -298,37 +293,11 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 		apicommon.HTTPWriteJSON(w, &apicommon.UpdateProcessCensusResponse{Added: 0})
 		return
 	}
-
-	if err := a.subscriptions.OrgCanAddCensusParticipants(census.OrgAddress, census.ID.Hex(), len(req.MemberIDs)); err != nil {
-		writeSubscriptionError(w, err)
+	grown, ok := a.addProcessCensusMembers(w, vp, req.MemberIDs)
+	if !ok {
 		return
 	}
-
-	added, memberErrs, err := a.db.AddCensusParticipantsByMemberIDs(census.ID.Hex(), req.MemberIDs)
-	switch {
-	case err == nil:
-	case stderrors.Is(err, db.ErrInvalidData), stderrors.Is(err, db.ErrUpdateWouldCreateDuplicates):
-		errors.ErrInvalidData.WithErr(err).Write(w)
-		return
-	case stderrors.Is(err, db.ErrNotFound):
-		errors.ErrCensusNotFound.Write(w)
-		return
-	default:
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-
-	// recount and persist the census size so the on-chain maxCensusSize we set below is correct.
-	size, err := a.db.CountCensusParticipants(census.ID.Hex())
-	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-	census.Size = size
-	if _, err := a.db.SetCensus(census); err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
+	census := grown.census
 
 	// only whole-census questions grow when participants are added; one that names an eligibility
 	// subset is unaffected by who else joined the census.
@@ -345,13 +314,78 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 		writeSubscriptionError(w, err)
 		return
 	}
-	resp := &apicommon.UpdateProcessCensusResponse{JobID: jobID, Added: uint32(added), Errors: memberErrs}
+	resp := &apicommon.UpdateProcessCensusResponse{JobID: jobID, Added: uint32(grown.added), Errors: grown.memberErrs}
 	if jobID == "" {
 		// no whole-census election to resize (subset-only questions): nothing async is pending, so 200.
 		apicommon.HTTPWriteJSON(w, resp)
 		return
 	}
 	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, resp)
+}
+
+// processCensusGrowth is what addProcessCensusMembers did to a process census.
+type processCensusGrowth struct {
+	census     *db.Census // with its recounted size stored
+	added      int
+	memberErrs []string
+}
+
+// addProcessCensusMembers adds memberIDs to the census of the published process vp and stores
+// its recounted size. Reports false with the response already written.
+//
+// The growth check and the write it allows are one step per organization (censusGrowthLocks),
+// and the census is read inside it: two parallel requests would otherwise each pass against
+// the same size and together grow past the price paid. Memberbase propagation takes the same
+// lock. It is released before the caller enqueues the on-chain resize, which waits on orgTxLocks.
+func (a *API) addProcessCensusMembers(
+	w http.ResponseWriter, vp *db.VotingProcess, memberIDs []string,
+) (*processCensusGrowth, bool) {
+	growthLock := a.censusGrowthLocks.lock(vp.OrgAddress)
+	defer growthLock.Unlock()
+	census, err := a.db.Census(vp.CensusID.Hex())
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return nil, false
+	}
+	// pay-per-process: the price is a function of the census size, so the census may grow
+	// only as far as the price already paid reaches. Past that the 402 carries what the
+	// growth costs, which POST /processes/{processId}/census/checkout sells — by card, or
+	// from the integrator wallet for a managed organization.
+	if err := a.censusGrowthRefusal(vp, census, memberIDs); err != nil {
+		writeSubscriptionError(w, err)
+		return nil, false
+	}
+	if err := a.subscriptions.OrgCanAddCensusParticipants(census.OrgAddress, census.ID.Hex(), len(memberIDs)); err != nil {
+		writeSubscriptionError(w, err)
+		return nil, false
+	}
+
+	added, memberErrs, err := a.db.AddCensusParticipantsByMemberIDs(census.ID.Hex(), memberIDs)
+	switch {
+	case err == nil:
+	case stderrors.Is(err, db.ErrInvalidData), stderrors.Is(err, db.ErrUpdateWouldCreateDuplicates):
+		errors.ErrInvalidData.WithErr(err).Write(w)
+		return nil, false
+	case stderrors.Is(err, db.ErrNotFound):
+		errors.ErrCensusNotFound.Write(w)
+		return nil, false
+	default:
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return nil, false
+	}
+
+	// recount and persist the census size so the on-chain maxCensusSize set next is correct.
+	size, err := a.db.CountCensusParticipants(census.ID.Hex())
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return nil, false
+	}
+	census.Size = size
+	if _, err := a.db.SetCensus(census); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return nil, false
+	}
+	return &processCensusGrowth{census: census, added: added, memberErrs: memberErrs}, true
 }
 
 // updateVotingProcessQuestionCensusHandler godoc
@@ -446,6 +480,20 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 		return
 	}
 
+	// What the election needs, with an empty list meaning the whole census (see the resize below).
+	needed := uint64(len(eligible))
+	if len(eligible) == 0 {
+		needed = uint64(census.Size)
+	}
+	// the resize below pushes needed on chain; past what the process paid for it is refused here,
+	// before the list is stored — refusing at the resize would strand it undersized. Pricing needed
+	// rather than the census lets a question narrow even once the census has outgrown its price.
+	if len(question.UpstreamID) > 0 {
+		if err := a.censusGrowthPaymentError(censusGrowth{vp: vp, census: census, size: int64(needed)}); err != nil {
+			writeSubscriptionError(w, err)
+			return
+		}
+	}
 	won, err := a.db.SetQuestionEligibleMemberIDs(question.ID, previous, eligible)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -462,10 +510,8 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 		Removed:  uint32(len(removed)),
 	}
 
-	// What the election needs, with an empty list meaning the whole census.
-	//
-	// This is always handed to enqueueSetProcessCensus rather than pre-filtered here against what
-	// the stored list implies the election was sized for. That proxy is wrong in exactly the case
+	// needed, computed above, is always handed to enqueueSetProcessCensus rather than pre-filtered
+	// against what the stored list implies the election was sized for. That proxy is wrong in exactly the case
 	// that matters: the list is committed above before the resize is enqueued, so a queue-full 503
 	// leaves the two disagreeing — and the retry, which is the whole recovery since nothing sweeps
 	// failed SetProcessCensus jobs, diffs to nothing and would conclude the election already has
@@ -477,10 +523,6 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 	// nobody by name yet can multiply the electorate, and account.ComputeMaxCensusSize stamped that
 	// election at exactly the old subset size — zero headroom. The CSP would sign and the chain
 	// would reject.
-	needed := uint64(len(eligible))
-	if len(eligible) == 0 {
-		needed = uint64(census.Size)
-	}
 	question.EligibleMemberIDs = eligible
 	jobID, err := a.enqueueSetProcessCensus(vp.OrgAddress, []censusSizeTarget{
 		{question: *question, census: census, size: needed},

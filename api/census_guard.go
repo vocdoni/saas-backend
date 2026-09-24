@@ -197,6 +197,12 @@ func (a *API) resizeEmptiedQuestions(
 			errs = append(errs, fmt.Sprintf("question %s: %v", emptied[i].ID.Hex(), err))
 			continue
 		}
+		// a census grown past what the process paid for is not put on chain, which the growth
+		// paths should already have kept from happening; the question stays at its size, reported
+		if err := a.censusGrowthPaymentError(censusGrowth{vp: vp, census: census}); err != nil {
+			errs = append(errs, fmt.Sprintf("question %s: %v", emptied[i].ID.Hex(), err))
+			continue
+		}
 		targets = append(targets, censusSizeTarget{
 			question: emptied[i], census: census, size: uint64(census.Size),
 		})

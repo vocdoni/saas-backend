@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -321,4 +322,36 @@ func TestCensusMembersEmptyValues(t *testing.T) {
 		c.Assert(p.LoginHash, qt.HasLen, 0)
 		c.Assert(p.LoginHashEmail, qt.HasLen, 0)
 	})
+}
+
+// TestCountNewCensusParticipants: the growth projection counts only members of the organization
+// that are not participants yet. An unknown id, one that is not an id at all, or a member of
+// another organization is not growth: the add rejects each with its own error, and counting it
+// would refuse a typo as unpaid growth.
+func TestCountNewCensusParticipants(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	c.Assert(testDB.SetOrganization(&Organization{Address: testOrgAddress}), qt.IsNil)
+	insert := func(org common.Address, name string) string {
+		id := bson.NewObjectID()
+		_, err := testDB.orgMembers.InsertOne(context.Background(), bson.M{
+			"_id": id, "orgAddress": org, "name": name, "email": name + "@example.com",
+		})
+		c.Assert(err, qt.IsNil)
+		return id.Hex()
+	}
+	census := &Census{OrgAddress: testOrgAddress, TwoFaFields: OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail}}
+	censusID, err := testDB.SetCensus(census)
+	c.Assert(err, qt.IsNil)
+	joined, fresh := insert(testOrgAddress, "joined"), insert(testOrgAddress, "fresh")
+	added, _, err := testDB.AddCensusParticipantsByMemberIDs(censusID, []string{joined})
+	c.Assert(err, qt.IsNil)
+	c.Assert(added, qt.Equals, 1)
+	foreign := insert(common.Address{0x99}, "foreign")
+
+	growth, err := testDB.CountNewCensusParticipants(census, []string{
+		fresh, fresh, joined, bson.NewObjectID().Hex(), "not-an-id", foreign,
+	})
+	c.Assert(err, qt.IsNil)
+	c.Assert(growth, qt.Equals, int64(1))
 }

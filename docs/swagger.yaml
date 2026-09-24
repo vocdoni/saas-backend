@@ -1088,6 +1088,31 @@ definitions:
       totalItems:
         type: integer
     type: object
+  apicommon.ProcessCensusGrowthQuote:
+    properties:
+      censusSize:
+        description: CensusSize is the projected size the quote was computed for.
+        type: integer
+      currency:
+        type: string
+      dueCents:
+        type: integer
+      lines:
+        items:
+          $ref: '#/definitions/pricing.QuoteLine'
+        type: array
+      paidCents:
+        description: PaidCents is the envelope already bought, DueCents the difference
+          to TotalCents.
+        type: integer
+      processId:
+        description: |-
+          ProcessID is the process whose envelope is exceeded. A memberbase change can reach the
+          census of several processes, so it names the one to buy headroom for.
+        type: string
+      totalCents:
+        type: integer
+    type: object
   apicommon.ProcessCheckoutRequest:
     properties:
       locale:
@@ -5332,6 +5357,10 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
+        "402":
+          description: The census would grow beyond the price paid; buy the difference
+          schema:
+            $ref: '#/definitions/apicommon.ProcessCensusGrowthQuote'
         "404":
           description: Process not found
           schema:
