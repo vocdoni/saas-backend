@@ -259,7 +259,7 @@ func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Re
 //	@Failure		400			{object}	errors.Error							"Invalid input data"
 //	@Failure		401			{object}	errors.Error							"Unauthorized"
 //	@Failure		404			{object}	errors.Error							"Process not found"
-//	@Failure		402			{object}	errors.Error							"The census would grow beyond the price paid for the process"
+//	@Failure		402			{object}	apicommon.ProcessCensusGrowthQuote		"The census would grow beyond the price paid; buy the difference"
 //	@Failure		409			{object}	errors.Error							"Process is not published"
 //	@Failure		500			{object}	errors.Error							"Internal server error"
 //	@Router			/processes/{processId}/census [put]
@@ -294,9 +294,10 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	// pay-per-process: the price is a function of the census size, so the census may grow
-	// only as far as the price already paid reaches. Past that a new quote is needed, which
-	// is not self-service yet — hence the 402 rather than a second checkout.
-	if a.refuseCensusGrowthBeyondPayment(w, vp, census, len(req.MemberIDs)) {
+	// only as far as the price already paid reaches. Past that the 402 carries what the
+	// growth costs, which POST /processes/{processId}/census/checkout sells — by card, or
+	// from the integrator wallet for a managed organization.
+	if a.refuseCensusGrowthBeyondPayment(w, vp, census, req.MemberIDs) {
 		return
 	}
 

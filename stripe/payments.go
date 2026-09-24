@@ -3,6 +3,7 @@ package stripe
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -27,6 +28,11 @@ const (
 	// MetadataKeyWalletTopUpOrg marks a session as a wallet top-up for an integrator
 	// organization (value: the org address).
 	MetadataKeyWalletTopUpOrg = "wallet_topup_org"
+	// MetadataKeyProcessTopUpCents marks a session as census headroom bought for an
+	// already-paid process, carrying the *target* amount its payment must be raised to (not
+	// the difference charged), so a replay is idempotent and two racing top-ups resolve
+	// monotonically to the larger target.
+	MetadataKeyProcessTopUpCents = "process_topup_cents"
 	// MetadataKeyRequestedBy carries the email of the user who started the checkout.
 	MetadataKeyRequestedBy = "requested_by"
 )
@@ -206,6 +212,10 @@ func (s *Service) handleCheckoutSessionResult(event *stripeapi.Event) error {
 		return err
 	}
 	switch {
+	case session.Metadata[MetadataKeyProcessTopUpCents] != "":
+		// before the process branch: a top-up also carries the process id, but it buys
+		// census headroom for a payment that is already paid, not the payment itself
+		return s.raiseProcessPayment(session)
 	case session.Metadata[MetadataKeyProcessID] != "":
 		return s.fulfillProcessPayment(session)
 	case session.Metadata[MetadataKeyWalletTopUpOrg] != "":
@@ -306,6 +316,45 @@ func (s *Service) afterProcessPaid(processID bson.ObjectID) {
 	if s.OnProcessPaid != nil {
 		s.OnProcessPaid(processID)
 	}
+}
+
+// raiseProcessPayment applies verified census headroom: the process's paid envelope is
+// raised to the target amount the session carries, which is what the census-growth guard
+// compares against. The raise is monotonic and records the session, so a replayed event
+// raises nothing.
+func (s *Service) raiseProcessPayment(session *stripeapi.CheckoutSession) error {
+	rawProcessID := session.Metadata[MetadataKeyProcessID]
+	processID, err := bson.ObjectIDFromHex(rawProcessID)
+	if err != nil {
+		return fmt.Errorf("invalid process id %q in census top-up session %s metadata (%v): %w",
+			rawProcessID, session.ID, err, errPermanentEvent)
+	}
+	rawTarget := session.Metadata[MetadataKeyProcessTopUpCents]
+	targetCents, err := strconv.ParseInt(rawTarget, 10, 64)
+	if err != nil || targetCents <= 0 {
+		return fmt.Errorf("invalid top-up target %q in session %s metadata: %w",
+			rawTarget, session.ID, errPermanentEvent)
+	}
+	if session.PaymentStatus != stripeapi.CheckoutSessionPaymentStatusPaid {
+		// a delayed payment method still clearing: the envelope stays where it is, so the
+		// census stays refused until async_payment_succeeded arrives
+		return nil
+	}
+	raised, err := s.db.RaiseProcessPaymentAmount(processID, targetCents, session.ID)
+	if err != nil {
+		return fmt.Errorf("failed to raise process payment amount: %w", err)
+	}
+	if !raised {
+		// a replay, or an envelope already at or above this target (a larger top-up landed
+		// first). Either way the customer's money bought headroom that is already there —
+		// worth a line, not an error, because retrying can never change it.
+		log.Warnw("census top-up raised nothing",
+			"processId", processID.Hex(), "targetCents", targetCents, "sessionId", session.ID)
+		return nil
+	}
+	log.Infow("census headroom paid",
+		"processId", processID.Hex(), "targetCents", targetCents, "sessionId", session.ID)
+	return nil
 }
 
 // creditWalletTopUp credits a verified top-up to the integrator's wallet. The net

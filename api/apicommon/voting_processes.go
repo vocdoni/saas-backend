@@ -203,6 +203,32 @@ type ProcessCheckoutResponse struct {
 	Currency     string `json:"currency"`
 }
 
+// ProcessCensusGrowthQuote is the 402 payload of a census that would grow a published
+// process past the price it was paid for: the projected quote at the requested size, what is
+// already covered, and the difference the organization has to buy. Raise the envelope with
+// POST /processes/{processId}/census/checkout (a managed organization's integrator wallet is
+// debited inline instead, so it never sees this).
+type ProcessCensusGrowthQuote struct {
+	Lines      []pricing.QuoteLine `json:"lines"`
+	TotalCents int64               `json:"totalCents"`
+	// PaidCents is the envelope already bought, DueCents the difference to TotalCents.
+	PaidCents int64 `json:"paidCents"`
+	DueCents  int64 `json:"dueCents"`
+	// CensusSize is the projected size the quote was computed for.
+	CensusSize int64  `json:"censusSize"`
+	Currency   string `json:"currency"`
+}
+
+// ProcessCensusCheckoutRequest buys census headroom for a paid process: a one-time checkout
+// for the difference between what the process paid and what CensusSize would cost.
+type ProcessCensusCheckoutRequest struct {
+	// CensusSize is the census size to buy room for; it must exceed what is already paid.
+	CensusSize int64 `json:"censusSize"`
+	// ReturnURL is where Stripe redirects after checkout; the session id is appended.
+	ReturnURL string `json:"returnURL"`
+	Locale    string `json:"locale,omitempty"`
+}
+
 // WalletResponse is an integrator's prepaid wallet: EUR balance plus its paged ledger,
 // newest first.
 type WalletResponse struct {

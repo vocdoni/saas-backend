@@ -98,6 +98,10 @@ var apiKeyAllowlist = map[string]string{
 	"PUT " + processesCensusEndpoint:          ScopeVotingWrite,
 	"DELETE " + processesCensusEndpoint:       ScopeVotingWrite,
 	"PUT " + processesQuestionCensusEndpoint:  ScopeVotingWrite,
+	// the only checkout route a key may call: a managed organization's census headroom is
+	// debited from the integrator wallet, never charged to a card, and the integrator drives
+	// census growth with its key. The per-organization role check still gates it.
+	"POST " + processesCensusCheckoutEndpoint: ScopeVotingWrite,
 }
 
 // requiredScopeForRoute returns the scope required to call (method, pattern) with an API key and

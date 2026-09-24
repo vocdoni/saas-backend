@@ -1269,6 +1269,39 @@ definitions:
           type: string
         type: array
     type: object
+  apicommon.ProcessCensusCheckoutRequest:
+    properties:
+      censusSize:
+        description: CensusSize is the census size to buy room for; it must exceed
+          what is already paid.
+        type: integer
+      locale:
+        type: string
+      returnURL:
+        description: ReturnURL is where Stripe redirects after checkout; the session
+          id is appended.
+        type: string
+    type: object
+  apicommon.ProcessCensusGrowthQuote:
+    properties:
+      censusSize:
+        description: CensusSize is the projected size the quote was computed for.
+        type: integer
+      currency:
+        type: string
+      dueCents:
+        type: integer
+      lines:
+        items:
+          $ref: '#/definitions/pricing.QuoteLine'
+        type: array
+      paidCents:
+        description: PaidCents is the envelope already bought, DueCents the difference
+          to TotalCents.
+        type: integer
+      totalCents:
+        type: integer
+    type: object
   apicommon.ProcessCheckoutRequest:
     properties:
       locale:
@@ -7032,9 +7065,9 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "402":
-          description: The census would grow beyond the price paid for the process
+          description: The census would grow beyond the price paid; buy the difference
           schema:
-            $ref: '#/definitions/errors.Error'
+            $ref: '#/definitions/apicommon.ProcessCensusGrowthQuote'
         "404":
           description: Process not found
           schema:
@@ -7050,6 +7083,70 @@ paths:
       security:
       - BearerAuth: []
       summary: Add members to a published process's census
+      tags:
+      - processes
+  /processes/{processId}/census/checkout:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Opens a one-time Stripe checkout for the difference between what the process
+        already paid and what its census would cost at censusSize, so a census that
+        outgrew its price can be grown (or a paid draft republished) instead of being
+        stuck behind a 402. Add-ons are priced exactly as the original payment priced
+        them, so the branding add-on is never charged twice. The paid amount is raised
+        when the payment is verified by webhook — never before, so the census stays
+        refused until the money lands. A managed organization pays from its integrator
+        wallet instead: the difference is debited synchronously and the response carries
+        no checkout session, so the census can grow immediately. 400 when the process has
+        no completed payment, or when the target does not cost more than was already
+        paid. Requires Admin role.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Census headroom to buy
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.ProcessCensusCheckoutRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessCheckoutResponse'
+        "400":
+          description: No completed payment, or nothing left to buy
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "402":
+          description: Integrator wallet does not cover the difference
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "422":
+          description: Census size requires a custom quote
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Buy census headroom for a paid process
       tags:
       - processes
   /processes/{processId}/check:

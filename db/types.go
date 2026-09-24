@@ -808,10 +808,14 @@ type ProcessPayment struct {
 	// add-on, so fulfillment knows whether to stamp Organization.BrandingPaidAt. The claim
 	// itself lives on the organization (Organization.BrandingClaimedBy), whose validity is
 	// re-derived from this payment's status: a failed payment releases it.
-	Branding  bool      `json:"-" bson:"branding,omitempty"`
-	PaidAt    time.Time `json:"paidAt,omitempty" bson:"paidAt,omitempty"`
-	CreatedAt time.Time `json:"-" bson:"createdAt"`
-	UpdatedAt time.Time `json:"-" bson:"updatedAt"`
+	Branding bool `json:"-" bson:"branding,omitempty"`
+	// TopUpSessions are the checkout sessions that already raised AmountCents, newest last
+	// and bounded (RaiseProcessPaymentAmount), so a replayed top-up webhook cannot raise the
+	// envelope twice.
+	TopUpSessions []string  `json:"-" bson:"topUpSessions,omitempty"`
+	PaidAt        time.Time `json:"paidAt,omitempty" bson:"paidAt,omitempty"`
+	CreatedAt     time.Time `json:"-" bson:"createdAt"`
+	UpdatedAt     time.Time `json:"-" bson:"updatedAt"`
 }
 
 // Wallet is an integrator's prepaid EUR balance. AppliedKeys makes credits and debits
