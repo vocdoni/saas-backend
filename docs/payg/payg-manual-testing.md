@@ -242,8 +242,26 @@ never what marks anything paid.
   publication, wallet not re-credited.
 - **Failed then retry**: after the failing SEPA IBAN, `GET …/checkout` shows `failed`;
   `POST …/checkout` opens a fresh session and the card flow works again.
-- **Paid lock**: once paid, `PUT /processes/{id}` and `DELETE` answer 409 — the price
-  covered the draft exactly as it was.
+- **Paid draft is editable**: once paid, `PUT /processes/{id}` still works — the publish
+  gate re-prices whatever the edit produced, so an edit can only repair the draft. What is
+  refused (409) is editing or deleting while a payment is `processing`, or deleting one
+  whose Stripe session you just completed but whose webhook has not landed.
+- **Census headroom**: after publishing, `PUT /processes/{id}/census` with a few extra
+  members goes through (€5 rounding absorbs it); add enough to cross the next €5 step and
+  it answers 402 with `{totalCents, paidCents, dueCents, censusSize}`. Buy the difference
+  with `POST /processes/{id}/census/checkout -d '{"censusSize":<target>,"returnURL":"http://localhost:8000/checkout.html"}'`,
+  pay it with a test card, and the same `PUT` then lands. For a managed organization the
+  same call debits the integrator wallet instead and takes effect immediately.
+- **Refund on delete**: `DELETE /processes/{id}` on a paid *draft* refunds it first — the
+  Stripe dashboard shows the refund with VAT included, the payment row survives as
+  `refunded`, and a branded organization can be charged for branding again afterwards. A
+  wallet-paid draft credits the integrator wallet instead, visible as a `refund` row in
+  `GET /wallet`. Note that a paid process normally publishes itself straight away, so a
+  paid draft only exists when that automatic publication failed preflight (the org hitting
+  its plan's process limit between paying and publishing is the realistic way in). The
+  assertions live in `TestDeletePaidDraftRefunds` and
+  `TestDeleteWalletPaidDraftCreditsIntegratorWallet`; the dashboard is what only a browser
+  can show you.
 - **Integrator wallet**: make your org an integrator
   (`go run ./cmd/cli --setIntegrator --orgAddress $ORG --maxManagedOrgs 5 --mongoURL mongodb://root:vocdoni@localhost:27017/saasdb`),
   then `POST /wallet/topup -d '{"amountCents":10000,"returnURL":"http://localhost:8000/checkout.html"}'`,

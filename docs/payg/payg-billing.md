@@ -9,7 +9,8 @@ never proof of payment.
 Spec: [VocdoniApp new pricing model](https://hackmd.io/@vocdoni/vocdoni-app-new-pricing-model-feature).
 Code map: `pricing/` (the formula), `db/process_payments.go` + `db/wallets.go` (state),
 `stripe/payments.go` (checkout + webhook fulfillment), `api/processes_payments.go` +
-`api/wallet.go` (endpoints), `api/processes_publish.go` (the gate).
+`api/wallet.go` (endpoints), `api/processes_publish.go` (the gate),
+`stripe/refunds.go` (money back).
 
 ## Pricing
 
@@ -29,8 +30,9 @@ Base price per eligible voter count `v`, rounded to the nearest €5 (`R5`):
 
 Add-ons: email 2FA €0.01/voter, SMS 2FA €0.03/voter (both derive from the census
 `twoFaFields`, not a separate flag), signed results certificate €49/process, custom URL
-€89/process, branding €149 **once per organization**
-(`Organization.BrandingPaidAt` suppresses the line once paid).
+€89/process, branding €149 **once per organization** — the line is suppressed once
+`Organization.BrandingPaidAt` is stamped, and while another process holds the claim
+described in [Branding is claimed, not just checked](#branding-is-claimed-not-just-checked).
 
 Worked examples (pinned in `pricing/pricing_test.go`): 10 voters → free; 600 → €290;
 10 000 → €1 420; 10 000 + email 2FA + certificate → €1 569.
@@ -60,21 +62,34 @@ deliberately **not** embedded in `votingProcesses`, whose write paths replace wh
 documents and must never be able to wipe a live session id or a paid state.
 
 ```
- (none) ──checkout──► pending ──async method──► processing ──webhook paid──► paid
-    ▲                    │  ▲                        │                        │
-    └────── free ──┐     │  └── new session ── failed ◄──── payment failed ───┘? no:
-                   ▼     ▼                                  paid is TERMINAL
-             publish  webhook paid ────────────────────────────► paid
+ (none) ──checkout──► pending ──delayed method──► processing
+   │                    │  ▲                          │
+   │ free (net €0)      │  └── new session ── failed ◄─┴── payment failed
+   │                    │                        ▲
+   ▼                    │                        └── session expired
+ publish            webhook paid ──► paid ──── draft deleted ───► refunded
+                                       ▲                            │
+                         wallet debit ─┘        refund failed at Stripe
+                                       └────────────────────────────┘
 ```
 
 - `pending`: a checkout session is open. Draft edits are allowed; the session is expired
-  and replaced at the next checkout if the price changed.
+  and replaced at the next checkout if the price changed. A session Stripe expires on its
+  own (`checkout.session.expired`) moves the payment to `failed`, which matters for
+  branding: an abandoned checkout must not hold the organization's claim forever.
 - `processing`: checkout completed with a delayed payment method (e.g. SEPA debit) and
   the outcome is unknown. No new charge may start; the draft is locked.
 - `failed`: the payment failed; the process is payable again with a fresh session.
-- `paid`: verified by webhook or debited from a wallet. **Terminal** — never reverted, so
-  publication retries never re-charge. The draft is locked (PUT/DELETE answer 409), and a
-  published paid process cannot grow its census beyond the size the price covered.
+- `paid`: verified by webhook or debited from a wallet. Publication retries never
+  re-charge, and every publish path re-prices against `amountCents`. The draft stays
+  **editable** (an edit can only repair a draft that failed publish preflight — the gate
+  re-prices it, so it cannot under-charge), its census may grow while the projected price
+  fits inside what was paid, and the envelope itself can be raised
+  ([Buying census headroom](#buying-census-headroom)).
+- `refunded`: the draft was deleted and the money went back ([Deleting a paid
+  draft](#deleting-a-paid-draft)). Terminal, and kept as the audit trail — the process it
+  names no longer exists, so nothing can be paid for again. The one way back to `paid` is
+  a refund Stripe later reports as failed.
 
 Every transition is a single conditional Mongo write whose **filter is the state
 machine** (`db/process_payments.go`), in the style of `ClaimVotingProcessForPublish`:
@@ -121,7 +136,8 @@ manually later, free. So payment completes even if the buyer closes the browser.
 `stripe/webhook.go` handles `checkout.session.completed` and
 `checkout.session.async_payment_succeeded` (fulfill only when the session's
 `payment_status` is `"paid"`; a completed-but-unpaid session only advances to
-`processing`), and `checkout.session.async_payment_failed` (→ `failed`). Sessions from
+`processing`), `checkout.session.async_payment_failed` and `checkout.session.expired`
+(→ `failed`), and `charge.refund.updated` (a refund that will never pay out). Sessions from
 the legacy subscription flow carry none of our metadata keys and are ignored.
 
 There is **no durable event store**. Idempotency is property of every side effect:
@@ -137,6 +153,10 @@ A replayed event (Stripe retry, restart, second replica) loses every guard and i
 no-op. Money arriving for a session the process no longer references is logged as an
 error for manual reconciliation — never silently dropped.
 
+An event that can never become valid — metadata naming no process, an id that is not an
+ObjectID — is answered **200** and dropped (`errPermanentEvent`): retrying it for three days
+would only bury the events that can still succeed.
+
 ## Integrator wallet (managed organizations)
 
 Integrators publish on behalf of managed organizations, so the payer is not present at
@@ -149,16 +169,85 @@ units — unit pools would clash with the non-linear base price):
 - **Debit at publish**: a managed org's process skips the 402 gate; inside the publish
   pipeline (after the claim, so concurrent publishes cannot both debit) the wallet is
   debited by one conditional update carrying both the balance condition
-  (`balanceCents $gte`) and the idempotency condition (`appliedKeys $ne processId`) in a
-  single filter — the no-double-spend guarantee across replicas, with no transactions.
+  (`balanceCents $gte`) and the idempotency condition (`appliedKeys $ne <processId:price>`)
+  in a single filter — the no-double-spend guarantee across replicas, with no transactions.
   Insufficient balance → 402 (40175, required + available cents), claim released,
-  retryable. A retry after a failed publication keeps the original debit.
-- **Ledger**: `walletLedger` is the append-only audit trail (+top-ups, −debits); the
-  wallet document is authoritative for the balance. `appliedKeys` growth is bounded by
-  operations per integrator; compaction is an explicit non-goal.
+  retryable. The key carries the price, so a retry at the **same** price is a no-op while a
+  retry of a draft that grew debits only the difference and raises the payment to match.
+- **Ledger**: `walletLedger` is the append-only audit trail (`topup`, `debit`, `refund`
+  rows) and the authority on what happened; the wallet document is authoritative for the
+  balance. `appliedKeys` is bounded to the most recent 5 000 keys
+  (`walletAppliedKeysWindow`), so a long-lived integrator cannot grow the document without
+  limit; an operation older than the window is caught by the ledger's unique index on
+  `idempotencyKey` instead.
 
-Managed orgs are refused at `POST /processes/{id}/checkout` — their payment provenance
-is the wallet, and pricing selects the integrator policy for them.
+Managed orgs are refused at `POST /processes/{id}/checkout` — their payment provenance is
+the wallet, and pricing selects the integrator policy for them. The one checkout route they
+do use is `POST /processes/{id}/census/checkout`, which debits the wallet instead of opening
+a session (see below); it is also the only checkout route callable with an API key, because
+integrators drive census growth with their keys.
+
+## Branding is claimed, not just checked
+
+Branding is the one add-on that can only be sold once per organization, so two processes
+paying at the same time must not both be charged for it — and neither may quietly lose it.
+The claim is a conditional write on the **organization** document
+(`brandingClaimedBy` + `brandingClaimedAt`, `db.ClaimOrganizationBranding`), taken at the
+two moments money moves: opening a card checkout, and debiting the integrator wallet.
+
+Read paths (`GET .../price`, the publish gate) only *read* the claim, so quoting never takes
+one. A caller that loses the claim has `Branding` dropped from its input and the quote
+recomputed **before** it is charged. Validity is re-derived from the claimant's payment, so
+the claim self-heals: it is releasable when that payment is absent or `failed`, or when it
+has been held longer than `db.BrandingClaimStaleAfter` (2 minutes) without becoming real.
+Fulfillment stamps `brandingPaidAt`; a refund releases both the stamp and the claim.
+
+## Buying census headroom
+
+`ProcessPayment.AmountCents` is the envelope: a published paid process may grow its census
+as long as the **projected price at the new size still fits inside it**. Because the base
+price rounds to €5, a handful of extra voters usually costs nothing.
+
+Growth past that price answers **402** with a `ProcessCensusGrowthQuote`
+(`{lines, totalCents, paidCents, dueCents, censusSize, currency}`) rather than a flat
+refusal, and `POST /processes/{processId}/census/checkout {censusSize, returnURL, locale}`
+sells exactly that difference:
+
+- **Card payer** — a `mode: payment` session for `dueCents`, carrying the target amount in
+  `process_topup_cents` metadata. The envelope is raised by the **webhook**
+  (`RaiseProcessPaymentAmount`, monotonic and keyed on the session id, keeping the last 50),
+  never by the redirect.
+- **Managed organization** — no card exists, so the difference is debited from the
+  integrator wallet synchronously, through the same path a re-publish would use, and takes
+  effect at once.
+
+The growth guard itself never charges: it can only project an **upper bound** (an id naming
+no member still counts as growth), and money must never move against a projection. The
+caller of `census/checkout` names the size, which is what makes charging there correct.
+The projection also ignores ids that are already participants, so re-sending a batch that
+already landed is not refused as growth it is not.
+
+## Deleting a paid draft
+
+`DELETE /processes/{processId}` on a paid draft **returns the money first, then deletes**,
+mirroring how it was paid:
+
+- card payment → a Stripe refund of the payment intent recorded at fulfillment, with
+  `Amount` unset so the VAT Stripe collected goes back too, idempotency key
+  `refund:<process id>`;
+- wallet payment → a `refund`-kind credit to the integrator wallet under the same key.
+
+Then the payment becomes `refunded`, the organization's branding claim and `brandingPaidAt`
+are released (so its next process is quoted branding again), the payment document is
+**kept** as the audit trail, and only then is the draft removed. If the money cannot go
+back, nothing is written and the draft stays: deleting a process whose payment we still hold
+is the one outcome this flow must never produce. A `processing` payment still refuses
+deletion, and so does a `pending` one whose session the customer just completed — both are
+retryable once they settle.
+
+`charge.refund.updated` closes the loop the other way: a refund that ends `failed` or
+`canceled` puts the payment back to `paid` and logs at **error** level. The draft is already
+gone and cannot be restored, so this is deliberately a manual-reconciliation signal.
 
 ## Error codes
 
@@ -167,14 +256,18 @@ is the wallet, and pricing selects the integrator policy for them.
 | 40174 | 402 | publication requires payment (quote in data) |
 | 40175 | 402 | insufficient integrator wallet balance (required/available in data) |
 | 40176 | 422 | census above 50 000 — custom quote only |
-| 40177 | 409 | a payment is already processing or completed |
+| 40177 | 409 | a payment is already processing or completed, or a session is completing |
+| 40174 | 402 | census growth beyond the paid price (`ProcessCensusGrowthQuote` in data) |
 
-## Storage summary (migration 0022)
+## Storage summary (migration 0023)
 
 - `processPayments` — one document per process payment (`_id` = process id).
 - `wallets` — one document per integrator (`_id` = org address).
 - `walletLedger` — append-only, unique index on `idempotencyKey`.
-- `votingProcesses` gains `addOns`; `organizations` gains `brandingPaidAt`.
+- `votingProcesses` gains `addOns`; `organizations` gains `brandingPaidAt`,
+  `brandingClaimedBy` and `brandingClaimedAt`.
+- `processPayments` also records `paymentIntentId` (what a refund is issued against),
+  `refundId`, and `topUpSessions` (the census-headroom sessions already applied).
 
 ## Testing the flow
 
@@ -216,10 +309,12 @@ Three layers, from hermetic to manual:
 
 ## Open questions / follow-ups
 
-- Census growth of a **published unpaid-tier** process is still governed by plan quotas;
-  paid processes block growth. Delta-billing for growth is a possible follow-up.
+- Census growth of a **published unpaid-tier** process is governed by plan quotas; a paid
+  one is governed by its envelope, which `census/checkout` can raise.
 - Custom URL is priced per process but the underlying subdomain remains org-level.
-- Refunds/chargebacks are out of scope: paid state is never auto-revoked.
+- Chargebacks are out of scope: a disputed payment is not reverted automatically. A refund
+  Stripe reports as failed after the draft was deleted needs a human — the error log is the
+  only signal, by design.
 - VAT treatment of wallet top-ups (single- vs multi-purpose voucher) needs accountant
   sign-off before launch; `automatic_tax` is on for top-up sessions.
 - Legacy subscriptions convert to process credits and the subscription system is
