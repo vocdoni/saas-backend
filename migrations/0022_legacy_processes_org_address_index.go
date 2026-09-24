@@ -36,10 +36,12 @@ func upLegacyProcessesOrgAddressIndex(ctx context.Context, database *mongo.Datab
 }
 
 // downLegacyProcessesOrgAddressIndex drops those indexes. Dropping an index does not touch the
-// documents, so unlike data-bearing migrations this rollback is safe to perform.
+// documents, so unlike data-bearing migrations this rollback is safe to perform. It goes through
+// replaceIndex, which tolerates an index that is already gone — rolling back twice, or rolling back
+// a partially applied up, must not fail.
 func downLegacyProcessesOrgAddressIndex(ctx context.Context, database *mongo.Database) error {
 	for _, name := range legacyOrgAddressIndexCollections {
-		if err := database.Collection(name).Indexes().DropOne(ctx, legacyOrgAddressIndexName); err != nil {
+		if err := replaceIndex(ctx, database.Collection(name), []string{legacyOrgAddressIndexName}, nil); err != nil {
 			return fmt.Errorf("failed to drop orgAddress index on %s: %w", name, err)
 		}
 	}

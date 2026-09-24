@@ -493,8 +493,13 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		// no stored process owns the id, but a legacy record still may: a process bundle, or the
 		// deprecated /process generation. Those are served as a read-only projection.
-		if resp := a.legacyProcessByID(raw); resp != nil {
-			apicommon.HTTPWriteJSON(w, resp)
+		legacyResp, err := a.legacyProcessByID(r.Context(), raw)
+		if err != nil {
+			legacyProjectionError(err).Write(w)
+			return
+		}
+		if legacyResp != nil {
+			apicommon.HTTPWriteJSON(w, legacyResp)
 			return
 		}
 		if !isVotingProcessIDShape(raw) {
@@ -662,7 +667,10 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 	// They are all published, so a drafts-only view has none.
 	var legacy []apicommon.VotingProcessResponse
 	if draft != db.DraftOnly {
-		legacy = a.legacyProcesses(orgAddress)
+		if legacy, err = a.legacyProcesses(r.Context(), orgAddress); err != nil {
+			legacyProjectionError(err).Write(w)
+			return
+		}
 		if statusFilter != "" {
 			legacy = filterLegacyProcessesByStatus(legacy, statusFilter)
 		}

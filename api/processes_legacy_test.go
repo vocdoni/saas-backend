@@ -1,7 +1,10 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
@@ -11,6 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/types"
+	"go.vocdoni.io/proto/build/go/models"
 )
 
 // explorerElectionID is the on-chain election of the record that motivated the legacy projection:
@@ -18,7 +22,9 @@ import (
 const explorerElectionID = "6b342d99f2187f3debbb14afcde7f41407f6cf87d4e7667f787c030000000000"
 
 // legacyTestElection builds an election read as the node returns it, with one result row per
-// question and the metadata inlined as the untyped document the projection has to decode.
+// question and the metadata inlined as the untyped document the projection has to decode. maxCount
+// is the ballot's field count — one per result row — and describes the election itself, not its
+// tally, which is why the projected question type does not change when results are published.
 func legacyTestElection(results [][]uint64, questions []map[string]any) *dvoteapi.Election {
 	rows := make([][]*types.BigInt, 0, len(results))
 	for _, row := range results {
@@ -36,7 +42,11 @@ func legacyTestElection(results [][]uint64, questions []map[string]any) *dvoteap
 			FinalResults: true,
 			Results:      rows,
 		},
-		Census: &dvoteapi.ElectionCensus{MaxCensusSize: 13},
+		Census:   &dvoteapi.ElectionCensus{MaxCensusSize: 13},
+		VoteMode: dvoteapi.VoteMode{EnvelopeType: &models.EnvelopeType{EncryptedVotes: true}},
+		TallyMode: dvoteapi.TallyMode{
+			ProcessVoteOptions: &models.ProcessVoteOptions{MaxCount: uint32(len(results)), MaxValue: 1},
+		},
 		Metadata: map[string]any{
 			"title":       map[string]any{"default": "Assemblea Straordinaria"},
 			"description": map[string]any{"default": "convocazione"},
@@ -64,18 +74,24 @@ func TestLegacyProjectionExplorerElection(t *testing.T) {
 	election := legacyTestElection([][]uint64{{8, 0}, {8, 0}},
 		[]map[string]any{legacyTestQuestion("Statuto"), legacyTestQuestion("Consiglio Direttivo")})
 
-	content := legacyContentOf(election, nil)
+	content := testAPI.legacyContentOf(context.Background(), election, nil)
 	c.Assert(content.title, qt.DeepEquals, db.MultiLangString{"default": "Assemblea Straordinaria"})
 	c.Assert(content.description, qt.DeepEquals, db.MultiLangString{"default": "convocazione"})
 	c.Assert(content.header, qt.Equals, "https://example.org/header.png")
 	c.Assert(content.questions, qt.HasLen, 2)
 
-	questions := legacyElectionQuestions(election, content.questions)
+	processID := bson.NewObjectID()
+	questions := legacyElectionQuestions(processID, election, content.questions)
 	c.Assert(questions, qt.HasLen, 2)
 	for i, q := range questions {
 		c.Assert(q.Order, qt.Equals, i)
 		c.Assert(q.UpstreamID.String(), qt.Equals, explorerElectionID)
 		c.Assert(q.Status, qt.Equals, "RESULTS")
+		c.Assert(q.ProcessID, qt.Equals, processID)
+		// one ballot field per question: a single-choice ballot, stated from the election's own
+		// tally mode so it does not appear only once the tally is published.
+		c.Assert(q.Type, qt.Equals, "singlechoice")
+		c.Assert(q.SecretUntilTheEnd, qt.IsTrue)
 		c.Assert(q.Choices, qt.HasLen, 2)
 		// ballotProtocol/typeSetup stay unset: the election's tally mode describes the whole ballot.
 		c.Assert(q.BallotProtocol, qt.IsNil)
@@ -89,6 +105,12 @@ func TestLegacyProjectionExplorerElection(t *testing.T) {
 	c.Assert(questions[0].Title, qt.DeepEquals, db.MultiLangString{"default": "Statuto"})
 	c.Assert(questions[1].Title, qt.DeepEquals, db.MultiLangString{"default": "Consiglio Direttivo"})
 	c.Assert(questions[0].Choices[1].Value, qt.Equals, uint32(1))
+	// the questions of one legacy election share its id, so their own ids must not collide — a zero
+	// (or repeated) id would make them indistinguishable to a client keying on it.
+	c.Assert(questions[0].ID, qt.Not(qt.Equals), questions[1].ID)
+	c.Assert(questions[0].ID.IsZero(), qt.IsFalse)
+	// stable across reads: the same election and order derive the same id.
+	c.Assert(legacyElectionQuestions(processID, election, content.questions)[0].ID, qt.Equals, questions[0].ID)
 }
 
 // TestLegacyProjectionSingleQuestion checks that a single question owns the whole result matrix,
@@ -98,9 +120,11 @@ func TestLegacyProjectionSingleQuestion(t *testing.T) {
 	election := legacyTestElection([][]uint64{{3, 1}, {2, 2}, {0, 4}},
 		[]map[string]any{legacyTestQuestion("Statuto")})
 
-	questions := legacyElectionQuestions(election, legacyContentOf(election, nil).questions)
+	content := testAPI.legacyContentOf(context.Background(), election, nil)
+	questions := legacyElectionQuestions(bson.NewObjectID(), election, content.questions)
 	c.Assert(questions, qt.HasLen, 1)
 	c.Assert(questions[0].Results.Results, qt.DeepEquals, [][]string{{"3", "1"}, {"2", "2"}, {"0", "4"}})
+	// three ballot fields behind one question: not a single-choice ballot, and not statable.
 	c.Assert(questions[0].Type, qt.Equals, "")
 }
 
@@ -110,8 +134,9 @@ func TestLegacyProjectionUnmappableResults(t *testing.T) {
 	c := qt.New(t)
 	election := legacyTestElection([][]uint64{{8, 0}, {8, 0}, {8, 0}},
 		[]map[string]any{legacyTestQuestion("Statuto"), legacyTestQuestion("Consiglio Direttivo")})
-
-	questions := legacyElectionQuestions(election, legacyContentOf(election, nil).questions)
+	// three ballot fields over two questions: the tally does not map, and neither does the type.
+	content := testAPI.legacyContentOf(context.Background(), election, nil)
+	questions := legacyElectionQuestions(bson.NewObjectID(), election, content.questions)
 	c.Assert(questions, qt.HasLen, 2)
 	for _, q := range questions {
 		c.Assert(q.Results.Results, qt.IsNil)
@@ -141,17 +166,45 @@ func TestLegacyProjectionStoredParams(t *testing.T) {
 		}},
 	}
 
-	content := legacyContentOf(election, params)
+	content := testAPI.legacyContentOf(context.Background(), election, params)
 	c.Assert(content.title, qt.DeepEquals, db.MultiLangString{"default": "stored title"})
 	c.Assert(content.streamURI, qt.Equals, "https://example.org/stream")
 
-	questions := legacyElectionQuestions(election, content.questions)
+	questions := legacyElectionQuestions(bson.NewObjectID(), election, content.questions)
 	c.Assert(questions, qt.HasLen, 1)
 	c.Assert(questions[0].Title, qt.DeepEquals, db.MultiLangString{"default": "stored question"})
 	c.Assert(questions[0].Status, qt.Equals, "ENDED")
 	c.Assert(questions[0].Results.VoteCount, qt.Equals, uint64(2))
 	// no census on the election read: MaxVoters is simply unknown, not invented.
 	c.Assert(questions[0].Results.MaxVoters, qt.Equals, uint64(0))
+}
+
+// TestLegacyProjectionExternalMetadata checks the bundle-only case the projection exists for: the
+// node inlines the metadata document only for ipfs:// references, so an election pointing at an
+// http(s) document must still resolve its questions — otherwise the record projects to nothing and
+// disappears from /processes exactly as it does today.
+func TestLegacyProjectionExternalMetadata(t *testing.T) {
+	c := qt.New(t)
+	election := legacyTestElection([][]uint64{{8, 0}}, []map[string]any{legacyTestQuestion("Statuto")})
+	doc, err := json.Marshal(election.Metadata)
+	c.Assert(err, qt.IsNil)
+	election.Metadata = nil // nothing inlined: the reference is all the projection has
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(doc)
+	}))
+	defer server.Close()
+	election.MetadataURL = server.URL + "/metadata.json"
+
+	content := testAPI.legacyContentOf(context.Background(), election, nil)
+	c.Assert(content.title, qt.DeepEquals, db.MultiLangString{"default": "Assemblea Straordinaria"})
+	c.Assert(content.questions, qt.HasLen, 1)
+	c.Assert(content.questions[0].Title, qt.DeepEquals, db.MultiLangString{"default": "Statuto"})
+
+	// an unreachable reference resolves to no content rather than to a wrong one.
+	election.MetadataURL = server.URL + "/missing.json"
+	server.Close()
+	c.Assert(testAPI.legacyContentOf(context.Background(), election, nil).questions, qt.HasLen, 0)
 }
 
 // TestLegacyProcessIDShape checks the 404-vs-400 boundary of GET /processes/{processId}: both id
@@ -261,6 +314,9 @@ func TestLegacyProcessesProjection(t *testing.T) {
 	// deduped: the bundle registers an election the row already owns, so it is not listed itself.
 	_, duplicated := byID[bundleID.String()]
 	c.Assert(duplicated, qt.IsFalse)
+	// and not readable under the bundle id either: the record the list attributes to the row must
+	// not answer a second time under another id.
+	requestAndAssertCode(http.StatusNotFound, t, http.MethodGet, token, nil, "processes", bundleID.String())
 
 	// content from the stored params, live state from the chain.
 	c.Assert(legacy.Title, qt.DeepEquals, db.MultiLangString{"default": "legacy row"})
@@ -270,6 +326,9 @@ func TestLegacyProcessesProjection(t *testing.T) {
 	c.Assert(legacy.Questions[0].Results, qt.Not(qt.IsNil))
 	c.Assert(legacy.Questions[0].Results.VoteCount, qt.Equals, uint64(0))
 	c.Assert(legacy.Census.Size, qt.Equals, int64(7))
+	// the question carries the ids a client keys on: its own, and the process it belongs to.
+	c.Assert(legacy.Questions[0].ID.IsZero(), qt.IsFalse)
+	c.Assert(legacy.Questions[0].ProcessID, qt.Equals, rowOID)
 
 	// readable by its own id and by the on-chain election id, projecting the same record.
 	byRowID := requestAndParse[apicommon.VotingProcessResponse](
