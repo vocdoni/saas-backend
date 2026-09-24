@@ -60,7 +60,17 @@ func (a *API) processQuote(vp *db.VotingProcess) (pricing.Quote, pricing.QuoteIn
 		return pricing.Quote{}, pricing.QuoteInput{}, errors.ErrGenericInternalServerError.WithErr(err)
 	}
 	input := processQuoteInput(vp, census, org)
-	if input.Branding {
+	payment, err := a.db.ProcessPayment(vp.ID)
+	if err != nil && err != db.ErrNotFound {
+		return pricing.Quote{}, pricing.QuoteInput{}, errors.ErrGenericInternalServerError.WithErr(err)
+	}
+	switch {
+	case err == nil && payment.Status == db.ProcessPaymentPaid && payment.Branding:
+		// the branding this process paid for is part of its price for good: fulfillment stamped
+		// the organization, which drops it from processQuoteInput, but leaving it out here would
+		// let a re-quote (publish retry, census growth) spend the €149 on voters instead
+		input.Branding = true
+	case input.Branding:
 		// Quoting only reads the claim: a price query must never take one, or browsing the
 		// price of a branded draft would deny branding to its siblings.
 		claimable, _, err := a.brandingClaimable(vp, org)
@@ -68,6 +78,7 @@ func (a *API) processQuote(vp *db.VotingProcess) (pricing.Quote, pricing.QuoteIn
 			return pricing.Quote{}, pricing.QuoteInput{}, err
 		}
 		input.Branding = claimable
+	default:
 	}
 	quote, err := pricing.Compute(input)
 	if err != nil {
@@ -76,39 +87,37 @@ func (a *API) processQuote(vp *db.VotingProcess) (pricing.Quote, pricing.QuoteIn
 	return quote, input, nil
 }
 
-// BrandingClaimStaleAfter bounds how long a branding claim may be held by a process that
-// has no payment record yet — the window between winning the claim and storing the payment,
-// one Stripe round trip wide — before a sibling draft may take it over. A claim whose
-// payment explicitly failed is releasable at once and does not wait for this. It is a var so
-// tests can shorten it.
-var BrandingClaimStaleAfter = 2 * time.Minute
-
 // brandingClaimable reports whether vp may still carry the once-per-organization branding
 // add-on, together with the claim it observed while deciding (zero when there is none), which
 // ClaimOrganizationBranding needs to CAS against.
 //
 // The claim is a hint whose validity is re-derived from the claimant's payment, so it
-// self-heals: a claim released by a failed payment, or abandoned before any payment was
-// stored, is taken over by the next draft instead of denying branding to the organization
-// forever.
+// self-heals: a claim no longer backed by a branded payment — none stored, failed, refunded,
+// or stored without branding because the claimant dropped the add-on — is taken over by the
+// next draft instead of denying branding to the organization forever. Only once it is stale
+// (db.BrandingClaimStaleAfter), though: a claimant retrying its payment refreshes the claim
+// before storing the new payment, so a fresh claim may be backed by a payment not written yet.
 func (a *API) brandingClaimable(vp *db.VotingProcess, org *db.Organization) (bool, bson.ObjectID, error) {
 	claimant := org.BrandingClaimedBy
 	if claimant == bson.NilObjectID || claimant == vp.ID {
 		return true, claimant, nil
 	}
+	if time.Since(org.BrandingClaimedAt) <= db.BrandingClaimStaleAfter {
+		return false, claimant, nil
+	}
 	payment, err := a.db.ProcessPayment(claimant)
 	switch {
 	case err == db.ErrNotFound:
-		// claimed but nothing stored yet: either a checkout mid-flight (leave it alone) or a
-		// claim whose draft never got that far (take it over once the window has passed)
-		return time.Since(org.BrandingClaimedAt) > BrandingClaimStaleAfter, claimant, nil
+		return true, claimant, nil
 	case err != nil:
 		// never assume a claim is free because it could not be read: that charges branding twice
 		return false, claimant, errors.ErrGenericInternalServerError.WithErr(err)
-	case payment.Status == db.ProcessPaymentFailed:
+	case !payment.Branding,
+		payment.Status == db.ProcessPaymentFailed,
+		payment.Status == db.ProcessPaymentRefunded:
 		return true, claimant, nil
 	default:
-		// pending, processing or paid: the claimant is still paying for branding
+		// a pending, processing or paid payment for branding: the claimant is still paying for it
 		return false, claimant, nil
 	}
 }
@@ -122,7 +131,9 @@ func (a *API) brandingClaimable(vp *db.VotingProcess, org *db.Organization) (boo
 func (a *API) claimBrandingForPayment(
 	vp *db.VotingProcess, org *db.Organization, input *pricing.QuoteInput,
 ) (pricing.Quote, error) {
-	if input.Branding {
+	// with the organization already stamped, a branded input can only be this process's own
+	// paid branding (processQuote): nothing left to claim
+	if input.Branding && org.BrandingPaidAt.IsZero() {
 		won := false
 		claimable, observed, err := a.brandingClaimable(vp, org)
 		if err != nil {

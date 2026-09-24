@@ -91,9 +91,10 @@ func TestClaimOrganizationBrandingConcurrent(t *testing.T) {
 	c.Assert(again, qt.IsTrue)
 }
 
-// TestClaimOrganizationBrandingTakeover pins the two ways a claim changes hands and the two
-// ways it cannot: a caller that observed the current claimant may take it over, one that
-// observed a stale value may not, and no one may claim branding the organization has paid.
+// TestClaimOrganizationBrandingTakeover pins the ways a claim changes hands and the ways it
+// cannot: a caller that observed the current claimant may take it over once the claim is
+// stale, never while it is fresh; one that observed an outdated claimant may not; and no one
+// may claim branding the organization has paid.
 func TestClaimOrganizationBrandingTakeover(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
@@ -109,7 +110,16 @@ func TestClaimOrganizationBrandingTakeover(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsFalse)
 
-	// having observed first's claim and judged it releasable, second takes it over
+	// a fresh claim is not taken over even by a caller that observed it: its claimant may be
+	// between refreshing the claim and storing the payment that backs it
+	won, err = testDB.ClaimOrganizationBranding(testOrgAddress, second, first)
+	c.Assert(err, qt.IsNil)
+	c.Assert(won, qt.IsFalse)
+
+	// once stale, second takes over first's claim, which it observed and judged releasable
+	restore := BrandingClaimStaleAfter
+	BrandingClaimStaleAfter = -time.Minute
+	defer func() { BrandingClaimStaleAfter = restore }()
 	won, err = testDB.ClaimOrganizationBranding(testOrgAddress, second, first)
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue)

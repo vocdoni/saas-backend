@@ -276,16 +276,24 @@ func (ms *MongoStorage) SetOrganizationSubscription(address common.Address, orgS
 	return nil
 }
 
+// BrandingClaimStaleAfter bounds how long another process's branding claim is respected
+// once its payment no longer backs it (absent, failed, refunded, or stored without
+// branding). Every paying attempt refreshes the claimant's brandingClaimedAt before it stores
+// its payment, so a claim this old is not in the middle of one. It is a var so tests can
+// shorten it.
+var BrandingClaimStaleAfter = 2 * time.Minute
+
 // ClaimOrganizationBranding wins the once-per-organization branding add-on for processID,
 // the way ClaimVotingProcessForPublish wins a publish: the filter is the claim, so matching
 // it is winning it. Reports false without error when another process holds the claim, which
 // tells the caller to re-price without branding before charging anything.
 //
 // observedClaimant is the claim the caller read and judged releasable — zero when it saw
-// none. It is part of the filter, so a claim taken or stolen in between is never overwritten;
-// no cutoff is needed here because brandingClaimedAt only ever moves together with
-// brandingClaimedBy, so the observed claimant already pins the state the caller reconciled.
-// An organization that already paid branding can never be claimed again.
+// none. It is part of the filter together with the stale cutoff, so a claim taken, stolen or
+// refreshed by its own claimant in between is never overwritten: a claimant retrying its
+// payment refreshes brandingClaimedAt before storing the new payment, and a sibling that read
+// the old payment in that window no longer matches. An organization that already paid
+// branding can never be claimed again.
 func (ms *MongoStorage) ClaimOrganizationBranding(
 	orgAddress common.Address, processID, observedClaimant bson.ObjectID,
 ) (bool, error) {
@@ -299,7 +307,10 @@ func (ms *MongoStorage) ClaimOrganizationBranding(
 		bson.M{"brandingClaimedBy": processID},
 	}
 	if observedClaimant != bson.NilObjectID && observedClaimant != processID {
-		allowed = append(allowed, bson.M{"brandingClaimedBy": observedClaimant})
+		allowed = append(allowed, bson.M{
+			"brandingClaimedBy": observedClaimant,
+			"brandingClaimedAt": bson.M{"$lt": time.Now().Add(-BrandingClaimStaleAfter)},
+		})
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
