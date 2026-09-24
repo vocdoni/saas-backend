@@ -14,6 +14,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -993,11 +994,18 @@ func newOrgMember() apicommon.OrgMember {
 	return newOrgMembers(1)[0]
 }
 
-// newOrgMembers returns n default test organization members with unique values on every field
+// orgMembersSeq numbers the members newOrgMembers hands out across the whole test binary.
+var orgMembersSeq atomic.Int64
+
+// newOrgMembers returns n default test organization members whose login data is unique across
+// calls, so two batches posted to one organization never collide: a census refuses members it
+// cannot tell apart.
 func newOrgMembers(n int) []apicommon.OrgMember {
 	members := make([]apicommon.OrgMember, n)
-	for i := range n {
-		members[i] = apicommon.OrgMember{
+	first := int(orgMembersSeq.Add(int64(n))) - n
+	for j := range n {
+		i := first + j
+		members[j] = apicommon.OrgMember{
 			MemberNumber: fmt.Sprintf("P%03d", i+1),
 			Name:         fmt.Sprintf("Name %d", i+1),
 			Surname:      fmt.Sprintf("Surname %d", i+1),
@@ -1007,7 +1015,7 @@ func newOrgMembers(n int) []apicommon.OrgMember {
 			Other:        map[string]any{"some": "data"},
 			NationalID:   fmt.Sprintf("DNI%03d", i+1),
 			BirthDate:    time.Date(1980, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, i).Format("2006-01-02"),
-			Weight:       fmt.Sprintf("%d", i+1),
+			Weight:       fmt.Sprintf("%d", j+1), // per batch: tests assert weights 1, 2, ...
 		}
 	}
 	return members
