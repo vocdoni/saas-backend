@@ -251,7 +251,8 @@ type WalletTopUpRequest struct {
 }
 
 // OrganizationProcessPayment is one process payment of an organization, as stored: no live
-// Stripe state (GET /processes/{processId}/checkout has it).
+// Stripe state (GET /processes/{processId}/checkout has it). Title is empty and Published
+// false when the process no longer exists — a refunded payment outlives its deleted draft.
 type OrganizationProcessPayment struct {
 	ProcessID   string                  `json:"processId"`
 	Title       db.MultiLangString      `json:"title,omitempty"`

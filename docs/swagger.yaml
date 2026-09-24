@@ -4138,7 +4138,8 @@ paths:
         The organization's process payments as stored, filtered by status — by default the
         ones still open (pending, processing), which is how the drafts whose checkout
         blocks publication are found. No live Stripe state is read: poll
-        GET /processes/{processId}/checkout for that. Requires Manager/Admin of the organization.
+        GET /processes/{processId}/checkout for that. A payment whose process was deleted
+        (refunded) is listed with an empty title. Requires Manager/Admin of the organization.
       parameters:
       - description: Organization address
         in: path
