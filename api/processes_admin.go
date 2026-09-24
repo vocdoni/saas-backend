@@ -54,10 +54,10 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	if refusePublishInProgress(w, vp) {
 		return
 	}
-	// a processing or paid payment refuses deletion (the user would lose what they
-	// paid); a pending one is released: expire its open session so it can never be
-	// paid, then drop the payment record with the draft.
-	if a.refusePaymentLocked(w, oid) {
+	// a processing or paid payment refuses deletion (the user would lose what they paid,
+	// and a refund is a manual Stripe-side operation); a pending one is released: expire
+	// its open session so it can never be paid, then drop the payment record with the draft.
+	if a.refusePaymentLocked(w, oid, db.ProcessPaymentPaid) {
 		return
 	}
 	payment, err := a.db.ProcessPayment(oid)

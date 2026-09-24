@@ -34,8 +34,9 @@ func pollProcessPublished(t *testing.T, token, pid string) {
 }
 
 // TestVotingProcessPublishPaymentGate: a priced process cannot publish unpaid (402 with
-// the quote in the payload, and the validation dry-run reports it), a paid one is locked
-// against edits and deletion, and publishes.
+// the quote in the payload, and the validation dry-run reports it), a paid one can still be
+// edited (that is how a draft stranded by publish preflight is repaired) but not deleted,
+// and publishes.
 func TestVotingProcessPublishPaymentGate(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "gatepassword123")
@@ -74,10 +75,11 @@ func TestVotingProcessPublishPaymentGate(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue)
 
-	// a paid draft can no longer be edited or deleted (the price was for this draft)
+	// a paid draft is still editable: the publish gate re-prices whatever the edit
+	// produced, so an edit can only repair the draft, never under-charge it
 	update := newVotingProcessRequest(orgAddress, memberIDs(members))
-	requestAndAssertError(errors.ErrPaymentSessionConflict, t, http.MethodPut, token, update,
-		"processes", pid)
+	requestAndAssertCode(http.StatusOK, t, http.MethodPut, token, update, "processes", pid)
+	// deleting it is still refused — that would destroy what was paid for
 	requestAndAssertError(errors.ErrPaymentSessionConflict, t, http.MethodDelete, token, nil,
 		"processes", pid)
 
@@ -282,6 +284,7 @@ func TestPublishPaidProcessRefusesGrownCensus(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	vp, err := testDB.VotingProcess(oid)
 	c.Assert(err, qt.IsNil)
+	me := requestAndParse[apicommon.UserInfo](t, http.MethodGet, token, nil, "users", "me")
 
 	// pay the draft at its real quote hash: a placeholder hash would exercise the
 	// mismatch path instead of the price-grew one
@@ -294,6 +297,7 @@ func TestPublishPaidProcessRefusesGrownCensus(t *testing.T) {
 		QuoteHash:         pricing.QuoteHash(input, quote.TotalCents),
 		AmountCents:       quote.TotalCents,
 		Currency:          "eur",
+		RequestedBy:       me.Email,
 	}, "")
 	c.Assert(err, qt.IsNil)
 	c.Assert(stored, qt.IsTrue)
@@ -322,6 +326,18 @@ func TestPublishPaidProcessRefusesGrownCensus(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(vp.Published, qt.IsFalse)
 	c.Assert(vp.PublishInProgress(), qt.IsFalse) // no claim left behind
+
+	// the webhook fulfillment hook is the other entry point into publication, and Stripe
+	// retries an event for days — so it re-prices too, instead of publishing on the
+	// strength of the paid status alone
+	testAPI.publishPaidProcess(oid)
+	vp, err = testDB.VotingProcess(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(vp.Published, qt.IsFalse)
+	c.Assert(vp.PublishInProgress(), qt.IsFalse)
+	payment, err := testDB.ProcessPayment(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPaid) // still paid: publish it manually
 }
 
 // TestManagedWalletDebitRepricesGrownCensus: the wallet debit is priced at the moment of

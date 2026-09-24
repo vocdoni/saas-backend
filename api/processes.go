@@ -406,9 +406,9 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// after the role check, so a non-member reads 401 rather than learning from a 409
-	// whether someone is paying for this process. A processing or paid payment freezes
-	// the priced inputs; a pending one does not (its open session is expired and
-	// replaced at the next checkout).
+	// whether someone is paying for this process. Only a processing payment freezes the
+	// priced inputs; editing a paid draft is how a draft stranded by publish preflight is
+	// repaired, and every publish path re-prices what the edit produced.
 	if a.refusePaymentLocked(w, oid) {
 		return
 	}

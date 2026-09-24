@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -215,6 +216,21 @@ func (a *API) publishPaidProcess(processID bson.ObjectID) {
 		log.Warnw("paid process census not found", "processId", processID.Hex(), "error", err)
 		return
 	}
+	// Re-price before publishing. A Stripe retry can land days after the payment, and the
+	// census behind the draft can have grown in between (POST /census/{id} has no payment
+	// state to consult), so publishing on the strength of the paid status alone would put a
+	// bigger election on chain at the smaller price.
+	due, err := a.paymentDueForPublish(vp)
+	if err != nil {
+		log.Warnw("could not re-price paid process, staying paid for a manual publish",
+			"processId", processID.Hex(), "error", err)
+		return
+	}
+	if due != nil {
+		log.Warnw("paid process is now priced above its payment, staying paid for a manual publish",
+			"processId", processID.Hex(), "paidCents", payment.AmountCents, "quotedCents", due.TotalCents)
+		return
+	}
 	if problems, _ := a.publishPreflightProblems(vp, questions, census, user); len(problems) > 0 {
 		log.Warnw("paid process failed publish preflight, staying paid for a manual publish",
 			"processId", processID.Hex(), "problems", strings.Join(problems, "; "))
@@ -231,13 +247,17 @@ func (a *API) publishPaidProcess(processID bson.ObjectID) {
 	log.Infow("paid process publication enqueued", "processId", processID.Hex(), "jobId", jobID)
 }
 
-// refusePaymentLocked refuses draft mutations while a payment is processing or paid: the
-// amount charged (or charging) was quoted for the draft exactly as it is. Pending
-// payments do not lock — the open session is expired and replaced at the next checkout.
+// refusePaymentLocked refuses draft mutations while a payment is processing: money is in
+// flight and its outcome is unknown, so the priced inputs must not move under it. A paid
+// draft is not locked — every publish path re-prices against what was paid, refusing when
+// the draft grew worth more, so an edit can only fix a draft that failed publish preflight,
+// never under-charge. Pending payments do not lock either: the open session is expired and
+// replaced at the next checkout. Callers naming extra statuses in alsoLocked refuse those
+// too (DELETE refuses paid: dropping the draft would destroy what was paid for).
 // A payment state it cannot read is refused rather than assumed absent: nothing further
 // down the write path consults payment state, so failing open here would let a transient
-// Mongo error unlock exactly the paid draft this guard exists to protect.
-func (a *API) refusePaymentLocked(w http.ResponseWriter, oid bson.ObjectID) bool {
+// Mongo error unlock exactly the draft this guard exists to protect.
+func (a *API) refusePaymentLocked(w http.ResponseWriter, oid bson.ObjectID, alsoLocked ...db.ProcessPaymentStatus) bool {
 	payment, err := a.db.ProcessPayment(oid)
 	if err != nil {
 		if err == db.ErrNotFound {
@@ -246,8 +266,14 @@ func (a *API) refusePaymentLocked(w http.ResponseWriter, oid bson.ObjectID) bool
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return true
 	}
-	if payment.Status == db.ProcessPaymentProcessing || payment.Status == db.ProcessPaymentPaid {
-		errors.ErrPaymentSessionConflict.Withf("the draft is locked by its payment").Write(w)
+	if payment.Status == db.ProcessPaymentProcessing {
+		errors.ErrPaymentSessionConflict.
+			Withf("the draft is locked while its payment is being processed").Write(w)
+		return true
+	}
+	if slices.Contains(alsoLocked, payment.Status) {
+		errors.ErrPaymentSessionConflict.
+			Withf("the draft payment is %s; edit the draft and publish it instead", payment.Status).Write(w)
 		return true
 	}
 	return false
