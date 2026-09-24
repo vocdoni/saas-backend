@@ -182,6 +182,45 @@ func (ms *MongoStorage) SetProcessPaymentPaidByWallet(payment *ProcessPayment) (
 	return res.MatchedCount == 1 || res.UpsertedCount == 1, nil
 }
 
+// SetProcessPaymentEnvelope records a paid payment of amountCents that no checkout collected,
+// so a published process's census has an envelope to grow against like any paid process:
+// growth past that price is refused with what it costs and bought through the same census
+// checkout. It is €0 for a process published free, and the price of its census at the time for
+// a process published before pay-per-process (grandfathered: what it already holds stays free).
+// A process that already has a payment keeps it, except a failed one: its checkout is over
+// (expired, cancelled or declined) and can no longer be paid, so it is replaced — leaving it would
+// give the published census no envelope at all. Reports whether it wrote.
+func (ms *MongoStorage) SetProcessPaymentEnvelope(
+	processID bson.ObjectID, orgAddress common.Address, amountCents int64,
+) (bool, error) {
+	if processID == bson.NilObjectID || (orgAddress.Cmp(common.Address{}) == 0) {
+		return false, ErrInvalidData
+	}
+	now := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	// with upsert, a payment the filter excludes collides on _id: that duplicate key is the refusal
+	res, err := ms.processPayments.ReplaceOne(ctx,
+		bson.M{"_id": processID, "status": ProcessPaymentFailed},
+		&ProcessPayment{
+			ProcessID:   processID,
+			OrgAddress:  orgAddress,
+			Status:      ProcessPaymentPaid,
+			AmountCents: amountCents,
+			Currency:    "eur",
+			PaidAt:      now,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}, options.Replace().SetUpsert(true))
+	if err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to set process payment envelope: %w", err)
+	}
+	return res.MatchedCount == 1 || res.UpsertedCount == 1, nil
+}
+
 // DeleteProcessPayment removes a pending or failed payment when its draft is deleted. It
 // reports false for any other status, which may have moved since the caller read it.
 func (ms *MongoStorage) DeleteProcessPayment(processID bson.ObjectID) (bool, error) {
