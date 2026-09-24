@@ -85,7 +85,8 @@ func (s *Service) HandleEvent(event *stripeapi.Event) error {
 	case stripeapi.EventTypeCheckoutSessionCompleted,
 		stripeapi.EventTypeCheckoutSessionAsyncPaymentSucceeded:
 		return s.handleCheckoutSessionResult(event)
-	case stripeapi.EventTypeCheckoutSessionAsyncPaymentFailed:
+	case stripeapi.EventTypeCheckoutSessionAsyncPaymentFailed,
+		stripeapi.EventTypeCheckoutSessionExpired:
 		return s.handleCheckoutSessionFailed(event)
 	default:
 		log.Debugf("stripe webhook: received unhandled event type %s (id %s)", event.Type, event.ID)

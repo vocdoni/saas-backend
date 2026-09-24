@@ -399,3 +399,62 @@ func TestBrandingChargedOncePerOrganization(t *testing.T) {
 		t, http.MethodGet, adminToken, nil, "processes", second, "price")
 	c.Assert(price.TotalCents, qt.Equals, withBrandingCents)
 }
+
+// TestBrandingClaimReleasedByAbandonedCheckout covers the claim's other exit: the customer
+// opens a branded checkout and walks away. Stripe eventually expires the session, and
+// without that event the claim would be held by a payment that can never complete — the
+// organization's once-only add-on denied to every later draft, forever.
+func TestBrandingClaimReleasedByAbandonedCheckout(t *testing.T) {
+	c := qt.New(t)
+	installStripeWebhookService(t)
+	installFakePaymentGW(t)
+	adminToken := testCreateUser(t, "brandingexpire1234")
+	orgAddress := testCreateOrganization(t, adminToken)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+
+	newBrandedProcess := func() string {
+		members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(15)...)
+		req := newVotingProcessRequest(orgAddress, memberIDs(members))
+		req.AddOns = db.ProcessAddOns{Branding: true}
+		created := requestAndParse[apicommon.CreateVotingProcessResponse](
+			t, http.MethodPost, adminToken, req, processesCreateEndpoint)
+		return created.ProcessID
+	}
+	const plainCents = int64(1_515)
+	const withBrandingCents = plainCents + 14_900
+
+	abandoned, next := newBrandedProcess(), newBrandedProcess()
+	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, adminToken,
+		&apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"},
+		"processes", abandoned, "checkout")
+	c.Assert(checkout.AmountCents, qt.Equals, withBrandingCents)
+
+	// while that session is open the claim holds, so the next draft is quoted without branding
+	price := requestAndParse[apicommon.ProcessPriceResponse](
+		t, http.MethodGet, adminToken, nil, "processes", next, "price")
+	c.Assert(price.TotalCents, qt.Equals, plainCents)
+
+	// Stripe expires the abandoned session
+	abandonedOID, err := bson.ObjectIDFromHex(abandoned)
+	c.Assert(err, qt.IsNil)
+	payment, err := testDB.ProcessPayment(abandonedOID)
+	c.Assert(err, qt.IsNil)
+	status := postSignedStripeEvent(t, testWebhookSecret, "evt_branding_expired",
+		"checkout.session.expired",
+		checkoutSessionObject(payment.CheckoutSessionID, "unpaid", withBrandingCents, map[string]string{
+			"voting_process_id": abandoned,
+		}))
+	c.Assert(status, qt.Equals, http.StatusOK)
+	payment, err = testDB.ProcessPayment(abandonedOID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentFailed)
+
+	// with the claim released, the next draft can be charged for branding
+	price = requestAndParse[apicommon.ProcessPriceResponse](
+		t, http.MethodGet, adminToken, nil, "processes", next, "price")
+	c.Assert(price.TotalCents, qt.Equals, withBrandingCents)
+	nextCheckout := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, adminToken,
+		&apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"},
+		"processes", next, "checkout")
+	c.Assert(nextCheckout.AmountCents, qt.Equals, withBrandingCents)
+}

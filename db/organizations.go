@@ -276,6 +276,49 @@ func (ms *MongoStorage) SetOrganizationSubscription(address common.Address, orgS
 	return nil
 }
 
+// ClaimOrganizationBranding wins the once-per-organization branding add-on for processID,
+// the way ClaimVotingProcessForPublish wins a publish: the filter is the claim, so matching
+// it is winning it. Reports false without error when another process holds the claim, which
+// tells the caller to re-price without branding before charging anything.
+//
+// observedClaimant is the claim the caller read and judged releasable — zero when it saw
+// none. It is part of the filter, so a claim taken or stolen in between is never overwritten;
+// no cutoff is needed here because brandingClaimedAt only ever moves together with
+// brandingClaimedBy, so the observed claimant already pins the state the caller reconciled.
+// An organization that already paid branding can never be claimed again.
+func (ms *MongoStorage) ClaimOrganizationBranding(
+	orgAddress common.Address, processID, observedClaimant bson.ObjectID,
+) (bool, error) {
+	if (orgAddress.Cmp(common.Address{}) == 0) || processID == bson.NilObjectID {
+		return false, ErrInvalidData
+	}
+	// unclaimed, already ours (a retry of the same draft), or the releasable claim the
+	// caller observed
+	allowed := bson.A{
+		bson.M{"brandingClaimedBy": bson.M{"$exists": false}},
+		bson.M{"brandingClaimedBy": processID},
+	}
+	if observedClaimant != bson.NilObjectID && observedClaimant != processID {
+		allowed = append(allowed, bson.M{"brandingClaimedBy": observedClaimant})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	filter := bson.M{
+		"_id":            orgAddress,
+		"brandingPaidAt": bson.M{"$exists": false},
+		"$or":            allowed,
+	}
+	update := bson.M{"$set": bson.M{"brandingClaimedBy": processID, "brandingClaimedAt": time.Now()}}
+	res, err := ms.organizations.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return false, fmt.Errorf("failed to claim organization branding: %w", err)
+	}
+	// MatchedCount, never ModifiedCount: re-claiming within the same millisecond writes the
+	// timestamp already stored and the server reports nothing modified — a won claim read as
+	// lost (same reason as ClaimVotingProcessForPublish).
+	return res.MatchedCount == 1, nil
+}
+
 // SetOrganizationBrandingPaid stamps the once-per-organization branding add-on as paid,
 // but only the first time: the conditional filter matches only while brandingPaidAt is
 // absent (it is omitempty, so an organization that never paid branding has no such

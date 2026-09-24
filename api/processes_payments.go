@@ -60,20 +60,89 @@ func (a *API) processQuote(vp *db.VotingProcess) (pricing.Quote, pricing.QuoteIn
 	}
 	input := processQuoteInput(vp, census, org)
 	if input.Branding {
-		// branding is charged once per organization, but BrandingPaidAt is only stamped at
-		// fulfillment — so two drafts checked out before either pays would both carry it.
-		// A live payment on another process of the org already claims it.
-		claimed, err := a.db.OrgHasLiveBrandingPayment(vp.OrgAddress, vp.ID)
+		// Quoting only reads the claim: a price query must never take one, or browsing the
+		// price of a branded draft would deny branding to its siblings.
+		claimable, _, err := a.brandingClaimable(vp, org)
 		if err != nil {
-			return pricing.Quote{}, pricing.QuoteInput{}, errors.ErrGenericInternalServerError.WithErr(err)
+			return pricing.Quote{}, pricing.QuoteInput{}, err
 		}
-		input.Branding = !claimed
+		input.Branding = claimable
 	}
 	quote, err := pricing.Compute(input)
 	if err != nil {
 		return pricing.Quote{}, pricing.QuoteInput{}, errors.ErrMalformedBody.WithErr(err)
 	}
 	return quote, input, nil
+}
+
+// BrandingClaimStaleAfter bounds how long a branding claim may be held by a process that
+// has no payment record yet — the window between winning the claim and storing the payment,
+// one Stripe round trip wide — before a sibling draft may take it over. A claim whose
+// payment explicitly failed is releasable at once and does not wait for this. It is a var so
+// tests can shorten it.
+var BrandingClaimStaleAfter = 2 * time.Minute
+
+// brandingClaimable reports whether vp may still carry the once-per-organization branding
+// add-on, together with the claim it observed while deciding (zero when there is none), which
+// ClaimOrganizationBranding needs to CAS against.
+//
+// The claim is a hint whose validity is re-derived from the claimant's payment, so it
+// self-heals: a claim released by a failed payment, or abandoned before any payment was
+// stored, is taken over by the next draft instead of denying branding to the organization
+// forever.
+func (a *API) brandingClaimable(vp *db.VotingProcess, org *db.Organization) (bool, bson.ObjectID, error) {
+	claimant := org.BrandingClaimedBy
+	if claimant == bson.NilObjectID || claimant == vp.ID {
+		return true, claimant, nil
+	}
+	payment, err := a.db.ProcessPayment(claimant)
+	switch {
+	case err == db.ErrNotFound:
+		// claimed but nothing stored yet: either a checkout mid-flight (leave it alone) or a
+		// claim whose draft never got that far (take it over once the window has passed)
+		return time.Since(org.BrandingClaimedAt) > BrandingClaimStaleAfter, claimant, nil
+	case err != nil:
+		// never assume a claim is free because it could not be read: that charges branding twice
+		return false, claimant, errors.ErrGenericInternalServerError.WithErr(err)
+	case payment.Status == db.ProcessPaymentFailed:
+		return true, claimant, nil
+	default:
+		// pending, processing or paid: the claimant is still paying for branding
+		return false, claimant, nil
+	}
+}
+
+// claimBrandingForPayment wins the organization's branding claim for vp and returns the
+// quote that must actually be charged: the one input asks for when the claim is ours, or a
+// re-priced one without branding when another process holds it. The paying paths call this
+// between quoting and charging, so two concurrent publishes can never both be billed for the
+// once-per-organization add-on. input is updated to match the returned quote, because it is
+// what the payment record and the quote hash are built from.
+func (a *API) claimBrandingForPayment(
+	vp *db.VotingProcess, org *db.Organization, input *pricing.QuoteInput,
+) (pricing.Quote, error) {
+	if input.Branding {
+		won := false
+		claimable, observed, err := a.brandingClaimable(vp, org)
+		if err != nil {
+			return pricing.Quote{}, err
+		}
+		if claimable {
+			if won, err = a.db.ClaimOrganizationBranding(vp.OrgAddress, vp.ID, observed); err != nil {
+				return pricing.Quote{}, errors.ErrGenericInternalServerError.WithErr(err)
+			}
+		}
+		if !won {
+			log.Infow("branding add-on is claimed by another process, pricing without it",
+				"processId", vp.ID.Hex(), "orgAddress", vp.OrgAddress.String(), "claimedBy", observed.Hex())
+			input.Branding = false
+		}
+	}
+	quote, err := pricing.Compute(*input)
+	if err != nil {
+		return pricing.Quote{}, errors.ErrMalformedBody.WithErr(err)
+	}
+	return quote, nil
 }
 
 // paymentDueForPublish decides whether publication must be refused for lack of payment.
@@ -134,6 +203,11 @@ func (a *API) paymentDueForPublish(vp *db.VotingProcess) (*pricing.Quote, error)
 func (a *API) debitManagedProcessWallet(vp *db.VotingProcess, org *db.Organization) error {
 	quote, input, err := a.processQuote(vp)
 	if err != nil {
+		return err
+	}
+	// win the branding claim before the debit: two managed publishes racing here would
+	// otherwise both price branding in and both be charged for it
+	if quote, err = a.claimBrandingForPayment(vp, org, &input); err != nil {
 		return err
 	}
 	if quote.TotalCents == 0 {
@@ -512,6 +586,12 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 	}
 	quote, input, err := a.processQuote(vp)
 	if err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+	// win the branding claim before the session is priced, so the amount the customer is
+	// asked to pay is the amount this process is entitled to charge
+	if quote, err = a.claimBrandingForPayment(vp, org, &input); err != nil {
 		writeSubscriptionError(w, err)
 		return
 	}

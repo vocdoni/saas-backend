@@ -216,9 +216,13 @@ func (s *Service) handleCheckoutSessionResult(event *stripeapi.Event) error {
 	}
 }
 
-// handleCheckoutSessionFailed processes checkout.session.async_payment_failed: the
-// delayed payment did not clear. A process payment returns to the payable (failed)
-// state; a wallet top-up needs nothing (no balance was credited).
+// handleCheckoutSessionFailed processes the two ways a checkout stops short of paying:
+// checkout.session.async_payment_failed (a delayed payment did not clear) and
+// checkout.session.expired (the customer abandoned it and Stripe closed the session). Both
+// return the process payment to the payable (failed) state, which is also what releases the
+// branding claim the checkout took — without this an abandoned branded checkout would hold
+// the organization's once-only add-on forever. A wallet top-up needs nothing (no balance was
+// credited).
 func (s *Service) handleCheckoutSessionFailed(event *stripeapi.Event) error {
 	session, err := parseCheckoutSessionFromEvent(event)
 	if err != nil {
@@ -238,7 +242,8 @@ func (s *Service) handleCheckoutSessionFailed(event *stripeapi.Event) error {
 		return fmt.Errorf("failed to mark process payment failed: %w", err)
 	}
 	if failed {
-		log.Warnw("process payment failed", "processId", processID.Hex(), "sessionId", session.ID)
+		log.Warnw("process payment is payable again",
+			"processId", processID.Hex(), "sessionId", session.ID, "reason", string(event.Type))
 	}
 	return nil
 }

@@ -90,12 +90,20 @@ type Organization struct {
 	Communications bool   `json:"communications" bson:"communications"`
 	// BrandingPaidAt records when the organization paid the once-per-organization
 	// branding add-on; pricing charges branding only while it is zero.
-	BrandingPaidAt time.Time                `json:"brandingPaidAt,omitempty" bson:"brandingPaidAt,omitempty"`
-	Parent         common.Address           `json:"parent" bson:"parent"`
-	Meta           map[string]any           `json:"meta" bson:"meta"`
-	Subscription   OrganizationSubscription `json:"subscription" bson:"subscription"`
-	Counters       OrganizationCounters     `json:"counters" bson:"counters"`
-	ManagedBy      common.Address           `json:"managedBy,omitempty" bson:"managedBy,omitempty"`
+	BrandingPaidAt time.Time `json:"brandingPaidAt,omitempty" bson:"brandingPaidAt,omitempty"`
+	// BrandingClaimedBy is the process currently entitled to charge the
+	// once-per-organization branding add-on, and BrandingClaimedAt when it took that
+	// claim. BrandingPaidAt is only stamped at fulfillment, so the claim is what keeps two
+	// drafts quoted before either pays from both being charged for branding
+	// (ClaimOrganizationBranding). Both are omitempty because the claim filters match on
+	// absence, and internal: a claim is not part of the organization's public shape.
+	BrandingClaimedBy bson.ObjectID            `json:"-" bson:"brandingClaimedBy,omitempty"`
+	BrandingClaimedAt time.Time                `json:"-" bson:"brandingClaimedAt,omitempty"`
+	Parent            common.Address           `json:"parent" bson:"parent"`
+	Meta              map[string]any           `json:"meta" bson:"meta"`
+	Subscription      OrganizationSubscription `json:"subscription" bson:"subscription"`
+	Counters          OrganizationCounters     `json:"counters" bson:"counters"`
+	ManagedBy         common.Address           `json:"managedBy,omitempty" bson:"managedBy,omitempty"`
 	// IntegratorLimits, when set, is a per-organization override that both enables
 	// integrator status (manual/admin path) and caps its managed resources. When unset,
 	// integrator status and limits derive from the active subscription plan instead.
@@ -797,9 +805,9 @@ type ProcessPayment struct {
 	// fulfillment publishes the process acting as this user.
 	RequestedBy string `json:"-" bson:"requestedBy,omitempty"`
 	// Branding records whether this payment carries the once-per-organization branding
-	// add-on. Organization.BrandingPaidAt is only stamped at fulfillment, so it is this
-	// flag that holds the claim in between: while the payment is live (pending,
-	// processing or paid) no other process of the organization is quoted branding.
+	// add-on, so fulfillment knows whether to stamp Organization.BrandingPaidAt. The claim
+	// itself lives on the organization (Organization.BrandingClaimedBy), whose validity is
+	// re-derived from this payment's status: a failed payment releases it.
 	Branding  bool      `json:"-" bson:"branding,omitempty"`
 	PaidAt    time.Time `json:"paidAt,omitempty" bson:"paidAt,omitempty"`
 	CreatedAt time.Time `json:"-" bson:"createdAt"`
