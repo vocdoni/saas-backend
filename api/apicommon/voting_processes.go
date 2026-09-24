@@ -160,6 +160,11 @@ type VotingProcessResponse struct {
 	// PUT to make the update conditional on nothing else having written in between (see
 	// CreateVotingProcessRequest.UpdatedAt).
 	UpdatedAt string `json:"updatedAt,omitempty"`
+	// Legacy marks a process projected read-only from the deprecated /process generation or from a
+	// process bundle. It cannot be edited, published, voted on or deleted through /processes, and
+	// its questions may share one upstreamId, because a legacy election holds the whole ballot
+	// rather than a single question.
+	Legacy bool `json:"legacy,omitempty"`
 }
 
 // VotingProcessListResponse is the paginated list of voting processes.

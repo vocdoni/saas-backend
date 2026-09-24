@@ -78,6 +78,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/go-chi/jwtauth/v5"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/handlers"
@@ -86,6 +87,7 @@ import (
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/objectstorage"
 	"github.com/vocdoni/saas-backend/subscriptions"
+	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
@@ -175,6 +177,10 @@ type API struct {
 	otpCooldown     time.Duration
 	notifySync      bool
 	statusSyncer    StatusEnqueuer
+	// ponytail: terminal-status elections are immutable, so cache them; keeps the public
+	// /processes reads from fanning out to the Vochain on every anonymous hit for legacy
+	// processes, whose whole content lives on chain.
+	electionCache *lru.Cache[string, *dvoteapi.Election]
 }
 
 // enqueueConfirm asks the status syncer to confirm a status change landed on-chain; a no-op when
@@ -240,6 +246,8 @@ func New(ctx context.Context, conf *Config) *API {
 		})
 	}
 
+	electionCache, _ := lru.New[string, *dvoteapi.Election](legacyElectionCacheSize)
+
 	a := &API{
 		ctx:             ctx,
 		db:              conf.DB,
@@ -264,6 +272,8 @@ func New(ctx context.Context, conf *Config) *API {
 		otpCooldown:     otpCooldown,
 		notifySync:      conf.NotificationsSyncDelivery,
 		statusSyncer:    conf.StatusSyncer,
+		// lru.New only fails on a non-positive size, and the size is a positive constant.
+		electionCache: electionCache,
 	}
 	a.startTxQueue()
 	// clear any publishing markers stranded by a previous crash/restart so those processes are

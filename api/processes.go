@@ -484,17 +484,24 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 //	@Failure		404			{object}	errors.Error
 //	@Router			/processes/{processId} [get]
 func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
-	oid, ok := a.votingProcessID(w, r)
-	if !ok {
-		return
-	}
-	vp, questions, err := a.db.ProcessWithQuestions(oid)
+	raw := chi.URLParam(r, "processId")
+	vp, questions, err := a.readVotingProcess(raw)
 	if err != nil {
-		if err == db.ErrNotFound {
-			errors.ErrProcessNotFound.Write(w)
+		if !stderrors.Is(err, db.ErrNotFound) {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		// no stored process owns the id, but a legacy record still may: a process bundle, or the
+		// deprecated /process generation. Those are served as a read-only projection.
+		if resp := a.legacyProcessByID(raw); resp != nil {
+			apicommon.HTTPWriteJSON(w, resp)
+			return
+		}
+		if !isVotingProcessIDShape(raw) {
+			errors.ErrMalformedURLParam.Withf("invalid process ID").Write(w)
+			return
+		}
+		errors.ErrProcessNotFound.Write(w)
 		return
 	}
 	// public read: published processes are visible to anyone; a draft only to a manager/admin of the
@@ -650,7 +657,17 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	pagination, err := calculatePagination(params.Page, params.Limit, total)
+	// legacy records (process bundles and the deprecated /process generation) are projected
+	// read-only and ordered after the stored ones, so they occupy the tail of the paginated set.
+	// They are all published, so a drafts-only view has none.
+	var legacy []apicommon.VotingProcessResponse
+	if draft != db.DraftOnly {
+		legacy = a.legacyProcesses(orgAddress)
+		if statusFilter != "" {
+			legacy = filterLegacyProcessesByStatus(legacy, statusFilter)
+		}
+	}
+	pagination, err := calculatePagination(params.Page, params.Limit, total+int64(len(legacy)))
 	if err != nil {
 		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
@@ -674,6 +691,11 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 		}
 		resp.Processes = append(resp.Processes, *apicommon.VotingProcessResponseFromDB(vp, questions, census, chainID))
 	}
+	// the legacy tail starts where the stored pages ran out: the page holding the boundary comes
+	// back short of the limit, and every page after it is legacy-only.
+	start := min(max((params.Page-1)*params.Limit+int64(len(list))-total, 0), int64(len(legacy)))
+	end := min(start+params.Limit-int64(len(list)), int64(len(legacy)))
+	resp.Processes = append(resp.Processes, legacy[start:end]...)
 	apicommon.HTTPWriteJSON(w, resp)
 }
 
