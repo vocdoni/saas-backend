@@ -236,6 +236,12 @@ const (
 	// GET routes to compute a price from formula inputs (public calculator)
 	pricingEndpoint = "/pricing"
 
+	// GET the caller's integrator wallet (balance + ledger, path-less)
+	walletEndpoint = "/wallet"
+
+	// POST starts a one-time checkout that tops up the integrator wallet
+	walletTopUpEndpoint = "/wallet/topup"
+
 	// POST starts (or resumes) the one-time checkout of a voting process;
 	// GET reports its payment status
 	processesCheckoutEndpoint = "/processes/{processId}/checkout"

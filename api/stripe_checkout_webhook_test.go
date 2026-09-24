@@ -306,6 +306,42 @@ func TestStripeCheckoutWebhookPaymentFailed(t *testing.T) {
 	c.Assert(again.SessionID, qt.Not(qt.Equals), checkout.SessionID)
 }
 
+// TestStripeCheckoutWebhookWalletTopUp: a verified top-up credits the integrator wallet
+// with the net (pre-tax) amount through the signed endpoint, exactly once across replays.
+func TestStripeCheckoutWebhookWalletTopUp(t *testing.T) {
+	c := qt.New(t)
+	installStripeWebhookService(t)
+
+	token := testCreateUser(t, "webhooktopup1234")
+	integratorAddr := testCreateOrganization(t, token)
+	integratorOrg, err := testDB.Organization(integratorAddr)
+	c.Assert(err, qt.IsNil)
+	integratorOrg.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 1}
+	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
+
+	sessionID := "cs_topup_" + util.RandomHex(8)
+	topUpObject := checkoutSessionObject(sessionID, "paid", 50_000, map[string]string{
+		stripe.MetadataKeyWalletTopUpOrg: integratorAddr.String(),
+	})
+	// amount_total carries VAT on top of the net amount; only the net is credited
+	topUpObject["amount_total"] = int64(60_500)
+
+	code := postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8),
+		"checkout.session.completed", topUpObject)
+	c.Assert(code, qt.Equals, http.StatusOK)
+	wallet := requestAndParse[apicommon.WalletResponse](t, http.MethodGet, token, nil, "wallet")
+	c.Assert(wallet.BalanceCents, qt.Equals, int64(50_000))
+
+	// a fresh-id replay (second replica) cannot double-credit; the ledger has one row
+	code = postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8),
+		"checkout.session.completed", topUpObject)
+	c.Assert(code, qt.Equals, http.StatusOK)
+	wallet = requestAndParse[apicommon.WalletResponse](t, http.MethodGet, token, nil, "wallet")
+	c.Assert(wallet.BalanceCents, qt.Equals, int64(50_000))
+	c.Assert(wallet.Ledger, qt.HasLen, 1)
+	c.Assert(wallet.Ledger[0].AmountCents, qt.Equals, int64(50_000))
+}
+
 // TestStripeCheckoutWebhookReplayPublishesStrandedProcess: fulfillment is two steps —
 // win the paid CAS, then publish. A crash in between leaves the money taken and the
 // process unpublished, and every later replay loses the CAS. Losing it must therefore
@@ -352,10 +388,28 @@ func TestStripeCheckoutWebhookPermanentlyInvalidEvents(t *testing.T) {
 	installStripeWebhookService(t)
 	installFakePaymentGW(t)
 
+	token := testCreateUser(t, "badmetadata12345")
+	integratorAddr := testCreateOrganization(t, token)
+	integratorOrg, err := testDB.Organization(integratorAddr)
+	c.Assert(err, qt.IsNil)
+	integratorOrg.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 1}
+	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
+
+	// a top-up whose organization is not an address: nothing to credit, ever
+	code := postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8),
+		"checkout.session.completed",
+		checkoutSessionObject("cs_badorg_"+util.RandomHex(4), "paid", 50_000, map[string]string{
+			stripe.MetadataKeyWalletTopUpOrg: "not-an-address",
+		}))
+	c.Assert(code, qt.Equals, http.StatusOK)
+	wallet := requestAndParse[apicommon.WalletResponse](t, http.MethodGet, token, nil, "wallet")
+	c.Assert(wallet.BalanceCents, qt.Equals, int64(0))
+	c.Assert(wallet.Ledger, qt.HasLen, 0)
+
 	// a process payment whose process id is not an ObjectID, on both the completed and
 	// the async-failed event: no process to reconcile it against, ever
 	for _, eventType := range []string{"checkout.session.completed", "checkout.session.async_payment_failed"} {
-		code := postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8), eventType,
+		code = postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8), eventType,
 			checkoutSessionObject("cs_badpid_"+util.RandomHex(4), "paid", 1_515, map[string]string{
 				stripe.MetadataKeyProcessID: "not-an-object-id",
 			}))
