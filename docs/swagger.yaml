@@ -4486,6 +4486,22 @@ paths:
         in: query
         name: search
         type: string
+      - description: 'Column to order by (default: name)'
+        enum:
+        - name
+        - surname
+        - email
+        - memberNumber
+        in: query
+        name: sortBy
+        type: string
+      - description: 'Sort direction (default: asc)'
+        enum:
+        - asc
+        - desc
+        in: query
+        name: sortOrder
+        type: string
       produces:
       - application/json
       responses:

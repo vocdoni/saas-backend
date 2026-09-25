@@ -85,7 +85,7 @@ func TestDeleteManagedOrg(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	_, err = testDB.Census(censusID)
 	c.Assert(err, qt.IsNil)
-	_, membersStillThere, err := testDB.OrgMembers(managed.Address, 1, 100, "")
+	_, membersStillThere, err := testDB.OrgMembers(managed.Address, db.OrgMembersQuery{Page: 1, Limit: 100})
 	c.Assert(err, qt.IsNil)
 	c.Assert(len(membersStillThere) > 0, qt.IsTrue)
 
@@ -114,7 +114,7 @@ func TestDeleteManagedOrg(t *testing.T) {
 	_, procs, err := testDB.ListProcesses(managed.Address, 1, 100, db.PublishedOnly)
 	c.Assert(err, qt.IsNil)
 	c.Assert(procs, qt.HasLen, 0)
-	_, noMembers, err := testDB.OrgMembers(managed.Address, 1, 100, "")
+	_, noMembers, err := testDB.OrgMembers(managed.Address, db.OrgMembersQuery{Page: 1, Limit: 100})
 	c.Assert(err, qt.IsNil)
 	c.Assert(noMembers, qt.HasLen, 0)
 

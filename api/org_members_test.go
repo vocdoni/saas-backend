@@ -852,3 +852,37 @@ func TestUpsertMemberEditAtCensusQuota(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(count, qt.Equals, int64(limit))
 }
+
+// TestOrganizationMembersSort asserts the members list honours sortBy/sortOrder and rejects values
+// outside the supported set rather than falling back to a default order.
+func TestOrganizationMembersSort(t *testing.T) {
+	c := qt.New(t)
+	adminToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	postOrgMembers(t, adminToken, orgAddress,
+		apicommon.OrgMember{MemberNumber: "63", Name: "beatriz", Surname: "Zapata", Email: "b@example.com"},
+		apicommon.OrgMember{MemberNumber: "9", Name: "Álvaro", Surname: "Gómez", Email: "c@example.com"},
+		apicommon.OrgMember{MemberNumber: "273", Name: "Carlos", Surname: "Abad", Email: "a@example.com"},
+	)
+	membersURL := organizationMembersURL(orgAddress.String())
+
+	listed := func(query string) []string {
+		resp := requestAndParse[apicommon.OrganizationMembersResponse](t, http.MethodGet, adminToken, nil,
+			membersURL+"?"+query)
+		numbers := make([]string, 0, len(resp.Members))
+		for _, m := range resp.Members {
+			numbers = append(numbers, m.MemberNumber)
+		}
+		return numbers
+	}
+
+	c.Assert(listed(""), qt.DeepEquals, []string{"9", "63", "273"})
+	c.Assert(listed("sortBy=surname"), qt.DeepEquals, []string{"273", "9", "63"})
+	c.Assert(listed("sortBy=email&sortOrder=desc"), qt.DeepEquals, []string{"9", "63", "273"})
+	c.Assert(listed("sortBy=memberNumber&sortOrder=asc"), qt.DeepEquals, []string{"9", "63", "273"})
+	c.Assert(listed("sortBy=memberNumber&sortOrder=desc&search=a"), qt.DeepEquals, []string{"273", "63", "9"})
+
+	for _, query := range []string{"sortBy=phone", "sortBy=Name", "sortOrder=descending", "sortBy=name&sortOrder=DESC"} {
+		requestAndAssertError(errors.ErrMalformedURLParam, t, http.MethodGet, adminToken, nil, membersURL+"?"+query)
+	}
+}
