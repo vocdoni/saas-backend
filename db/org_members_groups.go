@@ -351,7 +351,7 @@ func (ms *MongoStorage) ListOrganizationMemberGroup(
 	}
 	// For auto groups, all org members are included; query directly without an ID filter.
 	if group.IsAutoGroup {
-		return ms.OrgMembers(orgAddress, page, limit, "")
+		return ms.OrgMembers(orgAddress, OrgMembersQuery{Page: page, Limit: limit})
 	}
 	return ms.orgMembersByIDs(
 		orgAddress,

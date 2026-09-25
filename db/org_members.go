@@ -601,11 +601,62 @@ func (ms *MongoStorage) updateCensusParticipantsForMember(ctx context.Context, m
 	return nil
 }
 
+// OrgMemberSortField identifies the column an organization's member list is
+// ordered by. Only the values declared as constants below are valid.
+type OrgMemberSortField string
+
+const (
+	OrgMemberSortFieldName         OrgMemberSortField = "name"
+	OrgMemberSortFieldSurname      OrgMemberSortField = "surname"
+	OrgMemberSortFieldEmail        OrgMemberSortField = "email"
+	OrgMemberSortFieldMemberNumber OrgMemberSortField = "memberNumber"
+)
+
+// orgMemberSortKeys maps each sort field to its full sort key, tie-breakers
+// included so pages are stable. The member_sort_indexes migration creates one
+// collated index per key; keep both in sync.
+var orgMemberSortKeys = map[OrgMemberSortField][]string{
+	OrgMemberSortFieldName:         {"name", "surname", "_id"},
+	OrgMemberSortFieldSurname:      {"surname", "name", "_id"},
+	OrgMemberSortFieldEmail:        {"email", "_id"},
+	OrgMemberSortFieldMemberNumber: {"memberNumber", "_id"},
+}
+
+// IsValid reports whether the field is one of the supported sort fields.
+func (f OrgMemberSortField) IsValid() bool {
+	_, ok := orgMemberSortKeys[f]
+	return ok
+}
+
+// OrgMemberSortCollation orders member columns the way a person reads them:
+// case- and accent-insensitive, with digit runs compared as numbers ("63"
+// before "273"). Queries must use it to be served by the sort indexes.
+var OrgMemberSortCollation = &options.Collation{Locale: "en", Strength: 2, NumericOrdering: true}
+
+// OrgMembersQuery selects a page of an organization's members. An empty
+// SortBy orders by name.
+type OrgMembersQuery struct {
+	Page       int64
+	Limit      int64
+	Search     string
+	SortBy     OrgMemberSortField
+	Descending bool
+}
+
 // OrgMembers retrieves paginated orgMembers for an organization from the DB
-func (ms *MongoStorage) OrgMembers(orgAddress common.Address, page, limit int64, search string) (int64, []*OrgMember, error) {
+func (ms *MongoStorage) OrgMembers(orgAddress common.Address, query OrgMembersQuery) (int64, []*OrgMember, error) {
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return 0, nil, ErrInvalidData
 	}
+	sortBy := query.SortBy
+	if sortBy == "" {
+		sortBy = OrgMemberSortFieldName
+	}
+	sortKeys, ok := orgMemberSortKeys[sortBy]
+	if !ok {
+		return 0, nil, fmt.Errorf("%w: unknown sort field %q", ErrInvalidData, sortBy)
+	}
+	search := query.Search
 
 	// Create filter
 	filter := bson.M{
@@ -622,18 +673,17 @@ func (ms *MongoStorage) OrgMembers(orgAddress common.Address, page, limit int64,
 		}
 	}
 
-	findOptions := options.Find().
-		SetSort(bson.D{
-			{Key: "name", Value: 1},
-			{Key: "surname", Value: 1},
-			{Key: "email", Value: 1},
-			{Key: "memberNumber", Value: 1},
-			{Key: "nationalId", Value: 1},
-			{Key: "weight", Value: 1},
-			{Key: "createdAt", Value: 1},
-		})
+	direction := 1
+	if query.Descending {
+		direction = -1
+	}
+	sort := make(bson.D, 0, len(sortKeys))
+	for _, key := range sortKeys {
+		sort = append(sort, bson.E{Key: key, Value: direction})
+	}
+	findOptions := options.Find().SetSort(sort).SetCollation(OrgMemberSortCollation)
 
-	return paginatedDocuments[*OrgMember](ms.orgMembers, page, limit, filter, findOptions)
+	return paginatedDocuments[*OrgMember](ms.orgMembers, query.Page, query.Limit, filter, findOptions)
 }
 
 // DeleteOrgMembers removes the given members and revokes them from every census they were part of.

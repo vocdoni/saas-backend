@@ -335,7 +335,7 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test OrgMembers with zero address - should fail
-		_, _, err = testDB.OrgMembers(common.Address{}, 0, 10, "")
+		_, _, err = testDB.OrgMembers(common.Address{}, OrgMembersQuery{Limit: 10})
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test DeleteOrgMembers with zero address - should fail
