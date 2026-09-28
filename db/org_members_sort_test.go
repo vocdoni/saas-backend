@@ -20,7 +20,7 @@ func TestOrgMembersSort(t *testing.T) {
 
 	members := []*OrgMember{
 		{Name: "beatriz", Surname: "Zapata", Email: "b@example.com", MemberNumber: "273"},
-		{Name: "Álvaro", Surname: "Gómez", Email: "a10@example.com", MemberNumber: "63"},
+		{Name: "alvaro", Surname: "Gómez", Email: "a10@example.com", MemberNumber: "63"},
 		{Name: "Carlos", Surname: "álvarez", Email: "a9@example.com", MemberNumber: "1000"},
 		{Name: "Álvaro", Surname: "Abad", Email: "C@example.com", MemberNumber: "9"},
 	}
@@ -46,7 +46,7 @@ func TestOrgMembersSort(t *testing.T) {
 		sortBy OrgMemberSortField
 		want   []string // member numbers, ascending
 	}{
-		// "Álvaro" sorts with the a's, both Álvaros tie and fall to surname
+		// "Álvaro" and "alvaro" tie ignoring case and accent, so they fall to surname
 		{"", []string{"9", "63", "273", "1000"}},
 		{OrgMemberSortFieldName, []string{"9", "63", "273", "1000"}},
 		{OrgMemberSortFieldSurname, []string{"9", "1000", "63", "273"}},
@@ -68,6 +68,13 @@ func TestOrgMembersSort(t *testing.T) {
 
 	_, _, err := testDB.OrgMembers(testOrgAddress, OrgMembersQuery{Limit: 10, SortBy: "phone"})
 	c.Assert(err, qt.ErrorIs, ErrInvalidData)
+
+	// the search term is matched literally, never compiled as a pattern
+	for search, want := range map[string]int64{"(": 0, "a+": 0, "a.a": 0, "ÁLVARO": 1, "example.com": 4} {
+		total, _, err := testDB.OrgMembers(testOrgAddress, OrgMembersQuery{Page: 1, Limit: 10, Search: search})
+		c.Assert(err, qt.IsNil, qt.Commentf("search %q", search))
+		c.Assert(total, qt.Equals, want, qt.Commentf("search %q", search))
+	}
 }
 
 // TestOrgMembersSortUsesIndex asserts every sort of the members list, in both directions, is served
@@ -77,9 +84,9 @@ func TestOrgMembersSortUsesIndex(t *testing.T) {
 	c := qt.New(t)
 	// the driver's Collation struct lowercases its field names, which a raw command rejects
 	collation := bson.D{
-		{Key: "locale", Value: OrgMemberSortCollation.Locale},
-		{Key: "strength", Value: OrgMemberSortCollation.Strength},
-		{Key: "numericOrdering", Value: OrgMemberSortCollation.NumericOrdering},
+		{Key: "locale", Value: orgMemberSortCollation.Locale},
+		{Key: "strength", Value: orgMemberSortCollation.Strength},
+		{Key: "numericOrdering", Value: orgMemberSortCollation.NumericOrdering},
 	}
 	for sortBy, keys := range orgMemberSortKeys {
 		for _, direction := range []int{1, -1} {
@@ -161,6 +168,10 @@ func TestMemberSortIndexesMigration(t *testing.T) {
 		_, ok := keys[name]
 		c.Assert(ok, qt.IsTrue, qt.Commentf("missing index %s", name))
 	}
+	c.Assert(keys["orgAddress_1_phone_1"], qt.DeepEquals, bson.D{
+		{Key: "orgAddress", Value: int32(1)},
+		{Key: "phone", Value: int32(1)},
+	})
 	_, ok = keys["orgAddress_1_hashedPhone_1"]
 	c.Assert(ok, qt.IsFalse)
 
@@ -170,6 +181,8 @@ func TestMemberSortIndexesMigration(t *testing.T) {
 	c.Assert(mig.Down(ctx, database), qt.IsNil)
 	keys = indexKeys(c, testDB.orgMembers)
 	_, ok = keys["orgMembers_sort_name"]
+	c.Assert(ok, qt.IsFalse)
+	_, ok = keys["orgAddress_1_phone_1"]
 	c.Assert(ok, qt.IsFalse)
 	_, ok = keys["orgAddress_1_hashedPhone_1"]
 	c.Assert(ok, qt.IsTrue)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"net/mail"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -628,10 +629,11 @@ func (f OrgMemberSortField) IsValid() bool {
 	return ok
 }
 
-// OrgMemberSortCollation orders member columns the way a person reads them:
-// case- and accent-insensitive, with digit runs compared as numbers ("63"
-// before "273"). Queries must use it to be served by the sort indexes.
-var OrgMemberSortCollation = &options.Collation{Locale: "en", Strength: 2, NumericOrdering: true}
+// orgMemberSortCollation orders member columns the way a person reads them:
+// case- and accent-insensitive (ICU primary strength), with digit runs compared
+// as numbers ("63" before "273"). Queries must use it to be served by the sort
+// indexes.
+var orgMemberSortCollation = &options.Collation{Locale: "en", Strength: 1, NumericOrdering: true}
 
 // OrgMembersQuery selects a page of an organization's members. An empty
 // SortBy orders by name.
@@ -656,7 +658,8 @@ func (ms *MongoStorage) OrgMembers(orgAddress common.Address, query OrgMembersQu
 	if !ok {
 		return 0, nil, fmt.Errorf("%w: unknown sort field %q", ErrInvalidData, sortBy)
 	}
-	search := query.Search
+	// match the search term literally: a raw pattern can fail to compile or backtrack catastrophically
+	search := regexp.QuoteMeta(query.Search)
 
 	// Create filter
 	filter := bson.M{
@@ -681,7 +684,7 @@ func (ms *MongoStorage) OrgMembers(orgAddress common.Address, query OrgMembersQu
 	for _, key := range sortKeys {
 		sort = append(sort, bson.E{Key: key, Value: direction})
 	}
-	findOptions := options.Find().SetSort(sort).SetCollation(OrgMemberSortCollation)
+	findOptions := options.Find().SetSort(sort).SetCollation(orgMemberSortCollation)
 
 	return paginatedDocuments[*OrgMember](ms.orgMembers, query.Page, query.Limit, filter, findOptions)
 }

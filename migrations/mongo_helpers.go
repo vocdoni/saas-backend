@@ -94,11 +94,10 @@ func replaceIndexWithUpdateFunc(
 		}
 	}
 
-	// 3) create new indexes
-	for _, index := range newIndexes {
-		if _, err := collection.Indexes().CreateOne(ctx, index); err != nil {
-			return fmt.Errorf("failed to create index %v on %s: %w",
-				index.Keys, collection.Name(), err)
+	// 3) create new indexes in one call, so Mongo builds them all in a single collection scan
+	if len(newIndexes) > 0 {
+		if _, err := collection.Indexes().CreateMany(ctx, newIndexes); err != nil {
+			return fmt.Errorf("failed to create indexes on %s: %w", collection.Name(), err)
 		}
 	}
 
