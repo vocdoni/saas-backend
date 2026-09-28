@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -80,7 +81,7 @@ func TestLegacyProjectionExplorerElection(t *testing.T) {
 	c.Assert(content.questions, qt.HasLen, 2)
 
 	processID := bson.NewObjectID()
-	questions := legacyElectionQuestions(processID, election, content.questions)
+	questions := legacyElectionQuestions(processID, election, content)
 	c.Assert(questions, qt.HasLen, 2)
 	for i, q := range questions {
 		c.Assert(q.Order, qt.Equals, i)
@@ -92,8 +93,9 @@ func TestLegacyProjectionExplorerElection(t *testing.T) {
 		c.Assert(q.Type, qt.Equals, "singlechoice")
 		c.Assert(q.SecretUntilTheEnd, qt.IsTrue)
 		c.Assert(q.Choices, qt.HasLen, 2)
-		// ballotProtocol/typeSetup stay unset: the election's tally mode describes the whole ballot.
-		c.Assert(q.BallotProtocol, qt.IsNil)
+		// the question's own slice of the ballot: one field, valued over the two choices.
+		c.Assert(q.BallotProtocol, qt.DeepEquals, &db.BallotProtocol{MaxCount: 1, MaxValue: 1})
+		c.Assert(q.TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1})
 		c.Assert(q.Results, qt.Not(qt.IsNil))
 		c.Assert(q.Results.VoteCount, qt.Equals, uint64(8))
 		c.Assert(q.Results.MaxVoters, qt.Equals, uint64(13))
@@ -109,7 +111,7 @@ func TestLegacyProjectionExplorerElection(t *testing.T) {
 	c.Assert(questions[0].ID, qt.Not(qt.Equals), questions[1].ID)
 	c.Assert(questions[0].ID.IsZero(), qt.IsFalse)
 	// stable across reads: the same election and order derive the same id.
-	c.Assert(legacyElectionQuestions(processID, election, content.questions)[0].ID, qt.Equals, questions[0].ID)
+	c.Assert(legacyElectionQuestions(processID, election, content)[0].ID, qt.Equals, questions[0].ID)
 }
 
 // TestLegacyProjectionSingleQuestion checks that a single question owns the whole result matrix,
@@ -120,11 +122,13 @@ func TestLegacyProjectionSingleQuestion(t *testing.T) {
 		[]map[string]any{legacyTestQuestion("Statuto")})
 
 	content := testAPI.legacyContentOf(context.Background(), election, nil)
-	questions := legacyElectionQuestions(bson.NewObjectID(), election, content.questions)
+	questions := legacyElectionQuestions(bson.NewObjectID(), election, content)
 	c.Assert(questions, qt.HasLen, 1)
 	c.Assert(questions[0].Results.Results, qt.DeepEquals, [][]string{{"3", "1"}, {"2", "2"}, {"0", "4"}})
-	// three ballot fields behind one question: not a single-choice ballot, and not statable.
+	// three ballot fields behind one question: no named type reproduces that ballot, but the ballot
+	// itself is the question's own, so the client still gets the numbers it needs to read the matrix.
 	c.Assert(questions[0].Type, qt.Equals, "")
+	c.Assert(questions[0].BallotProtocol, qt.DeepEquals, &db.BallotProtocol{MaxCount: 3, MaxValue: 1})
 }
 
 // TestLegacyProjectionUnmappableResults checks that a tally whose rows do not map onto the questions
@@ -135,12 +139,136 @@ func TestLegacyProjectionUnmappableResults(t *testing.T) {
 		[]map[string]any{legacyTestQuestion("Statuto"), legacyTestQuestion("Consiglio Direttivo")})
 	// three ballot fields over two questions: the tally does not map, and neither does the type.
 	content := testAPI.legacyContentOf(context.Background(), election, nil)
-	questions := legacyElectionQuestions(bson.NewObjectID(), election, content.questions)
+	questions := legacyElectionQuestions(bson.NewObjectID(), election, content)
 	c.Assert(questions, qt.HasLen, 2)
 	for _, q := range questions {
 		c.Assert(q.Results.Results, qt.IsNil)
 		c.Assert(q.Results.VoteCount, qt.Equals, uint64(8))
 		c.Assert(q.Type, qt.Equals, "")
+		c.Assert(q.BallotProtocol, qt.IsNil)
+	}
+}
+
+// legacyTestChoices is a metadata question with n choices valued 0..n-1.
+func legacyTestChoices(title string, n int) map[string]any {
+	choices := make([]any, 0, n)
+	for i := range n {
+		choices = append(choices, map[string]any{
+			"title": map[string]any{"default": fmt.Sprintf("choice %d", i)},
+			"value": i,
+		})
+	}
+	return map[string]any{"title": map[string]any{"default": title}, "choices": choices}
+}
+
+// legacyTestElectionType stamps a metadata "type" block on a fixture election: the declared name is a
+// claim the chain never saw, so the projection only passes it through once the ballot corroborates it.
+func legacyTestElectionType(election *dvoteapi.Election, name string, properties map[string]any) {
+	if meta, ok := election.Metadata.(map[string]any); ok {
+		meta["type"] = map[string]any{"name": name, "properties": properties}
+	}
+}
+
+// legacyTestDeclaredType reads back the metadata "type" block the projection exposed.
+func legacyTestDeclaredType(question db.VotingProcessQuestion) *db.ElectionTypeMetadata {
+	declared, ok := question.Metadata["type"].(*db.ElectionTypeMetadata)
+	if !ok {
+		return nil
+	}
+	return declared
+}
+
+// TestLegacyProjectionChainBallot checks the record of issue #711: a ranked-with-overwrites ballot that
+// no named type reproduces still projects the parameters a client needs to read its results matrix, and
+// its declared multiple-choice name — which the ballot corroborates — comes through beside them.
+func TestLegacyProjectionChainBallot(t *testing.T) {
+	c := qt.New(t)
+	election := legacyTestElection([][]uint64{{3, 1, 4}, {2, 2, 4}, {0, 4, 4}},
+		[]map[string]any{legacyTestChoices("Statuto", 3)})
+	election.TallyMode.MaxValue = 2
+	election.TallyMode.MaxVoteOverwrites = 10
+	election.TallyMode.CostExponent = 1
+	election.VoteMode.UniqueValues = true
+	legacyTestElectionType(election, "multiple-choice", map[string]any{
+		"numChoices":   map[string]any{"min": 0, "max": 3},
+		"repeatChoice": false,
+	})
+
+	content := testAPI.legacyContentOf(context.Background(), election, nil)
+	questions := legacyElectionQuestions(bson.NewObjectID(), election, content)
+	c.Assert(questions, qt.HasLen, 1)
+	// the whole ballot is the only question's, echoed field for field from tallyMode and voteMode.
+	c.Assert(questions[0].BallotProtocol, qt.DeepEquals, &db.BallotProtocol{
+		MaxCount: 3, MaxValue: 2, MaxVoteOverwrites: 10, CostExponent: 1, UniqueValues: true,
+	})
+	// no named type maps onto a ranked ballot that also allows overwrites, so none is claimed.
+	c.Assert(questions[0].Type, qt.Equals, "")
+	c.Assert(legacyTestDeclaredType(questions[0]), qt.Not(qt.IsNil))
+	c.Assert(legacyTestDeclaredType(questions[0]).Name, qt.Equals, "multiple-choice")
+	// with no named type, the bounds come from the corroborated block rather than staying zero:
+	// numChoices.max caps the choices, and repeatChoice: false is a ranked ballot's unique values.
+	bounds := db.QuestionTypeSetup{MaxChoices: 3, UniqueChoices: true}
+	c.Assert(questions[0].TypeSetup, qt.Equals, bounds)
+}
+
+// TestLegacyProjectionUncorroboratedType checks the caution the whole metadata pass-through rests on:
+// elections the SaaS API published declare single-choice-multiquestion whatever ballot they then ran,
+// and a client trusts the declared name over the parameters, so a contradicted name is dropped.
+func TestLegacyProjectionUncorroboratedType(t *testing.T) {
+	c := qt.New(t)
+	// an approval ballot: one field per choice, each valued 0 or 1 — not one field over the choices.
+	election := legacyTestElection([][]uint64{{6, 2}, {4, 4}}, []map[string]any{legacyTestChoices("Statuto", 2)})
+	legacyTestElectionType(election, "single-choice-multiquestion", map[string]any{
+		"numChoices": map[string]any{"min": 1, "max": 1},
+	})
+
+	content := testAPI.legacyContentOf(context.Background(), election, nil)
+	questions := legacyElectionQuestions(bson.NewObjectID(), election, content)
+	c.Assert(questions, qt.HasLen, 1)
+	c.Assert(questions[0].BallotProtocol, qt.DeepEquals, &db.BallotProtocol{MaxCount: 2, MaxValue: 1})
+	// the name says one choice, the ballot ran two fields: dropped, and its bounds with it.
+	c.Assert(legacyTestDeclaredType(questions[0]), qt.IsNil)
+	c.Assert(questions[0].Type, qt.Equals, "")
+	c.Assert(questions[0].TypeSetup, qt.Equals, db.QuestionTypeSetup{})
+}
+
+// TestLegacyProjectionBudgetBallot checks a budget ballot, where a single field per choice carries a
+// spend rather than a rank. Labelling it single-choice — as the projection's first cut did whenever the
+// field count matched the question count — is exactly the wrong-numbers failure #711 reports.
+func TestLegacyProjectionBudgetBallot(t *testing.T) {
+	c := qt.New(t)
+	election := legacyTestElection([][]uint64{{40}, {35}, {25}}, []map[string]any{legacyTestChoices("Repartiment", 3)})
+	election.TallyMode.MaxValue = 0
+	election.TallyMode.MaxTotalCost = 100
+	election.TallyMode.CostExponent = 1
+	legacyTestElectionType(election, "budget-based", map[string]any{"numChoices": map[string]any{"min": 1}})
+
+	content := testAPI.legacyContentOf(context.Background(), election, nil)
+	questions := legacyElectionQuestions(bson.NewObjectID(), election, content)
+	c.Assert(questions, qt.HasLen, 1)
+	// the ballot is reproduced exactly by a cumulative question, so it is named one — with the budget.
+	c.Assert(questions[0].Type, qt.Equals, db.VotingTypeCumulative)
+	c.Assert(questions[0].TypeSetup, qt.Equals, db.QuestionTypeSetup{Budget: 100, CostExponent: 1})
+	c.Assert(legacyTestDeclaredType(questions[0]).Name, qt.Equals, "budget-based")
+}
+
+// TestLegacyProjectionTypeContradictsChoices checks the other half of the same guard: a ballot whose
+// field count matches the question count, but whose values reach past the choices on offer, describes
+// no single-choice question either — the field count alone never proved it did.
+func TestLegacyProjectionTypeContradictsChoices(t *testing.T) {
+	c := qt.New(t)
+	election := legacyTestElection([][]uint64{{8, 0}, {8, 0}},
+		[]map[string]any{legacyTestQuestion("Statuto"), legacyTestQuestion("Consiglio")})
+	election.TallyMode.MaxValue = 3 // three values over two choices: not a choice per value
+	legacyTestElectionType(election, "single-choice-multiquestion", nil)
+
+	content := testAPI.legacyContentOf(context.Background(), election, nil)
+	questions := legacyElectionQuestions(bson.NewObjectID(), election, content)
+	c.Assert(questions, qt.HasLen, 2)
+	for _, q := range questions {
+		c.Assert(q.BallotProtocol, qt.DeepEquals, &db.BallotProtocol{MaxCount: 1, MaxValue: 3})
+		c.Assert(q.Type, qt.Equals, "")
+		c.Assert(legacyTestDeclaredType(q), qt.IsNil)
 	}
 }
 
@@ -169,7 +297,7 @@ func TestLegacyProjectionStoredParams(t *testing.T) {
 	c.Assert(content.title, qt.DeepEquals, db.MultiLangString{"default": "stored title"})
 	c.Assert(content.streamURI, qt.Equals, "https://example.org/stream")
 
-	questions := legacyElectionQuestions(bson.NewObjectID(), election, content.questions)
+	questions := legacyElectionQuestions(bson.NewObjectID(), election, content)
 	c.Assert(questions, qt.HasLen, 1)
 	c.Assert(questions[0].Title, qt.DeepEquals, db.MultiLangString{"default": "stored question"})
 	c.Assert(questions[0].Status, qt.Equals, "ENDED")

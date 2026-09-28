@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
@@ -46,6 +48,10 @@ type legacyContent struct {
 	header      string
 	streamURI   string
 	questions   []db.Question
+	// typeMetadata is the document's declared "type" block, describing how the ballot is meant to be
+	// read. It is a claim, not a configuration — the chain never sees it — so it is only projected
+	// once the ballot corroborates it (legacyCorroboratedType).
+	typeMetadata *db.ElectionTypeMetadata
 }
 
 // legacyProcesses projects every legacy election of an organization onto the /processes read shape.
@@ -332,7 +338,7 @@ func (a *API) projectLegacyProcess(
 		if election.EndDate.After(vp.EndDate) {
 			vp.EndDate = election.EndDate
 		}
-		questions = append(questions, legacyElectionQuestions(src.id, election, content.questions)...)
+		questions = append(questions, legacyElectionQuestions(src.id, election, content)...)
 	}
 	if len(questions) == 0 {
 		return nil, nil
@@ -369,24 +375,31 @@ func (a *API) legacyContentOf(
 ) legacyContent {
 	if params != nil && len(params.Questions) > 0 {
 		return legacyContent{
-			title:       params.Title,
-			description: params.Description,
-			header:      params.Header,
-			streamURI:   params.StreamURI,
-			questions:   params.Questions,
+			title:        params.Title,
+			description:  params.Description,
+			header:       params.Header,
+			streamURI:    params.StreamURI,
+			questions:    params.Questions,
+			typeMetadata: params.TypeMetadata,
 		}
 	}
 	meta := a.legacyElectionMetadata(ctx, election)
 	if meta == nil {
 		return legacyContent{}
 	}
-	return legacyContent{
+	content := legacyContent{
 		title:       db.MultiLangString(meta.Title),
 		description: db.MultiLangString(meta.Description),
 		header:      meta.Media.Header,
 		streamURI:   meta.Media.StreamURI,
 		questions:   legacyMetaQuestions(meta.Questions),
 	}
+	// the inverse of account.BuildElectionMetadata, which writes this same block from
+	// ElectionParams.TypeMetadata (and stamps a default name when the row carried none).
+	if meta.Type.Name != "" {
+		content.typeMetadata = &db.ElectionTypeMetadata{Name: meta.Type.Name, Properties: meta.Type.Properties}
+	}
+	return content
 }
 
 // legacyElectionMetadata decodes an election's metadata document into the typed shape (a JSON
@@ -461,17 +474,16 @@ func legacyMetaQuestions(metaQuestions []dvoteapi.Question) []db.Question {
 }
 
 // legacyElectionQuestions projects one legacy election onto the new-format questions: one per ballot
-// question, all carrying the election id as UpstreamID and its status. BallotProtocol and TypeSetup
-// stay unset — the election has one tally mode for the whole ballot, describing no single question.
+// question, all carrying the election id as UpstreamID and its status. A question also carries the
+// ballot parameters the chain ran wherever the election's ballot describes a single question, plus a
+// named type only when those parameters are exactly one (account.QuestionTypeFromBallotProtocol).
 func legacyElectionQuestions(
-	processID bson.ObjectID, election *dvoteapi.Election, questions []db.Question,
+	processID bson.ObjectID, election *dvoteapi.Election, content legacyContent,
 ) []db.VotingProcessQuestion {
 	tally := questionResultsFromElection(election)
-	// one ballot field per question is exactly a single-choice ballot; any other shape is not statable
-	// per question. Read from the ballot description, so it does not change when the tally publishes.
-	singleChoice := election.TallyMode.ProcessVoteOptions != nil && int(election.TallyMode.MaxCount) == len(questions)
-	out := make([]db.VotingProcessQuestion, 0, len(questions))
-	for i, q := range questions {
+	protocol := legacyBallotProtocol(election, len(content.questions))
+	out := make([]db.VotingProcessQuestion, 0, len(content.questions))
+	for i, q := range content.questions {
 		question := db.VotingProcessQuestion{
 			ID:          legacyQuestionID(internal.HexBytes(election.ElectionID), i),
 			ProcessID:   processID,
@@ -481,10 +493,22 @@ func legacyElectionQuestions(
 			Choices:     q.Choices,
 			UpstreamID:  internal.HexBytes(election.ElectionID),
 			Status:      election.Status,
-			Results:     legacyQuestionResults(election, tally, i, len(questions)),
+			Results:     legacyQuestionResults(election, tally, i, len(content.questions)),
 		}
-		if singleChoice {
-			question.Type = "singlechoice"
+		if protocol != nil {
+			bp := *protocol // one copy per question, so a caller cannot alias the whole ballot
+			question.BallotProtocol = &bp
+			declared := legacyCorroboratedType(content.typeMetadata, &bp, len(content.questions), q.Choices)
+			if declared != nil {
+				// the same free-form bag the authoring path carries from the request, under the key
+				// the metadata document itself uses, so a client reads one shape on either path.
+				question.Metadata = map[string]any{"type": declared}
+			}
+			if qType, setup, ok := account.QuestionTypeFromBallotProtocol(&bp, q.Choices); ok {
+				question.Type, question.TypeSetup = qType, setup
+			} else if setup, ok := legacyTypeSetupFromProperties(declared); ok {
+				question.TypeSetup = setup
+			}
 		}
 		if election.VoteMode.EnvelopeType != nil {
 			question.SecretUntilTheEnd = election.VoteMode.EncryptedVotes
@@ -492,6 +516,128 @@ func legacyElectionQuestions(
 		out = append(out, question)
 	}
 	return out
+}
+
+// legacyBallotProtocol returns the on-chain ballot parameters of one projected question, or nil when the
+// election's ballot describes no single question. It is the inverse of the publish-time map in
+// account.(*Account).BuildNewProcessTx, reading the ballot description rather than the published tally.
+func legacyBallotProtocol(election *dvoteapi.Election, questions int) *db.BallotProtocol {
+	// TallyMode and VoteMode are wrappers over an embedded protobuf pointer: reading a field panics
+	// when it is nil.
+	if questions == 0 || election.TallyMode.ProcessVoteOptions == nil {
+		return nil
+	}
+	bp := &db.BallotProtocol{
+		MaxCount:          election.TallyMode.MaxCount,
+		MaxValue:          election.TallyMode.MaxValue,
+		MaxVoteOverwrites: election.TallyMode.MaxVoteOverwrites,
+		MaxTotalCost:      election.TallyMode.MaxTotalCost,
+		CostExponent:      election.TallyMode.CostExponent,
+	}
+	switch {
+	case questions == 1:
+		// the whole ballot belongs to the only question, tally mode included
+	case int(election.TallyMode.MaxCount) == questions:
+		// one ballot field per question: each question owns a single field of the ballot
+		bp.MaxCount = 1
+	default:
+		// any other shape states nothing per question
+		return nil
+	}
+	if election.VoteMode.EnvelopeType != nil {
+		bp.UniqueValues = election.VoteMode.UniqueValues
+		bp.CostFromWeight = election.VoteMode.CostFromWeight
+	}
+	return bp
+}
+
+// legacyCorroboratedType returns the metadata "type" block to expose, or nil when the ballot the chain
+// ran contradicts its declared name. Elections the SaaS API published stamp single-choice-multiquestion
+// whatever their ballot, and a client reads the declared name in preference to the protocol, so passing
+// an uncorroborated name through turns missing numbers into wrong ones.
+func legacyCorroboratedType(
+	tm *db.ElectionTypeMetadata, bp *db.BallotProtocol, questions int, choices []db.Choice,
+) *db.ElectionTypeMetadata {
+	if tm == nil || bp == nil {
+		return nil
+	}
+	// the highest choice value, not the count: values need not be a contiguous 0..n-1 range.
+	var maxChoiceValue uint32
+	for i := range choices {
+		if v := choices[i].Value; v > maxChoiceValue {
+			maxChoiceValue = v
+		}
+	}
+	switch tm.Name {
+	case "single-choice-multiquestion":
+		if bp.MaxCount == 1 && bp.MaxValue == maxChoiceValue {
+			return tm
+		}
+	case "multiple-choice":
+		if questions == 1 && bp.MaxCount > 1 && bp.MaxValue >= maxChoiceValue {
+			return tm
+		}
+	case "approval":
+		if questions == 1 && bp.MaxValue == 1 && int(bp.MaxCount) == len(choices) {
+			return tm
+		}
+	case "budget-based", "quadratic":
+		if bp.MaxValue == 0 {
+			return tm
+		}
+	default:
+		// an unknown name states nothing the ballot can corroborate
+	}
+	return nil
+}
+
+// legacyTypeSetupFromProperties reads a question's own bounds out of a corroborated metadata type block:
+// numChoices.min/max and repeatChoice, the only properties that describe the shape rather than the
+// display. Reports false — leaving TypeSetup zero next to the protocol — for a block carrying neither.
+func legacyTypeSetupFromProperties(tm *db.ElectionTypeMetadata) (db.QuestionTypeSetup, bool) {
+	if tm == nil {
+		return db.QuestionTypeSetup{}, false
+	}
+	props, ok := tm.Properties.(map[string]any)
+	if !ok {
+		return db.QuestionTypeSetup{}, false
+	}
+	setup, found := db.QuestionTypeSetup{}, false
+	if numChoices, ok := props["numChoices"].(map[string]any); ok {
+		if minChoices, ok := legacyPropertyUint32(numChoices["min"]); ok {
+			setup.MinChoices, found = minChoices, true
+		}
+		if maxChoices, ok := legacyPropertyUint32(numChoices["max"]); ok {
+			setup.MaxChoices, found = maxChoices, true
+		}
+	}
+	if repeatChoice, ok := props["repeatChoice"].(bool); ok {
+		setup.UniqueChoices, found = !repeatChoice, true
+	}
+	return setup, found
+}
+
+// legacyPropertyUint32 reads a metadata property as a count. The block is untyped either way it reaches
+// us: a float64 through the json round-trip in legacyElectionMetadata, a bson integer from the stored
+// ElectionParams. Anything else, or a negative, is not a count.
+func legacyPropertyUint32(v any) (uint32, bool) {
+	var n int64
+	switch value := v.(type) {
+	case float64:
+		n = int64(value)
+	case int32:
+		n = int64(value)
+	case int64:
+		n = value
+	case int:
+		n = int64(value)
+	default:
+		return 0, false
+	}
+	if n < 0 || n > math.MaxUint32 {
+		return 0, false
+	}
+	return uint32(n), true
 }
 
 // legacyQuestionID derives a projected question's id from the election id and ballot order: distinct
