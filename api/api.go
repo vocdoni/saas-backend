@@ -249,36 +249,37 @@ func New(ctx context.Context, conf *Config) *API {
 		})
 	}
 
+	// lru.New only fails on a non-positive size, and the size is a positive constant.
 	electionCache, _ := lru.New[string, *dvoteapi.Election](legacyElectionCacheSize)
+	liveElectionCache := expirable.NewLRU[string, *dvoteapi.Election](legacyElectionCacheSize, nil, legacyLiveElectionTTL)
 	legacyProjectionCache, _ := lru.New[string, *apicommon.VotingProcessResponse](legacyElectionCacheSize)
 
 	a := &API{
-		ctx:             ctx,
-		db:              conf.DB,
-		auth:            jwtauth.New("HS256", []byte(conf.Secret), nil),
-		host:            conf.Host,
-		port:            conf.Port,
-		client:          conf.Client,
-		account:         conf.Account,
-		mail:            conf.MailService,
-		sms:             conf.SMSService,
-		notifyQueue:     notifyQueue,
-		secret:          conf.Secret,
-		webAppURL:       conf.WebAppURL,
-		serverURL:       conf.ServerURL,
-		transparentMode: conf.FullTransparentMode,
-		subscriptions:   conf.Subscriptions,
-		objectStorage:   conf.ObjectStorage,
-		csp:             conf.CSP,
-		oauthServiceURL: conf.OAuthServiceURL,
-		orgTxLocks:      newOrgTxMutex(),
-		otpExpiry:       otpExpiry,
-		otpCooldown:     otpCooldown,
-		notifySync:      conf.NotificationsSyncDelivery,
-		statusSyncer:    conf.StatusSyncer,
-		// lru.New only fails on a non-positive size, and the size is a positive constant.
+		ctx:                   ctx,
+		db:                    conf.DB,
+		auth:                  jwtauth.New("HS256", []byte(conf.Secret), nil),
+		host:                  conf.Host,
+		port:                  conf.Port,
+		client:                conf.Client,
+		account:               conf.Account,
+		mail:                  conf.MailService,
+		sms:                   conf.SMSService,
+		notifyQueue:           notifyQueue,
+		secret:                conf.Secret,
+		webAppURL:             conf.WebAppURL,
+		serverURL:             conf.ServerURL,
+		transparentMode:       conf.FullTransparentMode,
+		subscriptions:         conf.Subscriptions,
+		objectStorage:         conf.ObjectStorage,
+		csp:                   conf.CSP,
+		oauthServiceURL:       conf.OAuthServiceURL,
+		orgTxLocks:            newOrgTxMutex(),
+		otpExpiry:             otpExpiry,
+		otpCooldown:           otpCooldown,
+		notifySync:            conf.NotificationsSyncDelivery,
+		statusSyncer:          conf.StatusSyncer,
 		electionCache:         electionCache,
-		liveElectionCache:     expirable.NewLRU[string, *dvoteapi.Election](legacyElectionCacheSize, nil, legacyLiveElectionTTL),
+		liveElectionCache:     liveElectionCache,
 		legacyProjectionCache: legacyProjectionCache,
 	}
 	a.startTxQueue()
