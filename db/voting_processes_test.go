@@ -398,3 +398,26 @@ func TestSetVotingProcessQuestionIDs(t *testing.T) {
 
 	c.Assert(testDB.SetVotingProcessQuestionIDs(bson.NewObjectID(), ids), qt.Equals, ErrNotFound)
 }
+
+func TestServedUpstreamIDs(t *testing.T) {
+	c := qt.New(t)
+	org := common.Address{0x12}
+	setupVotingProcessOrg(c, org)
+	id, err := testDB.SetVotingProcess(&VotingProcess{OrgAddress: org})
+	c.Assert(err, qt.IsNil)
+	qID, err := testDB.SetQuestion(&VotingProcessQuestion{ProcessID: id, OrgAddress: org, Type: VotingTypeSingleChoice})
+	c.Assert(err, qt.IsNil)
+	// an unpublished question carries no upstream id and must not match anything.
+	_, err = testDB.SetQuestion(&VotingProcessQuestion{ProcessID: id, OrgAddress: org, Order: 1, Type: VotingTypeSingleChoice})
+	c.Assert(err, qt.IsNil)
+	served := internal.HexBytes("served-election")
+	c.Assert(testDB.SetQuestionPublished(qID, served, "url", QuestionStatusReady), qt.IsNil)
+
+	got, err := testDB.ServedUpstreamIDs([]internal.HexBytes{served, internal.HexBytes("orphan-election")})
+	c.Assert(err, qt.IsNil)
+	c.Assert(got, qt.DeepEquals, map[string]bool{served.String(): true})
+
+	got, err = testDB.ServedUpstreamIDs(nil)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got, qt.HasLen, 0)
+}

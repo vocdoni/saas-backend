@@ -392,6 +392,59 @@ func TestLegacyProcessIDShape(t *testing.T) {
 	c.Assert(isVotingProcessIDShape("deadbeef"), qt.IsFalse)
 }
 
+// legacyTestSource registers election under a fresh id in the election caches, as a chain read
+// would, and returns a source spanning it. The election id is not on the test chain, so any read
+// that misses the caches fails.
+func legacyTestSource(election *dvoteapi.Election) *legacyProcessSource {
+	election.ElectionID = types.HexStringToHexBytes(fmt.Sprintf("%064x", bson.NewObjectID()))
+	if election.Status == "RESULTS" {
+		testAPI.electionCache.Add(election.ElectionID.String(), election)
+	} else {
+		testAPI.liveElectionCache.Add(election.ElectionID.String(), election)
+	}
+	return &legacyProcessSource{
+		id:        bson.NewObjectID(),
+		census:    &db.Census{Size: 3},
+		elections: []internal.HexBytes{internal.HexBytes(election.ElectionID)},
+	}
+}
+
+// TestLegacyProjectionCache checks a final record is served from the projection cache with no chain
+// read, and a still-moving one is re-projected on every read.
+func TestLegacyProjectionCache(t *testing.T) {
+	c := qt.New(t)
+	ctx := context.Background()
+
+	final := legacyTestElection([][]uint64{{8, 0}}, []map[string]any{legacyTestQuestion("Q")})
+	src := legacyTestSource(final)
+	first, err := testAPI.projectLegacyProcess(ctx, src)
+	c.Assert(err, qt.IsNil)
+	c.Assert(first, qt.Not(qt.IsNil))
+	// drop the election: a second projection that went back to the chain would now fail.
+	testAPI.electionCache.Remove(final.ElectionID.String())
+	second, err := testAPI.projectLegacyProcess(ctx, src)
+	c.Assert(err, qt.IsNil)
+	c.Assert(second, qt.DeepEquals, first)
+	c.Assert(second, qt.Not(qt.Equals), first)
+
+	live := legacyTestElection([][]uint64{{8, 0}}, []map[string]any{legacyTestQuestion("Q")})
+	live.Status = "ENDED"
+	liveSrc := legacyTestSource(live)
+	resp, err := testAPI.projectLegacyProcess(ctx, liveSrc)
+	c.Assert(err, qt.IsNil)
+	c.Assert(resp, qt.Not(qt.IsNil))
+	c.Assert(testAPI.legacyProjectionCache.Contains(liveSrc.cacheKey()), qt.IsFalse)
+
+	// a final election whose content did not resolve is not frozen either.
+	unresolved := legacyTestElection([][]uint64{{8, 0}}, nil)
+	unresolved.Metadata = nil
+	unresolvedSrc := legacyTestSource(unresolved)
+	resp, err = testAPI.projectLegacyProcess(ctx, unresolvedSrc)
+	c.Assert(err, qt.IsNil)
+	c.Assert(resp, qt.IsNil)
+	c.Assert(testAPI.legacyProjectionCache.Contains(unresolvedSrc.cacheKey()), qt.IsFalse)
+}
+
 // TestLegacyProcessesProjection exercises the projection end to end: a legacy db.Process row listed
 // and readable by its own id and by its election id, content from the stored params and state from
 // the chain, deduped against a bundle registering the same election, and unwritable.

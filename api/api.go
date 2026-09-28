@@ -79,7 +79,9 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/go-chi/jwtauth/v5"
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/vocdoni/saas-backend/account"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
@@ -178,6 +180,10 @@ type API struct {
 	notifySync      bool
 	statusSyncer    StatusEnqueuer
 	electionCache   *lru.Cache[string, *dvoteapi.Election]
+	// liveElectionCache holds not-yet-final legacy elections for legacyLiveElectionTTL.
+	liveElectionCache *expirable.LRU[string, *dvoteapi.Election]
+	// legacyProjectionCache holds fully-final legacy records already projected onto /processes.
+	legacyProjectionCache *lru.Cache[string, *apicommon.VotingProcessResponse]
 }
 
 // enqueueConfirm asks the status syncer to confirm a status change landed on-chain; a no-op when
@@ -244,6 +250,7 @@ func New(ctx context.Context, conf *Config) *API {
 	}
 
 	electionCache, _ := lru.New[string, *dvoteapi.Election](legacyElectionCacheSize)
+	legacyProjectionCache, _ := lru.New[string, *apicommon.VotingProcessResponse](legacyElectionCacheSize)
 
 	a := &API{
 		ctx:             ctx,
@@ -270,7 +277,9 @@ func New(ctx context.Context, conf *Config) *API {
 		notifySync:      conf.NotificationsSyncDelivery,
 		statusSyncer:    conf.StatusSyncer,
 		// lru.New only fails on a non-positive size, and the size is a positive constant.
-		electionCache: electionCache,
+		electionCache:         electionCache,
+		liveElectionCache:     expirable.NewLRU[string, *dvoteapi.Election](legacyElectionCacheSize, nil, legacyLiveElectionTTL),
+		legacyProjectionCache: legacyProjectionCache,
 	}
 	a.startTxQueue()
 	// clear any publishing markers stranded by a previous crash/restart so those processes are

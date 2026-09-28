@@ -9,6 +9,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/account"
@@ -21,9 +22,17 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-// legacyElectionCacheSize is how many immutable legacy elections are kept cached. The legacy set is
-// closed — nothing creates these any more — so a few hundred entries cover every read.
-const legacyElectionCacheSize = 512
+// legacyElectionCacheSize bounds each legacy cache (final elections, live elections, projected
+// records). The legacy set is closed — nothing creates these any more — so this covers every read.
+const legacyElectionCacheSize = 4096
+
+// legacyLiveElectionTTL is how long a still-moving election (READY, ONGOING, PAUSED, ENDED) is served
+// from cache, so a burst of list reads hits the Vochain once. ENDED→RESULTS shows within this window.
+const legacyLiveElectionTTL = 30 * time.Second
+
+// legacyFinalStatuses are the election statuses nothing can move any more; only those are cached
+// without expiry.
+var legacyFinalStatuses = []string{"RESULTS", "CANCELED"}
 
 // errLegacyChainUnavailable marks a projection failure caused by the Vochain rather than by storage,
 // so the handlers answer 50004 instead of a generic 500.
@@ -125,23 +134,35 @@ func legacyProjectionError(err error) errors.Error {
 // A db.Process row wins over a bundle registering the same election: it stores the election
 // parameters. Elections already served by the /processes path are skipped entirely.
 func (a *API) legacyProcessSources(org common.Address) ([]*legacyProcessSource, error) {
-	claimed := map[string]bool{}
-	var out []*legacyProcessSource
-
 	processes, err := a.db.AllProcessesByOrg(org, db.PublishedOnly)
 	if err != nil {
 		return nil, fmt.Errorf("could not list legacy processes: %w", err)
 	}
+	bundles, err := a.db.ProcessBundlesByOrg(org)
+	if err != nil {
+		return nil, fmt.Errorf("could not list process bundles: %w", err)
+	}
+	// one lookup for the whole set: which elections the /processes path already serves.
+	var electionIDs []internal.HexBytes
+	for i := range processes {
+		if len(processes[i].Address) > 0 {
+			electionIDs = append(electionIDs, processes[i].Address)
+		}
+	}
+	for _, bundle := range bundles {
+		electionIDs = append(electionIDs, bundle.Processes...)
+	}
+	served, err := a.db.ServedUpstreamIDs(electionIDs)
+	if err != nil {
+		return nil, fmt.Errorf("could not look up questions by upstream id: %w", err)
+	}
+
+	// claimed starts as the served set: an election either path already owns is not projected again.
+	claimed := served
+	var out []*legacyProcessSource
 	for i := range processes {
 		p := &processes[i]
-		if len(p.Address) == 0 {
-			continue
-		}
-		served, err := a.servedByProcessesAPI(p.Address)
-		if err != nil {
-			return nil, err
-		}
-		if served {
+		if len(p.Address) == 0 || claimed[p.Address.String()] {
 			continue
 		}
 		claimed[p.Address.String()] = true
@@ -153,22 +174,10 @@ func (a *API) legacyProcessSources(org common.Address) ([]*legacyProcessSource, 
 			params:     p.ElectionParams,
 		})
 	}
-
-	bundles, err := a.db.ProcessBundlesByOrg(org)
-	if err != nil {
-		return nil, fmt.Errorf("could not list process bundles: %w", err)
-	}
 	for _, bundle := range bundles {
 		var elections []internal.HexBytes
 		for _, electionID := range bundle.Processes {
 			if claimed[electionID.String()] {
-				continue
-			}
-			served, err := a.servedByProcessesAPI(electionID)
-			if err != nil {
-				return nil, err
-			}
-			if served {
 				continue
 			}
 			claimed[electionID.String()] = true
@@ -315,15 +324,25 @@ func (a *API) projectLegacyProcess(
 	if src == nil {
 		return nil, nil
 	}
+	cacheKey := src.cacheKey()
+	if cached, ok := a.legacyProjectionCache.Get(cacheKey); ok {
+		// a shallow copy per caller: nothing downstream mutates the response or its slices.
+		resp := *cached
+		return &resp, nil
+	}
 	vp := &db.VotingProcess{ID: src.id, OrgAddress: src.orgAddress, Published: true}
 	var questions []db.VotingProcessQuestion
 	haveContent := false
+	// cacheable while every election is final and resolved its content: a transient metadata or
+	// chain miss must not be frozen into the cached record.
+	cacheable := true
 	for _, electionID := range src.elections {
 		election, err := a.legacyElection(electionID)
 		if err != nil {
 			return nil, err
 		}
 		content := a.legacyContentOf(ctx, election, src.params)
+		cacheable = cacheable && len(content.questions) > 0 && slices.Contains(legacyFinalStatuses, election.Status)
 		// the container fields come from the first election that resolved content, all of them or
 		// none, so a later election cannot overwrite half of them.
 		if !haveContent && len(content.questions) > 0 {
@@ -346,23 +365,44 @@ func (a *API) projectLegacyProcess(
 	resp := apicommon.VotingProcessResponseFromDB(vp, questions, src.census, a.account.ChainID())
 	resp.Legacy = true
 	resp.Census.TotalWeight = a.censusTotalWeight(src.census)
+	if cacheable {
+		cached := *resp
+		a.legacyProjectionCache.Add(cacheKey, &cached)
+	}
 	return resp, nil
 }
 
-// legacyElection returns an on-chain election, caching the immutable ones so the public list does
-// not fan out to the Vochain on every anonymous hit. ENDED is not immutable — it still moves to
-// RESULTS when the tally is published — so caching it would freeze the projection without results.
+// cacheKey identifies a projected record by its id and the exact elections it spans, so a bundle
+// that loses an election to another owner is never served its older, wider projection.
+func (src *legacyProcessSource) cacheKey() string {
+	var b strings.Builder
+	b.WriteString(src.id.Hex())
+	for _, electionID := range src.elections {
+		b.WriteByte(':')
+		b.WriteString(electionID.String())
+	}
+	return b.String()
+}
+
+// legacyElection returns an on-chain election, cached so the public list does not fan out to the
+// Vochain on every anonymous hit: final ones for good, the rest for legacyLiveElectionTTL. ENDED is
+// not final — it still moves to RESULTS when the tally is published — so it only gets the TTL.
 func (a *API) legacyElection(electionID internal.HexBytes) (*dvoteapi.Election, error) {
 	key := electionID.String()
 	if cached, ok := a.electionCache.Get(key); ok {
+		return cached, nil
+	}
+	if cached, ok := a.liveElectionCache.Get(key); ok {
 		return cached, nil
 	}
 	election, err := a.account.Election(electionID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s: %w", errLegacyChainUnavailable, key, err)
 	}
-	if slices.Contains([]string{"RESULTS", "CANCELED"}, election.Status) {
+	if slices.Contains(legacyFinalStatuses, election.Status) {
 		a.electionCache.Add(key, election)
+	} else {
+		a.liveElectionCache.Add(key, election)
 	}
 	return election, nil
 }

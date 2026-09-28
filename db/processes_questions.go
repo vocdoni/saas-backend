@@ -189,6 +189,33 @@ func (ms *MongoStorage) QuestionByUpstreamID(upstreamID internal.HexBytes) (*Vot
 	return q, nil
 }
 
+// ServedUpstreamIDs reports which of the given on-chain election ids back a stored question, keyed
+// by HexBytes.String(). One indexed query in place of a QuestionByUpstreamID lookup per id.
+func (ms *MongoStorage) ServedUpstreamIDs(upstreamIDs []internal.HexBytes) (map[string]bool, error) {
+	served := map[string]bool{}
+	if len(upstreamIDs) == 0 {
+		return served, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	cursor, err := ms.processesQuestions.Find(ctx, bson.M{"upstreamId": bson.M{"$in": upstreamIDs}},
+		options.Find().SetProjection(bson.M{"upstreamId": 1}))
+	if err != nil {
+		return nil, fmt.Errorf("failed to find questions by upstream ids: %w", err)
+	}
+	defer func() { _ = cursor.Close(ctx) }()
+	var rows []struct {
+		UpstreamID internal.HexBytes `bson:"upstreamId"`
+	}
+	if err := cursor.All(ctx, &rows); err != nil {
+		return nil, fmt.Errorf("failed to decode questions by upstream ids: %w", err)
+	}
+	for _, row := range rows {
+		served[row.UpstreamID.String()] = true
+	}
+	return served, nil
+}
+
 // SetQuestionPublished records the on-chain outcome of a single question in one targeted
 // update, leaving sibling questions untouched.
 func (ms *MongoStorage) SetQuestionPublished(
