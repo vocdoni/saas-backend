@@ -374,13 +374,19 @@ func (a *API) legacyContentOf(
 	ctx context.Context, election *dvoteapi.Election, params *db.ElectionParams,
 ) legacyContent {
 	if params != nil && len(params.Questions) > 0 {
+		typeMetadata := params.TypeMetadata
+		if typeMetadata == nil {
+			// account.BuildElectionMetadata stamped this default on the published document, so the row
+			// declares the same block the chain-metadata path reads back.
+			typeMetadata = &db.ElectionTypeMetadata{Name: account.DefaultElectionType}
+		}
 		return legacyContent{
 			title:        params.Title,
 			description:  params.Description,
 			header:       params.Header,
 			streamURI:    params.StreamURI,
 			questions:    params.Questions,
-			typeMetadata: params.TypeMetadata,
+			typeMetadata: typeMetadata,
 		}
 	}
 	meta := a.legacyElectionMetadata(ctx, election)
@@ -498,14 +504,14 @@ func legacyElectionQuestions(
 		if protocol != nil {
 			bp := *protocol // one copy per question, so a caller cannot alias the whole ballot
 			question.BallotProtocol = &bp
-			declared := legacyCorroboratedType(content.typeMetadata, &bp, len(content.questions), q.Choices)
+			declared := legacyCorroboratedType(content.typeMetadata, &bp, content.questions)
 			if declared != nil {
 				// the same free-form bag the authoring path carries from the request, under the key
 				// the metadata document itself uses, so a client reads one shape on either path.
 				question.Metadata = map[string]any{"type": declared}
 			}
-			if qType, setup, ok := account.QuestionTypeFromBallotProtocol(&bp, q.Choices); ok {
-				question.Type, question.TypeSetup = qType, setup
+			if shape, ok := legacyNamedShape(&bp, q.Choices); ok {
+				question.Type, question.TypeSetup, question.BallotProtocol = shape.Type, shape.TypeSetup, shape.Protocol
 			} else if setup, ok := legacyTypeSetupFromProperties(declared); ok {
 				question.TypeSetup = setup
 			}
@@ -538,7 +544,12 @@ func legacyBallotProtocol(election *dvoteapi.Election, questions int) *db.Ballot
 	case questions == 1:
 		// the whole ballot belongs to the only question, tally mode included
 	case int(election.TallyMode.MaxCount) == questions:
-		// one ballot field per question: each question owns a single field of the ballot
+		// one ballot field per question: each question owns a single field of the ballot. A cost cap or
+		// uniqueValues constrains the fields jointly, so it is no one question's to state.
+		if bp.MaxTotalCost > 0 || election.VoteMode.EnvelopeType != nil &&
+			(election.VoteMode.UniqueValues || election.VoteMode.CostFromWeight) {
+			return nil
+		}
 		bp.MaxCount = 1
 	default:
 		// any other shape states nothing per question
@@ -555,40 +566,67 @@ func legacyBallotProtocol(election *dvoteapi.Election, questions int) *db.Ballot
 // ran contradicts its declared name. Elections the SaaS API published stamp single-choice-multiquestion
 // whatever their ballot, and a client reads the declared name in preference to the protocol, so passing
 // an uncorroborated name through turns missing numbers into wrong ones.
+//
+// The ballot's maxValue is election-wide — the SDK sizes it to the widest question — so it is checked
+// against the highest choice value across every question, not the one being projected. The other
+// names only ever describe a single-question ballot, where the two are the same.
 func legacyCorroboratedType(
-	tm *db.ElectionTypeMetadata, bp *db.BallotProtocol, questions int, choices []db.Choice,
+	tm *db.ElectionTypeMetadata, bp *db.BallotProtocol, questions []db.Question,
 ) *db.ElectionTypeMetadata {
-	if tm == nil || bp == nil {
+	if tm == nil || bp == nil || len(questions) == 0 {
 		return nil
 	}
-	// the highest choice value, not the count: values need not be a contiguous 0..n-1 range.
 	var maxChoiceValue uint32
-	for i := range choices {
-		if v := choices[i].Value; v > maxChoiceValue {
-			maxChoiceValue = v
-		}
+	for i := range questions {
+		maxChoiceValue = max(maxChoiceValue, account.MaxChoiceValue(questions[i].Choices))
 	}
+	single := len(questions) == 1
 	switch tm.Name {
-	case "single-choice-multiquestion":
+	case account.DefaultElectionType:
 		if bp.MaxCount == 1 && bp.MaxValue == maxChoiceValue {
 			return tm
 		}
 	case "multiple-choice":
-		if questions == 1 && bp.MaxCount > 1 && bp.MaxValue >= maxChoiceValue {
+		if single && bp.MaxCount > 1 && bp.MaxValue >= maxChoiceValue {
 			return tm
 		}
 	case "approval":
-		if questions == 1 && bp.MaxValue == 1 && int(bp.MaxCount) == len(choices) {
+		if single && bp.MaxValue == 1 && int(bp.MaxCount) == len(questions[0].Choices) {
 			return tm
 		}
 	case "budget-based", "quadratic":
-		if bp.MaxValue == 0 {
+		if single && bp.MaxValue == 0 {
 			return tm
 		}
 	default:
 		// an unknown name states nothing the ballot can corroborate
 	}
 	return nil
+}
+
+// legacyNamedShape recognises the named type a question's ballot runs, as
+// account.QuestionTypeFromBallotProtocol does, but through a costExponent the chain never read: it only
+// applies with a cost cap (maxTotalCost > 0 or costFromWeight), and elections published outside the
+// draft flow stamp one regardless (the record behind the projection carries 1). Without that, an exact
+// comparison would deny such a ballot the name it runs. The shape's Protocol is the canonical one, so
+// Type still re-derives it exactly; it differs from the chain's only in that inert field.
+func legacyNamedShape(bp *db.BallotProtocol, choices []db.Choice) (account.BallotShape, bool) {
+	candidates := []db.BallotProtocol{*bp}
+	if bp.MaxTotalCost == 0 && !bp.CostFromWeight {
+		for _, exponent := range []uint32{0, 1} { // the only exponents a named uncapped shape derives
+			if exponent != bp.CostExponent {
+				alt := *bp
+				alt.CostExponent = exponent
+				candidates = append(candidates, alt)
+			}
+		}
+	}
+	for i := range candidates {
+		if qType, setup, ok := account.QuestionTypeFromBallotProtocol(&candidates[i], choices); ok {
+			return account.BallotShape{Type: qType, TypeSetup: setup, Protocol: &candidates[i]}, true
+		}
+	}
+	return account.BallotShape{}, false
 }
 
 // legacyTypeSetupFromProperties reads a question's own bounds out of a corroborated metadata type block:
@@ -614,6 +652,10 @@ func legacyTypeSetupFromProperties(tm *db.ElectionTypeMetadata) (db.QuestionType
 	if repeatChoice, ok := props["repeatChoice"].(bool); ok {
 		setup.UniqueChoices, found = !repeatChoice, true
 	}
+	// keep the stored invariant MinChoices <= MaxChoices when the document states a bounded maximum.
+	if setup.MaxChoices > 0 {
+		setup.MinChoices = min(setup.MinChoices, setup.MaxChoices)
+	}
 	return setup, found
 }
 
@@ -624,6 +666,10 @@ func legacyPropertyUint32(v any) (uint32, bool) {
 	var n int64
 	switch value := v.(type) {
 	case float64:
+		// a fraction is not a count, and the range check keeps the int64 conversion defined.
+		if value != math.Trunc(value) || value < 0 || value > math.MaxUint32 {
+			return 0, false
+		}
 		n = int64(value)
 	case int32:
 		n = int64(value)
