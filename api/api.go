@@ -79,7 +79,9 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/go-chi/jwtauth/v5"
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/vocdoni/saas-backend/account"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
@@ -178,6 +180,10 @@ type API struct {
 	notifySync      bool
 	statusSyncer    StatusEnqueuer
 	electionCache   *lru.Cache[string, *dvoteapi.Election]
+	// liveElectionCache holds not-yet-final legacy elections for legacyLiveElectionTTL.
+	liveElectionCache *expirable.LRU[string, *dvoteapi.Election]
+	// legacyProjectionCache holds fully-final legacy records already projected onto /processes.
+	legacyProjectionCache *lru.Cache[string, *apicommon.VotingProcessResponse]
 }
 
 // enqueueConfirm asks the status syncer to confirm a status change landed on-chain; a no-op when
@@ -243,34 +249,38 @@ func New(ctx context.Context, conf *Config) *API {
 		})
 	}
 
+	// lru.New only fails on a non-positive size, and the size is a positive constant.
 	electionCache, _ := lru.New[string, *dvoteapi.Election](legacyElectionCacheSize)
+	liveElectionCache := expirable.NewLRU[string, *dvoteapi.Election](legacyElectionCacheSize, nil, legacyLiveElectionTTL)
+	legacyProjectionCache, _ := lru.New[string, *apicommon.VotingProcessResponse](legacyElectionCacheSize)
 
 	a := &API{
-		ctx:             ctx,
-		db:              conf.DB,
-		auth:            jwtauth.New("HS256", []byte(conf.Secret), nil),
-		host:            conf.Host,
-		port:            conf.Port,
-		client:          conf.Client,
-		account:         conf.Account,
-		mail:            conf.MailService,
-		sms:             conf.SMSService,
-		notifyQueue:     notifyQueue,
-		secret:          conf.Secret,
-		webAppURL:       conf.WebAppURL,
-		serverURL:       conf.ServerURL,
-		transparentMode: conf.FullTransparentMode,
-		subscriptions:   conf.Subscriptions,
-		objectStorage:   conf.ObjectStorage,
-		csp:             conf.CSP,
-		oauthServiceURL: conf.OAuthServiceURL,
-		orgTxLocks:      newOrgTxMutex(),
-		otpExpiry:       otpExpiry,
-		otpCooldown:     otpCooldown,
-		notifySync:      conf.NotificationsSyncDelivery,
-		statusSyncer:    conf.StatusSyncer,
-		// lru.New only fails on a non-positive size, and the size is a positive constant.
-		electionCache: electionCache,
+		ctx:                   ctx,
+		db:                    conf.DB,
+		auth:                  jwtauth.New("HS256", []byte(conf.Secret), nil),
+		host:                  conf.Host,
+		port:                  conf.Port,
+		client:                conf.Client,
+		account:               conf.Account,
+		mail:                  conf.MailService,
+		sms:                   conf.SMSService,
+		notifyQueue:           notifyQueue,
+		secret:                conf.Secret,
+		webAppURL:             conf.WebAppURL,
+		serverURL:             conf.ServerURL,
+		transparentMode:       conf.FullTransparentMode,
+		subscriptions:         conf.Subscriptions,
+		objectStorage:         conf.ObjectStorage,
+		csp:                   conf.CSP,
+		oauthServiceURL:       conf.OAuthServiceURL,
+		orgTxLocks:            newOrgTxMutex(),
+		otpExpiry:             otpExpiry,
+		otpCooldown:           otpCooldown,
+		notifySync:            conf.NotificationsSyncDelivery,
+		statusSyncer:          conf.StatusSyncer,
+		electionCache:         electionCache,
+		liveElectionCache:     liveElectionCache,
+		legacyProjectionCache: legacyProjectionCache,
 	}
 	a.startTxQueue()
 	// clear any publishing markers stranded by a previous crash/restart so those processes are

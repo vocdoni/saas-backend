@@ -83,13 +83,7 @@ func BallotProtocolFromType(
 	case db.VotingTypeSingleChoice:
 		// MaxValue must cover the highest client-supplied Choice.Value, which need not be a
 		// contiguous 0..n-1 range, so derive it from the actual values rather than the count.
-		var maxValue uint32
-		for i := range choices {
-			if v := choices[i].Value; v > maxValue {
-				maxValue = v
-			}
-		}
-		return &db.BallotProtocol{MaxCount: 1, MaxValue: maxValue}, nil
+		return &db.BallotProtocol{MaxCount: 1, MaxValue: MaxChoiceValue(choices)}, nil
 	case db.VotingTypeMultiChoice:
 		return &db.BallotProtocol{
 			MaxCount:     uint32(len(choices)),
@@ -126,6 +120,17 @@ func BallotProtocolFromType(
 	default:
 		return nil, fmt.Errorf("unsupported question type %q", qType)
 	}
+}
+
+// MaxChoiceValue returns the highest Choice.Value among the choices (0 for none): the value a
+// single-field ballot must reach to express every choice, since values need not be a contiguous
+// 0..n-1 range.
+func MaxChoiceValue(choices []db.Choice) uint32 {
+	var maxValue uint32
+	for i := range choices {
+		maxValue = max(maxValue, choices[i].Value)
+	}
+	return maxValue
 }
 
 // OpenChoiceMatcher returns a predicate reporting whether a decoded vote package (its votes values)

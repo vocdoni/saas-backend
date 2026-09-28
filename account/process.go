@@ -23,8 +23,8 @@ import (
 // electionMetadataVersion is the schema version written into ElectionMetadata.
 const electionMetadataVersion = "1.0"
 
-// defaultElectionType is the metadata type used when ElectionParams.TypeMetadata is nil.
-const defaultElectionType = "single-choice-multiquestion"
+// DefaultElectionType is the metadata type used when ElectionParams.TypeMetadata is nil.
+const DefaultElectionType = "single-choice-multiquestion"
 
 // BuildElectionMetadata maps the high-level ElectionParams into an on-chain
 // ElectionMetadata document and returns its JSON encoding. The returned bytes are
@@ -46,7 +46,7 @@ func BuildElectionMetadata(params *db.ElectionParams) ([]byte, error) {
 	if params.TypeMetadata != nil {
 		meta.Type = api.ElectionProperties{Name: params.TypeMetadata.Name, Properties: params.TypeMetadata.Properties}
 	} else {
-		meta.Type = api.ElectionProperties{Name: defaultElectionType}
+		meta.Type = api.ElectionProperties{Name: DefaultElectionType}
 	}
 	for _, q := range params.Questions {
 		question := api.Question{
