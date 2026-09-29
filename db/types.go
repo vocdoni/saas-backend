@@ -774,6 +774,16 @@ const (
 	ProcessPaymentRefunded ProcessPaymentStatus = "refunded"
 )
 
+// IsValid reports whether s is one of the declared process payment statuses.
+func (s ProcessPaymentStatus) IsValid() bool {
+	switch s {
+	case ProcessPaymentPending, ProcessPaymentProcessing, ProcessPaymentFailed, ProcessPaymentPaid:
+		return true
+	default:
+		return false
+	}
+}
+
 // ProcessPayment is the payment state of a voting process, keyed by process id. It lives in its
 // own collection so a draft save (a full replace) cannot wipe it.
 type ProcessPayment struct {

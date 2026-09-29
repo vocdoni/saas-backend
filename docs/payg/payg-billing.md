@@ -108,6 +108,10 @@ duplicate webhook resolves to a lost CAS instead of a second side effect.
      requesting user in **session metadata**.
 3. The app confirms with the embedded Payment Element; Stripe computes VAT.
 4. The webhook fulfills (below). `GET /processes/{id}/checkout` is for polling only.
+5. `GET /organizations/{address}/payments` (Admin or Manager) lists the organization's
+   payments as stored, `?status=` a comma list (default `pending,processing`: the checkouts
+   still open), newest first unless `sortOrder=asc`. It is how drafts held by an open
+   checkout are found; `DELETE /processes/{id}/checkout` cancels one.
 
 Free processes (net €0) skip all of this and publish directly.
 

@@ -221,6 +221,25 @@ type WalletTopUpRequest struct {
 	Locale      string `json:"locale,omitempty"`
 }
 
+// OrganizationProcessPayment is one process payment of an organization, as stored: no live
+// Stripe state (GET /processes/{processId}/checkout has it).
+type OrganizationProcessPayment struct {
+	ProcessID   string                  `json:"processId"`
+	Title       db.MultiLangString      `json:"title,omitempty"`
+	Published   bool                    `json:"published"`
+	Status      db.ProcessPaymentStatus `json:"status"`
+	AmountCents int64                   `json:"amountCents"`
+	Currency    string                  `json:"currency"`
+	CreatedAt   string                  `json:"createdAt"`
+	PaidAt      string                  `json:"paidAt,omitempty"`
+}
+
+// OrganizationProcessPaymentsResponse is a page of an organization's process payments.
+type OrganizationProcessPaymentsResponse struct {
+	Payments   []OrganizationProcessPayment `json:"payments"`
+	Pagination *Pagination                  `json:"pagination"`
+}
+
 // ProcessPaymentStatusResponse reports the payment state of a voting process, combining
 // the stored payment with the live checkout session state when one is open.
 type ProcessPaymentStatusResponse struct {

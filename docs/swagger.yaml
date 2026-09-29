@@ -974,6 +974,34 @@ definitions:
         description: Meta information of the organization
         type: object
     type: object
+  apicommon.OrganizationProcessPayment:
+    properties:
+      amountCents:
+        type: integer
+      createdAt:
+        type: string
+      currency:
+        type: string
+      paidAt:
+        type: string
+      processId:
+        type: string
+      published:
+        type: boolean
+      status:
+        $ref: '#/definitions/db.ProcessPaymentStatus'
+      title:
+        $ref: '#/definitions/db.MultiLangString'
+    type: object
+  apicommon.OrganizationProcessPaymentsResponse:
+    properties:
+      pagination:
+        $ref: '#/definitions/apicommon.Pagination'
+      payments:
+        items:
+          $ref: '#/definitions/apicommon.OrganizationProcessPayment'
+        type: array
+    type: object
   apicommon.OrganizationRole:
     properties:
       name:
@@ -4064,6 +4092,62 @@ paths:
       security:
       - BearerAuth: []
       summary: Update organization meta information
+      tags:
+      - organizations
+  /organizations/{orgAddress}/payments:
+    get:
+      description: |-
+        The organization's process payments as stored, filtered by status — by default the
+        ones still open (pending, processing), which is how the drafts whose checkout
+        blocks publication are found. No live Stripe state is read: poll
+        GET /processes/{processId}/checkout for that. Requires Manager/Admin of the organization.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: 'Comma-separated statuses (default: pending,processing)'
+        in: query
+        name: status
+        type: string
+      - description: 'Order by creation time (default: desc)'
+        enum:
+        - asc
+        - desc
+        in: query
+        name: sortOrder
+        type: string
+      - description: 'Page number (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - description: 'Number of items per page (default: 10)'
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.OrganizationProcessPaymentsResponse'
+        "400":
+          description: Invalid status, sortOrder or pagination
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: List the process payments of an organization
       tags:
       - organizations
   /organizations/{orgAddress}/subscription:
