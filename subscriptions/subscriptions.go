@@ -28,31 +28,11 @@ const (
 	DeleteUser
 	// CreateSubOrg represents the permission to create sub-organizations.
 	CreateSubOrg
-	// CreateDraft represents the permission to create draft processes.
-	CreateDraft
 	// CreateOrg represents the permission to create new organizations.
 	CreateOrg
 )
 
 const MaxOrgsPerUser = 15
-
-// String returns the string representation of the DBPermission.
-func (p DBPermission) String() string {
-	switch p {
-	case InviteUser:
-		return "InviteUser"
-	case DeleteUser:
-		return "DeleteUser"
-	case CreateSubOrg:
-		return "CreateSubOrg"
-	case CreateDraft:
-		return "CreateDraft"
-	case CreateOrg:
-		return "CreateOrg"
-	default:
-		return "Unknown"
-	}
-}
 
 // DBInterface defines the database methods required by the Subscriptions service
 type DBInterface interface {
@@ -66,9 +46,7 @@ type DBInterface interface {
 	SumSentEmailsManagedBy(integratorAddr common.Address) (int, error)
 	SumSentSMSManagedBy(integratorAddr common.Address) (int, error)
 	SumSentVotesManagedBy(integratorAddr common.Address) (int, error)
-	CountProcesses(orgAddress common.Address, draft db.DraftFilter) (int64, error)
 	CountVotingProcesses(orgAddress common.Address, draft db.DraftFilter) (int64, error)
-	OrganizationMemberGroup(groupID string, orgAddress common.Address) (*db.OrganizationMemberGroup, error)
 }
 
 // Subscriptions is the service that manages the organization permissions based on
@@ -176,68 +154,35 @@ func (p *Subscriptions) HasTxPermission(
 		return false, err
 	}
 
-	switch txType {
-	// check UPDATE ACCOUNT INFO
-	case models.TxType_SET_ACCOUNT_INFO_URI:
-		// check if the user has the admin role for the organization
-		if !user.HasRoleFor(org.Address, db.AdminRole) {
-			return false, errors.ErrUserHasNoAdminRole
-		}
-	// check CREATE PROCESS
-	case models.TxType_NEW_PROCESS:
-		// check if the user has the admin role for the organization
-		if !user.HasRoleFor(org.Address, db.AdminRole) {
-			return false, errors.ErrUserHasNoAdminRole
-		}
-		newProcess := tx.GetNewProcess()
-		if newProcess == nil || newProcess.Process == nil {
-			return false, errors.ErrInvalidData.With("missing new-process payload")
-		}
-		// A single process's declared census size is bounded by the governing plan's MaxCensus
-		// for every org — the integrator's plan for a managed org, otherwise the org's own.
-		if newProcess.Process.MaxCensusSize > uint64(plan.Organization.MaxCensus) {
-			return false, errors.ErrProcessCensusSizeExceedsPlanLimit.Withf("plan max census: %d", plan.Organization.MaxCensus)
-		}
-		// The process-*count* limit, however, is enforced for managed orgs against the
-		// integrator's aggregate quota (ReserveManagedPublish) at publish time, so the per-org
-		// count check is skipped for them. Capability/duration checks below apply to all.
-		if !managed(org) {
-			if org.Counters.Processes >= plan.Organization.MaxProcesses {
-				// allow processes with less than TestMaxCensusSize for user testing
-				if newProcess.Process.MaxCensusSize > uint64(db.TestMaxCensusSize) {
-					return false, errors.ErrMaxProcessesReached
-				}
-			}
-		}
-		return hasElectionMetadataPermissions(newProcess, plan)
-
-	// check UPDATE PROCESS CENSUS
-	case models.TxType_SET_PROCESS_CENSUS:
-		// check if the user has the admin role for the organization
-		if !user.HasRoleFor(org.Address, db.AdminRole) {
-			return false, errors.ErrUserHasNoAdminRole
-		}
-		// A census update carries a SetProcess payload (not NewProcess), so it must be read with
-		// GetSetProcess. Its new census size, when set, is bounded by the governing plan's
-		// MaxCensus exactly like a new process — the integrator's plan for a managed org.
-		setProcess := tx.GetSetProcess()
-		if setProcess == nil {
-			return false, errors.ErrInvalidData.With("missing set-process payload")
-		}
-		if setProcess.GetCensusSize() > uint64(plan.Organization.MaxCensus) {
-			return false, errors.ErrProcessCensusSizeExceedsPlanLimit.Withf("plan max census: %d", plan.Organization.MaxCensus)
-		}
-
-	case models.TxType_SET_PROCESS_STATUS,
-		models.TxType_CREATE_ACCOUNT:
-		// check if the user has the admin role for the organization
-		if !user.HasRoleFor(org.Address, db.AdminRole) && !user.HasRoleFor(org.Address, db.ManagerRole) {
-			return false, errors.ErrUserHasNoAdminRole
-		}
-	default:
+	// NEW_PROCESS, built by the /processes publish, is the only tx the service checks.
+	if txType != models.TxType_NEW_PROCESS {
 		return false, fmt.Errorf("unsupported txtype")
 	}
-	return true, nil
+	// check if the user has the admin role for the organization
+	if !user.HasRoleFor(org.Address, db.AdminRole) {
+		return false, errors.ErrUserHasNoAdminRole
+	}
+	newProcess := tx.GetNewProcess()
+	if newProcess == nil || newProcess.Process == nil {
+		return false, errors.ErrInvalidData.With("missing new-process payload")
+	}
+	// A single process's declared census size is bounded by the governing plan's MaxCensus
+	// for every org — the integrator's plan for a managed org, otherwise the org's own.
+	if newProcess.Process.MaxCensusSize > uint64(plan.Organization.MaxCensus) {
+		return false, errors.ErrProcessCensusSizeExceedsPlanLimit.Withf("plan max census: %d", plan.Organization.MaxCensus)
+	}
+	// The process-*count* limit, however, is enforced for managed orgs against the
+	// integrator's aggregate quota (ReserveManagedPublish) at publish time, so the per-org
+	// count check is skipped for them. Capability/duration checks below apply to all.
+	if !managed(org) {
+		if org.Counters.Processes >= plan.Organization.MaxProcesses {
+			// allow processes with less than TestMaxCensusSize for user testing
+			if newProcess.Process.MaxCensusSize > uint64(db.TestMaxCensusSize) {
+				return false, errors.ErrMaxProcessesReached
+			}
+		}
+	}
+	return hasElectionMetadataPermissions(newProcess, plan)
 }
 
 // HasDBPermission checks if the user has permission to perform the given action in the organization stored in the DB
@@ -267,44 +212,9 @@ func (p *Subscriptions) HasDBPermission(userEmail string, orgAddress common.Addr
 	}
 }
 
-// OrgHasPermission checks if the org has permission to perform the given action
-func (p *Subscriptions) OrgHasPermission(orgAddress common.Address, permission DBPermission) error {
-	switch permission {
-	case CreateDraft:
-		// Check if the organization has a subscription
-		org, err := p.db.Organization(orgAddress)
-		if err != nil {
-			return errors.ErrOrganizationNotFound.WithErr(err)
-		}
-		if org.ManagedBy == (common.Address{}) && p.IsIntegrator(org) {
-			return errors.ErrIntegratorTopLevelOrgCannotOwnProcess
-		}
-
-		// MaxDrafts value comes from the integrator's plan for managed orgs; the draft
-		// count itself stays per-org.
-		_, plan, err := p.limitsOwner(org)
-		if err != nil {
-			return err
-		}
-
-		count, err := p.db.CountProcesses(orgAddress, db.DraftOnly)
-		if err != nil {
-			return errors.ErrGenericInternalServerError.WithErr(err)
-		}
-
-		if count >= int64(plan.Organization.MaxDrafts) {
-			return errors.ErrMaxDraftsReached.Withf("(%d)", plan.Organization.MaxDrafts)
-		}
-		return nil
-	default:
-		return fmt.Errorf("permission not found")
-	}
-}
-
 // OrgCanCreateVotingProcessDraft checks that the organization is under its MaxDrafts plan
-// limit for the new /processes collection. It mirrors OrgHasPermission(CreateDraft) but
-// counts votingProcesses drafts (the two collections have independent counts). MaxDrafts
-// comes from the integrator's plan for a managed org; the draft count stays per-org.
+// limit for the /processes collection. MaxDrafts comes from the integrator's plan for a
+// managed org; the draft count stays per-org.
 func (p *Subscriptions) OrgCanCreateVotingProcessDraft(orgAddress common.Address) error {
 	org, err := p.db.Organization(orgAddress)
 	if err != nil {
@@ -394,27 +304,6 @@ func (p *Subscriptions) OrgCanAddNMembers(orgAddress common.Address, memberNumbe
 	return nil
 }
 
-func (p *Subscriptions) OrgCanPublishGroupCensus(census *db.Census, groupID string) error {
-	org, err := p.db.Organization(census.OrgAddress)
-	if err != nil {
-		return errors.ErrOrganizationNotFound.WithErr(err)
-	}
-	group, err := p.db.OrganizationMemberGroup(groupID, org.Address)
-	if err != nil {
-		return errors.ErrGroupNotFound.WithErr(err)
-	}
-	memberCount := len(group.MemberIDs)
-	if group.IsAutoGroup {
-		count, err := p.db.CountOrgMembers(org.Address)
-		if err != nil {
-			return errors.ErrGenericInternalServerError.WithErr(err)
-		}
-		memberCount = int(count)
-	}
-	// a legacy group census is a single election: one notification and one vote per member.
-	return p.OrgCanPublishCensus(census, memberCount, memberCount)
-}
-
 // OrgCanPublishCensus enforces the org's remaining email/SMS/vote allowance. notifyCount is how
 // many members would be notified (one 2FA challenge per voter), voteCount is how many votes would
 // be cast (a multi-question /processes publishes N elections, so each voter can cast N ballots →
@@ -482,7 +371,7 @@ func (p *Subscriptions) OrgCanPublishCensus(census *db.Census, notifyCount, vote
 // and duration — mirroring the NEW_PROCESS checks in HasTxPermission so the /processes publish
 // path can surface them synchronously (as a 400 and in the dry-run) instead of as an opaque
 // async job failure. Every check here has a HasTxPermission twin at build time — except the
-// per-question voting type, which is enforced only at this preflight (see the TODO in
+// per-question voting type, which is enforced only at this preflight (see the note in
 // hasElectionMetadataPermissions). Anonymous/vote-overwrite are not used by the /processes flow.
 // Admin role is verified by the caller.
 //
@@ -629,17 +518,4 @@ func (p *Subscriptions) ManagedPublishLimits(integrator *db.Organization) (maxPr
 		return 0, errors.ErrGenericInternalServerError.WithErr(err)
 	}
 	return plan.Organization.MaxProcesses, nil
-}
-
-// CanPublishForManagedOrg checks the integrator's aggregate process quota before publishing
-// an election under a managed org.
-func (p *Subscriptions) CanPublishForManagedOrg(integrator *db.Organization) error {
-	maxProcesses, err := p.ManagedPublishLimits(integrator)
-	if err != nil {
-		return err
-	}
-	if integrator.Counters.ManagedProcesses >= maxProcesses {
-		return errors.ErrIntegratorQuotaExceeded.Withf("max managed processes %d", maxProcesses)
-	}
-	return nil
 }

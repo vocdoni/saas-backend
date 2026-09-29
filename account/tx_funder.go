@@ -45,7 +45,7 @@ func (a *Account) handleSetAccountTx(tx *models.Tx, targetAddr common.Address) (
 
 	// Handle different subtypes
 	switch txSetAccount.Txtype {
-	case models.TxType_CREATE_ACCOUNT, models.TxType_SET_ACCOUNT_INFO_URI:
+	case models.TxType_CREATE_ACCOUNT:
 		txType = txSetAccount.Txtype
 
 		// Get the tx cost and create faucet package
@@ -127,7 +127,6 @@ func (a *Account) calculateSetProcessElectionPrice(
 	currentProcess any,
 ) uint64 {
 	// Extract the necessary fields based on the actual structure
-	var maxCensusSize uint64
 	var durationSeconds uint32
 	var encryptedVotes bool
 	var anonymous bool
@@ -151,13 +150,6 @@ func (a *Account) calculateSetProcessElectionPrice(
 		encryptedVotes = election.GetEncryptedVotes()
 		anonymous = election.GetAnonymous()
 		maxVoteOverwrite = election.GetMaxVoteOverwrites()
-
-		if census := election.GetCensus(); census != nil {
-			// Try to get the size from the census
-			if censusWithSize, ok := census.(interface{ GetSize() uint64 }); ok {
-				maxCensusSize = censusWithSize.GetSize()
-			}
-		}
 	} else { //nolint empty branch
 		// Fallback: use default values
 		// In a real implementation, you might want to use reflection to extract values
@@ -172,14 +164,6 @@ func (a *Account) calculateSetProcessElectionPrice(
 		return a.ElectionPriceCalc.Price(&electionprice.ElectionParameters{
 			MaxCensusSize:           txSetProcess.GetCensusSize(),
 			ElectionDurationSeconds: durationSeconds,
-			EncryptedVotes:          encryptedVotes,
-			AnonymousVotes:          anonymous,
-			MaxVoteOverwrite:        maxVoteOverwrite,
-		})
-	case models.TxType_SET_PROCESS_DURATION:
-		return a.ElectionPriceCalc.Price(&electionprice.ElectionParameters{
-			MaxCensusSize:           maxCensusSize,
-			ElectionDurationSeconds: txSetProcess.GetDuration(),
 			EncryptedVotes:          encryptedVotes,
 			AnonymousVotes:          anonymous,
 			MaxVoteOverwrite:        maxVoteOverwrite,
@@ -204,14 +188,6 @@ func (*Account) validateSetProcessTx(txSetProcess *models.SetProcessTx) error {
 		if (txSetProcess.CensusRoot == nil || txSetProcess.CensusURI == nil) && txSetProcess.CensusSize == nil {
 			return errors.ErrInvalidTxFormat.With("missing census fields")
 		}
-	case models.TxType_SET_PROCESS_RESULTS:
-		if txSetProcess.Results == nil {
-			return errors.ErrInvalidTxFormat.With("missing results field")
-		}
-	case models.TxType_SET_PROCESS_DURATION:
-		if txSetProcess.Duration == nil {
-			return errors.ErrInvalidTxFormat.With("missing duration field")
-		}
 	default:
 		return errors.ErrInvalidTxFormat.With("unsupported txtype")
 	}
@@ -234,7 +210,7 @@ func (a *Account) handleSetProcessTx(tx *models.Tx, targetAddr common.Address) (
 	}
 
 	// For certain types, we need to get the current process and calculate additional costs
-	if txSetProcess.Txtype == models.TxType_SET_PROCESS_CENSUS || txSetProcess.Txtype == models.TxType_SET_PROCESS_DURATION {
+	if txSetProcess.Txtype == models.TxType_SET_PROCESS_CENSUS {
 		election, err := a.client.Election(txSetProcess.ProcessId)
 		if err != nil {
 			return nil, nil, errors.ErrVochainRequestFailed.WithErr(err)
@@ -261,54 +237,6 @@ func (a *Account) handleSetProcessTx(tx *models.Tx, targetAddr common.Address) (
 	return tx, &txSetProcess.Txtype, nil
 }
 
-// handleSetSIKTx handles a SetSIK transaction.
-func (a *Account) handleSetSIKTx(tx *models.Tx, targetAddr common.Address) (*models.Tx, *models.TxType, error) {
-	txSetSIK := tx.GetSetSIK()
-
-	// Check the tx fields
-	if txSetSIK == nil || txSetSIK.SIK == nil {
-		return nil, nil, errors.ErrInvalidTxFormat.With("missing fields")
-	}
-
-	txType := models.TxType_SET_ACCOUNT_SIK
-
-	// Get the tx cost
-	amount, err := a.getTxCost(txType)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Create faucet package
-	faucetPkg, err := a.createFaucetPackage(targetAddr, amount)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Include the faucet package in the tx
-	txSetSIK.FaucetPackage = faucetPkg
-	tx = &models.Tx{
-		Payload: &models.Tx_SetSIK{
-			SetSIK: txSetSIK,
-		},
-	}
-
-	return tx, &txType, nil
-}
-
-// handleCollectFaucetTx handles a CollectFaucet transaction.
-func (*Account) handleCollectFaucetTx(tx *models.Tx) (*models.Tx, *models.TxType, error) {
-	txCollectFaucet := tx.GetCollectFaucet()
-	txType := models.TxType_COLLECT_FAUCET
-
-	tx = &models.Tx{
-		Payload: &models.Tx_CollectFaucet{
-			CollectFaucet: txCollectFaucet,
-		},
-	}
-
-	return tx, &txType, nil
-}
-
 // FundTransaction funds the tx with the required amount for the tx type
 // and returns the tx with the faucet package included.
 // Returns the tx, the type and an error if any.
@@ -320,10 +248,6 @@ func (a *Account) FundTransaction(tx *models.Tx, targetAddr common.Address) (*mo
 		return a.handleNewProcessTx(tx, targetAddr)
 	case *models.Tx_SetProcess:
 		return a.handleSetProcessTx(tx, targetAddr)
-	case *models.Tx_SetSIK, *models.Tx_DelSIK:
-		return a.handleSetSIKTx(tx, targetAddr)
-	case *models.Tx_CollectFaucet:
-		return a.handleCollectFaucetTx(tx)
 	default:
 		return nil, nil, errors.ErrTxTypeNotAllowed
 	}
