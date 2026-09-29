@@ -132,8 +132,8 @@ Component packages (each is a focused service composed in `main.go`):
   return these. Predefined errors in `errors_definition.go`.
 - **`statussync/`** — the on-demand question-status reconciler described above.
 - **`internal/`** — shared primitives: `HexBytes`, birthdate parsing, phone/argon2 helpers.
-- **`cmd/`** — `service/` (the API server), `cli/` (DB query tool for process/voter stats),
-  `client/` (HTTP client for CSV member import + census workflows).
+- **`cmd/`** — `service/` (the API server), `cli/` (`--setIntegrator` org switch),
+  `userdel/` (GDPR user erasure), `localsmtp/` (dev SMTP capture).
 - **`assets/`** are embedded via `embed.go` (`//go:embed all:assets`).
 
 ## Conventions
