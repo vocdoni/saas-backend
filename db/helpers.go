@@ -26,7 +26,6 @@ func (ms *MongoStorage) collectionsMap() map[string]**mongo.Collection {
 		"orgMembers":          &ms.orgMembers,
 		"orgMemberGroups":     &ms.orgMemberGroups,
 		"censusParticipants":  &ms.censusParticipants,
-		"publishedCensuses":   &ms.publishedCensuses,
 		"processes":           &ms.processes,
 		"processBundles":      &ms.processBundles,
 		"votingProcesses":     &ms.votingProcesses,
