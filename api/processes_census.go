@@ -1,7 +1,6 @@
 package api
 
 import (
-	stderrors "errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +10,19 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 )
+
+// censusMembersError maps a census build refused over members that cannot be told apart to a 400
+// naming them, in the shape the census pre-flight reports them: they are the caller's to fix, not a 500.
+func censusMembersError(err error) (errors.Error, bool) {
+	var clash *db.CensusMembersError
+	if !errors.As(err, &clash) {
+		return errors.Error{}, false
+	}
+	return errors.ErrInvalidData.
+		Withf("members are missing required auth data or share login data with another member: " +
+			"complete or fix their data, or remove them").
+		WithData(clash), true
+}
 
 // resolveOrCreateDefaultCensus materializes the inline census spec of a voting process into
 // a db.Census (auth/2FA policy + participants) and returns it. The census type is inferred
@@ -42,13 +54,8 @@ func (a *API) resolveOrCreateDefaultCensus(spec apicommon.CensusSpec, orgAddress
 	switch {
 	case spec.GroupID != "":
 		if _, err := a.db.PopulateGroupCensus(census, spec.GroupID); err != nil {
-			// members missing the same login data are the caller's to fix: name them (400), in the
-			// shape the census pre-flight reports them, rather than failing the build with a 500
-			var missingData *db.CensusMissingDataError
-			if stderrors.As(err, &missingData) {
-				return nil, errors.ErrInvalidData.
-					Withf("members are missing required auth data: complete their data or remove them").
-					WithData(missingData)
+			if apiErr, ok := censusMembersError(err); ok {
+				return nil, apiErr
 			}
 			return nil, fmt.Errorf("failed to populate group census: %w", err)
 		}

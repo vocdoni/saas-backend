@@ -7,16 +7,19 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-// CensusMissingDataError is returned when members missing required auth data cannot be told apart
-// in the census: missing the same data, they would be stored under the same login hash, which the
-// census keeps under a unique index. MissingData lists those members.
-type CensusMissingDataError struct {
+// CensusMembersError is returned when members of a census would be stored under the same login
+// hash, which the census keeps under a unique index. MissingData lists those missing required auth
+// data (missing the same data, they hash identically), Duplicates those whose data is complete but
+// hashes like another member's (e.g. names differing only by case, which the hash folds).
+type CensusMembersError struct {
 	MissingData []bson.ObjectID `json:"missingData"`
+	Duplicates  []bson.ObjectID `json:"duplicates"`
 }
 
 // Error implements the error interface.
-func (e *CensusMissingDataError) Error() string {
-	return fmt.Sprintf("%d census members are missing required auth data", len(e.MissingData))
+func (e *CensusMembersError) Error() string {
+	return fmt.Sprintf("%d census members are missing required auth data or share login data with another member",
+		len(e.MissingData)+len(e.Duplicates))
 }
 
 // MissingLoginData reports whether the member lacks the data to log in to a census with these
@@ -75,46 +78,44 @@ type loginKey struct {
 	hash  string
 }
 
-// missingDataCollisions returns a *CensusMissingDataError when members missing required auth data
-// would be stored under the same login hash as another member of the census. Members missing the
-// same field otherwise hash identically (an empty value is hashed like any other), and the unique
-// index would fail the whole census build. A member missing data that clashes with nobody is left
-// in: it cannot log in anyway. Clashes between members whose data is complete are not checked here.
-func missingDataCollisions(census *Census, members []*OrgMember) error {
-	missing := make(map[bson.ObjectID]bool)
+// sharedLoginHashes returns the members holding a login hash that another of the members holds too:
+// the same hashes the census unique indexes store, so exactly the members that cannot be told apart.
+func sharedLoginHashes(census Census, members []*OrgMember) map[bson.ObjectID]bool {
 	holders := make(map[loginKey][]bson.ObjectID)
 	for _, m := range members {
-		if m.MissingLoginData(census.AuthFields, census.TwoFaFields) {
-			missing[m.ID] = true
-		}
-		for field, hash := range calculateParticipantHashes(*census, *m) {
+		for field, hash := range calculateParticipantHashes(census, *m) {
 			key := loginKey{field: field, hash: string(hash)}
 			holders[key] = append(holders[key], m.ID)
 		}
 	}
-	if len(missing) == 0 {
-		return nil
-	}
-
-	clashing := make(map[bson.ObjectID]bool)
+	shared := make(map[bson.ObjectID]bool)
 	for _, ids := range holders {
 		if len(ids) < 2 {
 			continue
 		}
 		for _, id := range ids {
-			if missing[id] {
-				clashing[id] = true
-			}
+			shared[id] = true
 		}
 	}
-	if len(clashing) == 0 {
+	return shared
+}
+
+// loginHashClashes returns a *CensusMembersError when members would be stored under the same login
+// hash as another member of the census, which the unique index would refuse halfway through the
+// build. A member missing data that clashes with nobody is left in: it cannot log in anyway.
+func loginHashClashes(census *Census, members []*OrgMember) error {
+	shared := sharedLoginHashes(*census, members)
+	if len(shared) == 0 {
 		return nil
 	}
-
-	err := &CensusMissingDataError{MissingData: make([]bson.ObjectID, 0, len(clashing))}
+	err := &CensusMembersError{MissingData: make([]bson.ObjectID, 0), Duplicates: make([]bson.ObjectID, 0)}
 	for _, m := range members {
-		if clashing[m.ID] {
+		switch {
+		case !shared[m.ID]:
+		case m.MissingLoginData(census.AuthFields, census.TwoFaFields):
 			err.MissingData = append(err.MissingData, m.ID)
+		default:
+			err.Duplicates = append(err.Duplicates, m.ID)
 		}
 	}
 	return err

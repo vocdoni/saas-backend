@@ -3325,7 +3325,8 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.PublishedCensusResponse'
         "400":
-          description: Invalid census ID or group ID
+          description: Invalid census or group ID, or members missing/sharing login
+            data (40037)
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -6355,9 +6356,9 @@ paths:
       description: |-
         Create a multi-question voting process draft. Requires Manager/Admin role of the org
         (or a scoped API key with `voting:write`). Creates the inline census unpublished.
-        Members of `census.groupId` missing required auth data cannot vote; when several miss the
-        same data (so the census cannot tell them apart) they are refused with a 400 (40037)
-        whose `data.missingData` lists them.
+        Members of `census.groupId` missing required auth data cannot vote. Members the census
+        cannot tell apart (several missing the same data, or data equal but for case) are refused
+        with a 400 (40037) whose `data.missingData` and `data.duplicates` list them.
 
         Each question must define a named `type` — `singlechoice`, `multichoice`, `ranked`
         or `cumulative` — a raw `ballotProtocol`, or both. `multichoice` and `cumulative`
@@ -6495,6 +6496,9 @@ paths:
         Send the updatedAt read from GET /processes/{processId} to make the update conditional: it is
         rejected with 409 (40171) if anything wrote the process in between, so two editors cannot
         overwrite each other. Omitting updatedAt opts out of that guarantee and keeps last-writer-wins.
+
+        Census members the census cannot tell apart are refused as on create: a 400 (40037) whose
+        `data.missingData` and `data.duplicates` list them.
       parameters:
       - description: Process ID
         in: path

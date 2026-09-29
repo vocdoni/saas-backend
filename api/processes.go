@@ -41,9 +41,9 @@ func parseProcessDates(req *apicommon.CreateVotingProcessRequest) (start, end ti
 //	@Summary		Create a voting process draft
 //	@Description	Create a multi-question voting process draft. Requires Manager/Admin role of the org
 //	@Description	(or a scoped API key with `voting:write`). Creates the inline census unpublished.
-//	@Description	Members of `census.groupId` missing required auth data cannot vote; when several miss the
-//	@Description	same data (so the census cannot tell them apart) they are refused with a 400 (40037)
-//	@Description	whose `data.missingData` lists them.
+//	@Description	Members of `census.groupId` missing required auth data cannot vote. Members the census
+//	@Description	cannot tell apart (several missing the same data, or data equal but for case) are refused
+//	@Description	with a 400 (40037) whose `data.missingData` and `data.duplicates` list them.
 //	@Description
 //	@Description	Each question must define a named `type` — `singlechoice`, `multichoice`, `ranked`
 //	@Description	or `cumulative` — a raw `ballotProtocol`, or both. `multichoice` and `cumulative`
@@ -365,6 +365,9 @@ func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id bson.ObjectID, u
 //	@Description	Send the updatedAt read from GET /processes/{processId} to make the update conditional: it is
 //	@Description	rejected with 409 (40171) if anything wrote the process in between, so two editors cannot
 //	@Description	overwrite each other. Omitting updatedAt opts out of that guarantee and keeps last-writer-wins.
+//	@Description
+//	@Description	Census members the census cannot tell apart are refused as on create: a 400 (40037) whose
+//	@Description	`data.missingData` and `data.duplicates` list them.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json

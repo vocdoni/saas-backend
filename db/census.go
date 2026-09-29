@@ -61,8 +61,8 @@ func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
 }
 
 // PopulateGroupCensus stores the census and adds every member of the group as a participant,
-// returning the number added. Members missing required auth data that could not be told apart
-// (same login hash) are refused with a *CensusMissingDataError before anything is written.
+// returning the number added. Members that could not be told apart (same login hash) are refused
+// with a *CensusMembersError before anything is written.
 func (ms *MongoStorage) PopulateGroupCensus(
 	census *Census,
 	groupID string,
@@ -107,13 +107,19 @@ func (ms *MongoStorage) PopulateGroupCensus(
 	if !group.IsAutoGroup && len(group.MemberIDs) == 0 {
 		return 0, fmt.Errorf("group has no members")
 	}
-	_, members, err := ms.ListOrganizationMemberGroup(groupID, census.OrgAddress, 0, 0)
+	// an auto group holds the whole member base
+	var members []*OrgMember
+	if group.IsAutoGroup {
+		_, members, err = ms.OrgMembers(census.OrgAddress, OrgMembersQuery{})
+	} else {
+		_, members, err = ms.orgMembersByIDs(census.OrgAddress, group.MemberIDs, 0, 0)
+	}
 	if err != nil {
 		return 0, fmt.Errorf("error retrieving group members: %w", err)
 	}
-	// members missing the same login data hash identically and would fail the unique login-hash
-	// index halfway through the build: refuse them up front, naming them, before the group is linked
-	if err := missingDataCollisions(census, members); err != nil {
+	// members sharing a login hash would fail the unique login-hash index halfway through the build:
+	// refuse them up front, naming them, before the group is linked
+	if err := loginHashClashes(census, members); err != nil {
 		return 0, err
 	}
 

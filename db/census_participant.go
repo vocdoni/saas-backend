@@ -672,18 +672,15 @@ func (ms *MongoStorage) setBulkCensusParticipant(ctx context.Context, census *Ce
 			"participantID": id,
 			"censusId":      census.ID.Hex(),
 		}
+		// the same hashes the pre-build clash check compares (calculateParticipantHashes)
+		hashes := calculateParticipantHashes(*census, *member)
 		participantDoc := &CensusParticipant{
-			ParticipantID: id,
-			LoginHash:     HashAuthTwoFaFields(*member, census.AuthFields, census.TwoFaFields),
-			CensusID:      census.ID.Hex(),
-			UpdatedAt:     currentTime,
-		}
-
-		if len(census.TwoFaFields) == 2 && member.Email != "" {
-			participantDoc.LoginHashEmail = HashAuthTwoFaFields(*member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail})
-		}
-		if len(census.TwoFaFields) == 2 && !member.Phone.IsEmpty() {
-			participantDoc.LoginHashPhone = HashAuthTwoFaFields(*member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone})
+			ParticipantID:  id,
+			LoginHash:      hashes["loginHash"],
+			LoginHashEmail: hashes["loginHashEmail"],
+			LoginHashPhone: hashes["loginHashPhone"],
+			CensusID:       census.ID.Hex(),
+			UpdatedAt:      currentTime,
 		}
 		// Create participant update document
 		updateParticipantDoc, err := dynamicUpdateDocument(participantDoc, nil)

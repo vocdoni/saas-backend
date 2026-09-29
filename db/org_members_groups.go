@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -454,7 +453,8 @@ func (ms *MongoStorage) CheckMembersFields(
 }
 
 // aggregateMemberFields iterates a members cursor (projected to the given auth/2FA fields) and
-// classifies each member as valid, missing-data, or duplicate on the composite auth/2FA key.
+// classifies each member as valid, missing-data, or duplicate. Duplicates are members sharing a login
+// hash, the same definition the census build refuses (sharedLoginHashes).
 func aggregateMemberFields(
 	ctx context.Context,
 	cur *mongo.Cursor,
@@ -468,48 +468,32 @@ func aggregateMemberFields(
 		NotFound:    make([]bson.ObjectID, 0),
 	}
 
-	seenKeys := make(map[string]bson.ObjectID, cur.RemainingBatchLength())
-	duplicates := make(map[bson.ObjectID]struct{}, 0)
-
+	complete := make([]*OrgMember, 0, cur.RemainingBatchLength())
 	for cur.Next(ctx) {
-		// decode into a map so we can handle dynamic fields
-		var m OrgMember
-		var bm bson.M
-		if err := cur.Decode(&m); err != nil {
+		m := &OrgMember{}
+		if err := cur.Decode(m); err != nil {
 			return nil, err
 		}
-		if err := cur.Decode(&bm); err != nil {
-			return nil, err
-		}
-
-		// if the member lacks login data (an empty auth field, or no 2FA channel), add to missing data
-		// and continue to the next member; we do not check for duplicates in empty rows, where the
-		// shared value is the absence of one
+		// if the member lacks login data (an empty auth field, or no 2FA channel), add to missing data;
+		// we do not check for duplicates in empty rows, where the shared value is the absence of one
 		if m.MissingLoginData(authFields, twoFaFields) {
 			results.MissingData = append(results.MissingData, m.ID)
 			continue
 		}
-
-		// if the key is already seen, add to duplicates and continue to the next member
-		if len(authFields) > 0 || len(twoFaFields) > 0 {
-			key := buildCompositeKey(bm, authFields, twoFaFields)
-			if val, seen := seenKeys[key]; seen {
-				duplicates[m.ID] = struct{}{}
-				duplicates[val] = struct{}{}
-				continue
-			}
-			// neither empty nor duplicate, so we add it to the seen keys
-			seenKeys[key] = m.ID
-		}
-
-		// if the data passes all checks append the member ID to the results
-		results.Members = append(results.Members, m.ID)
+		complete = append(complete, m)
 	}
 	if err := cur.Err(); err != nil {
 		return nil, err
 	}
-	results.Duplicates = mapKeysToSlice(duplicates)
 
+	shared := sharedLoginHashes(Census{AuthFields: authFields, TwoFaFields: twoFaFields}, complete)
+	for _, m := range complete {
+		if shared[m.ID] {
+			results.Duplicates = append(results.Duplicates, m.ID)
+		} else {
+			results.Members = append(results.Members, m.ID)
+		}
+	}
 	return &results, nil
 }
 
@@ -613,38 +597,6 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
-}
-
-// mapKeysToSlice extracts all keys from a map as a slice.
-func mapKeysToSlice[T comparable, V any](m map[T]V) []T {
-	keys := make([]T, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
-}
-
-// buildCompositeKey constructs a composite key from both auth and 2FA fields.
-// Values are concatenated with "|" as delimiter, auth fields first, then 2FA fields.
-func buildCompositeKey(bm bson.M, authFields OrgMemberAuthFields, twoFaFields OrgMemberTwoFaFields) string {
-	totalFields := len(authFields) + len(twoFaFields)
-	if totalFields == 0 {
-		return ""
-	}
-
-	keyParts := make([]string, 0, totalFields)
-
-	// Add auth field values
-	for _, f := range authFields {
-		keyParts = append(keyParts, fmt.Sprint(bm[string(f)]))
-	}
-
-	// Add 2FA field values
-	for _, f := range twoFaFields {
-		keyParts = append(keyParts, fmt.Sprint(bm[string(f)]))
-	}
-
-	return strings.Join(keyParts, "|")
 }
 
 // AutoMemberGroup returns the organization's auto-generated "All members" group, or ErrNotFound if

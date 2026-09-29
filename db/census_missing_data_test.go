@@ -9,9 +9,9 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-// TestMissingDataCollisions pins which member sets the census build refuses up front: members
-// missing required auth data that could not be told apart (same login hash), and only those.
-func TestMissingDataCollisions(t *testing.T) {
+// TestLoginHashClashes pins which member sets the census build refuses up front: members that could
+// not be told apart (same login hash), split into those missing auth data and complete duplicates.
+func TestLoginHashClashes(t *testing.T) {
 	type member struct {
 		name, surname, nationalID, email string
 		phone                            HashedPhone
@@ -21,11 +21,12 @@ func TestMissingDataCollisions(t *testing.T) {
 	emailOrPhone := OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail, OrgMemberTwoFaFieldPhone}
 
 	for _, tc := range []struct {
-		name    string
-		auth    OrgMemberAuthFields
-		twoFa   OrgMemberTwoFaFields
-		members []member
-		missing []int // indexes into members; empty means the build is not refused
+		name     string
+		auth     OrgMemberAuthFields
+		twoFa    OrgMemberTwoFaFields
+		members  []member
+		missing  []int // indexes into members; both empty means the build is not refused
+		complete []int
 	}{
 		{
 			name:  "no email under email 2FA",
@@ -65,12 +66,36 @@ func TestMissingDataCollisions(t *testing.T) {
 			},
 		},
 		{
-			name: "clashes between complete members are not this check's concern",
+			name: "complete members differing only by case share the folded hash",
 			auth: OrgMemberAuthFields{OrgMemberAuthFieldsName, OrgMemberAuthFieldsSurname},
 			members: []member{
 				{name: "John", surname: "Smith"},
 				{name: "john", surname: "smith"},
+				{name: "Jane", surname: "Smith"},
 			},
+			complete: []int{0, 1},
+		},
+		{
+			name:  "email-and-phone: same email, different phones share the email hash",
+			auth:  OrgMemberAuthFields{OrgMemberAuthFieldsName},
+			twoFa: emailOrPhone,
+			members: []member{
+				{name: "Sam", email: "sam@example.com", phone: HashedPhone("phone-1")},
+				{name: "Sam", email: "sam@example.com", phone: HashedPhone("phone-2")},
+			},
+			complete: []int{0, 1},
+		},
+		{
+			name: "a missing-data member clashing with a complete one",
+			auth: nameNationalID,
+			members: []member{
+				{name: "Twin", nationalID: ""},
+				{name: "Twin", nationalID: ""},
+				{name: "Solo", nationalID: "X1"},
+				{name: "solo", nationalID: "x1"},
+			},
+			missing:  []int{0, 1},
+			complete: []int{2, 3},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -91,14 +116,15 @@ func TestMissingDataCollisions(t *testing.T) {
 				return out
 			}
 
-			err := missingDataCollisions(census, members)
-			if len(tc.missing) == 0 {
+			err := loginHashClashes(census, members)
+			if len(tc.missing)+len(tc.complete) == 0 {
 				c.Assert(err, qt.IsNil)
 				return
 			}
-			var missingData *CensusMissingDataError
-			c.Assert(errors.As(err, &missingData), qt.IsTrue, qt.Commentf("got %v", err))
-			c.Assert(missingData.MissingData, qt.DeepEquals, pick(tc.missing))
+			var clash *CensusMembersError
+			c.Assert(errors.As(err, &clash), qt.IsTrue, qt.Commentf("got %v", err))
+			c.Assert(clash.MissingData, qt.DeepEquals, pick(tc.missing))
+			c.Assert(clash.Duplicates, qt.DeepEquals, pick(tc.complete))
 		})
 	}
 }
@@ -170,10 +196,11 @@ func TestCensusMembersEmptyValues(t *testing.T) {
 		c := qt.New(t)
 		census := &Census{OrgAddress: testOrgAddress, TwoFaFields: emailOnly}
 		_, err := testDB.PopulateGroupCensus(census, noEmailGroup)
-		var missingData *CensusMissingDataError
-		c.Assert(errors.As(err, &missingData), qt.IsTrue, qt.Commentf("got %v", err))
+		var clash *CensusMembersError
+		c.Assert(errors.As(err, &clash), qt.IsTrue, qt.Commentf("got %v", err))
 		// "A" and "B" hash identically; "  " is not folded by the hash, so "C" clashes with nobody
-		c.Assert(hexes(missingData.MissingData), qt.ContentEquals, noEmail[:2])
+		c.Assert(hexes(clash.MissingData), qt.ContentEquals, noEmail[:2])
+		c.Assert(clash.Duplicates, qt.HasLen, 0)
 
 		stored, err := testDB.OrganizationMemberGroup(noEmailGroup, testOrgAddress)
 		c.Assert(err, qt.IsNil)
@@ -209,5 +236,27 @@ func TestCensusMembersEmptyValues(t *testing.T) {
 			c.Assert(p.LoginHashEmail, qt.HasLen, 0)
 			c.Assert(p.LoginHashPhone, qt.Not(qt.HasLen), 0)
 		}
+	})
+
+	t.Run("pre-flight and build agree on complete members differing only by case", func(t *testing.T) {
+		c := qt.New(t)
+		ids := []string{
+			insertRaw(bson.M{"name": "Anna", "email": "anna@example.com"}),
+			insertRaw(bson.M{"name": "anna", "email": "ANNA@example.com"}),
+		}
+		auth := OrgMemberAuthFields{OrgMemberAuthFieldsName}
+		groupID := group(ids...)
+
+		res, err := testDB.CheckMembersFields(testOrgAddress, ids, auth, emailOnly)
+		c.Assert(err, qt.IsNil)
+		c.Assert(hexes(res.Duplicates), qt.ContentEquals, ids)
+		c.Assert(res.Members, qt.HasLen, 0)
+
+		census := &Census{OrgAddress: testOrgAddress, AuthFields: auth, TwoFaFields: emailOnly}
+		_, err = testDB.PopulateGroupCensus(census, groupID)
+		var clash *CensusMembersError
+		c.Assert(errors.As(err, &clash), qt.IsTrue, qt.Commentf("got %v", err))
+		c.Assert(hexes(clash.Duplicates), qt.ContentEquals, ids)
+		c.Assert(clash.MissingData, qt.HasLen, 0)
 	})
 }

@@ -303,7 +303,7 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 //	@Param			groupId	path		string								true	"Group ID"
 //	@Param			request	body		apicommon.PublishCensusGroupRequest	true	"Census authentication configuration"
 //	@Success		200		{object}	apicommon.PublishedCensusResponse
-//	@Failure		400		{object}	errors.Error	"Invalid census ID or group ID"
+//	@Failure		400		{object}	errors.Error	"Invalid census or group ID, or members missing/sharing login data (40037)"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		403		{object}	errors.Error	"Plan census quota exceeded"
 //	@Failure		404		{object}	errors.Error	"Census not found, or neither authFields nor twoFaFields provided (ErrCensusTypeNotFound)"
@@ -377,11 +377,8 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 
 	inserted, err := a.db.PopulateGroupCensus(census, groupID.String())
 	if err != nil {
-		var missingData *db.CensusMissingDataError
-		if stderrors.As(err, &missingData) {
-			errors.ErrInvalidData.
-				Withf("members are missing required auth data: complete their data or remove them").
-				WithData(missingData).Write(w)
+		if apiErr, ok := censusMembersError(err); ok {
+			apiErr.Write(w)
 			return
 		}
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
