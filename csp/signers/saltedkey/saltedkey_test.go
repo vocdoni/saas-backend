@@ -13,7 +13,13 @@ import (
 )
 
 func TestECDSAsaltedKey(t *testing.T) {
-	privHex := fmt.Sprintf("%x", randomBytes(32))
+	assertECDSAsaltedKey(t, fmt.Sprintf("%x", randomBytes(32)))
+	// a root key with a leading zero byte must not lose it (big.Int.Bytes() would drop it)
+	assertECDSAsaltedKey(t, "00"+fmt.Sprintf("%x", randomBytes(31)))
+}
+
+func assertECDSAsaltedKey(t *testing.T, privHex string) {
+	t.Helper()
 	sk, err := NewSaltedKey(privHex)
 	qt.Assert(t, err, qt.IsNil)
 
