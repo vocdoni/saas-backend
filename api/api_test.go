@@ -13,7 +13,6 @@ import (
 	"os"
 	"path"
 	"regexp"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -45,16 +44,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-type apiTestCase struct {
-	name           string
-	uri            string
-	method         string
-	headers        map[string]string
-	body           []byte
-	expectedStatus int
-	expectedBody   []byte
-}
-
 const (
 	testSecret    = "super-secret"
 	testEmail     = "user@test.com"
@@ -73,12 +62,6 @@ const (
 	anotherEmail = "something-else@gmail.com"
 
 	cspNotificationCoolDownTime = time.Second * 5
-)
-
-var (
-	twoFaEmail        = db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail}
-	twoFaPhone        = db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldPhone}
-	twoFaEmailOrPhone = slices.Concat(twoFaEmail, twoFaPhone)
 )
 
 var (
@@ -246,40 +229,6 @@ func init() {
 //revive:disable:import-shadowing
 func testURL(path string) string {
 	return fmt.Sprintf("http://%s:%d%s", testHost, testPort, path)
-}
-
-// mustMarshal helper function marshalls the input interface into a byte slice.
-// It panics if the marshalling fails.
-func mustMarshal(i any) []byte {
-	b, err := json.Marshal(i)
-	if err != nil {
-		panic(err)
-	}
-	return b
-}
-
-// runAPITestCase helper function runs the given API test case and checks the
-// response status code and body against the expected values.
-func runAPITestCase(c *qt.C, tc apiTestCase) {
-	c.Logf("running api test case: %s", tc.name)
-	req, err := http.NewRequest(tc.method, tc.uri, bytes.NewBuffer(tc.body))
-	c.Assert(err, qt.IsNil)
-	for k, v := range tc.headers {
-		req.Header.Set(k, v)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	c.Assert(err, qt.IsNil)
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			c.Errorf("error closing response body: %v", err)
-		}
-	}()
-	c.Assert(resp.StatusCode, qt.Equals, tc.expectedStatus)
-	if tc.expectedBody != nil {
-		body, err := io.ReadAll(resp.Body)
-		c.Assert(err, qt.IsNil)
-		c.Assert(strings.TrimSpace(string(body)), qt.Equals, string(tc.expectedBody))
-	}
 }
 
 // pingAPI helper function pings the API endpoint and retries the request
@@ -597,34 +546,6 @@ func testNewVocdoniClient(t *testing.T) *apiclient.HTTPclient {
 	return client
 }
 
-// signRemoteSignerAndSendVocdoniTx sends a transaction to the Voconed API and waits for it to be mined.
-// It uses the remote signer from the API to sign the transaction.
-// Returns the response data if any.
-func signRemoteSignerAndSendVocdoniTx(t *testing.T, tx *models.Tx, token string, vocdoniClient *apiclient.HTTPclient,
-	orgAddress common.Address,
-) (responseData []byte) {
-	t.Helper()
-	c := qt.New(t)
-	txBytes, err := proto.Marshal(tx)
-	c.Assert(err, qt.IsNil)
-	td := &apicommon.TransactionData{
-		Address:   orgAddress,
-		TxPayload: txBytes,
-	}
-
-	// sign the transaction using the remote signer from the API
-	signedTD := requestAndParse[apicommon.TransactionData](t, http.MethodPost, token, td, signTxEndpoint)
-
-	// submit the transaction
-	hash, data, err := vocdoniClient.SendTx(signedTD.TxPayload)
-	c.Assert(err, qt.IsNil)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	err = waitUntilTxIsMined(ctx, hash, vocdoniClient)
-	c.Assert(err, qt.IsNil)
-	return data
-}
-
 // signAsOrgAndSendVocdoniTx funds and signs a transaction with the organization's key, the way
 // the backend does on its own on-chain paths, submits it and waits for it to be mined.
 // Returns the response data if any.
@@ -788,53 +709,6 @@ func fetchVocdoniChainID(t *testing.T, client *apiclient.HTTPclient) string {
 	cid := client.ChainID()
 	qt.Assert(t, cid, qt.Not(qt.Equals), "")
 	return cid
-}
-
-// postCensus creates a new census with the given organization address.
-// It returns the census ID.
-func postCensus(t *testing.T, token string, orgAddress common.Address,
-	authFields db.OrgMemberAuthFields, twoFaFields db.OrgMemberTwoFaFields,
-) string {
-	t.Helper()
-	createdCensus := requestAndParse[apicommon.CreateCensusResponse](t, http.MethodPost, token,
-		&apicommon.CreateCensusRequest{
-			OrgAddress:  orgAddress,
-			AuthFields:  authFields,
-			TwoFaFields: twoFaFields,
-		}, censusEndpoint)
-	qt.Assert(t, createdCensus.ID, qt.Not(qt.Equals), "", qt.Commentf("census ID is empty"))
-
-	t.Logf("Created census with ID: %s", createdCensus.ID)
-	return createdCensus.ID
-}
-
-// postProcessBundle creates a new process bundle with the given census ID and process IDs.
-// It returns the bundle ID and root.
-func postProcessBundle(t *testing.T, token, censusID string, processIDs ...[]byte) (bundleID string, root string) {
-	t.Helper()
-	c := qt.New(t)
-
-	// Convert process IDs to hex strings
-	hexProcessIDs := make([]string, len(processIDs))
-	for i, pid := range processIDs {
-		hexProcessIDs[i] = hex.EncodeToString(pid)
-	}
-
-	// Create a new bundle
-	bundleReq := &apicommon.CreateProcessBundleRequest{
-		CensusID:  censusID,
-		Processes: hexProcessIDs,
-	}
-	bundleResp := requestAndParse[apicommon.CreateProcessBundleResponse](t, http.MethodPost, token, bundleReq, "process", "bundle")
-	c.Assert(bundleResp.URI, qt.Not(qt.Equals), "", qt.Commentf("bundle URI is empty"))
-	c.Assert(bundleResp.Root, qt.Not(qt.Equals), "", qt.Commentf("bundle root is empty"))
-
-	// Extract the bundle ID from the URI
-	bundleURI := bundleResp.URI
-	bundleIDStr := bundleURI[len(bundleURI)-len(censusID):]
-
-	t.Logf("Created bundle with ID: %s and Root: %s", bundleIDStr, bundleResp.Root)
-	return bundleIDStr, bundleResp.Root.String()
 }
 
 // fetchCSPUserWeight retrieves the CSP weight of the voter behind authToken for the voting process pid.
@@ -1139,20 +1013,6 @@ func newOrgMembers(n int) []apicommon.OrgMember {
 	return members
 }
 
-func decodeNestedFieldAs[T any](c *qt.C, parsedJSON map[string]any, field string) T {
-	c.Helper()
-	c.Assert(parsedJSON[field], qt.Not(qt.IsNil), qt.Commentf("no field %q in json %#v\n", parsedJSON))
-
-	// to decode field we need to Marshal and Unmarshal
-	nestedFieldBytes, err := json.Marshal(parsedJSON[field])
-	c.Assert(err, qt.IsNil)
-
-	var nestedField T
-	err = json.Unmarshal(nestedFieldBytes, &nestedField)
-	c.Assert(err, qt.IsNil, qt.Commentf("%#v\n", parsedJSON[field]))
-	return nestedField
-}
-
 // organizationMembers methods
 
 func postOrgMembers(t *testing.T, loginToken string, orgAddress common.Address, members ...apicommon.OrgMember,
@@ -1200,69 +1060,9 @@ func putOrgMemberAndExpectError(t *testing.T, adminToken string, orgAddress comm
 	return requestAndExpectError(t, http.MethodPut, adminToken, member, organizationMembersURL(orgAddress.String()))
 }
 
-func postCensusAndExpectError(t *testing.T, adminToken string, censusInfo *apicommon.CreateCensusRequest) errors.Error {
-	t.Helper()
-	return requestAndExpectError(t, http.MethodPost, adminToken, censusInfo, censusEndpoint)
-}
-
 func getOrganization(t *testing.T, orgAddress common.Address) apicommon.OrganizationInfo {
 	t.Helper()
 	return requestAndParse[apicommon.OrganizationInfo](t, http.MethodGet, "", nil, organizationInfoURL(orgAddress.String()))
-}
-
-func getCensus(t *testing.T, adminToken string, censusID string) apicommon.OrganizationCensus {
-	t.Helper()
-	return requestAndParse[apicommon.OrganizationCensus](t, http.MethodGet, adminToken, nil, censusEndpoint, censusID)
-}
-
-func getCensusAndExpectError(t *testing.T, adminToken string, censusID string) errors.Error {
-	t.Helper()
-	return requestAndExpectError(t, http.MethodGet, adminToken, nil, censusEndpoint, censusID)
-}
-
-func postCensusParticipants(t *testing.T, adminToken string, censusID string, memberIDs ...string,
-) apicommon.AddMembersResponse {
-	t.Helper()
-	resp := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, adminToken,
-		&apicommon.AddCensusParticipantsRequest{MemberIDs: memberIDs},
-		censusEndpoint, censusID)
-	qt.Assert(t, resp.Added, qt.Equals, uint32(len(memberIDs)))
-	return resp
-}
-
-func postCensusParticipantsAndExpectError(t *testing.T, adminToken string, censusID string, memberIDs ...string,
-) errors.Error {
-	t.Helper()
-	return requestAndExpectError(t, http.MethodPost, adminToken, &apicommon.AddCensusParticipantsRequest{MemberIDs: memberIDs},
-		censusEndpoint, censusID)
-}
-
-func createGroupBasedCensus(t *testing.T, token string, orgAddress common.Address,
-	authFields db.OrgMemberAuthFields, twoFaFields db.OrgMemberTwoFaFields, memberIDs ...string,
-) (censusID string, group apicommon.OrganizationMemberGroupInfo, census apicommon.PublishedCensusResponse) {
-	t.Helper()
-	censusID = postCensus(t, token, orgAddress, authFields, twoFaFields)
-	group = postGroup(t, token, orgAddress, memberIDs...)
-	census = postGroupCensus(t, token, censusID, group.ID,
-		&apicommon.PublishCensusGroupRequest{
-			AuthFields:  authFields,
-			TwoFaFields: twoFaFields,
-		})
-	qt.Assert(t, census.Size, qt.Equals, int64(len(memberIDs)))
-	return censusID, group, census
-}
-
-func createGroupBasedCensusAndExpectError(t *testing.T, token string, orgAddress common.Address,
-	authFields db.OrgMemberAuthFields, twoFaFields db.OrgMemberTwoFaFields, memberIDs ...string,
-) errors.Error {
-	t.Helper()
-	censusID := postCensus(t, token, orgAddress, authFields, twoFaFields)
-	group := postGroup(t, token, orgAddress, memberIDs...)
-	return postGroupCensusAndExpectError(t, token, censusID, group.ID,
-		&apicommon.PublishCensusGroupRequest{
-			AuthFields:  authFields,
-			TwoFaFields: twoFaFields,
-		})
 }
 
 func postGroup(t *testing.T, token string, orgAddress common.Address, memberIDs ...string) apicommon.OrganizationMemberGroupInfo {
@@ -1277,29 +1077,6 @@ func postGroup(t *testing.T, token string, orgAddress common.Address, memberIDs 
 	qt.Assert(t, groupInfo.ID, qt.Not(qt.Equals), "")
 	t.Logf("Created member group with ID: %s", groupInfo.ID)
 	return groupInfo
-}
-
-// postGroupCensus creates a new census based on the given groupID on the given organization address.
-// It returns the census details.
-func postGroupCensus(t *testing.T, loginToken string, censusID, groupID string, request *apicommon.PublishCensusGroupRequest,
-) apicommon.PublishedCensusResponse {
-	t.Helper()
-	c := qt.New(t)
-
-	resp := requestAndParse[apicommon.PublishedCensusResponse](t, http.MethodPost, loginToken, request,
-		censusGroupPublishURL(censusID, groupID))
-
-	c.Assert(resp.URI, qt.Not(qt.Equals), "")
-	c.Assert(resp.Root, qt.Not(qt.Equals), "")
-	c.Logf("Published group census with URI: %s and Root: %s", resp.URI, resp.Root)
-	return resp
-}
-
-func postGroupCensusAndExpectError(t *testing.T, loginToken string, censusID, groupID string,
-	request *apicommon.PublishCensusGroupRequest,
-) errors.Error {
-	t.Helper()
-	return requestAndExpectError(t, http.MethodPost, loginToken, request, censusGroupPublishURL(censusID, groupID))
 }
 
 func setOrganizationSubscription(t *testing.T, orgAddress common.Address, planID string) {
@@ -1335,13 +1112,6 @@ func organizationGroupsURL(orgAddress string) string {
 
 func organizationInfoURL(orgAddress string) string {
 	return strings.ReplaceAll(organizationEndpoint, "{orgAddress}", orgAddress)
-}
-
-func censusGroupPublishURL(censusID, groupID string) string {
-	s := censusGroupPublishEndpoint
-	s = strings.ReplaceAll(s, "{id}", censusID)
-	s = strings.ReplaceAll(s, "{groupId}", groupID)
-	return s
 }
 
 func processAuthURL(pid, step string) string {

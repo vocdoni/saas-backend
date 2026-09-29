@@ -113,13 +113,8 @@ func hasElectionMetadataPermissions(process *models.NewProcessTx, plan *db.Plan)
 		return false, fmt.Errorf("duration is greater than the allowed")
 	}
 
-	// TODO:future the voting-type plan gate (plan.VotingTypes.{Single,Multiple,Ranked,Cumulative})
-	// runs only at /processes publish preflight (OrgAllowsVotingType), not here — so POST
-	// /transactions and the legacy /process build path, which both build a NewProcessTx and route
-	// through HasTxPermission, bypass it: an org whose plan lacks a flag can still get that ballot
-	// signed. The tx carries the full ballot shape (VoteOptions + EnvelopeType map 1:1 to a
-	// BallotProtocol), so the gate can be closed here by recognising the type from the tx and
-	// checking it against the plan.
+	// the voting-type plan gate (plan.VotingTypes) is not checked here: /processes publish, the
+	// only NewProcessTx builder, runs it in its preflight (OrgAllowsVotingType).
 	// TODO:future check if the streamURL is used and allowed by the plan
 
 	return true, nil
