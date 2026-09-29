@@ -26,9 +26,6 @@ var (
 	// ErrUserNotBelongsToProcess is returned if the user does not has
 	// participation rights.
 	ErrUserNotBelongsToProcess = fmt.Errorf("user does not belong to process")
-	// ErrUserNotBelongsToBundle is returned if the user does not has
-	// participation rights.
-	ErrUserNotBelongsToBundle = fmt.Errorf("user does not belong to process bundle")
 	// ErrInvalidAuthToken is returned if the authtoken does not match with the
 	// process.
 	ErrInvalidAuthToken = fmt.Errorf("invalid authentication token")

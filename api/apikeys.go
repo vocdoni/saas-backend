@@ -20,7 +20,7 @@ const (
 	ScopeQuotaRead    = "quota:read"    // read integrator quota & usage
 	ScopeManagedRead  = "managed:read"  // list managed organizations
 	ScopeManagedWrite = "managed:write" // create managed organizations
-	ScopeVotingWrite  = "voting:write"  // create/publish processes, censuses and bundles
+	ScopeVotingWrite  = "voting:write"  // create/publish processes and censuses
 	ScopeMembersWrite = "members:write" // manage members and groups
 )
 

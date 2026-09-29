@@ -10,7 +10,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
-	"github.com/google/uuid"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
@@ -939,15 +938,6 @@ type OrganizationCensus struct {
 	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
 }
 
-// CensusParticipantsResponse returns the memberIDs of the participants of a census.
-// swagger:model CensusParticipantsResponse
-type CensusParticipantsResponse struct {
-	// Unique identifier for the census
-	CensusID string `json:"censusId"`
-	// List of member IDs of the participants
-	MemberIDs []string `json:"memberIds"`
-}
-
 // OrganizationCensusFromDB converts a db.Census to an OrganizationCensus.
 func OrganizationCensusFromDB(census *db.Census) OrganizationCensus {
 	if census == nil {
@@ -1234,14 +1224,6 @@ type VerifyVotesResponse struct {
 	Votes []VerifiedVote `json:"votes"`
 }
 
-// RelayVoteResponse is returned by POST /vote with the vote nullifier (voteID)
-// assigned on chain.
-// swagger:model RelayVoteResponse
-type RelayVoteResponse struct {
-	// On-chain vote nullifier
-	VoteID internal.HexBytes `json:"voteID" swaggertype:"string" format:"hex" example:"deadbeef"`
-}
-
 // SetProcessStatusRequest is the body of PUT /processes/{processId}/questions/{questionId}/status.
 // swagger:model SetProcessStatusRequest
 type SetProcessStatusRequest struct {
@@ -1255,73 +1237,6 @@ type SetProcessStatusRequest struct {
 type EnqueuedResponse struct {
 	// Opaque job id; poll GET /jobs/{jobId} for the outcome
 	JobID string `json:"jobId" example:"a1b2c3"`
-}
-
-// InitiateAuthRequest defines the payload for participant authentication.
-// swagger:model InitiateAuthRequest
-type InitiateAuthRequest struct {
-	// Unique participant ID
-	ParticipantID string `json:"participantId"`
-
-	// Participant's email address (optional)
-	Email string `json:"email,omitempty"`
-
-	// Participant's phone number (optional)
-	Phone string `json:"phone,omitempty"`
-
-	// Participant's password (optional)
-	Password string `json:"password,omitempty"`
-}
-
-// VerifyAuthRequest defines the payload for auth code verification.
-// swagger:model VerifyAuthRequest
-type VerifyAuthRequest struct {
-	// Authentication token
-	Token string `json:"token"`
-
-	// Verification code
-	Code string `json:"code"`
-}
-
-// GenerateProofRequest defines the payload for generating voting proof.
-// swagger:model GenerateProofRequest
-type GenerateProofRequest struct {
-	// Authentication token
-	Token string `json:"token"`
-
-	// Blinded address for proof generation
-	BlindedAddress []byte `json:"blindedAddress" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
-}
-
-// Two-factor authentication types
-
-// AuthRequest defines the payload for requesting authentication.
-// swagger:model AuthRequest
-type AuthRequest struct {
-	// Authentication token
-	AuthToken *uuid.UUID `json:"authToken,omitempty"`
-
-	// Authentication data (reserved for the auth handler)
-	AuthData []string `json:"authData,omitempty"`
-}
-
-// SignRequest defines the payload for requesting a signature.
-// swagger:model SignRequest
-type SignRequest struct {
-	// Token R value
-	TokenR internal.HexBytes `json:"tokenR" swaggertype:"string" format:"hex" example:"deadbeef"`
-
-	// Authentication token
-	AuthToken *uuid.UUID `json:"authToken"`
-
-	// Blockchain address
-	Address string `json:"address,omitempty"`
-
-	// Payload to sign
-	Payload string `json:"payload,omitempty"`
-
-	// Election ID
-	ElectionID internal.HexBytes `json:"electionId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
 // OAuthLoginRequest defines the payload for register/login through the OAuth service.

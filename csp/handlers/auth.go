@@ -313,7 +313,7 @@ func (c *CSPHandlers) authSecondStep(r *http.Request) (internal.HexBytes, error)
 	case csp.ErrInvalidAuthToken, csp.ErrInvalidSolution, csp.ErrChallengeCodeFailure,
 		csp.ErrTokenExpired, csp.ErrTooManyAttempts:
 		return nil, errors.ErrUnauthorized.WithErr(err)
-	case csp.ErrUserUnknown, csp.ErrUserNotBelongsToBundle:
+	case csp.ErrUserUnknown:
 		return nil, errors.ErrUserNotFound.WithErr(err)
 	case csp.ErrStorageFailure:
 		return nil, errors.ErrInternalStorageError.WithErr(err)
