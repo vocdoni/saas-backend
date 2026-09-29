@@ -453,20 +453,9 @@ func (f OrgMemberTwoFaFields) GetCensusType() CensusType {
 func HashAuthTwoFaFields(memberData OrgMember, authFields OrgMemberAuthFields, twoFaFields OrgMemberTwoFaFields) []byte {
 	data := make([]string, 0, len(twoFaFields)+len(authFields))
 	for _, field := range authFields {
-		switch field {
-		case OrgMemberAuthFieldsName:
-			data = append(data, strings.ToLower(memberData.Name))
-		case OrgMemberAuthFieldsSurname:
-			data = append(data, strings.ToLower(memberData.Surname))
-		case OrgMemberAuthFieldsMemberNumber:
-			data = append(data, strings.ToLower(memberData.MemberNumber))
-		case OrgMemberAuthFieldsNationalID:
-			data = append(data, strings.ToLower(memberData.NationalID))
-		case OrgMemberAuthFieldsBirthDate:
-			data = append(data, strings.ToLower(memberData.BirthDate))
-		default:
-			// Ignore unknown fields
-			continue
+		// unknown fields are ignored
+		if value, known := memberAuthFieldValue(&memberData, field); known {
+			data = append(data, strings.ToLower(value))
 		}
 	}
 	for _, field := range twoFaFields {
