@@ -6355,6 +6355,8 @@ paths:
       description: |-
         Create a multi-question voting process draft. Requires Manager/Admin role of the org
         (or a scoped API key with `voting:write`). Creates the inline census unpublished.
+        Members of `census.groupId` that lack login data and would therefore share the same login
+        credentials are refused with a 400 (40037) whose `data.missingData` lists them.
 
         Each question must define a named `type` — `singlechoice`, `multichoice`, `ranked`
         or `cumulative` — a raw `ballotProtocol`, or both. `multichoice` and `cumulative`
@@ -7510,7 +7512,9 @@ paths:
         produce unique, complete credentials over the target members — a group (groupId), an
         explicit memberIds subset, or the whole organization when neither is set. Returns 400
         with the offending member ids (duplicates / missingData) when the census is not usable,
-        otherwise 200. Requires Manager/Admin role of the organization.
+        otherwise 200. A field that is empty or only whitespace counts as missing data, and
+        members with missing data are never reported as duplicates. Requires Manager/Admin role
+        of the organization.
 
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:

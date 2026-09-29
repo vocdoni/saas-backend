@@ -60,8 +60,9 @@ func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
 	return census.ID.Hex(), nil
 }
 
-// PopulateGroupCensus creates a new census for an organization
-// Returns the hex representation of the census
+// PopulateGroupCensus stores the census and adds every member of the group as a participant,
+// returning the number added. Members with missing login data that would share login credentials
+// are refused with a *CensusMemberCollisionError before anything is written.
 func (ms *MongoStorage) PopulateGroupCensus(
 	census *Census,
 	groupID string,
@@ -106,6 +107,15 @@ func (ms *MongoStorage) PopulateGroupCensus(
 	if !group.IsAutoGroup && len(group.MemberIDs) == 0 {
 		return 0, fmt.Errorf("group has no members")
 	}
+	_, members, err := ms.ListOrganizationMemberGroup(groupID, census.OrgAddress, 0, 0)
+	if err != nil {
+		return 0, fmt.Errorf("error retrieving group members: %w", err)
+	}
+	// members missing the same login data hash identically and would fail the unique login-hash
+	// index halfway through the build: refuse them up front, naming them, before the group is linked
+	if err := missingDataCollisions(census, members); err != nil {
+		return 0, err
+	}
 
 	census.GroupID = group.ID
 	// update the group with the census ID
@@ -114,7 +124,7 @@ func (ms *MongoStorage) PopulateGroupCensus(
 	}
 
 	// set the participants for the census
-	insertedCount, err := ms.setBulkCensusParticipant(ctx, census, groupID)
+	insertedCount, err := ms.setBulkCensusParticipant(ctx, census, members)
 	if err != nil {
 		return 0, fmt.Errorf("error setting census participants: %w", err)
 	}

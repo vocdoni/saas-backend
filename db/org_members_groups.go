@@ -482,14 +482,10 @@ func aggregateMemberFields(
 			return nil, err
 		}
 
-		// if any of the fields are empty, add to missing data and continue to the next member;
-		// we do not check for duplicates in empty rows
-		if hasAnyEmptyField(bm, authFields) {
-			results.MissingData = append(results.MissingData, m.ID)
-			continue
-		}
-
-		if len(twoFaFields) > 0 && hasAllEmptyTwoFaFields(bm, twoFaFields) {
+		// if the member lacks login data (an empty auth field, or no 2FA channel), add to missing data
+		// and continue to the next member; we do not check for duplicates in empty rows, where the
+		// shared value is the absence of one
+		if memberMissingLoginData(&m, authFields, twoFaFields) {
 			results.MissingData = append(results.MissingData, m.ID)
 			continue
 		}
@@ -626,27 +622,6 @@ func mapKeysToSlice[T comparable, V any](m map[T]V) []T {
 		keys = append(keys, k)
 	}
 	return keys
-}
-
-// hasAnyEmptyField returns true if any of the specified fields in the BSON document are empty or nil.
-func hasAnyEmptyField[T ~string](bm bson.M, fields []T) bool {
-	for _, f := range fields {
-		val := fmt.Sprint(bm[string(f)])
-		if val == "" || bm[string(f)] == nil {
-			return true
-		}
-	}
-	return false
-}
-
-// hasAllEmptyField returns true if any of the specified fields in the BSON document are empty or nil.
-func hasAllEmptyTwoFaFields[T ~string](bm bson.M, fields []T) bool {
-	for _, f := range fields {
-		if bm[string(f)] != nil {
-			return false
-		}
-	}
-	return true
 }
 
 // buildCompositeKey constructs a composite key from both auth and 2FA fields.

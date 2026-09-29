@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 )
@@ -189,4 +191,147 @@ func TestProcessesCensusGroupID(t *testing.T) {
 	c.Assert(groups, qt.Contains, group.ID)
 	c.Assert(groups, qt.Contains, "")
 	c.Assert(groups, qt.Not(qt.Contains), bson.NilObjectID.Hex())
+}
+
+// censusIssues is the data of a 400 from the census pre-flight or a census build: the ids of the
+// members that make the census unusable.
+type censusIssues struct {
+	Duplicates  []string `json:"duplicates"`
+	MissingData []string `json:"missingData"`
+}
+
+// expectCensusIssues sends the request, asserts an invalid-data 400 and returns the members it names.
+func expectCensusIssues(t *testing.T, method, jwt string, body any, urlPath ...string) censusIssues {
+	t.Helper()
+	resp, code := testRequest(t, method, jwt, body, urlPath...)
+	qt.Assert(t, code, qt.Equals, http.StatusBadRequest, qt.Commentf("response: %s", resp))
+	var parsed struct {
+		Code int          `json:"code"`
+		Data censusIssues `json:"data"`
+	}
+	qt.Assert(t, json.Unmarshal(resp, &parsed), qt.IsNil, qt.Commentf("response: %s", resp))
+	qt.Assert(t, parsed.Code, qt.Equals, errors.ErrInvalidData.Code, qt.Commentf("response: %s", resp))
+	return parsed.Data
+}
+
+// TestProcessCensusMissingData covers members with empty login fields. The pre-flight
+// (POST /processes/census/validation) reports them as missing data, never as duplicates, and a
+// create/update whose group holds several of them missing the same data (so they would share login
+// credentials) is refused with a 400 naming them, rather than failing the census build with a 500.
+func TestProcessCensusMissingData(t *testing.T) {
+	token := testCreateUser(t, "missingdatapass123")
+	nameNationalID := db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsNationalID}
+	emailOnly := db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail}
+
+	// login is the part of a member the cases vary; everything else keeps newOrgMembers' unique values.
+	type login struct{ name, nationalID, email string }
+
+	for _, tc := range []struct {
+		name    string
+		auth    db.OrgMemberAuthFields
+		twoFa   db.OrgMemberTwoFaFields
+		members []login
+		missing []int // what the pre-flight reports, as indexes into members
+		refused []int // what create/update refuses; empty means the census builds
+	}{
+		{
+			name:  "email 2FA with members that have no email",
+			twoFa: emailOnly,
+			members: []login{
+				{name: "A", email: ""},
+				{name: "B", email: ""},
+				{name: "C", email: ""},
+				{name: "D", email: "d@example.com"},
+			},
+			missing: []int{0, 1, 2},
+			refused: []int{0, 1, 2},
+		},
+		{
+			name: "same auth field missing on two members",
+			auth: nameNationalID,
+			members: []login{
+				{name: "Twin", nationalID: "", email: "twin1@example.com"},
+				{name: "Twin", nationalID: "", email: "twin2@example.com"},
+				{name: "Twin", nationalID: "X1", email: "twin3@example.com"},
+			},
+			missing: []int{0, 1},
+			refused: []int{0, 1},
+		},
+		{
+			name: "missing data without a clash still builds",
+			auth: nameNationalID,
+			members: []login{
+				{name: "Solo", nationalID: "", email: "solo@example.com"},
+				{name: "Other", nationalID: "X1", email: "other@example.com"},
+			},
+			missing: []int{0},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := qt.New(t)
+			orgAddress := testCreateOrganization(t, token)
+			setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+
+			toAdd := newOrgMembers(len(tc.members))
+			for i, l := range tc.members {
+				toAdd[i].Name, toAdd[i].NationalID, toAdd[i].Email = l.name, l.nationalID, l.email
+			}
+			byNumber := make(map[string]string, len(toAdd))
+			for _, m := range postOrgMembers(t, token, orgAddress, toAdd...) {
+				byNumber[m.MemberNumber] = m.ID
+			}
+			ids := make([]string, len(toAdd))
+			for i, m := range toAdd {
+				ids[i] = byNumber[m.MemberNumber]
+				c.Assert(ids[i], qt.Not(qt.Equals), "")
+			}
+			pick := func(idx []int) []string {
+				out := make([]string, 0, len(idx))
+				for _, i := range idx {
+					out = append(out, ids[i])
+				}
+				return out
+			}
+
+			group := postGroup(t, token, orgAddress, ids...)
+			byGroup := apicommon.CensusSpec{AuthFields: tc.auth, TwoFaFields: tc.twoFa, GroupID: group.ID}
+			byMembers := apicommon.CensusSpec{AuthFields: tc.auth, TwoFaFields: tc.twoFa, MemberIDs: ids}
+
+			// the pre-flight reports them as missing data, not duplicates, over the group and the id list
+			for _, spec := range []apicommon.CensusSpec{byGroup, byMembers} {
+				issues := expectCensusIssues(t, http.MethodPost, token,
+					&apicommon.ValidateProcessCensusRequest{OrgAddress: orgAddress.Bytes(), Census: spec},
+					"processes", "census", "validation")
+				c.Assert(issues.Duplicates, qt.HasLen, 0)
+				c.Assert(issues.MissingData, qt.ContentEquals, pick(tc.missing))
+			}
+
+			req := minimalVotingProcessRequest(orgAddress)
+			req.Census = byGroup
+			if len(tc.refused) == 0 {
+				// the census holds them; the member with missing data just cannot log in
+				requestAndAssertCode(http.StatusOK, t, http.MethodPost, token, req, processesCreateEndpoint)
+				return
+			}
+
+			// create, and the update of an existing draft, refuse the clashing members by id
+			draft := requestAndParse[apicommon.CreateVotingProcessResponse](
+				t, http.MethodPost, token, minimalVotingProcessRequest(orgAddress), processesCreateEndpoint)
+			issues := expectCensusIssues(t, http.MethodPost, token, req, processesCreateEndpoint)
+			c.Assert(issues.Duplicates, qt.HasLen, 0)
+			c.Assert(issues.MissingData, qt.ContentEquals, pick(tc.refused))
+			issues = expectCensusIssues(t, http.MethodPut, token, req, "processes", draft.ProcessID)
+			c.Assert(issues.Duplicates, qt.HasLen, 0)
+			c.Assert(issues.MissingData, qt.ContentEquals, pick(tc.refused))
+
+			// a refused build leaves nothing behind: the group backs no census, and the draft keeps
+			// the empty census it was created with
+			stored, err := testDB.OrganizationMemberGroup(group.ID, orgAddress)
+			c.Assert(err, qt.IsNil)
+			c.Assert(stored.CensusIDs, qt.HasLen, 0)
+			got := requestAndParse[apicommon.VotingProcessResponse](
+				t, http.MethodGet, token, nil, "processes", draft.ProcessID)
+			c.Assert(got.Census.Size, qt.Equals, int64(0))
+		})
+	}
 }

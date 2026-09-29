@@ -655,11 +655,8 @@ func (ms *MongoStorage) updateCensusSize(censusID string) error {
 	return nil
 }
 
-func (ms *MongoStorage) setBulkCensusParticipant(ctx context.Context, census *Census, groupID string) (int64, error) {
-	_, members, err := ms.ListOrganizationMemberGroup(groupID, census.OrgAddress, 0, 0)
-	if err != nil {
-		return 0, fmt.Errorf("error retrieving group members: %w", err)
-	}
+// setBulkCensusParticipant upserts the given members as participants of the census.
+func (ms *MongoStorage) setBulkCensusParticipant(ctx context.Context, census *Census, members []*OrgMember) (int64, error) {
 	if len(members) == 0 {
 		return 0, nil // nothing to do
 	}
@@ -861,15 +858,27 @@ func (ms *MongoStorage) CensusParticipantsByMemberIDs(
 	return participants, nil
 }
 
-func calculateParticipantHashesBson(census Census, member OrgMember) bson.M {
-	hashes := bson.M{}
-	hashes["loginHash"] = HashAuthTwoFaFields(member, census.AuthFields, census.TwoFaFields)
-
+// calculateParticipantHashes returns the login hashes a member is stored under as a participant of
+// the census, keyed by the censusParticipants field holding each one. Every such field carries its
+// own unique (censusId, field) index.
+func calculateParticipantHashes(census Census, member OrgMember) map[string][]byte {
+	hashes := map[string][]byte{
+		"loginHash": HashAuthTwoFaFields(member, census.AuthFields, census.TwoFaFields),
+	}
 	if len(census.TwoFaFields) == 2 && len(member.Email) > 0 {
 		hashes["loginHashEmail"] = HashAuthTwoFaFields(member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail})
 	}
 	if len(census.TwoFaFields) == 2 && !member.Phone.IsEmpty() {
 		hashes["loginHashPhone"] = HashAuthTwoFaFields(member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone})
+	}
+	return hashes
+}
+
+// calculateParticipantHashesBson is calculateParticipantHashes as a bson.M, for building queries.
+func calculateParticipantHashesBson(census Census, member OrgMember) bson.M {
+	hashes := bson.M{}
+	for field, hash := range calculateParticipantHashes(census, member) {
+		hashes[field] = hash
 	}
 	return hashes
 }

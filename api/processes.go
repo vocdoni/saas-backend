@@ -41,6 +41,8 @@ func parseProcessDates(req *apicommon.CreateVotingProcessRequest) (start, end ti
 //	@Summary		Create a voting process draft
 //	@Description	Create a multi-question voting process draft. Requires Manager/Admin role of the org
 //	@Description	(or a scoped API key with `voting:write`). Creates the inline census unpublished.
+//	@Description	Members of `census.groupId` that lack login data and would therefore share the same login
+//	@Description	credentials are refused with a 400 (40037) whose `data.missingData` lists them.
 //	@Description
 //	@Description	Each question must define a named `type` — `singlechoice`, `multichoice`, `ranked`
 //	@Description	or `cumulative` — a raw `ballotProtocol`, or both. `multichoice` and `cumulative`

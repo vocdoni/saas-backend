@@ -1,6 +1,7 @@
 package api
 
 import (
+	stderrors "errors"
 	"fmt"
 	"strings"
 	"time"
@@ -41,6 +42,14 @@ func (a *API) resolveOrCreateDefaultCensus(spec apicommon.CensusSpec, orgAddress
 	switch {
 	case spec.GroupID != "":
 		if _, err := a.db.PopulateGroupCensus(census, spec.GroupID); err != nil {
+			// members missing the same login data are the caller's to fix: name them (400), in the
+			// shape the census pre-flight reports them, rather than failing the build with a 500
+			var collision *db.CensusMemberCollisionError
+			if stderrors.As(err, &collision) {
+				return nil, errors.ErrInvalidData.
+					Withf("members with missing data would share login credentials: complete their data or remove them").
+					WithData(collision)
+			}
 			return nil, fmt.Errorf("failed to populate group census: %w", err)
 		}
 		if err := a.subscriptions.OrgCanAddCensusParticipants(orgAddress, censusID, 0); err != nil {
