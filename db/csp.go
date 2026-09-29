@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -422,60 +421,6 @@ func cspAuthTokenStatusID(userID, processID internal.HexBytes) internal.HexBytes
 	return internal.HexBytes(hash[:])
 }
 
-// CountCSPAuthByBundle counts the total number of CSP authentication tokens
-// for a given bundle ID. Returns an error if the anchorID is nil.
-func (ms *MongoStorage) CountCSPAuthByBundle(anchorID internal.HexBytes) (int64, error) {
-	if anchorID == nil {
-		return 0, ErrBadInputs
-	}
-	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-	// count documents matching the bundle ID
-	filter := bson.M{"bundleid": anchorID}
-	var distinctValues []any
-	if err := ms.cspTokens.Distinct(ctx, "userid", filter).Decode(&distinctValues); err != nil {
-		return 0, err
-	}
-	return int64(len(distinctValues)), nil
-}
-
-// CountCSPAuthVerifiedByBundle counts the number of verified CSP authentication
-// tokens for a given bundle ID. Returns an error if the anchorID is nil.
-func (ms *MongoStorage) CountCSPAuthVerifiedByBundle(anchorID internal.HexBytes) (int64, error) {
-	if anchorID == nil {
-		return 0, ErrBadInputs
-	}
-	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-	// count documents matching the bundle ID and verified status
-	filter := bson.M{"bundleid": anchorID, "verified": true}
-	var distinctValues []any
-	if err := ms.cspTokens.Distinct(ctx, "userid", filter).Decode(&distinctValues); err != nil {
-		return 0, err
-	}
-	return int64(len(distinctValues)), nil
-}
-
-// CountCSPProcessConsumedByProcess counts the number of consumed CSP processes
-// for a given process ID. Returns an error if the processID is nil.
-func (ms *MongoStorage) CountCSPProcessConsumedByProcess(processID internal.HexBytes) (int64, error) {
-	if processID == nil {
-		return 0, ErrBadInputs
-	}
-	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-	// count documents matching the process ID and consumed status
-	filter := bson.M{"processid": processID, "consumed": true}
-	var distinctValues []any
-	if err := ms.cspTokensStatus.Distinct(ctx, "userid", filter).Decode(&distinctValues); err != nil {
-		return 0, err
-	}
-	return int64(len(distinctValues)), nil
-}
-
 // CSPProcessByUserAndProcess retrieves the CSP process status for a given
 // user and process. Returns an error if the userID or processID are nil.
 func (ms *MongoStorage) CSPProcessByUserAndProcess(userID, processID internal.HexBytes) (*CSPProcess, error) {
@@ -489,42 +434,6 @@ func (ms *MongoStorage) CSPProcessByUserAndProcess(userID, processID internal.He
 	defer cancel()
 	// fetch the process status
 	return ms.fetchCSPProcessFromDB(ctx, userID, processID)
-}
-
-func (ms *MongoStorage) distinctCSPProcessVotersByProcess(processID internal.HexBytes) ([]string, error) {
-	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// prepare the filter
-	filter := bson.M{"processid": processID, "consumed": true}
-	// execute the distinct operation
-	var results []string
-	var distinctValues []any
-	if err := ms.cspTokensStatus.Distinct(ctx, "userid", filter).Decode(&distinctValues); err != nil {
-		return nil, fmt.Errorf("failed to execute distinct query: %w", err)
-	}
-	// convert results to []internal.HexBytes
-	for _, v := range distinctValues {
-		b, ok := v.(string)
-		if !ok {
-			return nil, fmt.Errorf("unexpected type in distinct results")
-		}
-		results = append(results, b)
-	}
-	return results, nil
-}
-
-func (ms *MongoStorage) GetOrgMembersByProcess(orgAddress common.Address, processID internal.HexBytes) ([]*OrgMember, error) {
-	userids, err := ms.distinctCSPProcessVotersByProcess(processID)
-	if err != nil {
-		return nil, err
-	}
-	_, orgMembers, err := ms.orgMembersByIDs(orgAddress, userids, 0, 0)
-	if err != nil {
-		return nil, err
-	}
-	return orgMembers, nil
 }
 
 // MembersWithUsedCSPProcess returns the subset of the given memberIDs (each the
@@ -566,10 +475,10 @@ func (ms *MongoStorage) MembersWithUsedCSPProcess(
 	return result, nil
 }
 
-// DeleteCSPAuthByBundle removes every CSP authentication token tied to the given bundle.
+// DeleteCSPAuthByAnchor removes every CSP authentication token tied to the given bundle.
 // It is a best-effort cleanup used when tearing down an organization (the bundle's
 // processes share a common census/auth flow). Returns the number of deleted tokens.
-func (ms *MongoStorage) DeleteCSPAuthByBundle(anchorID internal.HexBytes) (int64, error) {
+func (ms *MongoStorage) DeleteCSPAuthByAnchor(anchorID internal.HexBytes) (int64, error) {
 	if anchorID == nil {
 		return 0, ErrBadInputs
 	}

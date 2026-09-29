@@ -530,13 +530,16 @@ func TestLegacyProcessesProjection(t *testing.T) {
 	census, err := testDB.Census(censusID)
 	c.Assert(err, qt.IsNil)
 
-	// legacy shape 1: a db.Process row carrying the election parameters.
+	// legacy shape 1: a db.Process row carrying the election parameters. Its census copy is stale on
+	// purpose: the projection must report the census document (size 7), not the embedded copy.
+	stale := *census
+	stale.Size = 9
 	rowOID := bson.NewObjectID()
 	insertLegacyDoc(t, "processes", db.Process{
 		ID:         rowOID,
 		OrgAddress: orgAddress,
 		Address:    elections[0],
-		Census:     *census,
+		Census:     stale,
 		ElectionParams: &db.ElectionParams{
 			Title: db.MultiLangString{"default": "legacy row"},
 			Questions: []db.Question{{

@@ -287,6 +287,20 @@ func (a *API) processSource(process *db.Process) (*legacyProcessSource, error) {
 	}, nil
 }
 
+// legacyCensus returns the census document a legacy record embeds a copy of: the copy froze at
+// publish, while revocations keep shrinking the document. Falls back to the copy once it is gone.
+func (a *API) legacyCensus(embedded *db.Census) (*db.Census, error) {
+	live, err := a.db.Census(embedded.ID.Hex())
+	switch {
+	case err == nil:
+		return live, nil
+	case stderrors.Is(err, db.ErrNotFound):
+		return embedded, nil
+	default:
+		return nil, fmt.Errorf("could not read legacy census: %w", err)
+	}
+}
+
 // servedByProcessesAPI reports whether an election already backs a /processes question, which the
 // normal path lists and the projection must not duplicate.
 func (a *API) servedByProcessesAPI(electionID internal.HexBytes) (bool, error) {
@@ -364,9 +378,13 @@ func (a *API) projectLegacyProcess(
 	if len(questions) == 0 {
 		return nil, nil
 	}
-	resp := apicommon.VotingProcessResponseFromDB(vp, questions, src.census, a.account.ChainID())
+	census, err := a.legacyCensus(src.census)
+	if err != nil {
+		return nil, err
+	}
+	resp := apicommon.VotingProcessResponseFromDB(vp, questions, census, a.account.ChainID())
 	resp.Legacy = true
-	resp.Census.TotalWeight = a.censusTotalWeight(src.census)
+	resp.Census.TotalWeight = a.censusTotalWeight(census)
 	if cacheable {
 		cached := *resp
 		a.legacyProjectionCache.Add(cacheKey, &cached)

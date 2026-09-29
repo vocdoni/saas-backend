@@ -456,7 +456,7 @@ func TestCensusParticipant(t *testing.T) {
 			c.Assert(err, qt.Equals, ErrNotFound)
 		})
 
-		t.Run("UpdatesCensusSizeAndProcessBundles", func(_ *testing.T) {
+		t.Run("UpdatesCensusSize", func(_ *testing.T) {
 			c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 			member, census := setupTestCensusParticipantPrerequisites(t, "_memberIDs_size")
 
@@ -476,14 +476,6 @@ func TestCensusParticipant(t *testing.T) {
 			_, err = testDB.SetOrgMember("test_salt", member2)
 			c.Assert(err, qt.IsNil)
 
-			bundle := &ProcessesBundle{
-				OrgAddress: testOrgAddress,
-				Census:     *census,
-				Processes:  []internal.HexBytes{internal.HexBytes("process_memberIDs_size")},
-			}
-			bundleID, err := testDB.SetProcessBundle(bundle)
-			c.Assert(err, qt.IsNil)
-
 			err = testDB.SetCensusParticipant(&CensusParticipant{
 				ParticipantID: member.ID.Hex(),
 				CensusID:      census.ID.Hex(),
@@ -499,10 +491,6 @@ func TestCensusParticipant(t *testing.T) {
 			updatedCensus, err := testDB.Census(census.ID.Hex())
 			c.Assert(err, qt.IsNil)
 			c.Assert(updatedCensus.Size, qt.Equals, int64(2))
-
-			updatedBundle, err := testDB.ProcessBundle(bundleID)
-			c.Assert(err, qt.IsNil)
-			c.Assert(updatedBundle.Census.Size, qt.Equals, int64(2))
 
 			added, memberErrors, err = testDB.AddCensusParticipantsByMemberIDs(census.ID.Hex(),
 				[]string{member.ID.Hex(), member2.ID.Hex()})

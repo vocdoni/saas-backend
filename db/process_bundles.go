@@ -1,7 +1,6 @@
 package db
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,77 +9,8 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.vocdoni.io/dvote/log"
 )
-
-// SetProcessBundle creates a new process bundle or updates an existing one.
-// It validates that the organization and census exist before creating or updating the bundle.
-// Returns the bundle ID as a hex string on success.
-func (ms *MongoStorage) SetProcessBundle(bundle *ProcessesBundle) (internal.HexBytes, error) {
-	if bundle.ID.IsZero() {
-		bundle.ID = bson.NewObjectID()
-	}
-
-	// Check that the org exists
-	if _, err := ms.Organization(bundle.OrgAddress); err != nil {
-		return nil, fmt.Errorf("failed to get organization: %w", err)
-	}
-
-	// check that the census exists
-	_, err := ms.Census(bundle.Census.ID.Hex())
-	if err != nil {
-		return nil, fmt.Errorf("failed to get census: %w", err)
-	}
-
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-	// Create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-
-	// If the bundle has an ID, update it, otherwise create a new one
-	filter := bson.M{"_id": bundle.ID}
-	update := bson.M{"$set": bundle}
-	opts := options.UpdateOne().SetUpsert(true)
-
-	if _, err := ms.processBundles.UpdateOne(ctx, filter, update, opts); err != nil {
-		return nil, fmt.Errorf("failed to update process bundle: %w", err)
-	}
-
-	return *new(internal.HexBytes).SetString(bundle.ID.Hex()), nil
-}
-
-// DelProcessBundle removes a process bundle by ID.
-// Returns ErrInvalidData if the bundleID is zero, or ErrNotFound if no bundle with the given ID exists.
-func (ms *MongoStorage) DelProcessBundle(hbBundleID internal.HexBytes) error {
-	bundleID, err := bson.ObjectIDFromHex(hbBundleID.String())
-	if err != nil {
-		return ErrInvalidData
-	}
-	if bundleID.IsZero() {
-		return ErrInvalidData
-	}
-
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-	// Create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-
-	// Delete the process bundle from the database using the ID
-	filter := bson.M{"_id": bundleID}
-	result, err := ms.processBundles.DeleteOne(ctx, filter)
-	if err != nil {
-		return fmt.Errorf("failed to delete process bundle: %w", err)
-	}
-
-	if result.DeletedCount == 0 {
-		return ErrNotFound
-	}
-
-	return nil
-}
 
 // ProcessBundle retrieves a process bundle from the database based on its ID.
 // Returns the bundle with all its associated data including census information and processes.
@@ -106,31 +36,6 @@ func (ms *MongoStorage) ProcessBundle(hbBundleID internal.HexBytes) (*ProcessesB
 	}
 
 	return bundle, nil
-}
-
-// ProcessBundles retrieves all process bundles from the database.
-// Returns a slice of all process bundles with their complete information.
-func (ms *MongoStorage) ProcessBundles() ([]*ProcessesBundle, error) {
-	// Create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-
-	cursor, err := ms.processBundles.Find(ctx, bson.M{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to find process bundles: %w", err)
-	}
-	defer func() {
-		if err := cursor.Close(ctx); err != nil {
-			log.Warnw("failed to close cursor", "error", err)
-		}
-	}()
-
-	var bundles []*ProcessesBundle
-	if err := cursor.All(ctx, &bundles); err != nil {
-		return nil, fmt.Errorf("failed to decode process bundles: %w", err)
-	}
-
-	return bundles, nil
 }
 
 // ProcessBundlesByProcess retrieves process bundles that contain a specific process ID.
@@ -195,56 +100,10 @@ func (ms *MongoStorage) ProcessBundlesByOrg(orgAddress common.Address) ([]*Proce
 	return bundles, nil
 }
 
-// ListOrganizationBundles retrieves process bundles that belong to a specific organization.
-// This allows finding all bundles created by a particular organization with pagination.
-func (ms *MongoStorage) ListOrganizationBundles(orgAddress common.Address, page, limit int64) (int64, []ProcessesBundle, error) {
-	if orgAddress.Cmp(common.Address{}) == 0 {
-		return 0, nil, ErrInvalidData
-	}
-	filter := bson.M{
-		"orgAddress":  orgAddress,
-		"processes.0": bson.M{"$exists": true}, // has at least one process
-	}
-
-	sortedOptions := options.Find().SetSort(bson.D{{Key: "_id", Value: 1}})
-	return paginatedDocuments[ProcessesBundle](ms.processBundles, page, limit, filter, sortedOptions)
-}
-
-// ProcessBundlesByCensus retrieves process bundles that belong to a specific census.
-// This allows finding all bundles created for a particular census.
-func (ms *MongoStorage) ProcessBundlesByCensus(census *Census) ([]*ProcessesBundle, error) {
-	if census == nil || census.ID == bson.NilObjectID {
-		return nil, ErrInvalidData
-	}
-
-	// Create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-
-	// Find bundles where the census._id matches the given ID
-	filter := bson.M{"census._id": census.ID}
-	cursor, err := ms.processBundles.Find(ctx, filter)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find process bundles by census: %w", err)
-	}
-	defer func() {
-		if err := cursor.Close(ctx); err != nil {
-			log.Warnw("failed to close cursor", "error", err)
-		}
-	}()
-
-	var bundles []*ProcessesBundle
-	if err := cursor.All(ctx, &bundles); err != nil {
-		return nil, fmt.Errorf("failed to decode process bundles: %w", err)
-	}
-
-	return bundles, nil
-}
-
 // DeleteProcessBundlesByOrg removes every process bundle owned by the given organization.
 // Best-effort cleanup used when tearing down an organization. Returns the number of
 // deleted bundles. CSP auth tokens tied to those bundles must be cleaned up separately
-// (DeleteCSPAuthByBundle) before or after this call.
+// (DeleteCSPAuthByAnchor) before or after this call.
 func (ms *MongoStorage) DeleteProcessBundlesByOrg(orgAddress common.Address) (int64, error) {
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return 0, ErrInvalidData
@@ -258,67 +117,4 @@ func (ms *MongoStorage) DeleteProcessBundlesByOrg(orgAddress common.Address) (in
 		return 0, fmt.Errorf("failed to delete process bundles by org: %w", err)
 	}
 	return res.DeletedCount, nil
-}
-
-// AddProcessesToBundle adds processes to an existing bundle if they don't already exist.
-// It checks each process to avoid duplicates and only updates the database if new processes were added.
-func (ms *MongoStorage) AddProcessesToBundle(hbBundleID internal.HexBytes, processes []internal.HexBytes) error {
-	bundleID, err := bson.ObjectIDFromHex(hbBundleID.String())
-	if err != nil {
-		return ErrInvalidData
-	}
-	if len(processes) == 0 {
-		return ErrInvalidData
-	}
-
-	bundle, err := ms.ProcessBundle(hbBundleID)
-	if err != nil {
-		return fmt.Errorf("failed to get process bundle: %w", err)
-	}
-
-	if bundle.ID.IsZero() {
-		bundle.ID = bson.NewObjectID()
-	}
-
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-	// Create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-
-	// Check each process and add it if it doesn't already exist in the bundle
-	processesAdded := false
-	for _, newProcess := range processes {
-		exists := false
-		for _, existingProcess := range bundle.Processes {
-			if bytes.Equal(existingProcess, newProcess) {
-				exists = true
-				break
-			}
-		}
-		if !exists {
-			bundle.Processes = append(bundle.Processes, newProcess)
-			processesAdded = true
-		}
-	}
-
-	// If no processes were added, return early
-	if !processesAdded {
-		return nil
-	}
-
-	// Update the bundle in the database
-	filter := bson.M{"_id": bundleID}
-	update := bson.M{"$set": bson.M{"processes": bundle.Processes}}
-	if _, err := ms.processBundles.UpdateOne(ctx, filter, update); err != nil {
-		return fmt.Errorf("failed to update process bundle: %w", err)
-	}
-
-	return nil
-}
-
-// NewBundleID generates a new unique ObjectID for a process bundle.
-// This is used when creating a new bundle to ensure it has a unique identifier.
-func (*MongoStorage) NewBundleID() bson.ObjectID {
-	return bson.NewObjectID()
 }

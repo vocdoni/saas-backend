@@ -498,7 +498,7 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 				"org", managedAddr.Hex(), "bundle", b.ID.Hex(), "error", err)
 			continue
 		}
-		if _, err := a.db.DeleteCSPAuthByBundle(*bundleID); err != nil {
+		if _, err := a.db.DeleteCSPAuthByAnchor(*bundleID); err != nil {
 			log.Warnw("could not delete CSP auth tokens for bundle",
 				"org", managedAddr.Hex(), "bundle", b.ID.Hex(), "error", err)
 		}
