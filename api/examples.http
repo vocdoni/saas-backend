@@ -17,28 +17,6 @@ Authorization: Bearer <user_token>
 GET http://localhost:8080/auth/addresses
 Authorization: Bearer <user_token>
 
-### 🧾 Transactions
-
-### Sign transaction
-POST http://localhost:8080/transactions
-Authorization: Bearer <user_token>
-Content-Type: application/json
-
-{
-  "address": "0x...",
-  "txPayload": "<base64_encoded_protobuf>"
-}
-
-### Sign message
-POST http://localhost:8080/transactions/message
-Authorization: Bearer <user_token>
-Content-Type: application/json
-
-{
-  "address": "0x...",
-  "payload": "<payload_to_sign>"
-}
-
 ### 👥 Users
 
 ### Register user
@@ -244,69 +222,3 @@ Content-Type: image/jpeg
 
 ### Get object
 GET http://localhost:8080/storage/{objectID}
-
-### 📊 Census
-
-### Create census
-POST http://localhost:8080/census
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NDEyMTE2MDc5OTUyOTc2MzgsInVzZXJJZCI6Im1hbm9zKzEwQHZvY2Rvbmkub3JnIn0.Y2DimdC7irK4pdUsI2KmHJ6jijfWTSXuDQ7qVZicxVI
-Content-Type: application/json
-
-{
-  "type": "sms_or_mail",
-  "orgAddress": "0xbB77d65d95308866Ebf2cEf68c16C8bff1859509"
-}
-
-### Get census info
-GET http://localhost:8080/census/{id}
-Authorization: Bearer <user_token>
-
-### Add members
-POST http://localhost:8080/census/{id}
-Authorization: Bearer <user_token>
-Content-Type: application/json
-
-{
-  "members": [
-    {
-      "id": "012345",
-      "email": "member@example.com",
-      "phone": "+1234567890",
-      "password": "secretpass1234"
-    }
-  ]
-}
-
-### Publish census
-POST http://localhost:8080/census/{id}/publish
-Authorization: Bearer <user_token>
-
-### Get published census info
-GET http://localhost:8080/census/{id}/publish
-Authorization: Bearer <user_token>
-
-### Create process
-POST http://localhost:8080/process/{processId}
-Authorization: Bearer <user_token>
-Content-Type: application/json
-
-{
-  "censusRoot": "published_census_root",
-  "censusUri": "published_census_uri",
-  "metadata": "base64_encoded_metadata"
-}
-
-### Get process info
-GET http://localhost:8080/process/{processId}
-Authorization: Bearer <user_token>
-
-### Process authentication
-POST http://localhost:8080/process/{processId}/auth
-Content-Type: application/json
-
-{
-  "memberID": "012345",
-  "email": "member@example.com",
-  "phone": "+1234567890",
-  "password": "secretpass1234"
-}

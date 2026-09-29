@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Vocdoni SaaS backend is a Go service that lets multiple users act on behalf of a single
 organization on the Vocdoni Chain. It also acts as a **remote signer** for the Vocdoni SDK,
 making the service transparent to SDK consumers. It manages organizations, members, censuses,
-voting processes/bundles, subscriptions (Stripe), and a CSP (Credential Service Provider) that
+voting processes, subscriptions (Stripe), and a CSP (Credential Service Provider) that
 authenticates voters and signs their ballots.
 
 ## Commands
@@ -54,23 +54,18 @@ Configuration flows through **Viper with the `VOCDONI_` env prefix** (e.g. `--mo
 `api.New(conf).Start()`. Services are optional and conditionally enabled based on whether their
 config is present (SMTP, Twilio SMS); Stripe is required.
 
-### Two generations of the process API live side by side
+### Voting processes: one question = one on-chain election
 
-This is the single most confusing thing in the codebase, and it is invisible from any one file.
+A `db.VotingProcess` (`/processes`) is a *container* of `db.VotingProcessQuestion`s, and **each
+question is its own on-chain election**, identified after publish by its `UpstreamID`. So a voter
+casts one vote transaction per question, holds one CSP signature per question, and one nullifier
+per question. Anything taking an on-chain election id resolves it with `db.QuestionByUpstreamID`.
+Voter-facing CSP handlers live in `csp/handlers/processes.go`.
 
-- **New (`/processes`, plural)** — a `db.VotingProcess` is a *container* of `db.VotingProcessQuestion`s,
-  and **each question is its own on-chain election**, identified after publish by its `UpstreamID`.
-  So a voter casts one vote transaction per question, holds one CSP signature per question, and one
-  nullifier per question. Anything taking an on-chain election id resolves it with
-  `db.QuestionByUpstreamID`. Voter-facing CSP handlers for this generation live in
-  `csp/handlers/processes.go`.
-- **Legacy (`/process`, singular, and `/process/bundle/...`)** — a `db.Process` *is* one on-chain
-  election, and a "bundle" groups several. Handlers live in `csp/handlers/handlers.go`. Deprecated
-  but still wired; several routes are marked `@Deprecated` in their swag annotations.
-
-Code that must serve both looks up the new collection and falls back to the legacy one — see
-`parseRelayVote` in `api/process_vote.go`, which tries `db.ProcessByAddress` then
-`db.QuestionByUpstreamID`. New work belongs on the `/processes` side; do not extend the legacy path.
+The legacy `/process` + `/process/bundle` API (#722) is gone, but its `processes`/`processBundles`
+collections are still **read**: `GET /processes` projects legacy rows, managed-org teardown deletes
+them, and `parseRelayVote` in `api/process_vote.go` tries `db.ProcessByAddress` before
+`db.QuestionByUpstreamID`. Nothing writes to them anymore — do not add writers.
 
 A consequence worth internalizing: because one voter action fans out to N elections, several
 endpoints exist purely in batch form so a voter cannot end up half-done — `POST /votes` (relay),
