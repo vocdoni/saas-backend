@@ -433,3 +433,55 @@ func TestFreePublishRefusedOverOpenCheckout(t *testing.T) {
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
 }
+
+func TestOrganizationProcessPayments(t *testing.T) {
+	c := qt.New(t)
+	installFakePaymentGW(t)
+	token := testCreateUser(t, "paymentslist123")
+	orgAddress := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(15)...))
+	var pids []string
+	for range 2 {
+		pid := requestAndParse[apicommon.CreateVotingProcessResponse](
+			t, http.MethodPost, token, newVotingProcessRequest(orgAddress, ids), processesCreateEndpoint).ProcessID
+		requestAndAssertCode(http.StatusOK, t, http.MethodPost, token,
+			&apicommon.ProcessCheckoutRequest{ReturnURL: "https://x.example"}, "processes", pid, "checkout")
+		pids = append(pids, pid)
+	}
+	requestAndAssertCode(http.StatusOK, t, http.MethodDelete, token, nil, "processes", pids[0], "checkout")
+
+	list := func(query string) []apicommon.OrganizationProcessPayment {
+		return requestAndParse[apicommon.OrganizationProcessPaymentsResponse](
+			t, http.MethodGet, token, nil, "organizations", orgAddress.String(), "payments"+query).Payments
+	}
+	// by default only the payments still open: the cancelled checkout is failed
+	open := list("")
+	c.Assert(open, qt.HasLen, 1)
+	c.Assert(open[0].ProcessID, qt.Equals, pids[1])
+	c.Assert(open[0].Status, qt.Equals, db.ProcessPaymentPending)
+	c.Assert(open[0].AmountCents, qt.Equals, pricing.Cents(1_515))
+	c.Assert(open[0].Title, qt.Not(qt.HasLen), 0)
+	c.Assert(open[0].Published, qt.IsFalse)
+
+	failed := list("?status=failed")
+	c.Assert(failed, qt.HasLen, 1)
+	c.Assert(failed[0].ProcessID, qt.Equals, pids[0])
+
+	// newest first unless asked otherwise
+	both := list("?status=pending,failed")
+	c.Assert(both, qt.HasLen, 2)
+	c.Assert(both[0].ProcessID, qt.Equals, pids[1])
+	both = list("?status=pending,failed&sortOrder=asc")
+	c.Assert(both, qt.HasLen, 2)
+	c.Assert(both[0].ProcessID, qt.Equals, pids[0])
+
+	requestAndAssertError(errors.ErrMalformedURLParam, t, http.MethodGet, token, nil,
+		"organizations", orgAddress.String(), "payments?status=bogus")
+	requestAndAssertError(errors.ErrMalformedURLParam, t, http.MethodGet, token, nil,
+		"organizations", orgAddress.String(), "payments?sortOrder=up")
+
+	strangerToken := testCreateUser(t, "paymentsstranger123")
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodGet, strangerToken, nil,
+		"organizations", orgAddress.String(), "payments")
+}

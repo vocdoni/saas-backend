@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -530,4 +531,120 @@ func (a *API) releasePendingCheckout(w http.ResponseWriter, payment *db.ProcessP
 		return false
 	}
 	return true
+}
+
+// defaultPaymentStatuses are the payments that still need action — an open checkout, or one
+// being settled — which is what the payments list answers when no status is asked for.
+var defaultPaymentStatuses = []db.ProcessPaymentStatus{db.ProcessPaymentPending, db.ProcessPaymentProcessing}
+
+// organizationProcessPaymentsHandler godoc
+//
+//	@Summary		List the process payments of an organization
+//	@Description	The organization's process payments as stored, filtered by status — by default the
+//	@Description	ones still open (pending, processing), which is how the drafts whose checkout
+//	@Description	blocks publication are found. No live Stripe state is read: poll
+//	@Description	GET /processes/{processId}/checkout for that. Requires Manager/Admin of the organization.
+//	@Tags			organizations
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			orgAddress	path		string	true	"Organization address"
+//	@Param			status		query		string	false	"Comma-separated statuses (default: pending,processing)"
+//	@Param			sortOrder	query		string	false	"Order by creation time (default: desc)"	Enums(asc, desc)
+//	@Param			page		query		integer	false	"Page number (default: 1)"
+//	@Param			limit		query		integer	false	"Number of items per page (default: 10)"
+//	@Success		200			{object}	apicommon.OrganizationProcessPaymentsResponse
+//	@Failure		400			{object}	errors.Error	"Invalid status, sortOrder or pagination"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{orgAddress}/payments [get]
+func (a *API) organizationProcessPaymentsHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	org, _, ok := a.organizationFromRequest(r)
+	if !ok {
+		errors.ErrNoOrganizationProvided.Write(w)
+		return
+	}
+	if !user.HasRoleFor(org.Address, db.AdminRole) && !user.HasRoleFor(org.Address, db.ManagerRole) {
+		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization").Write(w)
+		return
+	}
+	query := r.URL.Query()
+	statuses := defaultPaymentStatuses
+	if raw := query.Get(ParamStatus); raw != "" {
+		statuses = nil
+		for s := range strings.SplitSeq(raw, ",") {
+			status := db.ProcessPaymentStatus(strings.TrimSpace(s))
+			if !status.IsValid() {
+				errors.ErrMalformedURLParam.Withf("invalid %s %q", ParamStatus, status).Write(w)
+				return
+			}
+			statuses = append(statuses, status)
+		}
+	}
+	ascending := false
+	switch sortOrder := query.Get(ParamSortOrder); sortOrder {
+	case "", "desc":
+	case "asc":
+		ascending = true
+	default:
+		errors.ErrMalformedURLParam.Withf("invalid %s %q", ParamSortOrder, sortOrder).Write(w)
+		return
+	}
+	params, err := parsePaginationParams(query.Get(ParamPage), query.Get(ParamLimit))
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
+		return
+	}
+	total, payments, err := a.db.OrganizationProcessPayments(org.Address, db.ProcessPaymentsQuery{
+		Statuses:  statuses,
+		Ascending: ascending,
+		Page:      params.Page,
+		Limit:     params.Limit,
+	})
+	if err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not get process payments: %v", err).Write(w)
+		return
+	}
+	pagination, err := calculatePagination(params.Page, params.Limit, total)
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
+		return
+	}
+	resp := &apicommon.OrganizationProcessPaymentsResponse{
+		Payments:   make([]apicommon.OrganizationProcessPayment, 0, len(payments)),
+		Pagination: pagination,
+	}
+	ids := make([]bson.ObjectID, len(payments))
+	for i := range payments {
+		ids[i] = payments[i].ProcessID
+	}
+	processes, err := a.db.VotingProcessesByIDs(ids)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	for i := range payments {
+		p := &payments[i]
+		item := apicommon.OrganizationProcessPayment{
+			ProcessID:   p.ProcessID.Hex(),
+			Status:      p.Status,
+			AmountCents: p.AmountCents,
+			Currency:    p.Currency,
+			CreatedAt:   p.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		}
+		if !p.PaidAt.IsZero() {
+			item.PaidAt = p.PaidAt.UTC().Format("2006-01-02T15:04:05Z")
+		}
+		// a process no longer there is listed with an empty title
+		if vp, ok := processes[p.ProcessID]; ok {
+			item.Title = vp.Title
+			item.Published = vp.Published
+		}
+		resp.Payments = append(resp.Payments, item)
+	}
+	apicommon.HTTPWriteJSON(w, resp)
 }

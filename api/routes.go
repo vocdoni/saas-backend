@@ -167,6 +167,8 @@ const (
 	// POST starts a one-time checkout that tops up the integrator wallet
 	walletTopUpEndpoint = "/wallet/topup"
 
+	// GET lists the organization's process payments, filtered by status
+	organizationPaymentsEndpoint = "/organizations/{orgAddress}/payments"
 	// POST starts (or resumes) the one-time checkout of a voting process;
 	// GET reports its payment status; DELETE cancels its open checkout
 	processesCheckoutEndpoint = "/processes/{processId}/checkout"
