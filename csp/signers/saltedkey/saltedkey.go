@@ -69,7 +69,7 @@ func NewSaltedKey(privKey string) (*SaltedKey, error) {
 // using the provided Salt.
 func (sk *SaltedKey) SignECDSA(salt [SaltSize]byte, msg []byte) ([]byte, error) {
 	esk := new(vocdonicrypto.SignKeys)
-	if err := esk.AddHexKey(fmt.Sprintf("%x", sk.rootKey.Bytes())); err != nil {
+	if err := esk.AddHexKey(fmt.Sprintf("%x", sk.rootKeyBytes())); err != nil {
 		return nil, fmt.Errorf("cannot sign ECDSA salted: %w", err)
 	}
 	// get the bigNumber from salt
@@ -106,7 +106,7 @@ func (sk *SaltedKey) BlindPubKey() *blind.PublicKey {
 
 // ECDSAPubKey returns the root ecdsa public key for plain signatures
 func (sk *SaltedKey) ECDSAPubKey() (*ecdsa.PublicKey, error) {
-	privK, err := ethcrypto.ToECDSA(sk.rootKey.Bytes())
+	privK, err := ethcrypto.ToECDSA(sk.rootKeyBytes())
 	if err != nil {
 		return nil, err
 	}
@@ -135,4 +135,10 @@ func SaltECDSAPubKey(pubKey *ecdsa.PublicKey, salt [saltedkey.SaltSize]byte) ([]
 	//nolint:staticcheck // SA1019: mutating X/Y is the point of salted-key derivation; predates the Go 1.26 deprecation
 	pubKey.X, pubKey.Y = pubKey.Add(pubKey.X, pubKey.Y, x, y)
 	return ethcrypto.FromECDSAPub(pubKey), nil
+}
+
+// rootKeyBytes returns the root key as a fixed 32-byte big-endian slice. big.Int.Bytes() drops
+// leading zero bytes, which would make a key starting with 0x00 too short for the signers.
+func (sk *SaltedKey) rootKeyBytes() []byte {
+	return sk.rootKey.FillBytes(make([]byte, PrivKeyHexSize/2))
 }

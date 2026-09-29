@@ -89,13 +89,11 @@ func New(conf *Config) *Subscriptions {
 
 // hasElectionMetadataPermissions checks if the organization has permission to create an election with the given metadata.
 func hasElectionMetadataPermissions(process *models.NewProcessTx, plan *db.Plan) (bool, error) {
-	// check ANONYMOUS. Two distinct mechanisms produce an anonymous election, and Features.Anonymous
-	// gates both: the zk-SNARK envelope (EnvelopeType.Anonymous) and blind CSP, which is a normal CSP
-	// census under origin OFF_CHAIN_CA_V2 (its unlinkability comes from the blind signature, so it
-	// deliberately keeps EnvelopeType.Anonymous false — see account.BuildNewProcessTx).
-	anonymous := process.Process.EnvelopeType.Anonymous ||
-		process.Process.CensusOrigin == models.CensusOrigin_OFF_CHAIN_CA_V2
-	if anonymous && !plan.Features.Anonymous {
+	// check ANONYMOUS. Features.Anonymous gates only the zk-SNARK envelope (EnvelopeType.Anonymous).
+	// Blind CSP, the other way to get an anonymous election, is included in every plan: it is a normal
+	// CSP census under origin OFF_CHAIN_CA_V2 whose unlinkability comes from the blind signature, so it
+	// keeps EnvelopeType.Anonymous false (see account.BuildNewProcessTx) and passes this check.
+	if process.Process.EnvelopeType.Anonymous && !plan.Features.Anonymous {
 		return false, fmt.Errorf("anonymous elections are not allowed")
 	}
 

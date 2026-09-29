@@ -1555,7 +1555,8 @@ definitions:
         description: Two-factor authentication sms limit
         type: integer
       anonymous:
-        description: Whether anonymous voting is available
+        description: Whether zk-SNARK anonymous voting is available. Blind-CSP anonymous
+          voting (census.anonymous) is available on every plan.
         type: boolean
       emailReminder:
         description: Whether email reminders are available

@@ -96,9 +96,9 @@ func TestHasTxPermission(t *testing.T) {
 	c.Assert(err, qt.ErrorIs, errors.ErrInvalidData)
 }
 
-// TestHasElectionMetadataPermissionsAnonymous checks that Features.Anonymous gates both anonymity
-// mechanisms: the zk-SNARK envelope (EnvelopeType.Anonymous) and blind CSP, which is a normal CSP
-// census under origin OFF_CHAIN_CA_V2 whose envelope flag deliberately stays false.
+// TestHasElectionMetadataPermissionsAnonymous checks that Features.Anonymous gates only the zk-SNARK
+// envelope (EnvelopeType.Anonymous). Blind CSP, a normal CSP census under origin OFF_CHAIN_CA_V2 whose
+// envelope flag stays false, is included in every plan and passes without the feature.
 func TestHasElectionMetadataPermissionsAnonymous(t *testing.T) {
 	c := qt.New(t)
 	newProcess := func(origin models.CensusOrigin, zkAnon bool) *models.NewProcessTx {
@@ -112,10 +112,10 @@ func TestHasElectionMetadataPermissionsAnonymous(t *testing.T) {
 		return &db.Plan{Features: db.Features{Anonymous: anon}, Organization: db.PlanLimits{MaxDuration: 30}}
 	}
 
-	// blind CSP (OFF_CHAIN_CA_V2) is refused without the feature, allowed with it
+	// blind CSP (OFF_CHAIN_CA_V2) is allowed with or without the feature
 	ok, err := hasElectionMetadataPermissions(newProcess(models.CensusOrigin_OFF_CHAIN_CA_V2, false), planWith(false))
-	c.Assert(err, qt.Not(qt.IsNil))
-	c.Assert(ok, qt.IsFalse)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
 	ok, err = hasElectionMetadataPermissions(newProcess(models.CensusOrigin_OFF_CHAIN_CA_V2, false), planWith(true))
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
@@ -125,10 +125,13 @@ func TestHasElectionMetadataPermissionsAnonymous(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
 
-	// the zk-SNARK anonymous envelope is gated too
+	// the zk-SNARK anonymous envelope is refused without the feature, allowed with it
 	ok, err = hasElectionMetadataPermissions(newProcess(models.CensusOrigin_OFF_CHAIN_TREE, true), planWith(false))
 	c.Assert(err, qt.Not(qt.IsNil))
 	c.Assert(ok, qt.IsFalse)
+	ok, err = hasElectionMetadataPermissions(newProcess(models.CensusOrigin_OFF_CHAIN_TREE, true), planWith(true))
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
 }
 
 func TestHasDBPermission(t *testing.T) {
