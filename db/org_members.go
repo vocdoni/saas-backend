@@ -557,6 +557,24 @@ func (ms *MongoStorage) updateCensusParticipantsForMember(ctx context.Context, m
 			return fmt.Errorf("failed to get census %s: %w", participant.CensusID, err)
 		}
 
+		participantFilter := bson.M{
+			"participantID": participant.ParticipantID,
+			"censusId":      participant.CensusID,
+		}
+		// the edit left the member without the data to log in: drop its login hashes rather than
+		// re-hash it, so it can neither log in nor clash with another participant
+		if member.MissingLoginData(census.AuthFields, census.TwoFaFields) {
+			unset := bson.M{
+				"$unset": bson.M{"loginHash": "", "loginHashEmail": "", "loginHashPhone": ""},
+				"$set":   bson.M{"updatedAt": time.Now()},
+			}
+			if _, err := ms.censusParticipants.UpdateOne(ctx, participantFilter, unset); err != nil {
+				return fmt.Errorf("failed to update census participant %s in census %s: %w",
+					participant.ParticipantID, participant.CensusID, err)
+			}
+			continue
+		}
+
 		// Calculate new hashes based on census configuration
 		hashes := calculateParticipantHashesBson(*census, *member)
 
@@ -583,10 +601,6 @@ func (ms *MongoStorage) updateCensusParticipantsForMember(ctx context.Context, m
 		}
 
 		// Update the census participant
-		participantFilter := bson.M{
-			"participantID": participant.ParticipantID,
-			"censusId":      participant.CensusID,
-		}
 		// Prepare update document for census participant
 		set := maps.Clone(hashes)
 		set["updatedAt"] = time.Now()

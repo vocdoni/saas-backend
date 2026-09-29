@@ -129,9 +129,11 @@ type UpdateQuestionCensusResponse struct {
 	Removed  uint32 `json:"removed"`
 }
 
-// CreateVotingProcessResponse is returned by POST /processes.
+// CreateVotingProcessResponse is returned by POST /processes and PUT /processes/{processId}.
 type CreateVotingProcessResponse struct {
 	ProcessID string `json:"processId"`
+	// MissingData lists the members left out of the census for missing the auth data it requires.
+	MissingData []string `json:"missingData,omitempty"`
 }
 
 // VotingProcessResponse is the full read shape of a voting process, used by the single-read

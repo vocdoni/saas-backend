@@ -1,25 +1,24 @@
 package db
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-// CensusMembersError is returned when members of a census would be stored under the same login
-// hash, which the census keeps under a unique index. MissingData lists those missing required auth
-// data (missing the same data, they hash identically), Duplicates those whose data is complete but
-// hashes like another member's (e.g. names differing only by case, which the hash folds).
+// CensusMembersError is returned when complete members of a census would be stored under the same
+// login hash as another member or participant of the census, which the census keeps under a unique
+// index (e.g. names differing only by case, which the hash folds).
 type CensusMembersError struct {
-	MissingData []bson.ObjectID `json:"missingData"`
-	Duplicates  []bson.ObjectID `json:"duplicates"`
+	Duplicates []bson.ObjectID `json:"duplicates"`
 }
 
 // Error implements the error interface.
 func (e *CensusMembersError) Error() string {
-	return fmt.Sprintf("%d census members are missing required auth data or share login data with another member",
-		len(e.MissingData)+len(e.Duplicates))
+	return fmt.Sprintf("%d census members share login data with another member", len(e.Duplicates))
 }
 
 // MissingLoginData reports whether the member lacks the data to log in to a census with these
@@ -78,45 +77,79 @@ type loginKey struct {
 	hash  string
 }
 
-// sharedLoginHashes returns the members holding a login hash that another of the members holds too:
-// the same hashes the census unique indexes store, so exactly the members that cannot be told apart.
-func sharedLoginHashes(census Census, members []*OrgMember) map[bson.ObjectID]bool {
-	holders := make(map[loginKey][]bson.ObjectID)
-	for _, m := range members {
-		for field, hash := range calculateParticipantHashes(census, *m) {
-			key := loginKey{field: field, hash: string(hash)}
-			holders[key] = append(holders[key], m.ID)
-		}
-	}
-	shared := make(map[bson.ObjectID]bool)
-	for _, ids := range holders {
-		if len(ids) < 2 {
-			continue
-		}
-		for _, id := range ids {
-			shared[id] = true
-		}
-	}
-	return shared
+// censusMember is a member to store as a census participant, with the login hashes it is stored under.
+type censusMember struct {
+	id     bson.ObjectID
+	hashes map[string][]byte
 }
 
-// loginHashClashes returns a *CensusMembersError when members would be stored under the same login
-// hash as another member of the census, which the unique index would refuse halfway through the
-// build. A member missing data that clashes with nobody is left in: it cannot log in anyway.
-func loginHashClashes(census *Census, members []*OrgMember) error {
-	shared := sharedLoginHashes(*census, members)
-	if len(shared) == 0 {
-		return nil
-	}
-	err := &CensusMembersError{MissingData: make([]bson.ObjectID, 0), Duplicates: make([]bson.ObjectID, 0)}
-	for _, m := range members {
-		switch {
-		case !shared[m.ID]:
-		case m.MissingLoginData(census.AuthFields, census.TwoFaFields):
-			err.MissingData = append(err.MissingData, m.ID)
-		default:
-			err.Duplicates = append(err.Duplicates, m.ID)
+// censusMembers splits the members of a census: those missing login data, left out of the census
+// since they could never log in, and the rest with their login hashes, computed once.
+type censusMembers struct {
+	complete []censusMember
+	missing  []bson.ObjectID
+	// holders maps every login key to the members and existing participants holding it
+	holders map[loginKey][]string
+}
+
+// duplicates returns the complete members holding a login hash that another member or existing
+// participant holds too: exactly the ones the census unique indexes would refuse.
+func (cm *censusMembers) duplicates() []bson.ObjectID {
+	dups := make([]bson.ObjectID, 0)
+	for _, m := range cm.complete {
+		for field, hash := range m.hashes {
+			if len(cm.holders[loginKey{field: field, hash: string(hash)}]) > 1 {
+				dups = append(dups, m.id)
+				break
+			}
 		}
 	}
-	return err
+	return dups
+}
+
+// classifyCensusMembers reads the members from cur, a cursor over org members projected to the
+// census login fields (findMemberFieldsCursor), in a single pass. The existing participants of the
+// census, if any, take part in the duplicate check, except for the members being re-stored.
+func classifyCensusMembers(
+	ctx context.Context,
+	cur *mongo.Cursor,
+	census Census,
+	existing []CensusParticipant,
+) (*censusMembers, error) {
+	cm := &censusMembers{missing: make([]bson.ObjectID, 0), holders: make(map[loginKey][]string)}
+	seen := make(map[string]bool)
+	for cur.Next(ctx) {
+		m := &OrgMember{}
+		if err := cur.Decode(m); err != nil {
+			return nil, fmt.Errorf("decoding member: %w", err)
+		}
+		if m.MissingLoginData(census.AuthFields, census.TwoFaFields) {
+			cm.missing = append(cm.missing, m.ID)
+			continue
+		}
+		hashes := calculateParticipantHashes(census, *m)
+		for field, hash := range hashes {
+			key := loginKey{field: field, hash: string(hash)}
+			cm.holders[key] = append(cm.holders[key], m.ID.Hex())
+		}
+		cm.complete = append(cm.complete, censusMember{id: m.ID, hashes: hashes})
+		seen[m.ID.Hex()] = true
+	}
+	if err := cur.Err(); err != nil {
+		return nil, fmt.Errorf("reading members: %w", err)
+	}
+	for _, p := range existing {
+		if seen[p.ParticipantID] {
+			continue // re-stored under its new hashes
+		}
+		for field, hash := range map[string][]byte{
+			"loginHash": p.LoginHash, "loginHashEmail": p.LoginHashEmail, "loginHashPhone": p.LoginHashPhone,
+		} {
+			if len(hash) > 0 {
+				key := loginKey{field: field, hash: string(hash)}
+				cm.holders[key] = append(cm.holders[key], p.ParticipantID)
+			}
+		}
+	}
+	return cm, nil
 }

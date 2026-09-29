@@ -375,9 +375,11 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	inserted, err := a.db.PopulateGroupCensus(census, groupID.String())
+	// members missing auth data are left out; this legacy route does not report them (the group
+	// census pre-flight does)
+	inserted, _, err := a.db.PopulateGroupCensus(census, groupID.String())
 	if err != nil {
-		if apiErr, ok := censusMembersError(err); ok {
+		if apiErr := (errors.Error{}); errors.As(censusBuildError(err), &apiErr) {
 			apiErr.Write(w)
 			return
 		}

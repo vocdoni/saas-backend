@@ -30,7 +30,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 				OrgMemberTwoFaFieldEmail,
 			},
 		}
-		_, err = testDB.PopulateGroupCensus(invalidCensus, "some-group-id")
+		_, _, err = testDB.PopulateGroupCensus(invalidCensus, "some-group-id")
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test with non-existent organization
@@ -40,7 +40,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 				OrgMemberTwoFaFieldEmail,
 			},
 		}
-		_, err = testDB.PopulateGroupCensus(nonExistentCensus, "some-group-id")
+		_, _, err = testDB.PopulateGroupCensus(nonExistentCensus, "some-group-id")
 		c.Assert(err, qt.Not(qt.IsNil))
 		c.Assert(err.Error(), qt.Contains, "invalid data provided")
 
@@ -52,7 +52,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 			},
 		}
 		nonExistentGroupID := bson.NewObjectID().Hex()
-		_, err = testDB.PopulateGroupCensus(nonExistentGroupCensus, nonExistentGroupID)
+		_, _, err = testDB.PopulateGroupCensus(nonExistentGroupCensus, nonExistentGroupID)
 		c.Assert(err, qt.Not(qt.IsNil))
 		c.Assert(err.Error(), qt.Contains, "invalid data provided")
 
@@ -63,7 +63,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 				OrgMemberTwoFaFieldEmail,
 			},
 		}
-		_, err = testDB.PopulateGroupCensus(invalidGroupCensus, "invalid-group-id-format")
+		_, _, err = testDB.PopulateGroupCensus(invalidGroupCensus, "invalid-group-id-format")
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
 
@@ -131,7 +131,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 				OrgMemberTwoFaFieldEmail,
 			},
 		}
-		_, err = testDB.PopulateGroupCensus(census1, group2ID)
+		_, _, err = testDB.PopulateGroupCensus(census1, group2ID)
 		c.Assert(err, qt.Not(qt.IsNil))
 		c.Assert(err.Error(), qt.Contains, "invalid data provided")
 
@@ -145,7 +145,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 				OrgMemberTwoFaFieldEmail,
 			},
 		}
-		_, err = testDB.PopulateGroupCensus(census2, group1ID)
+		_, _, err = testDB.PopulateGroupCensus(census2, group1ID)
 		c.Assert(err, qt.IsNil)
 
 		// Verify the census was created correctly with the group ID
@@ -207,8 +207,8 @@ func TestPopulateGroupCensus(t *testing.T) {
 				OrgMemberTwoFaFieldEmail,
 			},
 		}
-		_, err = testDB.PopulateGroupCensus(census1, groupID)
-		c.Assert(err, qt.ErrorMatches, "group has no members")
+		_, _, err = testDB.PopulateGroupCensus(census1, groupID)
+		c.Assert(err, qt.ErrorMatches, "no members in group .*")
 	})
 
 	t.Run("CensusCreation", func(_ *testing.T) {
@@ -225,10 +225,10 @@ func TestPopulateGroupCensus(t *testing.T) {
 		member := &OrgMember{
 			OrgAddress: testOrgAddress,
 			Email:      "member@example.com",
+			Phone:      HashedPhone("hashed-phone"),
 			Name:       "Test Member",
 		}
 		memberID, err := testDB.SetOrgMember(testSalt, member)
-		c.Assert(err, qt.IsNil)
 		c.Assert(err, qt.IsNil)
 
 		// Create a group
@@ -273,7 +273,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 		time.Sleep(time.Millisecond)
 
 		// Update census
-		inserted, err := testDB.PopulateGroupCensus(createdCensus, groupID)
+		inserted, _, err := testDB.PopulateGroupCensus(createdCensus, groupID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(inserted, qt.Equals, int64(1))
 
@@ -333,7 +333,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 				OrgMemberTwoFaFieldEmail,
 			},
 		}
-		inserted2, err := testDB.PopulateGroupCensus(census2, singleGroupID)
+		inserted2, _, err := testDB.PopulateGroupCensus(census2, singleGroupID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(inserted2, qt.Equals, int64(1))
 
@@ -361,7 +361,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 				OrgMemberTwoFaFieldEmail,
 			},
 		}
-		inserted3, err := testDB.PopulateGroupCensus(census3, multiGroupID)
+		inserted3, _, err := testDB.PopulateGroupCensus(census3, multiGroupID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(inserted3, qt.Equals, int64(2))
 

@@ -41,9 +41,10 @@ func parseProcessDates(req *apicommon.CreateVotingProcessRequest) (start, end ti
 //	@Summary		Create a voting process draft
 //	@Description	Create a multi-question voting process draft. Requires Manager/Admin role of the org
 //	@Description	(or a scoped API key with `voting:write`). Creates the inline census unpublished.
-//	@Description	Members of `census.groupId` missing required auth data cannot vote. Members the census
-//	@Description	cannot tell apart (several missing the same data, or data equal but for case) are refused
-//	@Description	with a 400 (40037) whose `data.missingData` and `data.duplicates` list them.
+//	@Description	Census members missing required auth data (an empty auth field, or no 2FA channel) could
+//	@Description	never log in: they are left out of the census and listed in the response `missingData`.
+//	@Description	Members the census cannot tell apart (data equal but for case, or equal to a participant
+//	@Description	already in the census) are refused with a 400 (40037) whose `data.duplicates` lists them.
 //	@Description
 //	@Description	Each question must define a named `type` — `singlechoice`, `multichoice`, `ranked`
 //	@Description	or `cumulative` — a raw `ballotProtocol`, or both. `multichoice` and `cumulative`
@@ -119,7 +120,7 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrMalformedBody.WithErr(err).Write(w)
 		return
 	}
-	census, err := a.resolveOrCreateDefaultCensus(req.Census, orgAddr)
+	census, missing, err := a.resolveOrCreateDefaultCensus(req.Census, orgAddr)
 	if err != nil {
 		writeSubscriptionError(w, err)
 		return
@@ -159,7 +160,7 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	apicommon.HTTPWriteJSON(w, apicommon.CreateVotingProcessResponse{ProcessID: vpID.Hex()})
+	apicommon.HTTPWriteJSON(w, apicommon.CreateVotingProcessResponse{ProcessID: vpID.Hex(), MissingData: missing})
 }
 
 // buildQuestions resolves and validates the questions of a voting process in memory — including
@@ -366,15 +367,16 @@ func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id bson.ObjectID, u
 //	@Description	rejected with 409 (40171) if anything wrote the process in between, so two editors cannot
 //	@Description	overwrite each other. Omitting updatedAt opts out of that guarantee and keeps last-writer-wins.
 //	@Description
-//	@Description	Census members the census cannot tell apart are refused as on create: a 400 (40037) whose
-//	@Description	`data.missingData` and `data.duplicates` list them.
+//	@Description	Census members are handled as on create: those missing required auth data are left out
+//	@Description	and listed in `missingData`, and those the census cannot tell apart are a 400 (40037)
+//	@Description	whose `data.duplicates` lists them.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			processId	path		string									true	"Process ID"
 //	@Param			request		body		apicommon.CreateVotingProcessRequest	true	"Voting process"
-//	@Success		200			{string}	string									"OK"
+//	@Success		200			{object}	apicommon.CreateVotingProcessResponse
 //	@Failure		400			{object}	errors.Error
 //	@Failure		401			{object}	errors.Error
 //	@Failure		404			{object}	errors.Error
@@ -423,7 +425,7 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	// one is reaped only after the update fully succeeds, so a failed edit neither orphans the
 	// new census nor destroys the old draft.
 	oldCensusID := vp.CensusID
-	census, err := a.resolveOrCreateDefaultCensus(req.Census, vp.OrgAddress)
+	census, missing, err := a.resolveOrCreateDefaultCensus(req.Census, vp.OrgAddress)
 	if err != nil {
 		writeSubscriptionError(w, err)
 		return
@@ -472,7 +474,7 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	if oldCensusID != census.ID {
 		_ = a.db.DelCensus(oldCensusID.Hex())
 	}
-	apicommon.HTTPWriteOK(w)
+	apicommon.HTTPWriteJSON(w, apicommon.CreateVotingProcessResponse{ProcessID: vp.ID.Hex(), MissingData: missing})
 }
 
 // votingProcessInfoHandler godoc

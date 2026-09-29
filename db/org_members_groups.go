@@ -453,45 +453,31 @@ func (ms *MongoStorage) CheckMembersFields(
 }
 
 // aggregateMemberFields iterates a members cursor (projected to the given auth/2FA fields) and
-// classifies each member as valid, missing-data, or duplicate. Duplicates are members sharing a login
-// hash, the same definition the census build refuses (sharedLoginHashes).
+// classifies each member as valid, missing-data, or duplicate, exactly as the census build does
+// (classifyCensusMembers): missing-data members are left out of the census, duplicates refuse it.
 func aggregateMemberFields(
 	ctx context.Context,
 	cur *mongo.Cursor,
 	authFields OrgMemberAuthFields,
 	twoFaFields OrgMemberTwoFaFields,
 ) (*OrgMemberAggregationResults, error) {
-	results := OrgMemberAggregationResults{
-		Members:     make([]bson.ObjectID, 0),
-		Duplicates:  make([]bson.ObjectID, 0),
-		MissingData: make([]bson.ObjectID, 0),
-		NotFound:    make([]bson.ObjectID, 0),
-	}
-
-	complete := make([]*OrgMember, 0, cur.RemainingBatchLength())
-	for cur.Next(ctx) {
-		m := &OrgMember{}
-		if err := cur.Decode(m); err != nil {
-			return nil, err
-		}
-		// if the member lacks login data (an empty auth field, or no 2FA channel), add to missing data;
-		// we do not check for duplicates in empty rows, where the shared value is the absence of one
-		if m.MissingLoginData(authFields, twoFaFields) {
-			results.MissingData = append(results.MissingData, m.ID)
-			continue
-		}
-		complete = append(complete, m)
-	}
-	if err := cur.Err(); err != nil {
+	cm, err := classifyCensusMembers(ctx, cur, Census{AuthFields: authFields, TwoFaFields: twoFaFields}, nil)
+	if err != nil {
 		return nil, err
 	}
-
-	shared := sharedLoginHashes(Census{AuthFields: authFields, TwoFaFields: twoFaFields}, complete)
-	for _, m := range complete {
-		if shared[m.ID] {
-			results.Duplicates = append(results.Duplicates, m.ID)
-		} else {
-			results.Members = append(results.Members, m.ID)
+	results := OrgMemberAggregationResults{
+		Members:     make([]bson.ObjectID, 0, len(cm.complete)),
+		Duplicates:  cm.duplicates(),
+		MissingData: cm.missing,
+		NotFound:    make([]bson.ObjectID, 0),
+	}
+	dup := make(map[bson.ObjectID]bool, len(results.Duplicates))
+	for _, id := range results.Duplicates {
+		dup[id] = true
+	}
+	for _, m := range cm.complete {
+		if !dup[m.id] {
+			results.Members = append(results.Members, m.id)
 		}
 	}
 	return &results, nil
@@ -506,42 +492,34 @@ func (ms *MongoStorage) getGroupMembersFields(
 	authFields OrgMemberAuthFields,
 	twoFaFields OrgMemberTwoFaFields,
 ) (*mongo.Cursor, error) {
-	// 1) Build find filter and projection
-	filter := bson.D{
-		{Key: "orgAddress", Value: orgAddress},
+	// without a group, the whole member base
+	if len(groupID) == 0 {
+		return ms.findMemberFieldsCursor(ctx, bson.D{{Key: "orgAddress", Value: orgAddress}}, authFields, twoFaFields)
 	}
-	// in case a groupID is provided, fetch the group and its members and
-	// extend the filter to include only those members
-	if len(groupID) > 0 {
-		group, err := ms.OrganizationMemberGroup(groupID, orgAddress)
-		if err != nil {
-			if err == ErrNotFound {
-				return nil, fmt.Errorf("group %s not found for organization %s: %w", groupID, orgAddress, ErrInvalidData)
-			}
-			return nil, fmt.Errorf("failed to fetch group %s for organization %s: %w", groupID, orgAddress, err)
+	group, err := ms.OrganizationMemberGroup(groupID, orgAddress)
+	if err != nil {
+		if err == ErrNotFound {
+			return nil, fmt.Errorf("group %s not found for organization %s: %w", groupID, orgAddress, ErrInvalidData)
 		}
-		// Auto groups always contain every member; no extra ID filter is needed.
-		// For regular groups, restrict to the stored member IDs.
-		if !group.IsAutoGroup {
-			// Check if the group has members
-			if len(group.MemberIDs) == 0 {
-				return nil, fmt.Errorf("no members in group %s for organization %s: %w", groupID, orgAddress, ErrInvalidData)
-			}
-			objectIDs := make([]bson.ObjectID, len(group.MemberIDs))
-			for i, id := range group.MemberIDs {
-				objID, err := bson.ObjectIDFromHex(id)
-				if err != nil {
-					return nil, fmt.Errorf("invalid member ID %s: %w", id, ErrInvalidData)
-				}
-				objectIDs[i] = objID
-			}
-			if len(objectIDs) > 0 {
-				filter = append(filter, bson.E{Key: "_id", Value: bson.M{"$in": objectIDs}})
-			}
-		}
+		return nil, fmt.Errorf("failed to fetch group %s for organization %s: %w", groupID, orgAddress, err)
 	}
-
+	filter, err := groupMembersFilter(group)
+	if err != nil {
+		return nil, err
+	}
 	return ms.findMemberFieldsCursor(ctx, filter, authFields, twoFaFields)
+}
+
+// groupMembersFilter returns the orgMembers filter matching the members of the group: the whole
+// member base for an auto group, the stored member IDs otherwise.
+func groupMembersFilter(group *OrganizationMemberGroup) (bson.D, error) {
+	if group.IsAutoGroup {
+		return bson.D{{Key: "orgAddress", Value: group.OrgAddress}}, nil
+	}
+	if len(group.MemberIDs) == 0 {
+		return nil, fmt.Errorf("no members in group %s for organization %s: %w", group.ID.Hex(), group.OrgAddress, ErrInvalidData)
+	}
+	return membersFilter(group.OrgAddress, group.MemberIDs)
 }
 
 // getMembersFields returns a projected members cursor for an explicit set of member IDs of an
@@ -553,6 +531,15 @@ func (ms *MongoStorage) getMembersFields(
 	authFields OrgMemberAuthFields,
 	twoFaFields OrgMemberTwoFaFields,
 ) (*mongo.Cursor, error) {
+	filter, err := membersFilter(orgAddress, memberIDs)
+	if err != nil {
+		return nil, err
+	}
+	return ms.findMemberFieldsCursor(ctx, filter, authFields, twoFaFields)
+}
+
+// membersFilter returns the orgMembers filter matching the given member IDs of the organization.
+func membersFilter(orgAddress common.Address, memberIDs []string) (bson.D, error) {
 	objectIDs := make([]bson.ObjectID, len(memberIDs))
 	for i, id := range memberIDs {
 		objID, err := bson.ObjectIDFromHex(id)
@@ -561,11 +548,10 @@ func (ms *MongoStorage) getMembersFields(
 		}
 		objectIDs[i] = objID
 	}
-	filter := bson.D{
+	return bson.D{
 		{Key: "orgAddress", Value: orgAddress},
 		{Key: "_id", Value: bson.M{"$in": objectIDs}},
-	}
-	return ms.findMemberFieldsCursor(ctx, filter, authFields, twoFaFields)
+	}, nil
 }
 
 // findMemberFieldsCursor runs a projected find over orgMembers for the given filter, returning only

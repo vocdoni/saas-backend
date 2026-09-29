@@ -575,6 +575,12 @@ definitions:
     type: object
   apicommon.CreateVotingProcessResponse:
     properties:
+      missingData:
+        description: MissingData lists the members left out of the census for missing
+          the auth data it requires.
+        items:
+          type: string
+        type: array
       processId:
         type: string
     type: object
@@ -6356,9 +6362,10 @@ paths:
       description: |-
         Create a multi-question voting process draft. Requires Manager/Admin role of the org
         (or a scoped API key with `voting:write`). Creates the inline census unpublished.
-        Members of `census.groupId` missing required auth data cannot vote. Members the census
-        cannot tell apart (several missing the same data, or data equal but for case) are refused
-        with a 400 (40037) whose `data.missingData` and `data.duplicates` list them.
+        Census members missing required auth data (an empty auth field, or no 2FA channel) could
+        never log in: they are left out of the census and listed in the response `missingData`.
+        Members the census cannot tell apart (data equal but for case, or equal to a participant
+        already in the census) are refused with a 400 (40037) whose `data.duplicates` lists them.
 
         Each question must define a named `type` — `singlechoice`, `multichoice`, `ranked`
         or `cumulative` — a raw `ballotProtocol`, or both. `multichoice` and `cumulative`
@@ -6497,8 +6504,9 @@ paths:
         rejected with 409 (40171) if anything wrote the process in between, so two editors cannot
         overwrite each other. Omitting updatedAt opts out of that guarantee and keeps last-writer-wins.
 
-        Census members the census cannot tell apart are refused as on create: a 400 (40037) whose
-        `data.missingData` and `data.duplicates` list them.
+        Census members are handled as on create: those missing required auth data are left out
+        and listed in `missingData`, and those the census cannot tell apart are a 400 (40037)
+        whose `data.duplicates` lists them.
       parameters:
       - description: Process ID
         in: path
@@ -6517,7 +6525,7 @@ paths:
         "200":
           description: OK
           schema:
-            type: string
+            $ref: '#/definitions/apicommon.CreateVotingProcessResponse'
         "400":
           description: Bad Request
           schema:
