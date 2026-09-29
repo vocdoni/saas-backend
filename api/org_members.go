@@ -81,6 +81,8 @@ func (a *API) sendMembersImportCompletionEmail(ctx context.Context, user *db.Use
 //	@Param			page		query		integer	false	"Page number (default: 1)"
 //	@Param			limit		query		integer	false	"Number of items per page (default: 10)"
 //	@Param			search		query		string	false	"Search term for member properties"
+//	@Param			sortBy		query		string	false	"Column to order by (default: name)"	Enums(name, surname, email, memberNumber)
+//	@Param			sortOrder	query		string	false	"Sort direction (default: asc)"			Enums(asc, desc)
 //	@Success		200			{object}	apicommon.OrganizationMembersResponse
 //	@Failure		400			{object}	errors.Error	"Invalid input"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
@@ -113,9 +115,31 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 	params, err := parsePaginationParams(r.URL.Query().Get(ParamPage), r.URL.Query().Get(ParamLimit))
 	if err != nil {
 		errors.ErrMalformedURLParam.WithErr(err).Write(w)
+		return
 	}
 
-	totalItems, members, err := a.db.OrgMembers(org.Address, params.Page, params.Limit, search)
+	sortBy := db.OrgMemberSortField(r.URL.Query().Get(ParamSortBy))
+	if sortBy != "" && !sortBy.IsValid() {
+		errors.ErrMalformedURLParam.Withf("invalid %s %q", ParamSortBy, sortBy).Write(w)
+		return
+	}
+	var descending bool
+	switch sortOrder := r.URL.Query().Get(ParamSortOrder); sortOrder {
+	case "", "asc":
+	case "desc":
+		descending = true
+	default:
+		errors.ErrMalformedURLParam.Withf("invalid %s %q", ParamSortOrder, sortOrder).Write(w)
+		return
+	}
+
+	totalItems, members, err := a.db.OrgMembers(org.Address, db.OrgMembersQuery{
+		Page:       params.Page,
+		Limit:      params.Limit,
+		Search:     search,
+		SortBy:     sortBy,
+		Descending: descending,
+	})
 	if err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not get org members: %v", err).Write(w)
 		return

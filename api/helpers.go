@@ -21,8 +21,10 @@ import (
 // These consts define the keywords for query (?param=), url (/url/param/) and POST params.
 // Note: In JS/TS acronyms like "ID" are camelCased as in "Id".
 const (
-	ParamPage  = "page"
-	ParamLimit = "limit"
+	ParamPage      = "page"
+	ParamLimit     = "limit"
+	ParamSortBy    = "sortBy"
+	ParamSortOrder = "sortOrder"
 )
 
 var (
