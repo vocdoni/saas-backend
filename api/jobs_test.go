@@ -12,6 +12,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 )
 
 // TestJobStatusImportErrorsGatedByRole verifies that member-import error strings — which can embed
@@ -82,4 +83,9 @@ func TestJobStatusImportErrorsGatedByRole(t *testing.T) {
 	}
 	c.Assert(found, qt.Not(qt.IsNil), qt.Commentf("seeded job not found in the admin list"))
 	c.Assert(found.Errors, qt.Contains, importErr)
+}
+
+// TestJobStatusNotFound asserts an unknown job id returns 404.
+func TestJobStatusNotFound(t *testing.T) {
+	requestAndAssertError(errors.ErrJobNotFound, t, http.MethodGet, "", nil, "jobs", "deadbeefdeadbeef")
 }

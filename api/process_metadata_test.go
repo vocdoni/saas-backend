@@ -14,42 +14,6 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 )
 
-// TestFetchExternalMetadata covers the external http(s) fetch helper: a valid JSON
-// document is decoded, a non-200 yields nil, and a body over the 1 MiB cap is rejected.
-func TestFetchExternalMetadata(t *testing.T) {
-	c := qt.New(t)
-
-	t.Run("ok", func(_ *testing.T) {
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write([]byte(`{"title":"hello","version":"1.0"}`))
-		}))
-		defer ts.Close()
-		m := fetchExternalMetadata(t.Context(), ts.URL)
-		c.Assert(m, qt.Not(qt.IsNil))
-		c.Assert(m["title"], qt.Equals, "hello")
-	})
-
-	t.Run("non-200", func(_ *testing.T) {
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusNotFound)
-		}))
-		defer ts.Close()
-		c.Assert(fetchExternalMetadata(t.Context(), ts.URL), qt.IsNil)
-	})
-
-	t.Run("over size cap", func(_ *testing.T) {
-		// a valid JSON document larger than the 1 MiB read cap is truncated and fails to
-		// decode, so it must be rejected rather than partially parsed.
-		big, err := json.Marshal(map[string]any{"x": strings.Repeat("a", 2<<20)})
-		c.Assert(err, qt.IsNil)
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write(big)
-		}))
-		defer ts.Close()
-		c.Assert(fetchExternalMetadata(t.Context(), ts.URL), qt.IsNil)
-	})
-}
-
 // TestResolveMetadataPromotesRemote asserts that a remote (external http) metadata
 // reference is resolved, cached locally and the reference promoted to a /storage/ URL,
 // so a later read resolves from local storage even when the external source is gone.

@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -401,31 +400,6 @@ func (a *API) resolveProcessMetadata(ctx context.Context, p *db.Process) map[str
 	return m
 }
 
-// fetchExternalMetadata best-effort downloads and JSON-decodes a metadata document from
-// an external http(s) reference (one that does not point at our own object storage).
-// Returns nil on any failure.
-func fetchExternalMetadata(ctx context.Context, url string) map[string]any {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return nil
-	}
-	var m map[string]any
-	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&m) != nil { // 1 MiB cap
-		return nil
-	}
-	return m
-}
-
 // organizationListProcessDraftsHandler godoc
 //
 //	@Summary		Get paginated list of process drafts
@@ -552,47 +526,6 @@ func (a *API) deleteProcessHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	apicommon.HTTPWriteOK(w)
-}
-
-// reserveManagedProcessSlot reserves one process slot against the integrator's shared
-// ManagedProcesses quota when org is a managed organization publishing a non-test-sized
-// election. It returns the integrator address and reserved=true when a slot was taken — the
-// caller MUST roll it back with AddOrganizationManagedProcesses(integratorAddr, -1) if the
-// publish/sign later fails. For a standalone org or a test-sized election it is a no-op
-// (reserved=false, nil error).
-//
-// HasTxPermission skips the per-org process-count check for managed orgs precisely because
-// this integrator-level reservation enforces it instead; every NEW_PROCESS entry point (draft
-// publish and the remote-signer /transactions path) must call this so the two cannot drift.
-func (a *API) reserveManagedProcessSlot(org *db.Organization, maxCensusSize uint64) (common.Address, bool, error) {
-	// draft creation already rejects integrator top-level orgs, but a caller reaching
-	// /transactions NEW_PROCESS directly would skip that check.
-	if org.ManagedBy == (common.Address{}) && a.subscriptions.IsIntegrator(org) {
-		return common.Address{}, false, errors.ErrIntegratorTopLevelOrgCannotOwnProcess
-	}
-	if org.ManagedBy == (common.Address{}) || maxCensusSize <= uint64(db.TestMaxCensusSize) {
-		return common.Address{}, false, nil
-	}
-	integrator, err := a.db.Organization(org.ManagedBy)
-	if err != nil {
-		// a managed org whose integrator no longer exists is a not-found condition, not a
-		// server fault — map it like subscriptions.limitsOwner does rather than 500.
-		if err == db.ErrNotFound {
-			return common.Address{}, false, errors.ErrOrganizationNotFound.WithErr(err)
-		}
-		return common.Address{}, false, errors.ErrGenericInternalServerError.Withf("could not get integrator organization: %v", err)
-	}
-	maxProcesses, err := a.subscriptions.ManagedPublishLimits(integrator)
-	if err != nil {
-		return common.Address{}, false, err
-	}
-	if err := a.db.ReserveManagedPublish(integrator.Address, maxProcesses); err != nil {
-		if err == db.ErrManagedQuotaReached {
-			return common.Address{}, false, errors.ErrIntegratorQuotaExceeded
-		}
-		return common.Address{}, false, errors.ErrGenericInternalServerError.WithErr(err)
-	}
-	return integrator.Address, true, nil
 }
 
 // publishProcessHandler godoc

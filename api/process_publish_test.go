@@ -10,7 +10,6 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
-	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/types"
 )
@@ -92,9 +91,4 @@ func TestPublishProcess(t *testing.T) {
 	resp2 := requestAndParse[apicommon.PublishProcessResponse](
 		t, http.MethodPost, token, nil, "process", draftID.Hex(), "publish")
 	c.Assert(resp2.Address.String(), qt.Equals, job.Result.Address.String())
-}
-
-// TestJobStatusNotFound asserts an unknown job id returns 404.
-func TestJobStatusNotFound(t *testing.T) {
-	requestAndAssertError(errors.ErrJobNotFound, t, http.MethodGet, "", nil, "jobs", "deadbeefdeadbeef")
 }

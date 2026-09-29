@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"io"
 	"math"
+	"net/http"
 	"slices"
 	"strings"
 	"time"
@@ -801,4 +803,29 @@ func isVotingProcessIDShape(raw string) bool {
 	}
 	var electionID internal.HexBytes
 	return electionID.ParseString(raw) == nil && len(electionID) == 32
+}
+
+// fetchExternalMetadata best-effort downloads and JSON-decodes a metadata document from
+// an external http(s) reference (one that does not point at our own object storage).
+// Returns nil on any failure.
+func fetchExternalMetadata(ctx context.Context, url string) map[string]any {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	var m map[string]any
+	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&m) != nil { // 1 MiB cap
+		return nil
+	}
+	return m
 }
