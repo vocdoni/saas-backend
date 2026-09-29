@@ -530,7 +530,9 @@ func TestLegacyProcessesProjection(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 
 	// legacy shape 1: a db.Process row carrying the election parameters.
-	rowOID, err := testDB.SetProcess(&db.Process{
+	rowOID := bson.NewObjectID()
+	insertLegacyDoc(t, "processes", db.Process{
+		ID:         rowOID,
 		OrgAddress: orgAddress,
 		Address:    elections[0],
 		Census:     *census,
@@ -542,16 +544,16 @@ func TestLegacyProcessesProjection(t *testing.T) {
 			}},
 		},
 	})
-	c.Assert(err, qt.IsNil)
 
 	// a bundle registering the same election is not a second record: the row wins, because it
 	// carries the election parameters and needs no chain round-trip for its content.
-	bundleID, err := testDB.SetProcessBundle(&db.ProcessesBundle{
+	bundleID := bson.NewObjectID()
+	insertLegacyDoc(t, "processBundles", db.ProcessesBundle{
+		ID:         bundleID,
 		OrgAddress: orgAddress,
 		Census:     *census,
 		Processes:  []internal.HexBytes{elections[0]},
 	})
-	c.Assert(err, qt.IsNil)
 
 	// the list now holds the kept process plus the legacy record, and counts both.
 	list := requestAndParse[apicommon.VotingProcessListResponse](
@@ -567,11 +569,11 @@ func TestLegacyProcessesProjection(t *testing.T) {
 	c.Assert(ok, qt.IsTrue)
 	c.Assert(legacy.Legacy, qt.IsTrue)
 	// deduped: the bundle registers an election the row already owns, so it is not listed itself.
-	_, duplicated := byID[bundleID.String()]
+	_, duplicated := byID[bundleID.Hex()]
 	c.Assert(duplicated, qt.IsFalse)
 	// and not readable under the bundle id either: the record the list attributes to the row must
 	// not answer a second time under another id.
-	requestAndAssertCode(http.StatusNotFound, t, http.MethodGet, token, nil, "processes", bundleID.String())
+	requestAndAssertCode(http.StatusNotFound, t, http.MethodGet, token, nil, "processes", bundleID.Hex())
 
 	// content from the stored params, live state from the chain.
 	c.Assert(legacy.Title, qt.DeepEquals, db.MultiLangString{"default": "legacy row"})

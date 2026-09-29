@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -344,6 +345,93 @@ func TestProcessCensusMissingData(t *testing.T) {
 					t, http.MethodGet, token, nil, "processes", draft.ProcessID)
 				c.Assert(got.Census.Size, qt.Equals, int64(0))
 			}
+		})
+	}
+}
+
+// TestProcessCensusExceedsTwoFaAllowance spends a plan's whole email (or SMS) allowance through
+// real CSP challenges and asserts the next draft over that channel fails validation, while a
+// draft over the other channel stays valid.
+func TestProcessCensusExceedsTwoFaAllowance(t *testing.T) {
+	cases := []struct {
+		name    string
+		spent   db.OrgMemberTwoFaFields
+		other   db.OrgMemberTwoFaFields
+		limit   func(*db.Plan, int)
+		authReq func(apicommon.OrgMember) *handlers.AuthRequest
+		wantErr errors.Error
+	}{
+		{
+			name:  "email",
+			spent: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail},
+			other: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldPhone},
+			limit: func(p *db.Plan, n int) { p.Features.TwoFaEmail = n },
+			authReq: func(m apicommon.OrgMember) *handlers.AuthRequest {
+				return &handlers.AuthRequest{MemberNumber: m.MemberNumber, Name: m.Name, Email: m.Email}
+			},
+			wantErr: errors.ErrProcessCensusSizeExceedsEmailAllowance,
+		},
+		{
+			name:  "sms",
+			spent: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldPhone},
+			other: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail},
+			limit: func(p *db.Plan, n int) { p.Features.TwoFaSms = n },
+			authReq: func(m apicommon.OrgMember) *handlers.AuthRequest {
+				return &handlers.AuthRequest{MemberNumber: m.MemberNumber, Name: m.Name, Phone: m.Phone}
+			},
+			wantErr: errors.ErrProcessCensusSizeExceedsSMSAllowance,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := qt.New(t)
+			token := testCreateUser(t, "adminpassword123")
+			orgAddress := testCreateProvisionedOrganization(t, token)
+			// the API masks phones on read, so authenticate with the posted (raw) members
+			raw := newOrgMembers(3)
+			members := postOrgMembers(t, token, orgAddress, raw...)
+
+			// a plan whose allowance on the tested channel covers exactly these members
+			plan := *mockEssentialPlan
+			plan.ID += "_allowance_" + tc.name
+			tc.limit(&plan, len(members))
+			c.Assert(testDB.SetPlan(&plan), qt.IsNil)
+			setOrganizationSubscription(t, orgAddress, plan.ID)
+
+			authFields := db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber, db.OrgMemberAuthFieldsName}
+			census := func(twoFa db.OrgMemberTwoFaFields) apicommon.CensusSpec {
+				return apicommon.CensusSpec{AuthFields: authFields, TwoFaFields: twoFa, MemberIDs: memberIDs(members)}
+			}
+			pid, _ := publishCensusProcess(t, token, orgAddress, census(tc.spent), 1)
+			for _, m := range raw {
+				testCSPAuthenticateWithFields(t, pid, tc.authReq(m))
+			}
+
+			draft := func(twoFa db.OrgMemberTwoFaFields) string {
+				req := minimalVotingProcessRequest(orgAddress)
+				req.Census = census(twoFa)
+				return requestAndParse[apicommon.CreateVotingProcessResponse](
+					t, http.MethodPost, token, req, processesCreateEndpoint).ProcessID
+			}
+			validate := func(pid string) apicommon.VotingProcessValidateResponse {
+				return requestAndParse[apicommon.VotingProcessValidateResponse](
+					t, http.MethodGet, token, nil, "processes", pid, "validation")
+			}
+			// the sent counter is bumped by the notification queue after delivery, so poll for it
+			spent := draft(tc.spent)
+			var res apicommon.VotingProcessValidateResponse
+			for range 50 {
+				if res = validate(spent); !res.Valid {
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+			c.Assert(res.Valid, qt.IsFalse)
+			c.Assert(fmt.Sprint(res.Errors), qt.Contains, tc.wantErr.Err.Error())
+
+			// the other channel's allowance is untouched
+			res = validate(draft(tc.other))
+			c.Assert(res.Valid, qt.IsTrue, qt.Commentf("errors: %v", res.Errors))
 		})
 	}
 }

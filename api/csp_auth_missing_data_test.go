@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net/http"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
@@ -18,7 +19,8 @@ func TestCSPAuthMissingData(t *testing.T) {
 	c := qt.New(t)
 
 	adminToken := testCreateUser(t, "adminpassword123")
-	orgAddress := testCreateOrganization(t, adminToken)
+	orgAddress := testCreateProvisionedOrganization(t, adminToken)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	members := postOrgMembers(t, adminToken, orgAddress,
 		apicommon.OrgMember{MemberNumber: "M-001", Name: "Twin", NationalID: "", Email: ""},
@@ -31,42 +33,40 @@ func TestCSPAuthMissingData(t *testing.T) {
 	}
 	twin, jane := byNumber["M-001"], byNumber["M-002"]
 
-	// publishes a census of twin and jane: twin is left out, missing the required data
+	// publishes a process over twin and jane: twin is left out of the census, missing the required data
 	publishCensus := func(t *testing.T, authFields db.OrgMemberAuthFields, twoFaFields db.OrgMemberTwoFaFields) string {
-		censusID := postCensus(t, adminToken, orgAddress, authFields, twoFaFields)
-		group := postGroup(t, adminToken, orgAddress, twin, jane)
-		census := postGroupCensus(t, adminToken, censusID, group.ID,
-			&apicommon.PublishCensusGroupRequest{AuthFields: authFields, TwoFaFields: twoFaFields})
-		qt.Assert(t, census.Size, qt.Equals, int64(1))
-		return censusID
+		pid, _ := publishCensusProcess(t, adminToken, orgAddress, apicommon.CensusSpec{
+			AuthFields: authFields, TwoFaFields: twoFaFields, MemberIDs: []string{twin, jane},
+		}, 1)
+		got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, adminToken, nil, "processes", pid)
+		qt.Assert(t, got.Census.Size, qt.Equals, int64(1))
+		return pid
 	}
 
 	t.Run("an empty auth field cannot be used to log in", func(t *testing.T) {
 		c := qt.New(t)
 		authFields := db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsNationalID}
-		censusID := publishCensus(t, authFields, db.OrgMemberTwoFaFields{})
-		bundleID, _ := postProcessBundle(t, adminToken, censusID, randomProcessID())
+		pid := publishCensus(t, authFields, db.OrgMemberTwoFaFields{})
 
 		// before the fix this authenticated the member on the name alone
 		for _, id := range []string{"", "   "} {
-			err := postProcessBundleAuth0AndExpectError(t, bundleID, &handlers.AuthRequest{Name: "Twin", NationalID: id})
+			err := postProcessAuth0AndExpectError(t, pid, &handlers.AuthRequest{Name: "Twin", NationalID: id})
 			c.Assert(err.Code, qt.Equals, errors.ErrInvalidUserData.Code)
 		}
-		err := postProcessBundleAuth0AndExpectError(t, bundleID, &handlers.AuthRequest{Name: "Twin", NationalID: "X1"})
+		err := postProcessAuth0AndExpectError(t, pid, &handlers.AuthRequest{Name: "Twin", NationalID: "X1"})
 		c.Assert(err.Code, qt.Equals, errors.ErrCensusParticipantNotFound.Code)
 
 		// a complete member is unaffected
-		postProcessBundleAuth0(t, bundleID, &handlers.AuthRequest{Name: "Jane", NationalID: "DNI002"})
+		postProcessAuth0(t, pid, &handlers.AuthRequest{Name: "Jane", NationalID: "DNI002"})
 	})
 
 	t.Run("a member without the 2FA channel cannot log in", func(t *testing.T) {
 		c := qt.New(t)
-		censusID := publishCensus(t, db.OrgMemberAuthFields{}, db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail})
-		bundleID, _ := postProcessBundle(t, adminToken, censusID, randomProcessID())
+		pid := publishCensus(t, db.OrgMemberAuthFields{}, db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail})
 
-		err := postProcessBundleAuth0AndExpectError(t, bundleID, &handlers.AuthRequest{Email: "   "})
+		err := postProcessAuth0AndExpectError(t, pid, &handlers.AuthRequest{Email: "   "})
 		c.Assert(err.Code, qt.Equals, errors.ErrInvalidUserData.Code)
-		err = postProcessBundleAuth0AndExpectError(t, bundleID, &handlers.AuthRequest{Email: "twin@example.com"})
+		err = postProcessAuth0AndExpectError(t, pid, &handlers.AuthRequest{Email: "twin@example.com"})
 		c.Assert(err.Code, qt.Equals, errors.ErrCensusParticipantNotFound.Code)
 	})
 }

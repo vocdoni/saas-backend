@@ -212,6 +212,9 @@ var testPort int
 // accessed by the tests directly.
 var testDB *db.MongoStorage
 
+// testDBName is the name of the database behind testDB, used to seed collections directly.
+var testDBName string
+
 // testMailService is the test mail service for the tests. Make it global so it
 // can be accessed by the tests directly.
 var testMailService = new(testutil.SMTP)
@@ -356,7 +359,8 @@ func TestMain(m *testing.M) {
 	// set reset db env var to true
 	_ = os.Setenv("VOCDONI_MONGO_RESET_DB", "true")
 	// create a new MongoDB connection with the test database
-	if testDB, err = db.New(mongoURI, test.RandomDatabaseName()); err != nil {
+	testDBName = test.RandomDatabaseName()
+	if testDB, err = db.New(mongoURI, testDBName); err != nil {
 		panic(err)
 	}
 	defer testDB.Close()
@@ -621,6 +625,38 @@ func signRemoteSignerAndSendVocdoniTx(t *testing.T, tx *models.Tx, token string,
 	return data
 }
 
+// signAsOrgAndSendVocdoniTx funds and signs a transaction with the organization's key, the way
+// the backend does on its own on-chain paths, submits it and waits for it to be mined.
+// Returns the response data if any.
+func signAsOrgAndSendVocdoniTx(
+	t *testing.T, tx *models.Tx, orgAddress common.Address, vocdoniClient *apiclient.HTTPclient,
+) []byte {
+	t.Helper()
+	c := qt.New(t)
+	org, err := testDB.Organization(orgAddress)
+	c.Assert(err, qt.IsNil)
+	signer, err := account.OrganizationSigner(testSecret, org.Creator, org.Nonce)
+	c.Assert(err, qt.IsNil)
+	tx, _, err = testAPI.account.FundTransaction(tx, signer.Address())
+	c.Assert(err, qt.IsNil)
+	stx, err := testAPI.account.SignTransaction(tx, signer)
+	c.Assert(err, qt.IsNil)
+	hash, data, err := vocdoniClient.SendTx(stx)
+	c.Assert(err, qt.IsNil)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	c.Assert(waitUntilTxIsMined(ctx, hash, vocdoniClient), qt.IsNil)
+	return data
+}
+
+// insertLegacyDoc seeds a record straight into a collection. The legacy /process writers are
+// gone, but their collections are still read (legacy projection, relay fallback, teardown).
+func insertLegacyDoc(t *testing.T, collection string, doc any) {
+	t.Helper()
+	_, err := testDB.DBClient.Database(testDBName).Collection(collection).InsertOne(context.Background(), doc)
+	qt.Assert(t, err, qt.IsNil)
+}
+
 // signAndSendVocdoniTx signs and sends a transaction to the Voconed API and waits for it to be mined.
 // It uses the provided signer to sign the transaction.
 // Returns the response data if any.
@@ -801,21 +837,21 @@ func postProcessBundle(t *testing.T, token, censusID string, processIDs ...[]byt
 	return bundleIDStr, bundleResp.Root.String()
 }
 
-// fetchCSPUserWeight retrieves the CSP user weight for the given process ID and voter address.
-func fetchCSPUserWeight(t *testing.T, bundleID string, authToken internal.HexBytes) internal.HexBytes {
+// fetchCSPUserWeight retrieves the CSP weight of the voter behind authToken for the voting process pid.
+func fetchCSPUserWeight(t *testing.T, pid string, authToken internal.HexBytes) internal.HexBytes {
 	t.Helper()
 	weightReq := &handlers.UserWeightRequest{
 		AuthToken: authToken,
 	}
 
 	weightResp := requestAndParse[handlers.UserWeightResponse](t, http.MethodPost, "", weightReq,
-		"process", "bundle", bundleID, "weight")
+		"processes", pid, "weight")
 	return weightResp.Weight
 }
 
-// testCSPSign signs a payload with the CSP using the given auth token and process ID.
-// It returns the signature.
-func testCSPSign(t *testing.T, bundleID string, authToken, processID, payload internal.HexBytes) internal.HexBytes {
+// testCSPSign signs a payload with the CSP for the question election processID of the voting
+// process pid, using the given auth token. It returns the signature.
+func testCSPSign(t *testing.T, pid string, authToken, processID, payload internal.HexBytes) internal.HexBytes {
 	t.Helper()
 	c := qt.New(t)
 
@@ -825,7 +861,7 @@ func testCSPSign(t *testing.T, bundleID string, authToken, processID, payload in
 		ProcessID: processID,
 		Payload:   hex.EncodeToString(payload),
 	}
-	signResp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", signReq, "process", "bundle", bundleID, "sign")
+	signResp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", signReq, "processes", pid, "sign")
 	c.Assert(signResp.Signature, qt.Not(qt.Equals), "", qt.Commentf("signature is empty"))
 
 	t.Logf("Received signature: %s", signResp.Signature.String())
@@ -833,7 +869,7 @@ func testCSPSign(t *testing.T, bundleID string, authToken, processID, payload in
 }
 
 func testAuthenthicateAndVote(t *testing.T, vocdoniClient *apiclient.HTTPclient,
-	bundleID string, processID internal.HexBytes, expectedWeight string, authRequest *handlers.AuthRequest,
+	pid string, processID internal.HexBytes, expectedWeight string, authRequest *handlers.AuthRequest,
 ) {
 	t.Helper()
 	c := qt.New(t)
@@ -848,9 +884,9 @@ func testAuthenthicateAndVote(t *testing.T, vocdoniClient *apiclient.HTTPclient,
 	user1Addr := user1.Address().Bytes()
 
 	// Authenticate the member with the CSP using the new multi-field system
-	authToken := testCSPAuthenticateWithFields(t, bundleID, authRequest)
+	authToken := testCSPAuthenticateWithFields(t, pid, authRequest)
 
-	cspWeight := fetchCSPUserWeight(t, bundleID, authToken)
+	cspWeight := fetchCSPUserWeight(t, pid, authToken)
 
 	weight, ok := math.ParseUint64(expectedWeight)
 	c.Assert(ok, qt.IsTrue, qt.Commentf("Failed to convert member weight %s to int", expectedWeight))
@@ -864,7 +900,7 @@ func testAuthenthicateAndVote(t *testing.T, vocdoniClient *apiclient.HTTPclient,
 	)
 
 	// Sign the voter's address with the CSP
-	signature := testCSPSign(t, bundleID, authToken, processID, user1Addr)
+	signature := testCSPSign(t, pid, authToken, processID, user1Addr)
 
 	// Generate a vote proof with the signature
 	proof := testGenerateVoteProof(processID, user1Addr, signature, weight)
@@ -880,34 +916,34 @@ func testAuthenthicateAndVote(t *testing.T, vocdoniClient *apiclient.HTTPclient,
 	c.Assert(votesAfter, qt.Equals, votesBefore+1, qt.Commentf("expected 1 more vote, got %d", votesAfter))
 }
 
-// postProcessBundleAuth0 authenticates with the CSP (step 0) and returns the AuthToken.
+// postProcessAuth0 authenticates with the CSP (step 0) and returns the AuthToken.
 // Asserts that AuthToken is not empty.
-func postProcessBundleAuth0(t *testing.T, bundleID string, request *handlers.AuthRequest, queryParams ...string,
+func postProcessAuth0(t *testing.T, pid string, request *handlers.AuthRequest, queryParams ...string,
 ) internal.HexBytes {
 	t.Helper()
 	resp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", request,
-		processBundleAuthURL(bundleID, "0")+joinQueryParams(queryParams...))
+		processAuthURL(pid, "0")+joinQueryParams(queryParams...))
 
 	qt.Assert(t, resp.AuthToken, qt.Not(qt.HasLen), 0, qt.Commentf("auth token is empty"))
 	t.Logf("Received auth token: %s", resp.AuthToken.String())
 	return resp.AuthToken
 }
 
-// postProcessBundleAuth0 authenticates with the CSP, expecting an error and returns it.
-func postProcessBundleAuth0AndExpectError(t *testing.T, bundleID string, request *handlers.AuthRequest, queryParams ...string,
+// postProcessAuth0AndExpectError authenticates with the CSP, expecting an error and returns it.
+func postProcessAuth0AndExpectError(t *testing.T, pid string, request *handlers.AuthRequest, queryParams ...string,
 ) errors.Error {
 	t.Helper()
 	return requestAndExpectError(t, http.MethodPost, "", request,
-		processBundleAuthURL(bundleID, "0")+joinQueryParams(queryParams...))
+		processAuthURL(pid, "0")+joinQueryParams(queryParams...))
 }
 
-// postProcessBundleAuth1 authenticates with the CSP (step 1) and returns the AuthToken.
+// postProcessAuth1 authenticates with the CSP (step 1) and returns the AuthToken.
 // Asserts that AuthToken is not empty.
-func postProcessBundleAuth1(t *testing.T, bundleID string, request *handlers.AuthChallengeRequest, queryParams ...string,
+func postProcessAuth1(t *testing.T, pid string, request *handlers.AuthChallengeRequest, queryParams ...string,
 ) internal.HexBytes {
 	t.Helper()
 	resp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", request,
-		processBundleAuthURL(bundleID, "1")+joinQueryParams(queryParams...))
+		processAuthURL(pid, "1")+joinQueryParams(queryParams...))
 
 	qt.Assert(t, resp.AuthToken, qt.Not(qt.HasLen), 0, qt.Commentf("verified auth token is empty"))
 	t.Logf("Authentication verified with token: %s", resp.AuthToken.String())
@@ -1308,9 +1344,9 @@ func censusGroupPublishURL(censusID, groupID string) string {
 	return s
 }
 
-func processBundleAuthURL(bundleID, step string) string {
-	s := processBundleAuthEndpoint
-	s = strings.ReplaceAll(s, "{bundleId}", bundleID)
+func processAuthURL(pid, step string) string {
+	s := processesAuthEndpoint
+	s = strings.ReplaceAll(s, "{processId}", pid)
 	s = strings.ReplaceAll(s, "{step}", step)
 	return s
 }

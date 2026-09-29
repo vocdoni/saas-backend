@@ -512,20 +512,22 @@ func TestUpsertOrganizationMember(t *testing.T) {
 	c := qt.New(t)
 	c.Run("MemberNumber+Email", func(c *qt.C) {
 		loginToken := testCreateUser(t, "adminpassword123")
-		orgAddress := testCreateOrganization(t, loginToken)
+		orgAddress := testCreateProvisionedOrganization(t, loginToken)
+		setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 		members := newOrgMembers(3)
 		c.Logf("will add org members: %+v", members)
 		orgMembers := postOrgMembers(t, loginToken, orgAddress, members...)
 		c.Logf("resulting org members: %+v", orgMembers)
 
-		censusID, _, _ := createGroupBasedCensus(t, loginToken, orgAddress,
-			db.OrgMemberAuthFields{
+		pid, _ := publishCensusProcess(t, loginToken, orgAddress, apicommon.CensusSpec{
+			AuthFields: db.OrgMemberAuthFields{
 				db.OrgMemberAuthFieldsMemberNumber,
-			}, db.OrgMemberTwoFaFields{
+			},
+			TwoFaFields: db.OrgMemberTwoFaFields{
 				db.OrgMemberTwoFaFieldEmail,
 			},
-			memberIDs(orgMembers)...)
-		bundleID, _ := postProcessBundle(t, loginToken, censusID, randomProcessID())
+			MemberIDs: memberIDs(orgMembers),
+		}, 1)
 
 		editedMember0 := orgMembers[0]
 		editedMember0.Phone = "" // unset Phone field since it contains the trimmed hash returned by API
@@ -577,14 +579,14 @@ func TestUpsertOrganizationMember(t *testing.T) {
 		c.Logf("resulting member: %+v", getOrgMember(t, loginToken, orgAddress, member0ID))
 
 		// Finally try authenticating, old values should fail
-		c.Assert(postProcessBundleAuth0AndExpectError(t, bundleID, &handlers.AuthRequest{
+		c.Assert(postProcessAuth0AndExpectError(t, pid, &handlers.AuthRequest{
 			MemberNumber: members[0].MemberNumber,
 			Email:        members[0].Email,
 		}),
 			qt.ErrorMatches, errors.ErrCensusParticipantNotFound.Err.Error()+".*")
 
 		// New values should work
-		testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+		testCSPAuthenticateWithFields(t, pid, &handlers.AuthRequest{
 			MemberNumber: editedMember0.MemberNumber,
 			Email:        editedMember0.Email,
 		})
@@ -592,37 +594,34 @@ func TestUpsertOrganizationMember(t *testing.T) {
 
 	c.Run("MemberNumber+Phone", func(c *qt.C) {
 		loginToken := testCreateUser(t, "adminpassword123")
-		orgAddress := testCreateOrganization(t, loginToken)
+		orgAddress := testCreateProvisionedOrganization(t, loginToken)
+		setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 		members := newOrgMembers(3)
 		c.Logf("will add org members: %+v", members)
 		orgMembers := postOrgMembers(t, loginToken, orgAddress, members...)
 		c.Logf("resulting org members: %+v", orgMembers)
 
-		// can't use TwoFaFieldPhone on free plan due to sms limits,
-		// so we need to upgrade the subscription first
-		setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-
-		censusID, _, _ := createGroupBasedCensus(t, loginToken, orgAddress,
-			db.OrgMemberAuthFields{
+		pid, _ := publishCensusProcess(t, loginToken, orgAddress, apicommon.CensusSpec{
+			AuthFields: db.OrgMemberAuthFields{
 				db.OrgMemberAuthFieldsMemberNumber,
-			}, db.OrgMemberTwoFaFields{
+			},
+			TwoFaFields: db.OrgMemberTwoFaFields{
 				db.OrgMemberTwoFaFieldPhone,
 			},
-			memberIDs(orgMembers)...)
-
-		bundleID, _ := postProcessBundle(t, loginToken, censusID, randomProcessID())
+			MemberIDs: memberIDs(orgMembers),
+		}, 1)
 
 		// We had a weird bug regarding updating an OrgMember Email
 		// of a participant of a census with OrgMemberTwoFaFieldPhone, prevented auth
 		// so we wrote this test to catch regressions
-		testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+		testCSPAuthenticateWithFields(t, pid, &handlers.AuthRequest{
 			MemberNumber: members[0].MemberNumber,
 			Phone:        members[0].Phone,
 		})
 
 		// wait and try authenticating again, should work
 		time.Sleep(cspNotificationCoolDownTime)
-		testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+		testCSPAuthenticateWithFields(t, pid, &handlers.AuthRequest{
 			MemberNumber: members[0].MemberNumber,
 			Phone:        members[0].Phone,
 		})
@@ -638,7 +637,7 @@ func TestUpsertOrganizationMember(t *testing.T) {
 
 		// Now wait and try authenticating again, should work
 		time.Sleep(cspNotificationCoolDownTime)
-		testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+		testCSPAuthenticateWithFields(t, pid, &handlers.AuthRequest{
 			MemberNumber: members[0].MemberNumber,
 			Phone:        members[0].Phone,
 		})
@@ -646,29 +645,27 @@ func TestUpsertOrganizationMember(t *testing.T) {
 
 	c.Run("AllAuthAndTwoFaFields", func(c *qt.C) {
 		loginToken := testCreateUser(t, "adminpassword123")
-		orgAddress := testCreateOrganization(t, loginToken)
+		orgAddress := testCreateProvisionedOrganization(t, loginToken)
+		setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 		members := newOrgMembers(3)
 		c.Logf("will add org members: %+v", members)
 		orgMembers := postOrgMembers(t, loginToken, orgAddress, members...)
 		c.Logf("resulting org members: %+v", orgMembers)
 
-		// can't use TwoFaFieldPhone on free plan due to sms limits,
-		// so we need to upgrade the subscription first
-		setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-
-		censusID, _, _ := createGroupBasedCensus(t, loginToken, orgAddress,
-			db.OrgMemberAuthFields{
+		pid, _ := publishCensusProcess(t, loginToken, orgAddress, apicommon.CensusSpec{
+			AuthFields: db.OrgMemberAuthFields{
 				db.OrgMemberAuthFieldsName,
 				db.OrgMemberAuthFieldsSurname,
 				db.OrgMemberAuthFieldsMemberNumber,
 				db.OrgMemberAuthFieldsNationalID,
 				db.OrgMemberAuthFieldsBirthDate,
-			}, db.OrgMemberTwoFaFields{
+			},
+			TwoFaFields: db.OrgMemberTwoFaFields{
 				db.OrgMemberTwoFaFieldEmail,
 				db.OrgMemberTwoFaFieldPhone,
 			},
-			memberIDs(orgMembers)...)
-		bundleID, _ := postProcessBundle(t, loginToken, censusID, randomProcessID())
+			MemberIDs: memberIDs(orgMembers),
+		}, 1)
 
 		editedMember0 := orgMembers[0]
 		editedMember0.Phone = "" // unset Phone field since it contains the trimmed hash returned by API
@@ -722,7 +719,7 @@ func TestUpsertOrganizationMember(t *testing.T) {
 		putOrgMember(t, loginToken, orgAddress, editedMember0)
 
 		// Finally try authenticating, old values should fail
-		c.Assert(postProcessBundleAuth0AndExpectError(t, bundleID, &handlers.AuthRequest{
+		c.Assert(postProcessAuth0AndExpectError(t, pid, &handlers.AuthRequest{
 			Name:         members[0].Name,
 			Surname:      members[0].Surname,
 			MemberNumber: members[0].MemberNumber,
@@ -733,7 +730,7 @@ func TestUpsertOrganizationMember(t *testing.T) {
 			Phone: members[0].Phone,
 		}),
 			qt.ErrorMatches, errors.ErrCensusParticipantNotFound.Err.Error()+".*")
-		c.Assert(postProcessBundleAuth0AndExpectError(t, bundleID, &handlers.AuthRequest{
+		c.Assert(postProcessAuth0AndExpectError(t, pid, &handlers.AuthRequest{
 			Name:         members[0].Name,
 			Surname:      members[0].Surname,
 			MemberNumber: members[0].MemberNumber,
@@ -743,7 +740,7 @@ func TestUpsertOrganizationMember(t *testing.T) {
 			Phone: members[0].Phone,
 		}),
 			qt.ErrorMatches, errors.ErrCensusParticipantNotFound.Err.Error()+".*")
-		c.Assert(postProcessBundleAuth0AndExpectError(t, bundleID, &handlers.AuthRequest{
+		c.Assert(postProcessAuth0AndExpectError(t, pid, &handlers.AuthRequest{
 			Name:         members[0].Name,
 			Surname:      members[0].Surname,
 			MemberNumber: members[0].MemberNumber,
@@ -755,7 +752,7 @@ func TestUpsertOrganizationMember(t *testing.T) {
 			qt.ErrorMatches, errors.ErrCensusParticipantNotFound.Err.Error()+".*")
 
 		// New values should work
-		testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+		testCSPAuthenticateWithFields(t, pid, &handlers.AuthRequest{
 			Name:         editedMember0.Name,
 			Surname:      editedMember0.Surname,
 			MemberNumber: editedMember0.MemberNumber,
@@ -766,7 +763,7 @@ func TestUpsertOrganizationMember(t *testing.T) {
 			Phone: editedMember0.Phone,
 		})
 		time.Sleep(cspNotificationCoolDownTime)
-		testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+		testCSPAuthenticateWithFields(t, pid, &handlers.AuthRequest{
 			Name:         editedMember0.Name,
 			Surname:      editedMember0.Surname,
 			MemberNumber: editedMember0.MemberNumber,
@@ -776,7 +773,7 @@ func TestUpsertOrganizationMember(t *testing.T) {
 			Email: editedMember0.Email,
 		})
 		time.Sleep(cspNotificationCoolDownTime)
-		testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+		testCSPAuthenticateWithFields(t, pid, &handlers.AuthRequest{
 			Name:         editedMember0.Name,
 			Surname:      editedMember0.Surname,
 			MemberNumber: editedMember0.MemberNumber,
@@ -787,7 +784,7 @@ func TestUpsertOrganizationMember(t *testing.T) {
 		})
 
 		// As well as member[1], should be able to auth just fine
-		testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+		testCSPAuthenticateWithFields(t, pid, &handlers.AuthRequest{
 			Name:         members[1].Name,
 			Surname:      members[1].Surname,
 			MemberNumber: members[1].MemberNumber,

@@ -29,24 +29,25 @@ func TestOrgLangInCSPEmails(t *testing.T) {
 
 		// Set up test environment with user, org, and census
 		token := testCreateUser(t, "superpassword123")
-		orgAddress := testCreateOrganization(t, token)
+		orgAddress := testCreateProvisionedOrganization(t, token)
+		setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 		if lang != "" {
 			requestAndAssertCode(200, t, "PUT", token, &apicommon.OrganizationInfo{DefaultLang: lang},
 				"organizations", orgAddress.String())
 		}
 		member := newOrgMember()
 		addedMembers := postOrgMembers(t, token, orgAddress, member)
-		censusID, _, _ := createGroupBasedCensus(t, token, orgAddress,
-			db.OrgMemberAuthFields{
+		pid, _ := publishCensusProcess(t, token, orgAddress, apicommon.CensusSpec{
+			AuthFields: db.OrgMemberAuthFields{
 				db.OrgMemberAuthFieldsName,
 				db.OrgMemberAuthFieldsSurname,
 				db.OrgMemberAuthFieldsMemberNumber,
 			},
-			db.OrgMemberTwoFaFields{
+			TwoFaFields: db.OrgMemberTwoFaFields{
 				db.OrgMemberTwoFaFieldEmail,
 			},
-			addedMembers[0].ID)
-		bundleID, _ := postProcessBundle(t, token, censusID, randomProcessID())
+			MemberIDs: []string{addedMembers[0].ID},
+		}, 1)
 
 		authReq := &handlers.AuthRequest{
 			Name:         member.Name,
@@ -56,7 +57,7 @@ func TestOrgLangInCSPEmails(t *testing.T) {
 		}
 
 		authResp := requestAndParse[handlers.AuthResponse](t, "POST", "", authReq,
-			"process", "bundle", bundleID, "auth", "0")
+			"processes", pid, "auth", "0")
 		c.Assert(authResp.AuthToken, qt.Not(qt.Equals), "", qt.Commentf("auth token should not be empty"))
 
 		assertContentMatches(t, waitForEmail(t, member.Email), lang, otpEmailRegexps)
@@ -95,23 +96,24 @@ func TestOrgDefaultLangNotifications(t *testing.T) {
 
 	// set up an organization with catalan as default language
 	token := testCreateUser(t, "superpassword123")
-	orgAddress := testCreateOrganization(t, token)
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	requestAndAssertCode(200, t, "PUT", token, &apicommon.OrganizationInfo{DefaultLang: "ca"},
 		"organizations", orgAddress.String())
 
 	members := newOrgMembers(2)
 	addedMembers := postOrgMembers(t, token, orgAddress, members...)
-	censusID, _, _ := createGroupBasedCensus(t, token, orgAddress,
-		db.OrgMemberAuthFields{
+	pid, _ := publishCensusProcess(t, token, orgAddress, apicommon.CensusSpec{
+		AuthFields: db.OrgMemberAuthFields{
 			db.OrgMemberAuthFieldsName,
 			db.OrgMemberAuthFieldsSurname,
 			db.OrgMemberAuthFieldsMemberNumber,
 		},
-		db.OrgMemberTwoFaFields{
+		TwoFaFields: db.OrgMemberTwoFaFields{
 			db.OrgMemberTwoFaFieldEmail,
 		},
-		addedMembers[0].ID, addedMembers[1].ID)
-	bundleID, _ := postProcessBundle(t, token, censusID, randomProcessID())
+		MemberIDs: []string{addedMembers[0].ID, addedMembers[1].ID},
+	}, 1)
 
 	authReq := func(m apicommon.OrgMember) *handlers.AuthRequest {
 		return &handlers.AuthRequest{
@@ -125,21 +127,21 @@ func TestOrgDefaultLangNotifications(t *testing.T) {
 	// without a lang param, the CSP auth email must fall back to the org
 	// default language
 	authResp := requestAndParse[handlers.AuthResponse](t, "POST", "", authReq(members[0]),
-		"process", "bundle", bundleID, "auth", "0")
+		"processes", pid, "auth", "0")
 	c.Assert(authResp.AuthToken, qt.Not(qt.HasLen), 0)
 	assertContentMatches(t, waitForEmail(t, members[0].Email), "ca", otpEmailRegexps)
 
 	// a resend without a lang param must also fall back to the org default
 	resendResp := requestAndParse[handlers.AuthResponse](t, "POST", "",
 		&handlers.AuthResendRequest{AuthToken: authResp.AuthToken, Email: members[0].Email},
-		"process", "bundle", bundleID, "auth", "resend")
+		"processes", pid, "auth", "resend")
 	c.Assert(resendResp.AuthToken, qt.Not(qt.HasLen), 0)
 	assertContentMatches(t, waitForEmail(t, members[0].Email), "ca", otpEmailRegexps)
 
 	// a voter's explicit lang param overrides the org default: the CSP endpoints
 	// are public, so the param is the recipient's own choice
 	authResp = requestAndParse[handlers.AuthResponse](t, "POST", "", authReq(members[1]),
-		"process", "bundle", bundleID, "auth", "0?lang=es")
+		"processes", pid, "auth", "0?lang=es")
 	c.Assert(authResp.AuthToken, qt.Not(qt.HasLen), 0)
 	assertContentMatches(t, waitForEmail(t, members[1].Email), "es", otpEmailRegexps)
 }

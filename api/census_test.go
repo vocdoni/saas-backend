@@ -7,7 +7,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
-	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 )
@@ -273,94 +272,4 @@ func TestCensus(t *testing.T) {
 		c.Assert(postGroupCensusAndExpectError(t, nonAdminToken, censusID, group.ID, publishGroupRequest),
 			qt.ErrorMatches, errors.ErrUnauthorized.Err.Error()+".*")
 	})
-}
-
-func TestCensusSizeExceedsEmailAllowance(t *testing.T) {
-	c := qt.New(t)
-
-	// Set up test environment with user, org, and members
-	adminToken := testCreateUser(t, "adminpassword123")
-	orgAddress := testCreateOrganization(t, adminToken)
-	members := newOrgMembers(3)
-	orgMembers := postOrgMembers(t, adminToken, orgAddress, members...)
-	processID := randomProcessID()
-
-	authFields := db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber, db.OrgMemberAuthFieldsName}
-
-	// reduce limit of freePlan to allow exactly orgMembers
-	reducedFreePlan := *mockFreePlan
-	reducedFreePlan.Features.TwoFaEmail = len(orgMembers)
-	qt.Assert(t, testDB.SetPlan(&reducedFreePlan), qt.IsNil)
-
-	censusID, _, _ := createGroupBasedCensus(t, adminToken, orgAddress, authFields, twoFaEmail,
-		memberIDs(orgMembers)...)
-
-	// Create a bundle with the census and process
-	bundleID, _ := postProcessBundle(t, adminToken, censusID, processID)
-
-	// Authenticate N members to trigger email sendings and hit MaxSentEmails limit
-	for _, member := range members {
-		testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
-			MemberNumber: member.MemberNumber,
-			Name:         member.Name,
-			Email:        member.Email,
-		})
-	}
-
-	// Now creating a group census with twoFaEmail should fail
-	c.Assert(createGroupBasedCensusAndExpectError(t, adminToken, orgAddress, authFields, twoFaEmail,
-		memberIDs(orgMembers)...),
-		qt.ErrorIs, errors.ErrProcessCensusSizeExceedsEmailAllowance)
-
-	// After upgrading to a subscription, twoFaPhone or twoFaEmailOrPhone are now allowed
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	createGroupBasedCensus(t, adminToken, orgAddress, authFields, twoFaPhone,
-		memberIDs(orgMembers)...)
-	createGroupBasedCensus(t, adminToken, orgAddress, authFields, twoFaEmailOrPhone,
-		memberIDs(orgMembers)...)
-}
-
-func TestCensusSizeExceedsSMSAllowance(t *testing.T) {
-	c := qt.New(t)
-
-	// Set up test environment with user, org, and members
-	adminToken := testCreateUser(t, "adminpassword123")
-	orgAddress := testCreateOrganization(t, adminToken)
-	members := newOrgMembers(3)
-	orgMembers := postOrgMembers(t, adminToken, orgAddress, members...)
-	processID := randomProcessID()
-
-	authFields := db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber, db.OrgMemberAuthFieldsName}
-
-	// reduce limit of freePlan to allow exactly orgMembers
-	reducedFreePlan := *mockFreePlan
-	reducedFreePlan.Features.TwoFaSms = len(orgMembers)
-	qt.Assert(t, testDB.SetPlan(&reducedFreePlan), qt.IsNil)
-
-	censusID, _, _ := createGroupBasedCensus(t, adminToken, orgAddress, authFields, twoFaPhone,
-		memberIDs(orgMembers)...)
-
-	// Create a bundle with the census and process
-	bundleID, _ := postProcessBundle(t, adminToken, censusID, processID)
-
-	// Authenticate N members to trigger SMS sendings and hit MaxSentEmails limit
-	for _, member := range members {
-		testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
-			MemberNumber: member.MemberNumber,
-			Name:         member.Name,
-			Phone:        member.Phone,
-		})
-	}
-
-	// Now creating a group census with twoFaPhone should fail
-	c.Assert(createGroupBasedCensusAndExpectError(t, adminToken, orgAddress, authFields, twoFaPhone,
-		memberIDs(orgMembers)...),
-		qt.ErrorIs, errors.ErrProcessCensusSizeExceedsSMSAllowance)
-
-	// After upgrading to a subscription, twoFaPhone or twoFaEmailOrPhone are now allowed
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	createGroupBasedCensus(t, adminToken, orgAddress, authFields, twoFaPhone,
-		memberIDs(orgMembers)...)
-	createGroupBasedCensus(t, adminToken, orgAddress, authFields, twoFaEmailOrPhone,
-		memberIDs(orgMembers)...)
 }

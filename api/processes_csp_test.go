@@ -43,6 +43,44 @@ func authProcessCSP(t *testing.T, pid string, authReq *handlers.AuthRequest) int
 	return verifyProcessCSP(t, pid, authReq.Email, step0.AuthToken)
 }
 
+// publishCensusProcess creates and publishes a /processes election over the given census with n
+// yes/no questions, returning the process id and the on-chain election id of each question. The
+// organization must be provisioned on chain and subscribed to a plan.
+func publishCensusProcess(t *testing.T, token string, orgAddress common.Address, census apicommon.CensusSpec, n int,
+) (string, []internal.HexBytes) {
+	t.Helper()
+	req := minimalVotingProcessRequest(orgAddress)
+	req.StartDate = ""
+	req.Census = census
+	for len(req.Questions) < n {
+		req.Questions = append(req.Questions, req.Questions[0])
+	}
+	return publishProcessRequest(t, token, req)
+}
+
+// publishProcessRequest creates and publishes req, returning the process id and the on-chain
+// election id of each of its questions.
+func publishProcessRequest(t *testing.T, token string, req *apicommon.CreateVotingProcessRequest,
+) (string, []internal.HexBytes) {
+	t.Helper()
+	c := qt.New(t)
+	n := len(req.Questions)
+	pid := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint,
+	).ProcessID
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
+
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(got.Questions, qt.HasLen, n)
+	elections := make([]internal.HexBytes, n)
+	for i, q := range got.Questions {
+		c.Assert(q.UpstreamID, qt.Not(qt.HasLen), 0)
+		elections[i] = q.UpstreamID
+	}
+	return pid, elections
+}
+
 // TestProcessCSP exercises the process-scoped CSP handlers (auth/resend/sign/weight/check)
 // end to end against a published multi-question process. Question 2 has an eligibility
 // subset restricted to the first member, so the second member can authenticate but is not
