@@ -7,31 +7,23 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-// CensusMemberCollisionError is returned when members lacking login data would share a login hash
-// with another member of the census. The census stores every login hash under a unique index, so
-// such a member set cannot be built. MissingData lists the members with missing data involved,
-// Duplicates any member with complete data they clash with.
-type CensusMemberCollisionError struct {
-	Duplicates  []bson.ObjectID `json:"duplicates"`
+// CensusMissingDataError is returned when members missing required auth data cannot be told apart
+// in the census: missing the same data, they would be stored under the same login hash, which the
+// census keeps under a unique index. MissingData lists those members.
+type CensusMissingDataError struct {
 	MissingData []bson.ObjectID `json:"missingData"`
 }
 
 // Error implements the error interface.
-func (e *CensusMemberCollisionError) Error() string {
-	return fmt.Sprintf("%v: %d census members with missing data would share login credentials",
-		ErrUpdateWouldCreateDuplicates, len(e.MissingData))
+func (e *CensusMissingDataError) Error() string {
+	return fmt.Sprintf("%d census members are missing required auth data", len(e.MissingData))
 }
 
-// Unwrap makes the error match ErrUpdateWouldCreateDuplicates.
-func (*CensusMemberCollisionError) Unwrap() error {
-	return ErrUpdateWouldCreateDuplicates
-}
-
-// memberMissingLoginData reports whether a member lacks the data to log in to a census with these
+// MissingLoginData reports whether the member lacks the data to log in to a census with these
 // fields: any auth field empty, or, when 2FA is configured, no 2FA channel at all (with both email
 // and phone configured either one is enough). An empty string counts as empty just like an absent
 // field, and so does a whitespace-only one.
-func memberMissingLoginData(m *OrgMember, authFields OrgMemberAuthFields, twoFaFields OrgMemberTwoFaFields) bool {
+func (m *OrgMember) MissingLoginData(authFields OrgMemberAuthFields, twoFaFields OrgMemberTwoFaFields) bool {
 	for _, field := range authFields {
 		if value, known := memberAuthFieldValue(m, field); known && strings.TrimSpace(value) == "" {
 			return true
@@ -83,15 +75,16 @@ type loginKey struct {
 	hash  string
 }
 
-// missingDataCollisions returns a *CensusMemberCollisionError when members with missing login data
-// would share a login hash with another member of the census. Members missing the same field
-// otherwise hash identically (an empty value is hashed like any other), and the unique index would
-// fail the whole census build. Clashes between members whose data is complete are not checked here.
+// missingDataCollisions returns a *CensusMissingDataError when members missing required auth data
+// would be stored under the same login hash as another member of the census. Members missing the
+// same field otherwise hash identically (an empty value is hashed like any other), and the unique
+// index would fail the whole census build. A member missing data that clashes with nobody is left
+// in: it cannot log in anyway. Clashes between members whose data is complete are not checked here.
 func missingDataCollisions(census *Census, members []*OrgMember) error {
 	missing := make(map[bson.ObjectID]bool)
 	holders := make(map[loginKey][]bson.ObjectID)
 	for _, m := range members {
-		if memberMissingLoginData(m, census.AuthFields, census.TwoFaFields) {
+		if m.MissingLoginData(census.AuthFields, census.TwoFaFields) {
 			missing[m.ID] = true
 		}
 		for field, hash := range calculateParticipantHashes(*census, *m) {
@@ -103,35 +96,25 @@ func missingDataCollisions(census *Census, members []*OrgMember) error {
 		return nil
 	}
 
-	involved := make(map[bson.ObjectID]bool)
+	clashing := make(map[bson.ObjectID]bool)
 	for _, ids := range holders {
 		if len(ids) < 2 {
 			continue
 		}
 		for _, id := range ids {
 			if missing[id] {
-				for _, other := range ids {
-					involved[other] = true
-				}
-				break
+				clashing[id] = true
 			}
 		}
 	}
-	if len(involved) == 0 {
+	if len(clashing) == 0 {
 		return nil
 	}
 
-	err := &CensusMemberCollisionError{
-		Duplicates:  make([]bson.ObjectID, 0),
-		MissingData: make([]bson.ObjectID, 0, len(involved)),
-	}
+	err := &CensusMissingDataError{MissingData: make([]bson.ObjectID, 0, len(clashing))}
 	for _, m := range members {
-		switch {
-		case !involved[m.ID]:
-		case missing[m.ID]:
+		if clashing[m.ID] {
 			err.MissingData = append(err.MissingData, m.ID)
-		default:
-			err.Duplicates = append(err.Duplicates, m.ID)
 		}
 	}
 	return err

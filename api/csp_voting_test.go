@@ -593,7 +593,8 @@ func TestCSPVoting(t *testing.T) {
 							Email:        "john.doe@example.com",
 						}
 						resp, code := testRequest(t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
-						c.Assert(code, qt.Equals, http.StatusNotFound, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
+						c.Assert(code, qt.Equals, http.StatusBadRequest,
+							qt.Commentf("expected bad request for missing auth fields, got %d: %s", code, resp))
 					})
 
 					// Test case 6: Try to authenticate with missing contact information
@@ -708,11 +709,11 @@ func TestCSPVoting(t *testing.T) {
 
 						withMemberNumBundleID, _ := postProcessBundle(t, token, withMemberNumCensusID, processID)
 
-						// Should not fail to authenticate David Garcia when memberNumber is required
+						// David Garcia has no memberNumber, so he cannot log in once the census requires it
 						resp, code = testRequest(t, http.MethodPost, "", authReq,
 							"process", "bundle", withMemberNumBundleID, "auth", "0")
-						c.Assert(code, qt.Equals, http.StatusOK,
-							qt.Commentf("expected unauthorized when memberNumber required but not provided, got %d: %s", code, resp))
+						c.Assert(code, qt.Equals, http.StatusBadRequest,
+							qt.Commentf("expected bad request when memberNumber required but missing, got %d: %s", code, resp))
 					})
 				})
 

@@ -61,8 +61,8 @@ func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
 }
 
 // PopulateGroupCensus stores the census and adds every member of the group as a participant,
-// returning the number added. Members with missing login data that would share login credentials
-// are refused with a *CensusMemberCollisionError before anything is written.
+// returning the number added. Members missing required auth data that could not be told apart
+// (same login hash) are refused with a *CensusMissingDataError before anything is written.
 func (ms *MongoStorage) PopulateGroupCensus(
 	census *Census,
 	groupID string,

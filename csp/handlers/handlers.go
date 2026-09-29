@@ -938,6 +938,12 @@ func (c *CSPHandlers) authFirstStep(
 		Phone:        phone,
 	}).Normalized()
 
+	// a voter must supply every login field the census requires: an empty value would otherwise hash
+	// like a member stored without it, letting that member in on the remaining fields alone
+	if inputMember.MissingLoginData(census.AuthFields, census.TwoFaFields) {
+		return nil, errors.ErrInvalidUserData.Withf("missing required auth data")
+	}
+
 	// Check the participant is in the census
 	censusParticipant, err := c.mainDB.CensusParticipantByLoginHash(*census, *inputMember)
 	if err != nil {

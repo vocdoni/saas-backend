@@ -9,8 +9,8 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-// TestMissingDataCollisions pins which member sets the census build refuses up front: members with
-// missing login data that would share a login hash, and only those.
+// TestMissingDataCollisions pins which member sets the census build refuses up front: members
+// missing required auth data that could not be told apart (same login hash), and only those.
 func TestMissingDataCollisions(t *testing.T) {
 	type member struct {
 		name, surname, nationalID, email string
@@ -21,12 +21,11 @@ func TestMissingDataCollisions(t *testing.T) {
 	emailOrPhone := OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail, OrgMemberTwoFaFieldPhone}
 
 	for _, tc := range []struct {
-		name     string
-		auth     OrgMemberAuthFields
-		twoFa    OrgMemberTwoFaFields
-		members  []member
-		missing  []int // indexes into members; both empty means the build is not refused
-		complete []int
+		name    string
+		auth    OrgMemberAuthFields
+		twoFa   OrgMemberTwoFaFields
+		members []member
+		missing []int // indexes into members; empty means the build is not refused
 	}{
 		{
 			name:  "no email under email 2FA",
@@ -93,15 +92,13 @@ func TestMissingDataCollisions(t *testing.T) {
 			}
 
 			err := missingDataCollisions(census, members)
-			if len(tc.missing)+len(tc.complete) == 0 {
+			if len(tc.missing) == 0 {
 				c.Assert(err, qt.IsNil)
 				return
 			}
-			var collision *CensusMemberCollisionError
-			c.Assert(errors.As(err, &collision), qt.IsTrue, qt.Commentf("got %v", err))
-			c.Assert(errors.Is(err, ErrUpdateWouldCreateDuplicates), qt.IsTrue)
-			c.Assert(collision.MissingData, qt.DeepEquals, pick(tc.missing))
-			c.Assert(collision.Duplicates, qt.DeepEquals, pick(tc.complete))
+			var missingData *CensusMissingDataError
+			c.Assert(errors.As(err, &missingData), qt.IsTrue, qt.Commentf("got %v", err))
+			c.Assert(missingData.MissingData, qt.DeepEquals, pick(tc.missing))
 		})
 	}
 }
@@ -173,11 +170,10 @@ func TestCensusMembersEmptyValues(t *testing.T) {
 		c := qt.New(t)
 		census := &Census{OrgAddress: testOrgAddress, TwoFaFields: emailOnly}
 		_, err := testDB.PopulateGroupCensus(census, noEmailGroup)
-		var collision *CensusMemberCollisionError
-		c.Assert(errors.As(err, &collision), qt.IsTrue, qt.Commentf("got %v", err))
-		c.Assert(collision.Duplicates, qt.HasLen, 0)
+		var missingData *CensusMissingDataError
+		c.Assert(errors.As(err, &missingData), qt.IsTrue, qt.Commentf("got %v", err))
 		// "A" and "B" hash identically; "  " is not folded by the hash, so "C" clashes with nobody
-		c.Assert(hexes(collision.MissingData), qt.ContentEquals, noEmail[:2])
+		c.Assert(hexes(missingData.MissingData), qt.ContentEquals, noEmail[:2])
 
 		stored, err := testDB.OrganizationMemberGroup(noEmailGroup, testOrgAddress)
 		c.Assert(err, qt.IsNil)

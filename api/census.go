@@ -377,11 +377,11 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 
 	inserted, err := a.db.PopulateGroupCensus(census, groupID.String())
 	if err != nil {
-		var collision *db.CensusMemberCollisionError
-		if stderrors.As(err, &collision) {
+		var missingData *db.CensusMissingDataError
+		if stderrors.As(err, &missingData) {
 			errors.ErrInvalidData.
-				Withf("members with missing data would share login credentials: complete their data or remove them").
-				WithData(collision).Write(w)
+				Withf("members are missing required auth data: complete their data or remove them").
+				WithData(missingData).Write(w)
 			return
 		}
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)

@@ -6355,8 +6355,9 @@ paths:
       description: |-
         Create a multi-question voting process draft. Requires Manager/Admin role of the org
         (or a scoped API key with `voting:write`). Creates the inline census unpublished.
-        Members of `census.groupId` that lack login data and would therefore share the same login
-        credentials are refused with a 400 (40037) whose `data.missingData` lists them.
+        Members of `census.groupId` missing required auth data cannot vote; when several miss the
+        same data (so the census cannot tell them apart) they are refused with a 400 (40037)
+        whose `data.missingData` lists them.
 
         Each question must define a named `type` — `singlechoice`, `multichoice`, `ranked`
         or `cumulative` — a raw `ballotProtocol`, or both. `multichoice` and `cumulative`

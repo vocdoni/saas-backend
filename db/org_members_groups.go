@@ -485,7 +485,7 @@ func aggregateMemberFields(
 		// if the member lacks login data (an empty auth field, or no 2FA channel), add to missing data
 		// and continue to the next member; we do not check for duplicates in empty rows, where the
 		// shared value is the absence of one
-		if memberMissingLoginData(&m, authFields, twoFaFields) {
+		if m.MissingLoginData(authFields, twoFaFields) {
 			results.MissingData = append(results.MissingData, m.ID)
 			continue
 		}

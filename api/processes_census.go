@@ -44,11 +44,11 @@ func (a *API) resolveOrCreateDefaultCensus(spec apicommon.CensusSpec, orgAddress
 		if _, err := a.db.PopulateGroupCensus(census, spec.GroupID); err != nil {
 			// members missing the same login data are the caller's to fix: name them (400), in the
 			// shape the census pre-flight reports them, rather than failing the build with a 500
-			var collision *db.CensusMemberCollisionError
-			if stderrors.As(err, &collision) {
+			var missingData *db.CensusMissingDataError
+			if stderrors.As(err, &missingData) {
 				return nil, errors.ErrInvalidData.
-					Withf("members with missing data would share login credentials: complete their data or remove them").
-					WithData(collision)
+					Withf("members are missing required auth data: complete their data or remove them").
+					WithData(missingData)
 			}
 			return nil, fmt.Errorf("failed to populate group census: %w", err)
 		}
