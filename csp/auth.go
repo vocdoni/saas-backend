@@ -15,17 +15,17 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-// BundleAuthToken method generates a new authentication token for a user in
-// a process of a bundle. It generates a new token, secret and code from the
+// AuthToken method generates a new authentication token for a user,
+// anchored to a voting process. It generates a new token, secret and code from the
 // attempt number. It composes the notification challenge and pushes it to
 // the queue to be sent. It returns the token as HexBytes.
-func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
+func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 	ctype notifications.ChallengeType, lang string,
 	orgName, orgLogo string, orgAddress common.Address,
 ) (internal.HexBytes, error) {
 	// check the input parameters
-	if len(bID) == 0 {
-		return nil, ErrNoBundleID
+	if len(anchorID) == 0 {
+		return nil, ErrNoAnchorID
 	}
 	if len(uID) == 0 {
 		return nil, ErrNoUserID
@@ -33,15 +33,15 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 
 	// For auth-only cases (no challenge type and no destination), create a pre-verified token
 	if to == "" && ctype == "" {
-		return c.createAuthOnlyToken(bID, uID)
+		return c.createAuthOnlyToken(anchorID, uID)
 	}
 
-	// get last token for the user and bundle
-	lastToken, err := c.Storage.LastCSPAuth(uID, bID)
+	// get last token for the user and anchor
+	lastToken, err := c.Storage.LastCSPAuth(uID, anchorID)
 	if err != nil && err != db.ErrTokenNotFound {
 		log.Warnw("error getting last token",
 			"userID", uID,
-			"bundleID", bID,
+			"anchorID", anchorID,
 			"error", err)
 		return nil, ErrStorageFailure
 	}
@@ -51,7 +51,7 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 		if remainingTime > 0 {
 			log.Warnw("cooldown time not reached",
 				"userID", uID,
-				"bundleID", bID,
+				"anchorID", anchorID,
 				"lastToken", lastToken.Token)
 			return nil, errors.ErrAttemptCoolDownTime.WithData(map[string]any{"coolDownTime": remainingTime.Milliseconds()})
 		}
@@ -59,17 +59,17 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 	// generate a new token, secret and code
 	token, secret, code := c.generateToken()
 	// create the new token
-	if err := c.Storage.SetCSPAuth(token, uID, bID, secret); err != nil {
+	if err := c.Storage.SetCSPAuth(token, uID, anchorID, secret); err != nil {
 		log.Warnw("error setting new token",
 			"userID", uID,
-			"bundleID", bID,
+			"anchorID", anchorID,
 			"token", token,
 			"error", err)
 		return nil, ErrStorageFailure
 	}
 	log.Debugw("new auth token stored",
 		"userID", uID,
-		"bundleID", bID,
+		"anchorID", anchorID,
 		"token", token)
 	// compose the notification challenge, advertising the OTP validity window
 	// (the challenge TTL, not the notification cooldown) as the code's expiry
@@ -78,11 +78,11 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 		Name:    orgName,
 		Logo:    orgLogo,
 	}
-	ch, err := notifications.NewNotificationChallenge(ctype, lang, uID, bID, to, code, orgInfo, c.notificationTTL.String())
+	ch, err := notifications.NewNotificationChallenge(ctype, lang, uID, anchorID, to, code, orgInfo, c.notificationTTL.String())
 	if err != nil {
 		log.Warnw("error composing notification challenge",
 			"userID", uID,
-			"bundleID", bID,
+			"anchorID", anchorID,
 			"token", token,
 			"error", err)
 		return nil, ErrNotificationFailure
@@ -92,7 +92,7 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 	if err := c.pushChallenge(ch); err != nil {
 		log.Warnw("error pushing notification challenge",
 			"userID", uID,
-			"bundleID", bID,
+			"anchorID", anchorID,
 			"token", token,
 			"error", err)
 		return nil, ErrNotificationFailure
@@ -134,7 +134,7 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 	if remainingTime <= 0 {
 		log.Warnw("resend requested but OTP has expired",
 			"userID", authTokenData.UserID,
-			"bundleID", authTokenData.BundleID,
+			"anchorID", authTokenData.AnchorID,
 			"token", authTokenData.Token)
 		return ErrTokenExpired
 	}
@@ -145,7 +145,7 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 	if authTokenData.Secret == "" {
 		log.Warnw("resend requested for token without challenge secret",
 			"userID", authTokenData.UserID,
-			"bundleID", authTokenData.BundleID,
+			"anchorID", authTokenData.AnchorID,
 			"token", token)
 		return ErrTokenExpired
 	}
@@ -159,7 +159,7 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 	if err != nil {
 		log.Warnw("error regenerating token code",
 			"userID", authTokenData.UserID,
-			"bundleID", authTokenData.BundleID,
+			"anchorID", authTokenData.AnchorID,
 			"token", token,
 			"error", err)
 		return ErrChallengeCodeFailure
@@ -168,7 +168,7 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 		ctype,
 		lang,
 		authTokenData.UserID,
-		authTokenData.BundleID,
+		authTokenData.AnchorID,
 		to,
 		code,
 		orgInfo,
@@ -177,7 +177,7 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 	if err != nil {
 		log.Warnw("error composing notification challenge",
 			"userID", authTokenData.UserID,
-			"bundleID", authTokenData.BundleID,
+			"anchorID", authTokenData.AnchorID,
 			"token", token,
 			"error", err)
 		return ErrNotificationFailure
@@ -187,7 +187,7 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 	if err := c.pushChallenge(ch); err != nil {
 		log.Warnw("error pushing notification challenge",
 			"userID", authTokenData.UserID,
-			"bundleID", authTokenData.BundleID,
+			"anchorID", authTokenData.AnchorID,
 			"token", token,
 			"error", err)
 		return ErrNotificationFailure
@@ -195,15 +195,14 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 	return nil
 }
 
-// VerifyBundleAuthToken method verifies the authentication token for a user
-// in a process of a bundle. It gets the user data from the token and checks
+// VerifyAuthToken method verifies the authentication token for a user. It gets the user data from the token and checks
 // if the process is already consumed. It checks if the process is related to
 // the user and if the token matches. It verifies the solution and updates the
 // user data in the storage. It returns an error if the process is already
 // consumed, if the process is not related to the user, if the token does not
 // match, if the solution is not correct or if there is an error updating the
 // user data.
-func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) error {
+func (c *CSP) VerifyAuthToken(token internal.HexBytes, solution string) error {
 	if len(token) == 0 {
 		return ErrInvalidAuthToken
 	}
@@ -227,7 +226,7 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 	if authTokenData.Secret == "" {
 		log.Warnw("verification attempted for token without challenge secret",
 			"userID", authTokenData.UserID,
-			"bundleID", authTokenData.BundleID,
+			"anchorID", authTokenData.AnchorID,
 			"token", token)
 		return ErrTokenExpired
 	}
@@ -235,7 +234,7 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 	if time.Since(authTokenData.CreatedAt) > c.notificationTTL {
 		log.Warnw("OTP expired",
 			"userID", authTokenData.UserID,
-			"bundleID", authTokenData.BundleID,
+			"anchorID", authTokenData.AnchorID,
 			"token", token)
 		return ErrTokenExpired
 	}
@@ -243,7 +242,7 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 	if authTokenData.Attempts >= MaxChallengeAttempts {
 		log.Warnw("too many challenge attempts",
 			"userID", authTokenData.UserID,
-			"bundleID", authTokenData.BundleID,
+			"anchorID", authTokenData.AnchorID,
 			"token", token,
 			"attempts", authTokenData.Attempts)
 		return ErrTooManyAttempts
@@ -253,7 +252,7 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 	if !c.verifySolution(authTokenData.Secret, solution) {
 		log.Warnw("challenge code does not match",
 			"userID", authTokenData.UserID,
-			"bundleID", authTokenData.BundleID,
+			"anchorID", authTokenData.AnchorID,
 			"token", token)
 		recorded, err := c.Storage.IncrementCSPAuthAttempts(token, MaxChallengeAttempts)
 		if err != nil {
@@ -275,7 +274,7 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 	if err := c.Storage.VerifyCSPAuth(token); err != nil {
 		log.Warnw("error verifying token",
 			"userID", authTokenData.UserID,
-			"bundleID", authTokenData.BundleID,
+			"anchorID", authTokenData.AnchorID,
 			"token", token,
 			"error", err)
 		return ErrStorageFailure
@@ -309,22 +308,22 @@ func (*CSP) verifySolution(secret, solution string) bool {
 // createAuthOnlyToken creates a pre-verified token for auth-only censuses
 // that don't require challenge verification. It generates a token and immediately
 // marks it as verified.
-func (c *CSP) createAuthOnlyToken(bID, uID internal.HexBytes) (internal.HexBytes, error) {
+func (c *CSP) createAuthOnlyToken(anchorID, uID internal.HexBytes) (internal.HexBytes, error) {
 	// generate a new token (we don't need the code for auth-only)
 	bToken, err := uuid.New().MarshalBinary()
 	if err != nil {
 		log.Warnw("error marshalling token",
 			"error", err,
 			"userID", uID,
-			"bundleID", bID)
+			"anchorID", anchorID)
 		return nil, ErrInvalidAuthToken
 	}
 
 	// create the new token (auth-only tokens need no OTP secret)
-	if err := c.Storage.SetCSPAuth(bToken, uID, bID, ""); err != nil {
+	if err := c.Storage.SetCSPAuth(bToken, uID, anchorID, ""); err != nil {
 		log.Warnw("error setting new token",
 			"userID", uID,
-			"bundleID", bID,
+			"anchorID", anchorID,
 			"error", err)
 		return nil, ErrStorageFailure
 	}
@@ -333,7 +332,7 @@ func (c *CSP) createAuthOnlyToken(bID, uID internal.HexBytes) (internal.HexBytes
 	if err := c.Storage.VerifyCSPAuth(bToken); err != nil {
 		log.Warnw("error verifying auth-only token",
 			"userID", uID,
-			"bundleID", bID,
+			"anchorID", anchorID,
 			"token", bToken,
 			"error", err)
 		return nil, ErrStorageFailure
@@ -341,7 +340,7 @@ func (c *CSP) createAuthOnlyToken(bID, uID internal.HexBytes) (internal.HexBytes
 
 	log.Debugw("new auth-only token created and verified",
 		"userID", uID,
-		"bundleID", bID,
+		"anchorID", anchorID,
 		"token", bToken)
 
 	return bToken, nil

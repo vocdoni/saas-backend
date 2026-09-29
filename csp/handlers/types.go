@@ -138,37 +138,26 @@ type BlindSignResponse struct {
 }
 
 // UserWeightRequest defines the payload for the request to get the
-// weight of a user for a given bundle. It includes the authToken to query
+// weight of a user for a given process. It includes the authToken to query
 // the information.
 type UserWeightRequest struct {
 	AuthToken internal.HexBytes `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
-// USerWeightResponse defines the payload for the response to the
-// request to get the weight of a user for a given bundle. It includes
+// UserWeightResponse defines the payload for the response to the
+// request to get the weight of a user for a given process. It includes
 // the weight of the user.
 type UserWeightResponse struct {
 	Weight internal.HexBytes `json:"weight,omitempty" swaggertype:"string" format:"hex" example:"2a"`
 }
 
 // CheckMembershipRequest defines the payload for the request to check whether
-// the user behind a CSP auth token belongs to a bundle's census. The user is
+// the user behind a CSP auth token belongs to a process's census. The user is
 // identified solely by the authToken; the optional electionId (process ID)
 // scopes the hasVoted result to that process.
 type CheckMembershipRequest struct {
 	AuthToken internal.HexBytes `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
 	ProcessID internal.HexBytes `json:"electionId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
-}
-
-// CheckMembershipResponse defines the payload for the response to the census
-// membership check. Belongs reports whether the token's user is an eligible
-// participant of the bundle's census, Weight is the voter weight (1 unless the
-// census is weighted) and HasVoted reports whether the user already cast a
-// ballot in the requested process (only meaningful when electionId is provided).
-type CheckMembershipResponse struct {
-	Belongs  bool              `json:"belongs"`
-	Weight   internal.HexBytes `json:"weight,omitempty" swaggertype:"string" format:"hex" example:"2a"`
-	HasVoted bool              `json:"hasVoted"`
 }
 
 // ProcessCheckResponse is the voter status/eligibility response of the new /processes
@@ -193,16 +182,6 @@ type ProcessQuestionStatus struct {
 // authToken to query the information.
 type ConsumedAddressRequest struct {
 	AuthToken internal.HexBytes `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
-}
-
-// ConsumedAddressResponse defines the payload for the response to the
-// request to get the if a token was used and which address was used.
-// It includes the address, the nullifier, and the timestamp of the
-// usage.
-type ConsumedAddressResponse struct {
-	Address   internal.HexBytes `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
-	Nullifier internal.HexBytes `json:"nullifier" swaggertype:"string" format:"hex" example:"deadbeef"`
-	At        time.Time         `json:"at"`
 }
 
 // QuestionConsumedAddress is one question's consumed voting info for a voter: the address that
