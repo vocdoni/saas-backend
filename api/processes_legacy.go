@@ -398,7 +398,7 @@ func (src *legacyProcessSource) cacheKey() string {
 	var b strings.Builder
 	b.WriteString(src.id.Hex())
 	for _, electionID := range src.elections {
-		b.WriteByte(':')
+		b.WriteString(":")
 		b.WriteString(electionID.String())
 	}
 	return b.String()
