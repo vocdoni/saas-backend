@@ -627,7 +627,8 @@ func legacyCorroboratedType(
 			return tm
 		}
 	case "multiple-choice":
-		if single && bp.MaxCount > 1 && bp.MaxValue >= maxChoiceValue {
+		// a single pick still runs multichoice when the SDK reserved an abstain value past the last choice
+		if single && bp.MaxValue >= maxChoiceValue && (bp.MaxCount > 1 || bp.MaxValue > maxChoiceValue) {
 			return tm
 		}
 	case "approval":

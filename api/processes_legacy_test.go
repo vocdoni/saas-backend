@@ -216,6 +216,37 @@ func TestLegacyProjectionChainBallot(t *testing.T) {
 	c.Assert(questions[0].TypeSetup, qt.Equals, bounds)
 }
 
+// TestLegacyProjectionSingleChoiceAbstain checks issue #724: the legacy SDK publishes a single-pick
+// multiple-choice question with abstain as maxCount 1 over one value past the last choice. The ballot
+// corroborates the declared name, so it comes through and a client keeps the abstain column; without
+// that extra value a single pick reads the same as single-choice, so the name is still dropped.
+func TestLegacyProjectionSingleChoiceAbstain(t *testing.T) {
+	c := qt.New(t)
+	project := func(maxValue uint32) db.VotingProcessQuestion {
+		election := legacyTestElection([][]uint64{{3, 2, 1, 2}}, []map[string]any{legacyTestChoices("Statuto", 3)})
+		election.TallyMode.MaxValue = maxValue
+		legacyTestElectionType(election, "multiple-choice", map[string]any{
+			"numChoices": map[string]any{"min": 0, "max": 1},
+			"canAbstain": true,
+		})
+		content := testAPI.legacyContentOf(context.Background(), election, nil)
+		questions := legacyElectionQuestions(bson.NewObjectID(), election, content)
+		c.Assert(questions, qt.HasLen, 1)
+		return questions[0]
+	}
+
+	abstain := project(3)
+	c.Assert(legacyTestDeclaredType(abstain), qt.Not(qt.IsNil))
+	c.Assert(legacyTestDeclaredType(abstain).Name, qt.Equals, "multiple-choice")
+	// no named type runs an abstain slot, so the name is the declared one and the bounds come from it.
+	c.Assert(abstain.Type, qt.Equals, "")
+	c.Assert(abstain.BallotProtocol.MaxCount, qt.Equals, uint32(1))
+	c.Assert(abstain.BallotProtocol.MaxValue, qt.Equals, uint32(3))
+	c.Assert(abstain.TypeSetup.MaxChoices, qt.Equals, uint32(1))
+
+	c.Assert(legacyTestDeclaredType(project(2)), qt.IsNil)
+}
+
 // TestLegacyProjectionUncorroboratedType checks the caution the whole metadata pass-through rests on:
 // elections the SaaS API published declare single-choice-multiquestion whatever ballot they then ran,
 // and a client trusts the declared name over the parameters, so a contradicted name is dropped.
