@@ -2,6 +2,10 @@ package db
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,19 +30,19 @@ func runRepair(t *testing.T, opts migrations.RepairOptions) migrations.RepairRep
 // it were folded to lowercase, i.e. straight from the exact-case member values.
 // Used to seed rows as they exist in a database written by the old code.
 func unfoldedHash(m OrgMember, auth OrgMemberAuthFields, twoFa OrgMemberTwoFaFields) []byte {
-	values := make([]string, 0, len(auth)+len(twoFa))
+	values := make(map[string]string, len(auth)+len(twoFa))
 	for _, f := range auth {
 		switch f {
 		case OrgMemberAuthFieldsName:
-			values = append(values, m.Name)
+			values[string(f)] = m.Name
 		case OrgMemberAuthFieldsSurname:
-			values = append(values, m.Surname)
+			values[string(f)] = m.Surname
 		case OrgMemberAuthFieldsMemberNumber:
-			values = append(values, m.MemberNumber)
+			values[string(f)] = m.MemberNumber
 		case OrgMemberAuthFieldsNationalID:
-			values = append(values, m.NationalID)
+			values[string(f)] = m.NationalID
 		case OrgMemberAuthFieldsBirthDate:
-			values = append(values, m.BirthDate)
+			values[string(f)] = m.BirthDate
 		default:
 			// mirrors HashAuthTwoFaFields: unknown fields are ignored
 		}
@@ -46,16 +50,16 @@ func unfoldedHash(m OrgMember, auth OrgMemberAuthFields, twoFa OrgMemberTwoFaFie
 	for _, f := range twoFa {
 		switch f {
 		case OrgMemberTwoFaFieldEmail:
-			values = append(values, m.Email)
+			values[string(f)] = m.Email
 		case OrgMemberTwoFaFieldPhone:
 			if !m.Phone.IsEmpty() {
-				values = append(values, string(m.Phone))
+				values[string(f)] = string(m.Phone)
 			}
 		default:
 			// mirrors HashAuthTwoFaFields: unknown fields are ignored
 		}
 	}
-	return internal.HashSortedFields(values)
+	return internal.HashLoginFields(values)
 }
 
 // seedLegacyParticipant inserts a member and its census participant directly,
@@ -154,6 +158,41 @@ func TestRepairLoginHashes(t *testing.T) {
 			c.Assert(err, qt.IsNil)
 			c.Assert(found.ParticipantID, qt.Equals, member.ID.Hex())
 		}
+	})
+
+	t.Run("rehashes the pre-sha256 format and tells swapped fields apart", func(_ *testing.T) {
+		reset()
+		census, censusID := newCensus(authFields, noTwoFa)
+
+		// the old internal.HashSortedFields: sorted, space-joined plaintext plus a constant, so a
+		// member with name and surname swapped stored the same value
+		oldHash := func(m *OrgMember) []byte {
+			values := []string{strings.ToLower(m.Name), strings.ToLower(m.Surname), strings.ToLower(m.MemberNumber)}
+			slices.Sort(values)
+			return sha256.New().Sum(fmt.Append(nil, values))
+		}
+		john := &OrgMember{
+			ID: bson.NewObjectID(), OrgAddress: testOrgAddress,
+			Name: "John", Surname: "Doe", MemberNumber: "M-001", CreatedAt: time.Now(),
+		}
+		seedLegacyParticipant(t, censusID, john, oldHash(john))
+
+		report := runRepair(t, migrations.RepairOptions{Apply: true})
+		c.Assert(report.ParticipantsRehashed, qt.Equals, 1)
+		c.Assert(storedParticipant(john.ID.Hex(), censusID).LoginHash, qt.HasLen, sha256.Size)
+
+		found, err := testDB.CensusParticipantByLoginHash(*census, OrgMember{
+			OrgAddress: testOrgAddress, Name: "john", Surname: "doe", MemberNumber: "m-001",
+		})
+		c.Assert(err, qt.IsNil)
+		c.Assert(found.ParticipantID, qt.Equals, john.ID.Hex())
+		_, err = testDB.CensusParticipantByLoginHash(*census, OrgMember{
+			OrgAddress: testOrgAddress, Name: "doe", Surname: "john", MemberNumber: "m-001",
+		})
+		c.Assert(err, qt.Equals, ErrNotFound)
+
+		// idempotent
+		c.Assert(runRepair(t, migrations.RepairOptions{Apply: true}).ParticipantsRehashed, qt.Equals, 0)
 	})
 
 	t.Run("trims whitespace and rehashes in one run", func(_ *testing.T) {

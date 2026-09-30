@@ -48,10 +48,9 @@ type participantHashDoc struct {
 }
 
 // hashMemberFields mirrors db.HashAuthTwoFaFields exactly: it collects the
-// configured auth and twoFa field values from the member and feeds them to the
-// shared internal.HashSortedFields primitive. The append order is irrelevant
-// because HashSortedFields sorts before hashing, so only the set of values
-// must match the canonical implementation.
+// configured auth and twoFa field values from the member, keyed by field name,
+// and feeds them to the shared internal.HashLoginFields primitive. The field
+// names must be exactly db's, since they are part of what is hashed.
 //
 // It exists so the repair tooling can recompute stored hashes straight from bson
 // documents without importing db. That makes it a duplicate of a
@@ -60,19 +59,19 @@ type participantHashDoc struct {
 // db.TestRepairMatchesCanonicalHash asserts they agree — including the lowercasing
 // below, which makes login case-insensitive and must stay identical to db's.
 func hashMemberFields(m memberHashDoc, authFields, twoFaFields []string) []byte {
-	data := make([]string, 0, len(authFields)+len(twoFaFields))
+	fields := make(map[string]string, len(authFields)+len(twoFaFields))
 	for _, field := range authFields {
 		switch field {
 		case "name":
-			data = append(data, strings.ToLower(m.Name))
+			fields[field] = strings.ToLower(m.Name)
 		case "surname":
-			data = append(data, strings.ToLower(m.Surname))
+			fields[field] = strings.ToLower(m.Surname)
 		case "memberNumber":
-			data = append(data, strings.ToLower(m.MemberNumber))
+			fields[field] = strings.ToLower(m.MemberNumber)
 		case "nationalId":
-			data = append(data, strings.ToLower(m.NationalID))
+			fields[field] = strings.ToLower(m.NationalID)
 		case "birthDate": //nolint:goconst
-			data = append(data, strings.ToLower(m.BirthDate))
+			fields[field] = strings.ToLower(m.BirthDate)
 		default:
 			// ignore unknown fields, mirroring db.HashAuthTwoFaFields
 		}
@@ -80,17 +79,17 @@ func hashMemberFields(m memberHashDoc, authFields, twoFaFields []string) []byte 
 	for _, field := range twoFaFields {
 		switch field {
 		case "email": //nolint:goconst
-			data = append(data, strings.ToLower(m.Email))
+			fields[field] = strings.ToLower(m.Email)
 		case "phone":
 			if len(m.Phone) > 0 {
 				// already hashed bytes, not text: never folded
-				data = append(data, string(m.Phone))
+				fields[field] = string(m.Phone)
 			}
 		default:
 			// ignore unknown fields, mirroring db.HashAuthTwoFaFields
 		}
 	}
-	return internal.HashSortedFields(data)
+	return internal.HashLoginFields(fields)
 }
 
 // recomputeParticipantHashes produces exactly the hash keys that were originally
