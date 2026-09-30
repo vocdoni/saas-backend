@@ -17,7 +17,9 @@ import (
 //	@Description	produce unique, complete credentials over the target members — a group (groupId), an
 //	@Description	explicit memberIds subset, or the whole organization when neither is set. Returns 400
 //	@Description	with the offending member ids (duplicates / missingData) when the census is not usable,
-//	@Description	otherwise 200. Requires Manager/Admin role of the organization.
+//	@Description	otherwise 200. A field that is empty or only whitespace counts as missing data, and
+//	@Description	members with missing data are never reported as duplicates. Requires Manager/Admin role
+//	@Description	of the organization.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes

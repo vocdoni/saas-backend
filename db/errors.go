@@ -26,6 +26,8 @@ var (
 	ErrTokenNotVerified = fmt.Errorf("token not verified")
 	// ErrUpdateWouldCreateDuplicates is returned when trying to update an OrgMember
 	ErrUpdateWouldCreateDuplicates = fmt.Errorf("update would create duplicates")
+	// ErrMissingLoginData is returned when a member lacks the auth data a census requires to log in
+	ErrMissingLoginData = fmt.Errorf("missing required auth data")
 	// ErrAutoGroupCannotBeDeleted is returned when trying to delete the auto-generated "All members" group
 	ErrAutoGroupCannotBeDeleted = fmt.Errorf("auto-generated group cannot be deleted")
 	// ErrAutoGroupMembersCannotBeModified is returned when trying to manually add/remove members from the auto group

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -547,6 +548,12 @@ func (ms *MongoStorage) AddCensusParticipantsByMemberIDs(censusID string, member
 		default:
 		}
 
+		// a member missing login data could never log in: it is left out of the census
+		if member.MissingLoginData(census.AuthFields, census.TwoFaFields) {
+			memberErrors = append(memberErrors, fmt.Errorf("%s: %w", memberID, ErrMissingLoginData))
+			continue
+		}
+
 		participantFilter := bson.M{
 			"participantID": member.ID.Hex(),
 			"censusId":      census.ID.Hex(),
@@ -655,11 +662,9 @@ func (ms *MongoStorage) updateCensusSize(censusID string) error {
 	return nil
 }
 
-func (ms *MongoStorage) setBulkCensusParticipant(ctx context.Context, census *Census, groupID string) (int64, error) {
-	_, members, err := ms.ListOrganizationMemberGroup(groupID, census.OrgAddress, 0, 0)
-	if err != nil {
-		return 0, fmt.Errorf("error retrieving group members: %w", err)
-	}
+// setBulkCensusParticipant upserts the given members as participants of the census, under the login
+// hashes classifyCensusMembers computed for them.
+func (ms *MongoStorage) setBulkCensusParticipant(ctx context.Context, census *Census, members []censusMember) (int64, error) {
 	if len(members) == 0 {
 		return 0, nil // nothing to do
 	}
@@ -670,23 +675,18 @@ func (ms *MongoStorage) setBulkCensusParticipant(ctx context.Context, census *Ce
 	docs := make([]mongo.WriteModel, 0, len(members))
 	for _, member := range members {
 		// Create participant filter and document
-		id := member.ID.Hex()
+		id := member.id.Hex()
 		censusParticipantsFilter := bson.M{
 			"participantID": id,
 			"censusId":      census.ID.Hex(),
 		}
 		participantDoc := &CensusParticipant{
-			ParticipantID: id,
-			LoginHash:     HashAuthTwoFaFields(*member, census.AuthFields, census.TwoFaFields),
-			CensusID:      census.ID.Hex(),
-			UpdatedAt:     currentTime,
-		}
-
-		if len(census.TwoFaFields) == 2 && member.Email != "" {
-			participantDoc.LoginHashEmail = HashAuthTwoFaFields(*member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail})
-		}
-		if len(census.TwoFaFields) == 2 && !member.Phone.IsEmpty() {
-			participantDoc.LoginHashPhone = HashAuthTwoFaFields(*member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone})
+			ParticipantID:  id,
+			LoginHash:      member.hashes["loginHash"],
+			LoginHashEmail: member.hashes["loginHashEmail"],
+			LoginHashPhone: member.hashes["loginHashPhone"],
+			CensusID:       census.ID.Hex(),
+			UpdatedAt:      currentTime,
 		}
 		// Create participant update document
 		updateParticipantDoc, err := dynamicUpdateDocument(participantDoc, nil)
@@ -700,7 +700,7 @@ func (ms *MongoStorage) setBulkCensusParticipant(ctx context.Context, census *Ce
 		setDoc, ok := updateParticipantDoc["$set"].(bson.M)
 		if !ok {
 			log.Warnw("failed to extract $set document for participant",
-				"error", "invalid $set type", "participantID", member.ID.Hex())
+				"error", "invalid $set type", "participantID", id)
 			continue
 		}
 
@@ -861,15 +861,28 @@ func (ms *MongoStorage) CensusParticipantsByMemberIDs(
 	return participants, nil
 }
 
-func calculateParticipantHashesBson(census Census, member OrgMember) bson.M {
-	hashes := bson.M{}
-	hashes["loginHash"] = HashAuthTwoFaFields(member, census.AuthFields, census.TwoFaFields)
-
-	if len(census.TwoFaFields) == 2 && len(member.Email) > 0 {
+// calculateParticipantHashes returns the login hashes a member is stored under as a participant of
+// the census, keyed by the censusParticipants field holding each one. Every such field carries its
+// own unique (censusId, field) index.
+func calculateParticipantHashes(census Census, member OrgMember) map[string][]byte {
+	hashes := map[string][]byte{
+		"loginHash": HashAuthTwoFaFields(member, census.AuthFields, census.TwoFaFields),
+	}
+	// a whitespace-only email is no channel, as MissingLoginData has it
+	if len(census.TwoFaFields) == 2 && strings.TrimSpace(member.Email) != "" {
 		hashes["loginHashEmail"] = HashAuthTwoFaFields(member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail})
 	}
 	if len(census.TwoFaFields) == 2 && !member.Phone.IsEmpty() {
 		hashes["loginHashPhone"] = HashAuthTwoFaFields(member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone})
+	}
+	return hashes
+}
+
+// calculateParticipantHashesBson is calculateParticipantHashes as a bson.M, for building queries.
+func calculateParticipantHashesBson(census Census, member OrgMember) bson.M {
+	hashes := bson.M{}
+	for field, hash := range calculateParticipantHashes(census, member) {
+		hashes[field] = hash
 	}
 	return hashes
 }

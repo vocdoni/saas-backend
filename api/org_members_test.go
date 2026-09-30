@@ -816,7 +816,7 @@ func TestUpsertMemberEditAtCensusQuota(t *testing.T) {
 
 	autoGroup, err := testDB.AutoMemberGroup(orgAddress)
 	c.Assert(err, qt.IsNil)
-	size, err := testDB.PopulateGroupCensus(&db.Census{
+	size, _, err := testDB.PopulateGroupCensus(&db.Census{
 		OrgAddress:  orgAddress,
 		AuthFields:  db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname},
 		TwoFaFields: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail},

@@ -392,7 +392,7 @@ func TestUpdateOrganizationMemberGroupRevokesOnlyGroupMembers(t *testing.T) {
 		AuthFields:  OrgMemberAuthFields{OrgMemberAuthFieldsMemberNumber},
 		TwoFaFields: OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail},
 	}
-	_, err = testDB.PopulateGroupCensus(groupCensus, groupID)
+	_, _, err = testDB.PopulateGroupCensus(groupCensus, groupID)
 	c.Assert(err, qt.IsNil)
 
 	// carol is a member of the same organization, but not of this group

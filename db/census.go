@@ -60,29 +60,59 @@ func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
 	return census.ID.Hex(), nil
 }
 
-// PopulateGroupCensus creates a new census for an organization
-// Returns the hex representation of the census
-func (ms *MongoStorage) PopulateGroupCensus(
+// PopulateGroupCensus stores the census and adds every member of the group as a participant,
+// returning the number added and the members left out for missing required auth data (they could
+// never log in). Members that could not be told apart from another member or participant of the
+// census (same login hash) are refused with a *CensusMembersError before anything is written.
+func (ms *MongoStorage) PopulateGroupCensus(census *Census, groupID string) (int64, []bson.ObjectID, error) {
+	if census.OrgAddress.Cmp(common.Address{}) == 0 {
+		return 0, nil, ErrInvalidData
+	}
+	group, err := ms.OrganizationMemberGroup(groupID, census.OrgAddress)
+	if err != nil {
+		if err == ErrNotFound {
+			return 0, nil, ErrInvalidData
+		}
+		return 0, nil, fmt.Errorf("error retrieving organization group: %w", err)
+	}
+	filter, err := groupMembersFilter(group)
+	if err != nil {
+		return 0, nil, err
+	}
+	return ms.populateCensus(census, filter, group)
+}
+
+// PopulateMembersCensus is PopulateGroupCensus for an explicit set of members of the census
+// organization. IDs matching no member of the organization are ignored.
+func (ms *MongoStorage) PopulateMembersCensus(census *Census, memberIDs []string) (int64, []bson.ObjectID, error) {
+	if census.OrgAddress.Cmp(common.Address{}) == 0 {
+		return 0, nil, ErrInvalidData
+	}
+	filter, err := membersFilter(census.OrgAddress, memberIDs)
+	if err != nil {
+		return 0, nil, err
+	}
+	return ms.populateCensus(census, filter, nil)
+}
+
+// populateCensus stores the census with the org members matching the filter as participants,
+// linking it to the group when one is given. See PopulateGroupCensus.
+func (ms *MongoStorage) populateCensus(
 	census *Census,
-	groupID string,
-) (int64, error) {
-	// create a context with a timeout
+	membersFilter bson.D,
+	group *OrganizationMemberGroup,
+) (int64, []bson.ObjectID, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-
-	if census.OrgAddress.Cmp(common.Address{}) == 0 {
-		return 0, ErrInvalidData
-	}
 
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// check that the org exists
-	_, err := ms.Organization(census.OrgAddress)
-	if err != nil {
+	if _, err := ms.Organization(census.OrgAddress); err != nil {
 		if err == ErrNotFound {
-			return 0, ErrInvalidData
+			return 0, nil, ErrInvalidData
 		}
-		return 0, fmt.Errorf("error retrieving organization: %w", err)
+		return 0, nil, fmt.Errorf("error retrieving organization: %w", err)
 	}
 
 	if census.ID != bson.NilObjectID {
@@ -95,42 +125,53 @@ func (ms *MongoStorage) PopulateGroupCensus(
 	}
 	census.Type = census.TwoFaFields.GetCensusType()
 
-	// check that the group exists
-	group, err := ms.OrganizationMemberGroup(groupID, census.OrgAddress)
+	// participants already in the census hold login hashes too
+	existing, err := ms.CensusParticipants(census.ID.Hex())
 	if err != nil {
-		if err == ErrNotFound {
-			return 0, ErrInvalidData
+		return 0, nil, fmt.Errorf("error retrieving census participants: %w", err)
+	}
+	cur, err := ms.findMemberFieldsCursor(ctx, membersFilter, census.AuthFields, census.TwoFaFields)
+	if err != nil {
+		return 0, nil, fmt.Errorf("error retrieving census members: %w", err)
+	}
+	defer func() {
+		if err := cur.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
 		}
-		return 0, fmt.Errorf("error retrieving organization group: %w", err)
-	}
-	if !group.IsAutoGroup && len(group.MemberIDs) == 0 {
-		return 0, fmt.Errorf("group has no members")
-	}
-
-	census.GroupID = group.ID
-	// update the group with the census ID
-	if err := ms.addOrganizationMemberGroupCensus(ctx, group.ID.Hex(), census.OrgAddress, census.ID.Hex()); err != nil {
-		return 0, fmt.Errorf("error updating group with census ID: %w", err)
-	}
-
-	// set the participants for the census
-	insertedCount, err := ms.setBulkCensusParticipant(ctx, census, groupID)
+	}()
+	members, err := classifyCensusMembers(ctx, cur, *census, existing)
 	if err != nil {
-		return 0, fmt.Errorf("error setting census participants: %w", err)
+		return 0, nil, fmt.Errorf("error retrieving census members: %w", err)
+	}
+	// members sharing a login hash would fail the unique login-hash index halfway through the build:
+	// refuse them up front, naming them, before the group is linked
+	if dups := members.duplicates(); len(dups) > 0 {
+		return 0, nil, &CensusMembersError{Duplicates: dups}
+	}
+
+	if group != nil {
+		census.GroupID = group.ID
+		if err := ms.addOrganizationMemberGroupCensus(ctx, group.ID.Hex(), census.OrgAddress, census.ID.Hex()); err != nil {
+			return 0, nil, fmt.Errorf("error updating group with census ID: %w", err)
+		}
+	}
+
+	insertedCount, err := ms.setBulkCensusParticipant(ctx, census, members.complete)
+	if err != nil {
+		return 0, nil, fmt.Errorf("error setting census participants: %w", err)
 	}
 	census.Size = insertedCount
 
 	updateDoc, err := dynamicUpdateDocument(census, nil)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	filter := bson.M{"_id": census.ID}
 	opts := options.UpdateOne().SetUpsert(true)
-	_, err = ms.censuses.UpdateOne(ctx, filter, updateDoc, opts)
-	if err != nil {
-		return 0, err
+	if _, err := ms.censuses.UpdateOne(ctx, filter, updateDoc, opts); err != nil {
+		return 0, nil, err
 	}
-	return census.Size, nil
+	return census.Size, members.missing, nil
 }
 
 // DeleteCensus removes a census and all its members

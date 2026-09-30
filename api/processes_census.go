@@ -9,14 +9,35 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
+
+// censusBuildError maps a failed census build to the API error to return. Members that cannot be
+// told apart are a 400 naming them, in the shape the census pre-flight reports them, and so is a bad
+// member or group ID: those are the caller's to fix, not a 500.
+func censusBuildError(err error) error {
+	var clash *db.CensusMembersError
+	switch {
+	case errors.As(err, &clash):
+		return errors.ErrInvalidData.
+			Withf("members share login data with another member: fix their data or remove them").
+			WithData(clash)
+	case errors.Is(err, db.ErrInvalidData):
+		return errors.ErrInvalidData.WithErr(err)
+	default:
+		return fmt.Errorf("failed to populate census: %w", err)
+	}
+}
 
 // resolveOrCreateDefaultCensus materializes the inline census spec of a voting process into
 // a db.Census (auth/2FA policy + participants) and returns it. The census type is inferred
 // from the 2FA fields (SetCensus does this). Census/vote quotas are enforced, mirroring
 // addCensusParticipantsHandler. The census is created unpublished; publishing happens at
-// process publish time.
-func (a *API) resolveOrCreateDefaultCensus(spec apicommon.CensusSpec, orgAddress common.Address) (*db.Census, error) {
+// process publish time. Members missing the auth data the census requires are left out of it and
+// returned, as hex IDs, for the caller to report.
+func (a *API) resolveOrCreateDefaultCensus(
+	spec apicommon.CensusSpec, orgAddress common.Address,
+) (*db.Census, []string, error) {
 	census := &db.Census{
 		OrgAddress:  orgAddress,
 		Weighted:    spec.Weighted,
@@ -27,7 +48,7 @@ func (a *API) resolveOrCreateDefaultCensus(spec apicommon.CensusSpec, orgAddress
 	}
 	censusID, err := a.db.SetCensus(census)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create census: %w", err)
+		return nil, nil, fmt.Errorf("failed to create census: %w", err)
 	}
 	// self-clean: if any step below fails, delete the census we just created so a failed
 	// resolve leaves nothing behind (DelCensus also removes any participants added).
@@ -38,20 +59,21 @@ func (a *API) resolveOrCreateDefaultCensus(spec apicommon.CensusSpec, orgAddress
 		}
 	}()
 
+	var missing []bson.ObjectID
 	switch {
 	case spec.GroupID != "":
-		if _, err := a.db.PopulateGroupCensus(census, spec.GroupID); err != nil {
-			return nil, fmt.Errorf("failed to populate group census: %w", err)
+		if _, missing, err = a.db.PopulateGroupCensus(census, spec.GroupID); err != nil {
+			return nil, nil, censusBuildError(err)
 		}
 		if err := a.subscriptions.OrgCanAddCensusParticipants(orgAddress, censusID, 0); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	case len(spec.MemberIDs) > 0:
 		if err := a.subscriptions.OrgCanAddCensusParticipants(orgAddress, censusID, len(spec.MemberIDs)); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		if _, _, err := a.db.AddCensusParticipantsByMemberIDs(censusID, spec.MemberIDs); err != nil {
-			return nil, fmt.Errorf("failed to add census participants: %w", err)
+		if _, missing, err = a.db.PopulateMembersCensus(census, spec.MemberIDs); err != nil {
+			return nil, nil, censusBuildError(err)
 		}
 	default:
 		// no members and no group: an empty (auth-only shell) census
@@ -60,14 +82,18 @@ func (a *API) resolveOrCreateDefaultCensus(spec apicommon.CensusSpec, orgAddress
 	// persist the resulting census size for downstream maxCensusSize computation
 	size, err := a.db.CountCensusParticipants(censusID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to count census participants: %w", err)
+		return nil, nil, fmt.Errorf("failed to count census participants: %w", err)
 	}
 	census.Size = size
 	if _, err := a.db.SetCensus(census); err != nil {
-		return nil, fmt.Errorf("failed to update census size: %w", err)
+		return nil, nil, fmt.Errorf("failed to update census size: %w", err)
 	}
 	committed = true
-	return census, nil
+	missingIDs := make([]string, len(missing))
+	for i, id := range missing {
+		missingIDs[i] = id.Hex()
+	}
+	return census, missingIDs, nil
 }
 
 // resolveEligibleMemberIDs resolves a question's optional eligibility subset to a list of

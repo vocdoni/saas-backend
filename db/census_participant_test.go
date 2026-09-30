@@ -33,6 +33,7 @@ func setupTestCensusParticipantPrerequisites(t *testing.T, memberSuffix string) 
 		ID:           bson.NewObjectID(),
 		OrgAddress:   testOrgAddress,
 		MemberNumber: memberNumber,
+		Name:         "Test" + memberSuffix,
 		Email:        "test" + memberSuffix + "@example.com",
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
@@ -394,6 +395,7 @@ func TestCensusParticipant(t *testing.T) {
 				ID:           bson.NewObjectID(),
 				OrgAddress:   testOrgAddress,
 				MemberNumber: "member2_memberIDs",
+				Name:         "Member2",
 				Email:        "member2_memberIDs@example.com",
 				CreatedAt:    time.Now(),
 				UpdatedAt:    time.Now(),
@@ -466,6 +468,7 @@ func TestCensusParticipant(t *testing.T) {
 				ID:           bson.NewObjectID(),
 				OrgAddress:   testOrgAddress,
 				MemberNumber: "member2_memberIDs_size",
+				Name:         "Member2",
 				Email:        "member2_memberIDs_size@example.com",
 				CreatedAt:    time.Now(),
 				UpdatedAt:    time.Now(),
@@ -638,7 +641,13 @@ func TestCensusParticipant(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		upsertCount, err := testDB.setBulkCensusParticipant(ctx, census, groupID)
+		_, groupMembers, err := testDB.ListOrganizationMemberGroup(groupID, testOrgAddress, 0, 0)
+		c.Assert(err, qt.IsNil)
+		toStore := make([]censusMember, 0, len(groupMembers))
+		for _, m := range groupMembers {
+			toStore = append(toStore, censusMember{id: m.ID, hashes: calculateParticipantHashes(*census, *m)})
+		}
+		upsertCount, err := testDB.setBulkCensusParticipant(ctx, census, toStore)
 		c.Assert(err, qt.IsNil)
 		c.Assert(upsertCount, qt.Equals, int64(3))
 
