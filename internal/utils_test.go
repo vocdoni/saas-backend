@@ -312,3 +312,17 @@ func TestDecryptTokenFromHexErrors(t *testing.T) {
 		c.Assert(err.Error(), quicktest.Contains, "failed to decrypt token")
 	})
 }
+
+func TestHashLoginFields(t *testing.T) {
+	c := quicktest.New(t)
+	hash := HashLoginFields(map[string]string{"name": "john", "surname": "doe"})
+	c.Assert(hash, quicktest.HasLen, 32)
+
+	// values swapped between fields
+	c.Assert(HashLoginFields(map[string]string{"name": "doe", "surname": "john"}), quicktest.Not(quicktest.DeepEquals), hash)
+	// characters moved between fields
+	c.Assert(HashLoginFields(map[string]string{"name": "a b", "surname": "c"}), quicktest.Not(quicktest.DeepEquals),
+		HashLoginFields(map[string]string{"name": "a", "surname": "b c"}))
+	// no plaintext in the digest
+	c.Assert(string(hash), quicktest.Not(quicktest.Contains), "john")
+}

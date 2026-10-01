@@ -5,8 +5,10 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"math/big"
 	"regexp"
 	"slices"
@@ -39,19 +41,21 @@ func NormalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
 
-// HashSortedFields sorts the given field values and returns the login-hash
-// digest used to look up census participants during CSP authentication.
-//
-// IMPORTANT: the construction below is intentional and MUST NOT be "fixed".
-// sha256.New().Sum(b) appends the digest of what has been written to the
-// hasher (nothing, here) to b, so the returned bytes are the Go-formatted
-// representation of the sorted slice followed by the SHA-256 of the empty
-// input. Every loginHash/loginHashEmail already stored in the database depends
-// on this exact, byte-for-byte behaviour; changing it would invalidate every
-// stored hash and lock out every voter.
-func HashSortedFields(data []string) []byte {
-	slices.Sort(data)
-	return sha256.New().Sum(fmt.Append(nil, data))
+// HashLoginFields returns the login-hash digest used to look up census
+// participants during CSP authentication, over field name → value pairs.
+// Fields are ordered by name and every name and value is length-prefixed, so
+// distinct inputs never share an encoding: swapping two fields' values or
+// moving characters between them changes the hash.
+func HashLoginFields(fields map[string]string) []byte {
+	var buf []byte
+	for _, name := range slices.Sorted(maps.Keys(fields)) {
+		buf = binary.AppendUvarint(buf, uint64(len(name)))
+		buf = append(buf, name...)
+		buf = binary.AppendUvarint(buf, uint64(len(fields[name])))
+		buf = append(buf, fields[name]...)
+	}
+	sum := sha256.Sum256(buf)
+	return sum[:]
 }
 
 // SanitizeAndVerifyPhoneNumber helper function allows to sanitize and verify a phone number

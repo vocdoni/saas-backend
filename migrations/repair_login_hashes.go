@@ -23,8 +23,8 @@ import (
 // stay below main's for main's migrations to still apply after a forward merge,
 // so the backfill stays out of it.
 //
-// The function is idempotent, so running it more than once — or running it here
-// and again later as a registered migration on another branch — is harmless.
+// The function is idempotent, so running it more than once is harmless. On main,
+// migration 0025 runs it to move every hash to internal.HashLoginFields.
 
 const (
 	// memberFetchBatch bounds the $in used to resolve a census's members.
@@ -418,7 +418,7 @@ func computeParticipantHashes(m memberHashDoc, c censusHashDoc) participantHashS
 	set := participantHashSet{
 		LoginHash: hashMemberFields(m, c.AuthFields, c.TwoFaFields),
 	}
-	if len(c.TwoFaFields) == 2 && len(m.Email) > 0 {
+	if len(c.TwoFaFields) == 2 && strings.TrimSpace(m.Email) != "" {
 		set.LoginHashEmail = hashMemberFields(m, c.AuthFields, []string{"email"}) //nolint:goconst
 	}
 	if len(c.TwoFaFields) == 2 && len(m.Phone) > 0 {

@@ -331,7 +331,7 @@ type OrgMember struct {
 // login-hash comparison go through it: members are stored normalized, and the
 // CSP normalizes the login request the same way before recomputing the hash.
 // Keeping the two in one place is the point — the hash is a byte-exact match
-// (see internal.HashSortedFields), so any drift between how a field is stored
+// (see internal.HashLoginFields), so any drift between how a field is stored
 // and how it is compared silently locks the member out.
 //
 // It only normalizes. Invalid values are passed through in their trimmed form
@@ -430,9 +430,8 @@ func (f OrgMemberTwoFaFields) GetCensusType() CensusType {
 }
 
 // HashAuthTwoFaFields helper function receives as input the data of a member and
-// the auth and twoFa field and produces a sha256 hash of the concatenation of the
-// data that are included in the fields. The data are ordered by the field names
-// in order to make the hash reproducible.
+// the auth and twoFa field and produces the sha256 login hash of the values of
+// those fields, keyed by field name (see internal.HashLoginFields).
 //
 // Text values are lowercased so that login is case-insensitive. That folding is
 // deliberately confined to this function and never written back to the member:
@@ -451,28 +450,28 @@ func (f OrgMemberTwoFaFields) GetCensusType() CensusType {
 // that the repair tooling can recompute stored hashes without importing db. Any
 // change here MUST be made there too — db.TestRepairMatchesCanonicalHash guards that.
 func HashAuthTwoFaFields(memberData OrgMember, authFields OrgMemberAuthFields, twoFaFields OrgMemberTwoFaFields) []byte {
-	data := make([]string, 0, len(twoFaFields)+len(authFields))
+	fields := make(map[string]string, len(twoFaFields)+len(authFields))
 	for _, field := range authFields {
 		// unknown fields are ignored
 		if value, known := memberAuthFieldValue(&memberData, field); known {
-			data = append(data, strings.ToLower(value))
+			fields[string(field)] = strings.ToLower(value)
 		}
 	}
 	for _, field := range twoFaFields {
 		switch field {
 		case OrgMemberTwoFaFieldEmail:
-			data = append(data, strings.ToLower(memberData.Email))
+			fields[string(field)] = strings.ToLower(memberData.Email)
 		case OrgMemberTwoFaFieldPhone:
 			if !memberData.Phone.IsEmpty() {
 				// already hashed bytes, not text: never folded
-				data = append(data, string(memberData.Phone))
+				fields[string(field)] = string(memberData.Phone)
 			}
 		default:
 			// Ignore unknown fields
 			continue
 		}
 	}
-	return internal.HashSortedFields(data)
+	return internal.HashLoginFields(fields)
 }
 
 type OrgMemberAggregationResults struct {
