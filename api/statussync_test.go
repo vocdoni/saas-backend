@@ -143,10 +143,16 @@ func TestStatusSync(t *testing.T) {
 	c.Assert(qEnded.Status == db.QuestionStatusEnded || qEnded.Status == db.QuestionStatusResults, qt.IsTrue,
 		qt.Commentf("status=%s", qEnded.Status))
 	c.Assert(qEnded.SyncedAt.IsZero(), qt.IsFalse)
+	// manually ended election: endedAt must be recorded by the syncer
+	c.Assert(qEnded.EndedAt.IsZero(), qt.IsFalse,
+		qt.Commentf("endedAt should be set for a manually ended question"))
 	qPaused, err := testDB.Question(qPausedID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(qPaused.Status, qt.Equals, db.QuestionStatusPaused)
 	c.Assert(qPaused.SyncedAt.IsZero(), qt.IsFalse)
+	// paused (not ended) election: endedAt must not be set
+	c.Assert(qPaused.EndedAt.IsZero(), qt.IsTrue,
+		qt.Commentf("endedAt should not be set for a non-ended question"))
 
 	// --- confirm success: chain already at the target only refreshes syncedAt, keeps the status ---
 	before := qPaused.SyncedAt

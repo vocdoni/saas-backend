@@ -335,6 +335,24 @@ func (ms *MongoStorage) SyncableQuestionsByOrg(orgAddress common.Address) ([]Que
 	return refs, nil
 }
 
+// SetQuestionEndedAt persists the actual on-chain end time of a question's election. The update
+// applies only when endedAt is not already set, so the first recorded value wins and the call is
+// idempotent — a second call after the value is stored is a no-op. Used by the status syncer and
+// the lazy backfill in resolveQuestionResults for historically ended questions.
+func (ms *MongoStorage) SetQuestionEndedAt(upstreamID internal.HexBytes, endedAt time.Time) error {
+	if len(upstreamID) == 0 || endedAt.IsZero() {
+		return ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	// only write when the field is absent: first value wins, idempotent
+	filter := bson.M{"upstreamId": upstreamID, "endedAt": bson.M{"$exists": false}} //nolint:goconst
+	if _, err := ms.processesQuestions.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"endedAt": endedAt}}); err != nil {
+		return fmt.Errorf("failed to set question endedAt: %w", err)
+	}
+	return nil
+}
+
 // SetQuestionStatusSynced conditionally reconciles a question (by on-chain id) to next, stamping
 // syncedAt. The update applies only while the stored status still equals prev, so a concurrent
 // direct write (publish/status-change) is never clobbered by a stale syncer value — a mismatch

@@ -761,6 +761,12 @@ type VotingProcessQuestion struct {
 	MetadataURL       string            `json:"-" bson:"metadataURL,omitempty"`
 	Status            string            `json:"status,omitempty" bson:"status,omitempty"`
 	SyncedAt          time.Time         `json:"-" bson:"syncedAt,omitempty"`
+	// EndedAt is the actual on-chain moment this question's election stopped accepting votes,
+	// set only when the vote was ended early (before its scheduled end, i.e. ManuallyEnded on
+	// the chain). Absent (omitzero) when the vote ran to its scheduled end. Recorded lazily on
+	// the first read after ending when the statussync path misses it, so historical questions
+	// are filled on GET /processes/{id} or GET /processes/{id}/questions/{qid}.
+	EndedAt time.Time `json:"endedAt,omitzero" bson:"endedAt,omitempty"`
 	// EncryptionKeys are the on-chain vote-encryption public keys of this question's election,
 	// resolved on read and cached (only for secretUntilTheEnd questions). Because of omitempty the
 	// JSON field is absent (not an empty array) until the keykeepers publish the keys, so clients

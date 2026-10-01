@@ -977,6 +977,18 @@ func (a *API) resolveQuestionResults(q *db.VotingProcessQuestion, withMemos bool
 			"question", q.ID.Hex(), "upstreamId", q.UpstreamID.String(), "error", err)
 		return nil
 	}
+	// lazy backfill: if the election was manually ended and we haven't recorded endedAt yet,
+	// persist it now. statussync does not re-sync terminal (RESULTS) questions, so this is the
+	// only path that fills historical ones. Set on the in-memory question too so this response
+	// carries the field without a round-trip.
+	if election.ManuallyEnded && !election.EndDate.IsZero() && q.EndedAt.IsZero() {
+		if err := a.db.SetQuestionEndedAt(q.UpstreamID, election.EndDate); err != nil {
+			log.Warnw("results: set endedAt failed",
+				"question", q.ID.Hex(), "upstreamId", q.UpstreamID.String(), "error", err)
+		} else {
+			q.EndedAt = election.EndDate
+		}
+	}
 	qr := questionResultsFromElection(election)
 	if withMemos {
 		qr.Memos = a.resolveQuestionMemos(q)

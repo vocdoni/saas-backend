@@ -15,6 +15,7 @@ import (
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
+	vocdoniapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -221,6 +222,7 @@ func (s *Syncer) process(t *task) {
 		if _, err := s.db.SetQuestionStatusSynced(t.upstreamID, t.known, chainStatus); err != nil {
 			log.Warnw("status sync: reconcile write failed", "upstreamId", hexID, "error", err.Error())
 		}
+		s.maybeRecordEndedAt(t.upstreamID, hexID, election)
 		return
 	}
 
@@ -229,6 +231,7 @@ func (s *Syncer) process(t *task) {
 		if _, err := s.db.SetQuestionStatusSynced(t.upstreamID, t.expected, t.expected); err != nil {
 			log.Warnw("status sync: confirm stamp failed", "upstreamId", hexID, "error", err.Error())
 		}
+		s.maybeRecordEndedAt(t.upstreamID, hexID, election)
 		return
 	}
 	// not confirmed yet: keep polling without touching the optimistic stored value.
@@ -241,6 +244,20 @@ func (s *Syncer) process(t *task) {
 	// gave up: reconcile the optimistic value to whatever the chain actually holds.
 	if _, err := s.db.SetQuestionStatusSynced(t.upstreamID, t.expected, chainStatus); err != nil {
 		log.Warnw("status sync: give-up reconcile failed", "upstreamId", hexID, "error", err.Error())
+	}
+	s.maybeRecordEndedAt(t.upstreamID, hexID, election)
+}
+
+// maybeRecordEndedAt persists the actual on-chain end time for a manually ended question's
+// election. It is a no-op for elections that ran to their scheduled end (ManuallyEnded=false),
+// for a zero EndDate, and for questions that already have endedAt set (SetQuestionEndedAt is
+// idempotent, but skipping the call avoids a matched-count=0 write on the common path).
+func (s *Syncer) maybeRecordEndedAt(upstreamID internal.HexBytes, hexID string, election *vocdoniapi.Election) {
+	if !election.ManuallyEnded || election.EndDate.IsZero() {
+		return
+	}
+	if err := s.db.SetQuestionEndedAt(upstreamID, election.EndDate); err != nil {
+		log.Warnw("status sync: set endedAt failed", "upstreamId", hexID, "error", err.Error())
 	}
 }
 

@@ -3,9 +3,11 @@ package db
 import (
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -153,4 +155,46 @@ func TestSetProcessQuestionsConcurrentGrowing(t *testing.T) {
 	c.Assert(len(stored) >= 2 && len(stored) <= 4, qt.IsTrue,
 		qt.Commentf("expected 2 to 4 rows, got %d: the tail may be swept by a shorter concurrent writer, "+
 			"but the seeded slots and the one-row-per-slot invariant may not be violated", len(stored)))
+}
+
+// TestSetQuestionEndedAt verifies that SetQuestionEndedAt is idempotent: the first call persists
+// the timestamp and a second call with a different time is a no-op (first value wins).
+func TestSetQuestionEndedAt(t *testing.T) {
+	c := qt.New(t)
+	org := common.Address{0x99}
+	setupVotingProcessOrg(c, org)
+
+	pid, err := testDB.SetVotingProcess(&VotingProcess{OrgAddress: org, Title: MultiLangString{"default": "P endedAt"}})
+	c.Assert(err, qt.IsNil)
+
+	upstream := internal.HexBytes("endedAt-election-1")
+	qID, err := testDB.SetQuestion(&VotingProcessQuestion{
+		ProcessID:  pid,
+		OrgAddress: org,
+		Order:      0,
+		Title:      MultiLangString{"default": "Q"},
+		UpstreamID: upstream,
+		Status:     QuestionStatusEnded,
+	})
+	c.Assert(err, qt.IsNil)
+
+	// first call: endedAt should be set
+	t1 := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	c.Assert(testDB.SetQuestionEndedAt(upstream, t1), qt.IsNil)
+
+	got, err := testDB.Question(qID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.EndedAt.Equal(t1), qt.IsTrue, qt.Commentf("endedAt=%v", got.EndedAt))
+
+	// second call with a different time: first value wins (idempotent)
+	t2 := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	c.Assert(testDB.SetQuestionEndedAt(upstream, t2), qt.IsNil)
+
+	got, err = testDB.Question(qID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.EndedAt.Equal(t1), qt.IsTrue, qt.Commentf("endedAt should not change on second call, got %v", got.EndedAt))
+
+	// zero endedAt and empty upstreamID are rejected
+	c.Assert(testDB.SetQuestionEndedAt(upstream, time.Time{}), qt.Not(qt.IsNil))
+	c.Assert(testDB.SetQuestionEndedAt(internal.HexBytes{}, t1), qt.Not(qt.IsNil))
 }
