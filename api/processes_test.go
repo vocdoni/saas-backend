@@ -1261,3 +1261,185 @@ func TestVotingProcessPublishGateSkipsMinted(t *testing.T) {
 		t, http.MethodGet, token, nil, "processes", created.ProcessID, "validation")
 	c.Assert(val.Valid, qt.IsTrue, qt.Commentf("a minted question must not block the process: %v", val.Errors))
 }
+
+// publishVotingProcess creates a 2-question process for orgAddress and publishes it, returning the
+// process id and the fully-hydrated post-publish read (used by the tests below as the "current on-chain
+// shape" baseline to echo back and mutate).
+func publishVotingProcess(
+	t *testing.T, token string, orgAddress common.Address, ids []string,
+) (string, apicommon.VotingProcessResponse) {
+	t.Helper()
+	c := qt.New(t)
+	req := newVotingProcessRequest(orgAddress, ids)
+	req.StartDate = ""
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint)
+	pid := created.ProcessID
+
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
+
+	published := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(published.Published, qt.IsTrue)
+	return pid, published
+}
+
+// TestVotingProcessUpdatePublishedMetadata covers issue #684/#686: once a process is published its
+// elections are live on-chain, but the organization must still be able to fix a typo in the title,
+// description, or a choice label — through the dedicated metadata endpoint — without touching the
+// ballot voters already cast against.
+func TestVotingProcessUpdatePublishedMetadata(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	pid, published := publishVotingProcess(t, token, orgAddress, ids)
+
+	meta := requestAndParse[apicommon.VotingProcessMetadata](t, http.MethodGet, token, nil, "processes", pid, "metadata")
+	c.Assert(meta.Questions, qt.HasLen, len(published.Questions))
+
+	meta.Title = db.MultiLangString{"default": "Updated title"}
+	meta.Description = db.MultiLangString{"default": "Updated description"}
+	meta.Header = "https://example.com/header.png"
+	meta.StreamURI = "https://example.com/stream"
+	for i := range meta.Questions {
+		meta.Questions[i].Title = db.MultiLangString{"default": fmt.Sprintf("Updated Q%d", i)}
+		meta.Questions[i].Description = db.MultiLangString{"default": fmt.Sprintf("Updated description Q%d", i)}
+		for j := range meta.Questions[i].Choices {
+			meta.Questions[i].Choices[j].Title = db.MultiLangString{"default": fmt.Sprintf("Updated choice %d-%d", i, j)}
+		}
+	}
+	requestAndAssertCode(http.StatusOK, t, http.MethodPut, token, meta, "processes", pid, "metadata")
+
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(got.Published, qt.IsTrue)
+	c.Assert(got.Title["default"], qt.Equals, "Updated title")
+	c.Assert(got.Description["default"], qt.Equals, "Updated description")
+	c.Assert(got.Header, qt.Equals, "https://example.com/header.png")
+	c.Assert(got.StreamURI, qt.Equals, "https://example.com/stream")
+	c.Assert(got.UpdatedAt, qt.Not(qt.Equals), published.UpdatedAt)
+	c.Assert(got.Questions, qt.HasLen, len(published.Questions))
+	for i, q := range got.Questions {
+		c.Assert(q.Title["default"], qt.Equals, fmt.Sprintf("Updated Q%d", i))
+		c.Assert(q.Description["default"], qt.Equals, fmt.Sprintf("Updated description Q%d", i))
+		// the election itself is untouched: same mined upstream id, same choice count/values
+		c.Assert(q.UpstreamID, qt.DeepEquals, published.Questions[i].UpstreamID)
+		c.Assert(q.EligibleMemberIDs, qt.DeepEquals, published.Questions[i].EligibleMemberIDs)
+		c.Assert(q.Choices, qt.HasLen, len(published.Questions[i].Choices))
+		for j, ch := range q.Choices {
+			c.Assert(ch.Title["default"], qt.Equals, fmt.Sprintf("Updated choice %d-%d", i, j))
+			c.Assert(ch.Value, qt.Equals, published.Questions[i].Choices[j].Value)
+		}
+	}
+
+	// the general PUT /processes/{processId} endpoint keeps rejecting a published process outright
+	upd := newVotingProcessRequest(orgAddress, ids)
+	requestAndAssertError(errors.ErrDuplicateConflict, t, http.MethodPut, token, upd, "processes", pid)
+}
+
+// TestVotingProcessRejectStructuralChangesOnPublished covers the other half of issue #684/#686: the
+// metadata endpoint's request shape has no field for question/choice count, type, typeSetup,
+// ballotProtocol or a choice's value, so a mismatched question or choice count is rejected with 400
+// and a rejected attempt must leave the stored process exactly as it was.
+func TestVotingProcessRejectStructuralChangesOnPublished(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	pid, published := publishVotingProcess(t, token, orgAddress, ids)
+
+	cases := []struct {
+		name   string
+		mutate func(*apicommon.VotingProcessMetadata)
+	}{
+		{"remove a question", func(m *apicommon.VotingProcessMetadata) {
+			m.Questions = m.Questions[:len(m.Questions)-1]
+		}},
+		{"remove a choice", func(m *apicommon.VotingProcessMetadata) {
+			m.Questions[0].Choices = m.Questions[0].Choices[:1]
+		}},
+		{"add a question", func(m *apicommon.VotingProcessMetadata) {
+			m.Questions = append(m.Questions, m.Questions[len(m.Questions)-1])
+		}},
+		{"add a choice", func(m *apicommon.VotingProcessMetadata) {
+			m.Questions[0].Choices = append(m.Questions[0].Choices, m.Questions[0].Choices[0])
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			meta := requestAndParse[apicommon.VotingProcessMetadata](
+				t, http.MethodGet, token, nil, "processes", pid, "metadata")
+			tc.mutate(&meta)
+			requestAndAssertError(errors.ErrMalformedBody, t, http.MethodPut, token, meta, "processes", pid, "metadata")
+		})
+	}
+
+	// none of the rejected attempts touched anything: the process still reads exactly as published
+	after := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(after.Title, qt.DeepEquals, published.Title)
+	c.Assert(after.Questions, qt.HasLen, len(published.Questions))
+	for i, q := range after.Questions {
+		c.Assert(q.Title, qt.DeepEquals, published.Questions[i].Title)
+		c.Assert(q.Choices, qt.HasLen, len(published.Questions[i].Choices))
+		for j, ch := range q.Choices {
+			c.Assert(ch.Value, qt.Equals, published.Questions[i].Choices[j].Value)
+		}
+	}
+}
+
+// TestVotingProcessUpdateDraftStillWorks guards against a regression where introducing the metadata
+// endpoint accidentally changed the general PUT /processes/{processId} behavior for a draft: a draft
+// PUT must still be able to change the ballot shape (here, the number of questions).
+func TestVotingProcessUpdateDraftStillWorks(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	req := newVotingProcessRequest(orgAddress, ids)
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint)
+	pid := created.ProcessID
+
+	// a draft may drop a question entirely, which a published process never can
+	upd := newVotingProcessRequest(orgAddress, ids)
+	upd.Questions = upd.Questions[:1]
+	requestAndAssertCode(http.StatusOK, t, http.MethodPut, token, upd, "processes", pid)
+
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(got.Published, qt.IsFalse)
+	c.Assert(got.Questions, qt.HasLen, 1)
+}
+
+// TestVotingProcessMetadataDraft covers the metadata endpoint as a lighter-weight, text-only
+// alternative to the general PUT /processes/{processId} on a draft (not just a published process).
+func TestVotingProcessMetadataDraft(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	req := newVotingProcessRequest(orgAddress, ids)
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint)
+	pid := created.ProcessID
+
+	meta := requestAndParse[apicommon.VotingProcessMetadata](t, http.MethodGet, token, nil, "processes", pid, "metadata")
+	meta.Title = db.MultiLangString{"default": "Draft updated title"}
+	requestAndAssertCode(http.StatusOK, t, http.MethodPut, token, meta, "processes", pid, "metadata")
+
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(got.Published, qt.IsFalse)
+	c.Assert(got.Title["default"], qt.Equals, "Draft updated title")
+	c.Assert(got.Questions, qt.HasLen, len(req.Questions))
+}
