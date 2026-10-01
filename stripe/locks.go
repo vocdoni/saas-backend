@@ -36,24 +36,3 @@ func (lm *LockManager) LockOrganization(orgAddress common.Address) func() {
 		lock.Unlock()
 	}
 }
-
-// CleanupLocks removes unused locks (optional optimization)
-// This can be called periodically to prevent memory leaks from inactive organizations
-func (lm *LockManager) CleanupLocks() {
-	// Note: This is a simple implementation. In production, you might want to track
-	// lock usage and only clean up locks that haven't been used recently
-	lm.locks.Range(func(key, value any) bool {
-		lock, ok := value.(*sync.Mutex)
-		if !ok {
-			// This should never happen if we only store *sync.Mutex values
-			return true
-		}
-		// Try to acquire the lock without blocking
-		if lock.TryLock() {
-			// If we can acquire it, it's not in use, so we can remove it
-			lock.Unlock()
-			lm.locks.Delete(key)
-		}
-		return true
-	})
-}
