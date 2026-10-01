@@ -25,10 +25,12 @@ type fakePaymentGW struct {
 	sessions map[string]*stripe.PaymentSessionInfo
 	created  []*stripe.PaymentSessionParams
 	expired  []string
+	refunds  []fakeRefund
 	// expireErr, when set, makes ExpirePaymentSession fail (Stripe unreachable)
 	expireErr error
 	// createErr, when set, makes CreatePaymentSession fail (Stripe unreachable)
 	createErr error
+	refundFn  func(processID bson.ObjectID, paymentIntentID string) (*stripe.RefundInfo, error)
 }
 
 func newFakePaymentGW() *fakePaymentGW {
@@ -424,6 +426,15 @@ func TestFreePublishRefusedOverOpenCheckout(t *testing.T) {
 
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
+
+	// the cancelled checkout gives way to the €0 envelope, or the census could grow for free
+	oid, err := bson.ObjectIDFromHex(pid)
+	c.Assert(err, qt.IsNil)
+	payment, err := testDB.ProcessPayment(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPaid)
+	c.Assert(payment.AmountCents, qt.Equals, int64(0))
+	c.Assert(payment.CheckoutSessionID, qt.Equals, "")
 }
 
 func TestOrganizationProcessPayments(t *testing.T) {

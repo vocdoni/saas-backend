@@ -211,3 +211,106 @@ func TestProcessPaymentPendingPinsReplacedSession(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.CheckoutSessionID, qt.Equals, "cs_c")
 }
+
+// TestProcessPaymentRefund covers the money-back transitions: only a paid payment refunds,
+// the refund is recorded on the row that survives its deleted process, and a refund Stripe
+// later fails puts the payment back to paid so nothing looks settled that is not.
+func TestProcessPaymentRefund(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	processID := bson.NewObjectID()
+	ok, err := testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_1"), "")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+
+	// nothing to refund until the money actually arrived
+	ok, err = testDB.MarkProcessPaymentRefunded(processID, "re_1", 29_000)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+
+	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_1", ProcessCharge{PaymentIntentID: "pi_1"})
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	payment, err := testDB.ProcessPayment(processID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.PaymentIntentID, qt.Equals, "pi_1")
+
+	// paid -> refunded, recording what the money went back as
+	ok, err = testDB.MarkProcessPaymentRefunded(processID, "re_1", 29_000)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	payment, err = testDB.ProcessPayment(processID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, ProcessPaymentRefunded)
+	c.Assert(payment.RefundID, qt.Equals, "re_1")
+
+	// a delete retried after the refund landed must not refund twice
+	ok, err = testDB.MarkProcessPaymentRefunded(processID, "re_2", 29_000)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+
+	// a refund that failed at Stripe is not a refund: back to paid, refund id kept as the
+	// trace of what to reconcile by hand
+	ok, err = testDB.MarkProcessPaymentRefundFailed(processID, "re_1")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	payment, err = testDB.ProcessPayment(processID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, ProcessPaymentPaid)
+	c.Assert(payment.RefundID, qt.Equals, "re_1")
+
+	// a replay of that event, and one naming a refund this payment never had, change nothing
+	ok, err = testDB.MarkProcessPaymentRefundFailed(processID, "re_1")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+	ok, err = testDB.MarkProcessPaymentRefundFailed(processID, "re_other")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+}
+
+// TestProcessPaymentRefundPlan: a delete fixes its refund once, against the envelope it read,
+// and the payment is locked from then on — neither a card top-up nor a wallet top-up can raise
+// what that refund returns.
+func TestProcessPaymentRefundPlan(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	processID := bson.NewObjectID()
+	ok, err := testDB.SetProcessPaymentPaidByWallet(&ProcessPayment{
+		ProcessID: processID, OrgAddress: testOrgAddress, AmountCents: 29_000, Currency: "eur",
+	})
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+
+	// planned against an envelope that moved: nothing is fixed
+	ok, err = testDB.PlanProcessPaymentRefund(processID, 20_000, 0)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+
+	ok, err = testDB.PlanProcessPaymentRefund(processID, 29_000, 14_900)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	// set once: a second plan does not replace the first
+	ok, err = testDB.PlanProcessPaymentRefund(processID, 29_000, 0)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+	payment, err := testDB.ProcessPayment(processID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.RefundWithheldCents, qt.Not(qt.IsNil))
+	c.Assert(*payment.RefundWithheldCents, qt.Equals, int64(14_900))
+
+	ok, err = testDB.RaiseProcessPaymentAmount(ProcessTopUp{
+		ProcessID: processID, FromCents: 29_000, ToCents: 40_000, SessionID: "cs_topup",
+	})
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+	ok, err = testDB.SetProcessPaymentPaidByWallet(&ProcessPayment{
+		ProcessID: processID, OrgAddress: testOrgAddress, AmountCents: 40_000, Currency: "eur",
+	})
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+	payment, err = testDB.ProcessPayment(processID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.AmountCents, qt.Equals, int64(29_000))
+}

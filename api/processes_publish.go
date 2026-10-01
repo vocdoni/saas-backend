@@ -319,6 +319,11 @@ func (a *API) startProcessPublish(t publishTarget) (string, error) {
 			log.Warnw("could not clear voting process publishing state", "error", e)
 		}
 	}()
+	// again under the claim, which a delete takes too: one that refunded and failed between
+	// the payment gate and here would otherwise go on chain unpaid
+	if err := a.refuseRefundedDraft(oid); err != nil {
+		return "", err
+	}
 
 	org, err := a.db.Organization(vp.OrgAddress)
 	if err != nil {
@@ -493,6 +498,12 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 			log.Warnw("could not clear publishing marker after late publish failure", "error", ce)
 		}
 		return nil, e
+	}
+	// both payment gates let a process through without a payment only when it priced at zero,
+	// so one that has none was published free: record that as its envelope, or its census
+	// could later grow into a priced size without anything to charge against
+	if _, e := a.db.SetProcessPaymentEnvelope(pw.vp.ID, pw.vp.OrgAddress, 0); e != nil {
+		log.Warnw("could not record free process payment", "processId", pw.vp.ID.Hex(), "error", e)
 	}
 	if pw.nonTestSized {
 		if e := a.db.IncrementOrganizationProcessesCounter(pw.vp.OrgAddress); e != nil {

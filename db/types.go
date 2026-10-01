@@ -777,7 +777,8 @@ const (
 // IsValid reports whether s is one of the declared process payment statuses.
 func (s ProcessPaymentStatus) IsValid() bool {
 	switch s {
-	case ProcessPaymentPending, ProcessPaymentProcessing, ProcessPaymentFailed, ProcessPaymentPaid:
+	case ProcessPaymentPending, ProcessPaymentProcessing, ProcessPaymentFailed, ProcessPaymentPaid,
+		ProcessPaymentRefunded:
 		return true
 	default:
 		return false
@@ -805,6 +806,11 @@ type ProcessPayment struct {
 	ChargeTotalCents    int64 `json:"-" bson:"chargeTotalCents,omitempty"`
 	// RefundID is the Stripe refund id, or the wallet credit's idempotency key.
 	RefundID string `json:"-" bson:"refundId,omitempty"`
+	// RefundWithheldCents is the refund a delete fixed before moving any money: the net amount it
+	// keeps back (the relied-on branding add-on, or 0). Set once, so a retried delete repeats the
+	// same refunds under the same keys; nil until a delete starts. While it is set the payment is
+	// locked: nothing may raise it, and the draft can only be deleted.
+	RefundWithheldCents *int64 `json:"-" bson:"refundWithheldCents,omitempty"`
 	// RequestedBy is the checkout user's email; fulfillment publishes as this user.
 	RequestedBy string `json:"-" bson:"requestedBy,omitempty"`
 	// Branding is whether this payment charged the branding add-on, so fulfillment stamps
