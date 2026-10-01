@@ -121,6 +121,10 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 	census := func(ids []string) apicommon.CensusSpec {
 		return apicommon.CensusSpec{AuthFields: db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber}, MemberIDs: ids}
 	}
+	// it is priced, so the integrator wallet that funds its managed orgs' processes pays for it
+	c.Assert(testDB.CreditWallet(db.WalletCredit{
+		OrgAddress: integratorAddr, AmountCents: 100_000, IdempotencyKey: "cs_integrator_managed_orgs",
+	}), qt.IsNil)
 	publishCensusProcess(t, token, firstManaged, census(members), 1)
 	integratorOrg, err = testDB.Organization(integratorAddr)
 	c.Assert(err, qt.IsNil)
@@ -147,21 +151,18 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 	c.Assert(integratorOrg.Counters.ManagedProcesses, qt.Equals, 1)
 }
 
-// TestIntegratorTopLevelOrgCannotOwnElections closes the freeride: an integrator top-level org
-// (integrator-enabled, not itself managed) must not own elections, because both the /integrator
-// dashboard and the pool-quota checks aggregate strictly across managed orgs (managedBy=integrator)
-// and would silently exclude anything the integrator ran on its own top-level org. The guard fires
-// at draft-create (and again at publish, in reserveManagedProcessSlot), and is independent of census
-// size — the rule is "no elections here", not "no billable elections here".
-func TestIntegratorTopLevelOrgCannotOwnElections(t *testing.T) {
+// TestIntegratorTopLevelOrgCanOwnProcesses pins the rule pay-per-process introduced: an
+// integrator top-level org (integrator-enabled, not itself managed) may own a /processes draft.
+// It used to be refused so its elections could not bypass the managed-org pool quotas; each
+// process now pays for itself, so there is no pool to bypass.
+func TestIntegratorTopLevelOrgCanOwnProcesses(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
 	token := testCreateUser(t, "integratorpass123")
 	integratorAddr := testCreateOrganization(t, token)
 
-	// enable integrator (override) and subscribe it to a plan that would otherwise let it
-	// create drafts and publish elections. The guard must reject regardless.
+	// enable integrator (override) and subscribe it to a plan that lets it create drafts.
 	integratorOrg, err := testDB.Organization(integratorAddr)
 	c.Assert(err, qt.IsNil)
 	integratorOrg.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 1}
@@ -180,17 +181,20 @@ func TestIntegratorTopLevelOrgCannotOwnElections(t *testing.T) {
 		LastPaymentDate: time.Now(), Active: true,
 	}), qt.IsNil)
 
-	// /processes draft-create on the integrator top-level org — rejected.
+	// /processes draft-create on the integrator top-level org — allowed.
 	_, code := testRequest(t, http.MethodPost, token, &apicommon.CreateVotingProcessRequest{
 		OrgAddress: integratorAddr.Bytes(),
-		Title:      db.MultiLangString{"default": "Freeride attempt"},
-		Questions:  []apicommon.VotingProcessQuestionRequest{{Title: db.MultiLangString{"default": "Q1"}}},
+		Title:      db.MultiLangString{"default": "Top-level process"},
+		Questions: []apicommon.VotingProcessQuestionRequest{{
+			Title: db.MultiLangString{"default": "Q1"},
+			Type:  db.VotingTypeSingleChoice,
+		}},
 	}, "processes")
-	c.Assert(code, qt.Equals, http.StatusForbidden) // ErrIntegratorTopLevelOrgCannotOwnProcess
+	c.Assert(code, qt.Equals, http.StatusOK)
 }
 
-// TestManagedOrgOnIntegratorPlanCanCreateDraft guards the exact regression window the toplevel
-// guard opened: managed orgs (managedBy != 0) whose plan happens to carry IntegratorLimits > 0
+// TestManagedOrgOnIntegratorPlanCanCreateDraft guards the regression window the since-lifted
+// top-level guard opened: managed orgs (managedBy != 0) whose plan happens to carry IntegratorLimits > 0
 // — as the default plan does (scripts/defaultplan/main.go seeds MaxManagedOrgs=10, and every
 // managed org gets subscribed to the default plan by createManagedOrganizationHandler) — must
 // still be able to create drafts. IsIntegrator(managedOrg) is true in that case (the plan grants it),
@@ -230,8 +234,8 @@ func TestManagedOrgOnIntegratorPlanCanCreateDraft(t *testing.T) {
 	)
 	// createManagedOrganizationHandler subscribes managed orgs to the default plan; the test
 	// fixtures' default plan carries no integrator limits, so move the managed org onto the
-	// integrator-limits-bearing plan to mirror production. IsIntegrator(managed) is then true —
-	// the guard must not fire because ManagedBy!=0 makes it a leaf, not the top-level shell.
+	// integrator-limits-bearing plan to mirror production. IsIntegrator(managed) is then true,
+	// yet ManagedBy!=0 makes it a leaf, not the top-level shell.
 	c.Assert(testDB.SetOrganizationSubscription(managed.Address, &db.OrganizationSubscription{
 		PlanID: plan.ID, StartDate: time.Now(), RenewalDate: time.Now().Add(24 * time.Hour),
 		LastPaymentDate: time.Now(), Active: true,
