@@ -36,7 +36,7 @@ type censusHashDoc struct {
 // names must be exactly db's, since they are part of what is hashed.
 //
 // It is the one copy shared by migration 0015, the repair tooling
-// (RepairLoginHashes, scripts/repairlogins) and migration 0024, so they can
+// (RepairLoginHashes, scripts/repairlogins) and migration 0025, so they can
 // recompute stored hashes straight from bson documents without importing db.
 // That makes it a duplicate of a
 // correctness-critical function: if the two ever disagree, the repair writes

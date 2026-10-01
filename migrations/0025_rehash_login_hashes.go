@@ -9,7 +9,7 @@ import (
 )
 
 func init() {
-	AddMigration(24, "rehash_login_hashes", upRehashLoginHashes, downRehashLoginHashes)
+	AddMigration(25, "rehash_login_hashes", upRehashLoginHashes, downRehashLoginHashes)
 }
 
 // upRehashLoginHashes rewrites every census participant login hash in the format of

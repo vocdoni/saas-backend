@@ -24,7 +24,7 @@ import (
 // so the backfill stays out of it.
 //
 // The function is idempotent, so running it more than once is harmless. On main,
-// migration 0024 runs it to move every hash to internal.HashLoginFields.
+// migration 0025 runs it to move every hash to internal.HashLoginFields.
 
 const (
 	// memberFetchBatch bounds the $in used to resolve a census's members.
