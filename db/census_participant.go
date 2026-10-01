@@ -624,9 +624,7 @@ func (ms *MongoStorage) AddCensusParticipantsByMemberIDs(censusID string, member
 	return added, errorsAsStrings(memberErrors), nil
 }
 
-// updateCensusSize updates the size of a census in the database:
-//   - it updates the size in the census document
-//   - it updates the size in the process bundle documents
+// updateCensusSize updates the size of a census document from its participant count.
 func (ms *MongoStorage) updateCensusSize(censusID string) error {
 	// Get the census from the database
 	census, err := ms.Census(censusID)
@@ -642,22 +640,6 @@ func (ms *MongoStorage) updateCensusSize(censusID string) error {
 	census.Size = newSize
 	if _, err = ms.SetCensus(census); err != nil {
 		return fmt.Errorf("failed to update census size: %w", err)
-	}
-	// Get the bundles with that census
-	bundles, err := ms.ProcessBundlesByCensus(census)
-	if err != nil {
-		return err
-	}
-	// Update the bundles
-	bundlesErrors := make([]error, 0, len(bundles))
-	for _, bundle := range bundles {
-		bundle.Census.Size = newSize
-		if _, err = ms.SetProcessBundle(bundle); err != nil {
-			bundlesErrors = append(bundlesErrors, fmt.Errorf("failed to update bundle size: %w", err))
-		}
-	}
-	if len(bundlesErrors) > 0 {
-		return errors.Join(bundlesErrors...)
 	}
 	return nil
 }

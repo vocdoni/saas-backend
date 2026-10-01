@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
@@ -214,6 +215,37 @@ func TestLegacyProjectionChainBallot(t *testing.T) {
 	// numChoices.max caps the choices, and repeatChoice: false is a ranked ballot's unique values.
 	bounds := db.QuestionTypeSetup{MaxChoices: 3, UniqueChoices: true}
 	c.Assert(questions[0].TypeSetup, qt.Equals, bounds)
+}
+
+// TestLegacyProjectionSingleChoiceAbstain checks issue #724: the legacy SDK publishes a single-pick
+// multiple-choice question with abstain as maxCount 1 over one value past the last choice. The ballot
+// corroborates the declared name, so it comes through and a client keeps the abstain column; without
+// that extra value a single pick reads the same as single-choice, so the name is still dropped.
+func TestLegacyProjectionSingleChoiceAbstain(t *testing.T) {
+	c := qt.New(t)
+	project := func(maxValue uint32) db.VotingProcessQuestion {
+		election := legacyTestElection([][]uint64{{3, 2, 1, 2}}, []map[string]any{legacyTestChoices("Statuto", 3)})
+		election.TallyMode.MaxValue = maxValue
+		legacyTestElectionType(election, "multiple-choice", map[string]any{
+			"numChoices": map[string]any{"min": 0, "max": 1},
+			"canAbstain": true,
+		})
+		content := testAPI.legacyContentOf(context.Background(), election, nil)
+		questions := legacyElectionQuestions(bson.NewObjectID(), election, content)
+		c.Assert(questions, qt.HasLen, 1)
+		return questions[0]
+	}
+
+	abstain := project(3)
+	c.Assert(legacyTestDeclaredType(abstain), qt.Not(qt.IsNil))
+	c.Assert(legacyTestDeclaredType(abstain).Name, qt.Equals, "multiple-choice")
+	// no named type runs an abstain slot, so the name is the declared one and the bounds come from it.
+	c.Assert(abstain.Type, qt.Equals, "")
+	c.Assert(abstain.BallotProtocol.MaxCount, qt.Equals, uint32(1))
+	c.Assert(abstain.BallotProtocol.MaxValue, qt.Equals, uint32(3))
+	c.Assert(abstain.TypeSetup.MaxChoices, qt.Equals, uint32(1))
+
+	c.Assert(legacyTestDeclaredType(project(2)), qt.IsNil)
 }
 
 // TestLegacyProjectionUncorroboratedType checks the caution the whole metadata pass-through rests on:
@@ -498,11 +530,16 @@ func TestLegacyProcessesProjection(t *testing.T) {
 	census, err := testDB.Census(censusID)
 	c.Assert(err, qt.IsNil)
 
-	// legacy shape 1: a db.Process row carrying the election parameters.
-	rowOID, err := testDB.SetProcess(&db.Process{
+	// legacy shape 1: a db.Process row carrying the election parameters. Its census copy is stale on
+	// purpose: the projection must report the census document (size 7), not the embedded copy.
+	stale := *census
+	stale.Size = 9
+	rowOID := bson.NewObjectID()
+	insertLegacyDoc(t, "processes", db.Process{
+		ID:         rowOID,
 		OrgAddress: orgAddress,
 		Address:    elections[0],
-		Census:     *census,
+		Census:     stale,
 		ElectionParams: &db.ElectionParams{
 			Title: db.MultiLangString{"default": "legacy row"},
 			Questions: []db.Question{{
@@ -511,16 +548,16 @@ func TestLegacyProcessesProjection(t *testing.T) {
 			}},
 		},
 	})
-	c.Assert(err, qt.IsNil)
 
 	// a bundle registering the same election is not a second record: the row wins, because it
 	// carries the election parameters and needs no chain round-trip for its content.
-	bundleID, err := testDB.SetProcessBundle(&db.ProcessesBundle{
+	bundleID := bson.NewObjectID()
+	insertLegacyDoc(t, "processBundles", db.ProcessesBundle{
+		ID:         bundleID,
 		OrgAddress: orgAddress,
 		Census:     *census,
 		Processes:  []internal.HexBytes{elections[0]},
 	})
-	c.Assert(err, qt.IsNil)
 
 	// the list now holds the kept process plus the legacy record, and counts both.
 	list := requestAndParse[apicommon.VotingProcessListResponse](
@@ -536,11 +573,11 @@ func TestLegacyProcessesProjection(t *testing.T) {
 	c.Assert(ok, qt.IsTrue)
 	c.Assert(legacy.Legacy, qt.IsTrue)
 	// deduped: the bundle registers an election the row already owns, so it is not listed itself.
-	_, duplicated := byID[bundleID.String()]
+	_, duplicated := byID[bundleID.Hex()]
 	c.Assert(duplicated, qt.IsFalse)
 	// and not readable under the bundle id either: the record the list attributes to the row must
 	// not answer a second time under another id.
-	requestAndAssertCode(http.StatusNotFound, t, http.MethodGet, token, nil, "processes", bundleID.String())
+	requestAndAssertCode(http.StatusNotFound, t, http.MethodGet, token, nil, "processes", bundleID.Hex())
 
 	// content from the stored params, live state from the chain.
 	c.Assert(legacy.Title, qt.DeepEquals, db.MultiLangString{"default": "legacy row"})
@@ -579,4 +616,40 @@ func TestLegacyProcessesProjection(t *testing.T) {
 	// the second orphaned election is left unregistered on purpose: nothing claims it, so it stays
 	// out of the projection entirely.
 	c.Assert(elections[1].String(), qt.Not(qt.Equals), elections[0].String())
+}
+
+// TestFetchExternalMetadata covers the external http(s) fetch helper: a valid JSON
+// document is decoded, a non-200 yields nil, and a body over the 1 MiB cap is rejected.
+func TestFetchExternalMetadata(t *testing.T) {
+	c := qt.New(t)
+
+	t.Run("ok", func(_ *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"title":"hello","version":"1.0"}`))
+		}))
+		defer ts.Close()
+		m := fetchExternalMetadata(t.Context(), ts.URL)
+		c.Assert(m, qt.Not(qt.IsNil))
+		c.Assert(m["title"], qt.Equals, "hello")
+	})
+
+	t.Run("non-200", func(_ *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer ts.Close()
+		c.Assert(fetchExternalMetadata(t.Context(), ts.URL), qt.IsNil)
+	})
+
+	t.Run("over size cap", func(_ *testing.T) {
+		// a valid JSON document larger than the 1 MiB read cap is truncated and fails to
+		// decode, so it must be rejected rather than partially parsed.
+		big, err := json.Marshal(map[string]any{"x": strings.Repeat("a", 2<<20)})
+		c.Assert(err, qt.IsNil)
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write(big)
+		}))
+		defer ts.Close()
+		c.Assert(fetchExternalMetadata(t.Context(), ts.URL), qt.IsNil)
+	})
 }

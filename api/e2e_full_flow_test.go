@@ -11,17 +11,15 @@ import (
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 )
 
 // TestFullElectionLifecycle walks the complete organizer-and-voter flow end to end
 // through the public/protected API exactly as a SaaS client would: it creates an
-// organization (with eager on-chain account provisioning), adds members, builds and
-// publishes a group census, creates and publishes a binary election, then has every
-// member authenticate via the CSP and relay a vote. Finally it ends the election and
-// asserts the on-chain tally returned by GET /process/{id}/results matches the votes
-// that were cast.
+// organization (with eager on-chain account provisioning), adds members, creates and
+// publishes a process with a binary question over them, then has every member
+// authenticate via the CSP and relay a vote. Finally it ends the election and asserts
+// the on-chain tally surfaced by the /processes reads matches the votes that were cast.
 func TestFullElectionLifecycle(t *testing.T) {
 	c := qt.New(t)
 	defer func() {
@@ -38,22 +36,10 @@ func TestFullElectionLifecycle(t *testing.T) {
 
 	// --- organizer: user, org with on-chain account, plan subscription ---
 	token := testCreateUser(t, "superpassword123")
-	orgInfo := &apicommon.CreateOrganizationRequest{
-		OrganizationInfo: apicommon.OrganizationInfo{
-			Type:    string(db.CompanyType),
-			Website: fmt.Sprintf("https://e2e-%d.com", internal.RandomInt(100000)),
-		},
-		ProvisionAccount: true,
-	}
-	org := requestAndParse[apicommon.OrganizationInfo](t, http.MethodPost, token, orgInfo, organizationsEndpoint)
-	orgAddress := org.Address
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
-	plans, err := testDB.Plans()
-	c.Assert(err, qt.IsNil)
-	c.Assert(len(plans) > 1, qt.IsTrue)
-	setOrganizationSubscription(t, orgAddress, plans[1].ID)
-
-	// --- members + group-based CSP census ---
+	// --- members ---
 	members := newOrgMembers(numVoters)
 	for i := range members {
 		// unit weights keep the tally equal to the vote counts regardless of the
@@ -76,41 +62,24 @@ func TestFullElectionLifecycle(t *testing.T) {
 		db.OrgMemberAuthFieldsMemberNumber,
 	}
 	twoFaFields := db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail}
-	censusID, _, _ := createGroupBasedCensus(t, token, orgAddress, authFields, twoFaFields, memberIDs(members)...)
 
-	// --- create the election draft via the API, then publish it on-chain ---
-	electionParams := &db.ElectionParams{
-		Title:         db.MultiLangString{"default": "Full lifecycle election"},
-		EndDate:       time.Now().Add(2 * time.Hour),
-		MaxCensusSize: 100,
-		Questions: []db.Question{{
-			Title: db.MultiLangString{"default": "Do you approve?"},
-			Choices: []db.Choice{
-				{Title: db.MultiLangString{"default": "No"}, Value: 0},
-				{Title: db.MultiLangString{"default": "Yes"}, Value: 1},
-			},
-		}},
-		VoteType:     db.VoteType{MaxCount: 1, MaxValue: 1},
-		ElectionType: db.ElectionType{Autostart: true, Interruptible: true},
+	// --- create and publish the process: the binary question plus a second one left READY ---
+	req := minimalVotingProcessRequest(orgAddress)
+	req.StartDate = ""
+	req.Census = apicommon.CensusSpec{AuthFields: authFields, TwoFaFields: twoFaFields, MemberIDs: memberIDs(members)}
+	req.Questions[0].Title = db.MultiLangString{"default": "Do you approve?"}
+	req.Questions[0].Choices = []db.Choice{
+		{Title: db.MultiLangString{"default": "No"}, Value: 0},
+		{Title: db.MultiLangString{"default": "Yes"}, Value: 1},
 	}
-	draftID := requestAndParse[bson.ObjectID](t, http.MethodPost, token,
-		&apicommon.CreateProcessRequest{OrgAddress: orgAddress, ElectionParams: electionParams},
-		processCreateEndpoint)
-	c.Assert(draftID.IsZero(), qt.IsFalse)
-
-	pubJob := enqueueAndPollJob(t, http.MethodPost, token, nil, "process", draftID.Hex(), "publish")
-	c.Assert(pubJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish error: %s", pubJob.Errors))
-	c.Assert(len(pubJob.Result.Address) > 0, qt.IsTrue)
-	c.Assert(pubJob.Result.Status, qt.Equals, "READY")
-	addr := pubJob.Result.Address
-
-	// --- bundle links the census to the on-chain process for the CSP voter flow ---
-	bundleID, _ := postProcessBundle(t, token, censusID, addr.Bytes())
+	req.Questions = append(req.Questions, req.Questions[0])
+	pid, elections := publishProcessRequest(t, token, req)
+	addr := elections[0]
 
 	// --- each member authenticates with the CSP and relays a vote ---
 	seenNullifiers := make(map[string]struct{}, numVoters)
 	for i := range members {
-		authToken := testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+		authToken := testCSPAuthenticateWithFields(t, pid, &handlers.AuthRequest{
 			Name:         members[i].Name,
 			Surname:      members[i].Surname,
 			MemberNumber: members[i].MemberNumber,
@@ -120,7 +89,7 @@ func TestFullElectionLifecycle(t *testing.T) {
 		voter := ethereum.SignKeys{}
 		c.Assert(voter.Generate(), qt.IsNil)
 		voterAddr := internal.HexBytes(voter.Address().Bytes())
-		signature := testCSPSign(t, bundleID, authToken, addr, voterAddr)
+		signature := testCSPSign(t, pid, authToken, addr, voterAddr)
 		proof := testGenerateVoteProof(addr, voterAddr, signature, 1)
 
 		// the vote package must decode to state.VotePackage{Votes []int} ({"votes":[N]});
@@ -133,74 +102,38 @@ func TestFullElectionLifecycle(t *testing.T) {
 		seenNullifiers[nullifier.String()] = struct{}{}
 	}
 
-	// --- end the election; the chain auto-advances ENDED -> RESULTS once tallied ---
+	// --- end the first question's election; the chain auto-advances ENDED -> RESULTS once tallied ---
+	before := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	qID := before.Questions[0].ID.Hex()
 	endJob := enqueueAndPollJob(t, http.MethodPut, token,
-		&apicommon.SetProcessStatusRequest{Status: "ended"}, "process", draftID.Hex(), "status")
+		&apicommon.SetProcessStatusRequest{Status: "ended"}, "processes", pid, "questions", qID, "status")
 	c.Assert(endJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("end error: %s", endJob.Errors))
-	c.Assert(endJob.Result.Status, qt.Equals, "ENDED")
 	waitForElectionStatus(t, addr, "ENDED", "RESULTS")
 
-	// --- fetch and verify the results are final and the tally is correct ---
-	var res apicommon.ProcessResultsResponse
+	// --- manager GET /processes/{id}: the ended question carries the final tally inline ---
+	var info apicommon.VotingProcessResponse
 	for i := 0; i < 20; i++ {
-		res = requestAndParse[apicommon.ProcessResultsResponse](
-			t, http.MethodGet, "", nil, "process", draftID.Hex(), "results")
-		if res.FinalResults && res.VoteCount == uint64(numVoters) {
+		info = requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+		if qr := info.Questions[0].Results; qr != nil && qr.FinalResults && qr.VoteCount == uint64(numVoters) {
 			break
 		}
 		time.Sleep(time.Second)
 	}
-	c.Assert(res.VoteCount, qt.Equals, uint64(numVoters))
-	c.Assert(res.FinalResults, qt.IsTrue)
-	c.Assert(res.Status, qt.Not(qt.HasLen), 0)
-
-	// the tally is Results[question][value]; with a binary vote type question 0 has two
-	// buckets. votePlan {1,1,0} => two "Yes" (value 1) and one "No" (value 0).
-	c.Assert(res.Results, qt.HasLen, 1)
-	c.Assert(res.Results[0], qt.HasLen, 2)
-	c.Assert(res.Results[0][0], qt.Equals, "1") // value 0 ("No")
-	c.Assert(res.Results[0][1], qt.Equals, "2") // value 1 ("Yes")
-
-	// --- new /processes API: the same RESULTS election, surfaced per-question inline ---
-	// seed a published voting process whose first question points at the election above and is in
-	// RESULTS, plus a second question left READY (never on chain) that must NOT carry results.
-	vpID, err := testDB.SetVotingProcess(&db.VotingProcess{
-		OrgAddress: orgAddress, Published: true,
-		Title: db.MultiLangString{"default": "Results process"},
-	})
-	c.Assert(err, qt.IsNil)
-	qID, err := testDB.SetQuestion(&db.VotingProcessQuestion{
-		ProcessID: vpID, OrgAddress: orgAddress, Order: 0,
-		Title: db.MultiLangString{"default": "Do you approve?"},
-		Choices: []db.Choice{
-			{Title: db.MultiLangString{"default": "No"}, Value: 0},
-			{Title: db.MultiLangString{"default": "Yes"}, Value: 1},
-		},
-		UpstreamID: addr, Status: db.QuestionStatusResults,
-	})
-	c.Assert(err, qt.IsNil)
-	_, err = testDB.SetQuestion(&db.VotingProcessQuestion{
-		ProcessID: vpID, OrgAddress: orgAddress, Order: 1,
-		Title: db.MultiLangString{"default": "Draft q"}, Status: db.QuestionStatusReady,
-	})
-	c.Assert(err, qt.IsNil)
-
-	// manager GET /processes/{id}: the RESULTS question carries the tally inline; the READY one omits it.
-	info := requestAndParse[apicommon.VotingProcessResponse](
-		t, http.MethodGet, token, nil, "processes", vpID.Hex())
 	c.Assert(info.Questions, qt.HasLen, 2)
 	qr := info.Questions[0].Results
 	c.Assert(qr, qt.Not(qt.IsNil))
 	c.Assert(qr.VoteCount, qt.Equals, uint64(numVoters))
 	c.Assert(qr.FinalResults, qt.IsTrue)
-	c.Assert(qr.MaxVoters, qt.Equals, uint64(100)) // the election's on-chain maxCensusSize
 	// singlechoice question -> one ballot field -> one results row of value buckets [No, Yes].
+	// votePlan {1,1,0} => one "No" (value 0) and two "Yes" (value 1).
 	c.Assert(qr.Results, qt.DeepEquals, [][]string{{"1", "2"}})
-	c.Assert(info.Questions[1].Results, qt.IsNil)
+	// the second question was never voted nor ended
+	c.Assert(info.Questions[1].Results, qt.Not(qt.IsNil))
+	c.Assert(info.Questions[1].Results.FinalResults, qt.IsFalse)
 
 	// public GET /processes/{id}/questions/{qId}: same tally on the voter-facing read.
 	pub := requestAndParse[apicommon.PublicQuestionResponse](
-		t, http.MethodGet, "", nil, "processes", vpID.Hex(), "questions", qID.Hex())
+		t, http.MethodGet, "", nil, "processes", pid, "questions", qID)
 	c.Assert(pub.Results, qt.Not(qt.IsNil))
 	c.Assert(pub.Results.VoteCount, qt.Equals, uint64(numVoters))
 	c.Assert(pub.Results.Results, qt.DeepEquals, [][]string{{"1", "2"}})

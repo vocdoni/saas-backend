@@ -113,12 +113,6 @@ func HexHashPassword(salt, password string) string {
 	return hex.EncodeToString(HashPassword(salt, password))
 }
 
-// HashVerificationCode helper function allows to hash a verification code
-// associated to the email of the user that requested it.
-func HashVerificationCode(userEmail, code string) string {
-	return hex.EncodeToString(sha256.New().Sum([]byte(userEmail + code)))
-}
-
 // HashOrgData hashes organization data using the organization address as salt.
 func HashOrgData(orgAddress common.Address, data string) []byte {
 	return argon2hash([]byte(data), orgAddress.Bytes())

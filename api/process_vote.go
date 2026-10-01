@@ -1,19 +1,15 @@
 package api
 
 import (
-	"encoding/json"
 	stderrors "errors"
 	"net/http"
-	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/vochain/state"
@@ -480,181 +476,4 @@ func (a *API) recordBatchVote(jobID string, index int) func(*db.JobResult, error
 			log.Warnw("could not record batch vote outcome", "jobId", jobID, "index", index, "error", err)
 		}
 	}
-}
-
-// setProcessStatusHandler godoc
-//
-//	@Summary		Change an on-chain election status
-//	@Description	Changes the status of an on-chain election (ready|paused|ended|canceled). The
-//	@Description	backend builds a SET_PROCESS_STATUS transaction, funds and signs it with the
-//	@Description	organization signer synchronously, then submits and confirms it on a background
-//	@Description	worker; the call returns 202 with a job id. Poll GET /jobs/{jobId} for the result.
-//	@Description	Requires Manager/Admin role of the organization that owns the process.
-//	@Description
-//	@Description	Also callable with a scoped API key (scope: `voting:write`).
-//	@Tags			process
-//	@Accept			json
-//	@Produce		json
-//	@Security		BearerAuth
-//	@Param			processId	path		string								true	"24-hex ProcessID"
-//	@Param			request		body		apicommon.SetProcessStatusRequest	true	"New process status"
-//	@Success		202			{object}	apicommon.EnqueuedResponse			"Job accepted; poll GET /jobs/{jobId}"
-//	@Failure		400			{object}	errors.Error						"Invalid input data"
-//	@Failure		401			{object}	errors.Error						"Unauthorized"
-//	@Failure		404			{object}	errors.Error						"Process not found"
-//	@Failure		500			{object}	errors.Error						"Internal server error"
-//	@Failure		503			{object}	errors.Error						"Transaction queue is full"
-//	@Deprecated
-//	@Router	/process/{processId}/status [put]
-func (a *API) setProcessStatusHandler(w http.ResponseWriter, r *http.Request) {
-	objID, err := bson.ObjectIDFromHex(chi.URLParam(r, "processId"))
-	if err != nil {
-		errors.ErrMalformedURLParam.Withf("invalid process id").Write(w)
-		return
-	}
-
-	user, ok := apicommon.UserFromContext(r.Context())
-	if !ok {
-		errors.ErrUnauthorized.Write(w)
-		return
-	}
-
-	var req apicommon.SetProcessStatusRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		errors.ErrMalformedBody.Write(w)
-		return
-	}
-
-	var status models.ProcessStatus
-	switch strings.ToLower(req.Status) {
-	case "ready":
-		status = models.ProcessStatus_READY
-	case "paused":
-		status = models.ProcessStatus_PAUSED
-	case "ended":
-		status = models.ProcessStatus_ENDED
-	case "canceled":
-		status = models.ProcessStatus_CANCELED
-	default:
-		errors.ErrMalformedBody.With("invalid status").Write(w)
-		return
-	}
-
-	process, err := a.db.Process(objID)
-	if err != nil {
-		if err == db.ErrNotFound {
-			errors.ErrProcessNotFound.Write(w)
-			return
-		}
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-	// only a published process has an on-chain election whose status can be changed.
-	if len(process.Address) == 0 {
-		errors.ErrProcessNotFound.Withf("process not published").Write(w)
-		return
-	}
-
-	// permission: Manager or Admin of the owning organization
-	if !user.HasRoleFor(process.OrgAddress, db.ManagerRole) && !user.HasRoleFor(process.OrgAddress, db.AdminRole) {
-		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization that owns this process").Write(w)
-		return
-	}
-
-	org, err := a.db.Organization(process.OrgAddress)
-	if err != nil {
-		if err == db.ErrNotFound {
-			errors.ErrOrganizationNotFound.Write(w)
-			return
-		}
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-
-	orgSigner, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce)
-	if err != nil {
-		errors.ErrGenericInternalServerError.Withf("could not restore organization signer: %v", err).Write(w)
-		return
-	}
-
-	// serialize build->sign->submit per organization so a concurrent status change or
-	// publish for the same org cannot read the same account nonce and sign a conflicting
-	// tx. The worker releases the lock after submit (held across the async hand-off);
-	// every synchronous failure below releases it via the deferred unlock.
-	orgLock := a.orgTxLocks.lock(org.Address)
-	lockHeld := true
-	defer func() {
-		if lockHeld {
-			orgLock.Unlock()
-		}
-	}()
-
-	tx, err := a.account.BuildSetProcessStatusTx(orgSigner.Address(), process.Address.Bytes(), status)
-	if err != nil {
-		errors.ErrVochainRequestFailed.WithErr(err).Write(w)
-		return
-	}
-
-	// fund
-	fundedTx, txType, err := a.account.FundTransaction(tx, orgSigner.Address())
-	if err != nil {
-		if apiErr, ok := err.(errors.Error); ok {
-			apiErr.Write(w)
-			return
-		}
-		errors.ErrVochainRequestFailed.WithErr(err).Write(w)
-		return
-	}
-	if txType == nil || *txType != models.TxType_SET_PROCESS_STATUS {
-		errors.ErrInvalidTxFormat.With("unexpected tx type for status change").Write(w)
-		return
-	}
-
-	// quota / permission (same engine as the /transactions and publish paths)
-	if hasPermission, err := a.subscriptions.HasTxPermission(fundedTx, *txType, org, user); !hasPermission || err != nil {
-		errors.ErrUnauthorized.Withf("user does not have permission to change process status: %v", err).Write(w)
-		return
-	}
-
-	// sign with the organization signer
-	stx, err := a.account.SignTransaction(fundedTx, orgSigner)
-	if err != nil {
-		errors.ErrGenericInternalServerError.Withf("could not sign status tx: %v", err).Write(w)
-		return
-	}
-
-	// submit + wait on the worker pool; on success persist the new cached status
-	// (canonical uppercase enum name e.g. "PAUSED").
-	newStatus := strings.ToUpper(req.Status)
-	jobID, err := apicommon.NewJobID()
-	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-	if err := a.db.CreateTxJob(jobID, db.JobTypeSetProcessStatus, process.OrgAddress); err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
-		defer orgLock.Unlock()
-		if _, err := a.account.SubmitSignedTx(stx); err != nil {
-			return nil, err
-		}
-		process.Status = newStatus
-		if _, err := a.db.SetProcess(process); err != nil {
-			return nil, err
-		}
-		return &db.JobResult{Status: newStatus}, nil
-	}}) {
-		// full queue: mark the job failed so it is not orphaned pending; the deferred
-		// unlock fires on return.
-		if e := a.db.SetJobStatus(jobID, db.JobStatusFailed, nil, "tx queue full"); e != nil {
-			log.Warnw("could not mark job failed after full queue", "error", e)
-		}
-		errors.ErrTxQueueFull.Write(w)
-		return
-	}
-	lockHeld = false
-
-	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, &apicommon.EnqueuedResponse{JobID: jobID})
 }

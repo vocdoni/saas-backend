@@ -21,7 +21,8 @@ func TestCSPAuthNormalizesInput(t *testing.T) {
 	c := qt.New(t)
 
 	adminToken := testCreateUser(t, "adminpassword123")
-	orgAddress := testCreateOrganization(t, adminToken)
+	orgAddress := testCreateProvisionedOrganization(t, adminToken)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	// Padded exactly the way a spreadsheet or CSV import pads them.
 	members := []apicommon.OrgMember{
@@ -67,13 +68,12 @@ func TestCSPAuthNormalizesInput(t *testing.T) {
 			db.OrgMemberAuthFieldsSurname,
 			db.OrgMemberAuthFieldsMemberNumber,
 		}
-		censusID, _, _ := createGroupBasedCensus(t, adminToken, orgAddress, authFields,
-			db.OrgMemberTwoFaFields{}, john.ID, jane.ID)
-		bundleID, _ := postProcessBundle(t, adminToken, censusID, randomProcessID())
+		pid, _ := publishCensusProcess(t, adminToken, orgAddress,
+			apicommon.CensusSpec{AuthFields: authFields, MemberIDs: []string{john.ID, jane.ID}}, 1)
 
 		// The values as a voter would type them, with no padding at all. Before
 		// the fix this member could never authenticate.
-		postProcessBundleAuth0(t, bundleID, &handlers.AuthRequest{
+		postProcessAuth0(t, pid, &handlers.AuthRequest{
 			Name:         "John",
 			Surname:      "Doe",
 			MemberNumber: "M-001",
@@ -81,7 +81,7 @@ func TestCSPAuthNormalizesInput(t *testing.T) {
 
 		// And padded input authenticates too, so a copied-and-pasted value with a
 		// stray space still works.
-		postProcessBundleAuth0(t, bundleID, &handlers.AuthRequest{
+		postProcessAuth0(t, pid, &handlers.AuthRequest{
 			Name:         " John ",
 			Surname:      " Doe",
 			MemberNumber: "M-001  ",
@@ -94,9 +94,8 @@ func TestCSPAuthNormalizesInput(t *testing.T) {
 			db.OrgMemberAuthFieldsSurname,
 			db.OrgMemberAuthFieldsMemberNumber,
 		}
-		censusID, _, _ := createGroupBasedCensus(t, adminToken, orgAddress, authFields,
-			db.OrgMemberTwoFaFields{}, john.ID)
-		bundleID, _ := postProcessBundle(t, adminToken, censusID, randomProcessID())
+		pid, _ := publishCensusProcess(t, adminToken, orgAddress,
+			apicommon.CensusSpec{AuthFields: authFields, MemberIDs: []string{john.ID}}, 1)
 
 		// The member was imported as "John Doe" / "M-001"; any casing resolves.
 		for _, req := range []*handlers.AuthRequest{
@@ -105,7 +104,7 @@ func TestCSPAuthNormalizesInput(t *testing.T) {
 			{Name: "JOHN", Surname: "DOE", MemberNumber: "M-001"},
 			{Name: " jOhN ", Surname: "dOe", MemberNumber: " m-001"},
 		} {
-			postProcessBundleAuth0(t, bundleID, req)
+			postProcessAuth0(t, pid, req)
 		}
 
 		// Folding is confined to the hash: the member still reads back with the
@@ -123,18 +122,17 @@ func TestCSPAuthNormalizesInput(t *testing.T) {
 			db.OrgMemberAuthFieldsName,
 			db.OrgMemberAuthFieldsBirthDate,
 		}
-		censusID, _, _ := createGroupBasedCensus(t, adminToken, orgAddress, authFields,
-			db.OrgMemberTwoFaFields{}, jane.ID)
-		bundleID, _ := postProcessBundle(t, adminToken, censusID, randomProcessID())
+		pid, _ := publishCensusProcess(t, adminToken, orgAddress,
+			apicommon.CensusSpec{AuthFields: authFields, MemberIDs: []string{jane.ID}}, 1)
 
 		// Canonical form.
-		postProcessBundleAuth0(t, bundleID, &handlers.AuthRequest{
+		postProcessAuth0(t, pid, &handlers.AuthRequest{
 			Name:      "Jane",
 			BirthDate: "1981-02-03",
 		})
 
 		// Day-first form, which internal.ParseBirthDate also accepts on import.
-		postProcessBundleAuth0(t, bundleID, &handlers.AuthRequest{
+		postProcessAuth0(t, pid, &handlers.AuthRequest{
 			Name:      "Jane",
 			BirthDate: "03/02/1981",
 		})

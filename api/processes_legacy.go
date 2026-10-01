@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"io"
 	"math"
+	"net/http"
 	"slices"
 	"strings"
 	"time"
@@ -285,6 +287,20 @@ func (a *API) processSource(process *db.Process) (*legacyProcessSource, error) {
 	}, nil
 }
 
+// legacyCensus returns the census document a legacy record embeds a copy of: the copy froze at
+// publish, while revocations keep shrinking the document. Falls back to the copy once it is gone.
+func (a *API) legacyCensus(embedded *db.Census) (*db.Census, error) {
+	live, err := a.db.Census(embedded.ID.Hex())
+	switch {
+	case err == nil:
+		return live, nil
+	case stderrors.Is(err, db.ErrNotFound):
+		return embedded, nil
+	default:
+		return nil, fmt.Errorf("could not read legacy census: %w", err)
+	}
+}
+
 // servedByProcessesAPI reports whether an election already backs a /processes question, which the
 // normal path lists and the projection must not duplicate.
 func (a *API) servedByProcessesAPI(electionID internal.HexBytes) (bool, error) {
@@ -362,9 +378,13 @@ func (a *API) projectLegacyProcess(
 	if len(questions) == 0 {
 		return nil, nil
 	}
-	resp := apicommon.VotingProcessResponseFromDB(vp, questions, src.census, a.account.ChainID())
+	census, err := a.legacyCensus(src.census)
+	if err != nil {
+		return nil, err
+	}
+	resp := apicommon.VotingProcessResponseFromDB(vp, questions, census, a.account.ChainID())
 	resp.Legacy = true
-	resp.Census.TotalWeight = a.censusTotalWeight(src.census)
+	resp.Census.TotalWeight = a.censusTotalWeight(census)
 	if cacheable {
 		cached := *resp
 		a.legacyProjectionCache.Add(cacheKey, &cached)
@@ -378,7 +398,7 @@ func (src *legacyProcessSource) cacheKey() string {
 	var b strings.Builder
 	b.WriteString(src.id.Hex())
 	for _, electionID := range src.elections {
-		b.WriteByte(':')
+		b.WriteString(":")
 		b.WriteString(electionID.String())
 	}
 	return b.String()
@@ -627,7 +647,8 @@ func legacyCorroboratedType(
 			return tm
 		}
 	case "multiple-choice":
-		if single && bp.MaxCount > 1 && bp.MaxValue >= maxChoiceValue {
+		// a single pick still runs multichoice when the SDK reserved an abstain value past the last choice
+		if single && bp.MaxValue >= maxChoiceValue && (bp.MaxCount > 1 || bp.MaxValue > maxChoiceValue) {
 			return tm
 		}
 	case "approval":
@@ -800,4 +821,29 @@ func isVotingProcessIDShape(raw string) bool {
 	}
 	var electionID internal.HexBytes
 	return electionID.ParseString(raw) == nil && len(electionID) == 32
+}
+
+// fetchExternalMetadata best-effort downloads and JSON-decodes a metadata document from
+// an external http(s) reference (one that does not point at our own object storage).
+// Returns nil on any failure.
+func fetchExternalMetadata(ctx context.Context, url string) map[string]any {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	var m map[string]any
+	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&m) != nil { // 1 MiB cap
+		return nil
+	}
+	return m
 }

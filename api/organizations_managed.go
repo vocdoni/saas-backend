@@ -472,7 +472,7 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 
 	// capture usage to roll back the integrator counters after deletion. The integrator's
 	// ManagedProcesses counter is bumped on publish only for non-test-sized elections
-	// (ElectionParams.MaxCensusSize > db.TestMaxCensusSize), by 1 (see api/process.go). The
+	// (ElectionParams.MaxCensusSize > db.TestMaxCensusSize), by 1 (the legacy /process publish). The
 	// rollback delta must mirror that rule exactly, so it is derived from the published
 	// non-test-sized processes' ElectionParams rather than from the census documents.
 	var nonTestPublishedCount int64
@@ -498,7 +498,7 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 				"org", managedAddr.Hex(), "bundle", b.ID.Hex(), "error", err)
 			continue
 		}
-		if _, err := a.db.DeleteCSPAuthByBundle(*bundleID); err != nil {
+		if _, err := a.db.DeleteCSPAuthByAnchor(*bundleID); err != nil {
 			log.Warnw("could not delete CSP auth tokens for bundle",
 				"org", managedAddr.Hex(), "bundle", b.ID.Hex(), "error", err)
 		}

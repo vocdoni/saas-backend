@@ -9,8 +9,8 @@ import (
 var (
 	// ErrNoUserID is returned when no user ID is provided.
 	ErrNoUserID = fmt.Errorf("no user ID provided for the user")
-	// ErrNoBundleID is returned when no bundle ID is provided.
-	ErrNoBundleID = fmt.Errorf("no bundle ID provided")
+	// ErrNoAnchorID is returned when no anchor ID is provided.
+	ErrNoAnchorID = fmt.Errorf("no anchor ID provided")
 	// ErrNoProcessID is returned when no process ID is provided.
 	ErrNoProcessID = fmt.Errorf("no process ID provided")
 	// ErrTooManyAttempts is returned when no more verification attempts are
@@ -26,9 +26,6 @@ var (
 	// ErrUserNotBelongsToProcess is returned if the user does not has
 	// participation rights.
 	ErrUserNotBelongsToProcess = fmt.Errorf("user does not belong to process")
-	// ErrUserNotBelongsToBundle is returned if the user does not has
-	// participation rights.
-	ErrUserNotBelongsToBundle = fmt.Errorf("user does not belong to process bundle")
 	// ErrInvalidAuthToken is returned if the authtoken does not match with the
 	// process.
 	ErrInvalidAuthToken = fmt.Errorf("invalid authentication token")

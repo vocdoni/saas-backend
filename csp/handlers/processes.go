@@ -165,7 +165,7 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	if !bytes.Equal(anchor, auth.BundleID) {
+	if !bytes.Equal(anchor, auth.AnchorID) {
 		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
 		return
 	}
@@ -282,7 +282,7 @@ func (c *CSPHandlers) resolveSignContext(
 		errors.ErrUnauthorized.WithErr(csp.ErrAuthTokenNotVerified).Write(w)
 		return nil, false
 	}
-	if !bytes.Equal(oid[:], auth.BundleID) {
+	if !bytes.Equal(oid[:], auth.AnchorID) {
 		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
 		return nil, false
 	}
@@ -874,7 +874,7 @@ func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	if !bytes.Equal(anchor, auth.BundleID) {
+	if !bytes.Equal(anchor, auth.AnchorID) {
 		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
 		return
 	}
@@ -933,7 +933,7 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	if !bytes.Equal(anchor, auth.BundleID) {
+	if !bytes.Equal(anchor, auth.AnchorID) {
 		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
 		return
 	}
@@ -1062,7 +1062,7 @@ func (c *CSPHandlers) ProcessSignInfoHandler(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	if !bytes.Equal(anchor, auth.BundleID) {
+	if !bytes.Equal(anchor, auth.AnchorID) {
 		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
 		return
 	}

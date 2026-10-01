@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/hex"
 	"fmt"
 	"net/http"
 	"testing"
@@ -14,6 +13,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/types"
@@ -43,86 +43,6 @@ func waitForElectionStatus(t *testing.T, address internal.HexBytes, accepted ...
 		time.Sleep(time.Second)
 	}
 	c.Fatalf("election %s never reached status %v (last seen %q)", address.String(), accepted, lastStatus)
-}
-
-// TestProcessStatusLifecycle publishes a draft as an on-chain election and then
-// drives it through paused → ready → ended via the status endpoint, asserting the
-// chain reflects each transition.
-func TestProcessStatusLifecycle(t *testing.T) {
-	c := qt.New(t)
-	token := testCreateUser(t, "password123")
-
-	// create an org with eager on-chain account provisioning
-	orgInfo := &apicommon.CreateOrganizationRequest{
-		OrganizationInfo: apicommon.OrganizationInfo{
-			Type:    string(db.CompanyType),
-			Website: fmt.Sprintf("https://status-%d.com", internal.RandomInt(100000)),
-		},
-		ProvisionAccount: true,
-	}
-	org := requestAndParse[apicommon.OrganizationInfo](t, http.MethodPost, token, orgInfo, organizationsEndpoint)
-	orgAddress := org.Address
-	c.Assert(orgAddress, qt.Not(qt.Equals), common.Address{})
-
-	// subscribe to a plan so NEW_PROCESS permission passes
-	plans, err := testDB.Plans()
-	c.Assert(err, qt.IsNil)
-	c.Assert(len(plans) > 1, qt.IsTrue)
-	c.Assert(testDB.SetOrganizationSubscription(orgAddress, &db.OrganizationSubscription{
-		PlanID:          plans[1].ID,
-		StartDate:       time.Now(),
-		RenewalDate:     time.Now().Add(24 * time.Hour),
-		LastPaymentDate: time.Now(),
-		Active:          true,
-	}), qt.IsNil)
-
-	// seed a draft with election params (interruptible so the status can change)
-	draftID, err := testDB.SetProcess(&db.Process{
-		OrgAddress: orgAddress,
-		ElectionParams: &db.ElectionParams{
-			Title:         db.MultiLangString{"default": "Status lifecycle election"},
-			EndDate:       time.Now().Add(2 * time.Hour),
-			MaxCensusSize: 100,
-			Questions: []db.Question{{
-				Title: db.MultiLangString{"default": "Question 1"},
-				Choices: []db.Choice{
-					{Title: db.MultiLangString{"default": "Yes"}, Value: 0},
-					{Title: db.MultiLangString{"default": "No"}, Value: 1},
-				},
-			}},
-			VoteType:     db.VoteType{MaxCount: 1, MaxValue: 1},
-			ElectionType: db.ElectionType{Autostart: true, Interruptible: true},
-		},
-	})
-	c.Assert(err, qt.IsNil)
-	c.Assert(draftID.IsZero(), qt.IsFalse)
-
-	// publish (async) to obtain the on-chain process address
-	pubJob := enqueueAndPollJob(t, http.MethodPost, token, nil, "process", draftID.Hex(), "publish")
-	c.Assert(pubJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", pubJob.Errors))
-	c.Assert(len(pubJob.Result.Address) > 0, qt.IsTrue)
-	c.Assert(pubJob.Result.Status, qt.Equals, "READY")
-	addr := pubJob.Result.Address
-
-	// drive the status transitions and assert the chain reflects each change. An
-	// ended election is auto-advanced to "RESULTS" by the chain once tallied, so
-	// the terminal transition accepts either.
-	transitions := []struct {
-		request     string
-		respStatus  string
-		chainStatus []string
-	}{
-		{"paused", "PAUSED", []string{"PAUSED"}},
-		{"ready", "READY", []string{"READY"}},
-		{"ended", "ENDED", []string{"ENDED", "RESULTS"}},
-	}
-	for _, tr := range transitions {
-		job := enqueueAndPollJob(t, http.MethodPut, token,
-			&apicommon.SetProcessStatusRequest{Status: tr.request}, "process", draftID.Hex(), "status")
-		c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", job.Errors))
-		c.Assert(job.Result.Status, qt.Equals, tr.respStatus)
-		waitForElectionStatus(t, addr, tr.chainStatus...)
-	}
 }
 
 // testSignVoteTx builds a vote envelope for processID and signs it as the voter would,
@@ -165,98 +85,39 @@ func testRelayVoteRequest(t *testing.T, signer *ethereum.SignKeys, processID int
 	return job.Result.VoteID
 }
 
-// relayVotingFixture is a voter authenticated against a CSP bundle covering one or more
-// on-chain processes, i.e. everything the relay endpoints need to accept a real vote.
+// relayVotingFixture is a voter authenticated against a published process covering one or
+// more on-chain elections, i.e. everything the relay endpoints need to accept a real vote.
 type relayVotingFixture struct {
 	token      string
 	client     *apiclient.HTTPclient
 	orgAddress common.Address
 	processIDs []internal.HexBytes
-	bundleID   string
+	pid        string
 	authToken  internal.HexBytes
 	voter      *ethereum.SignKeys
 }
 
 // proofFor CSP-signs the voter's address for one of the fixture's processes and builds the
-// vote proof from it. The CSP consumes a process per user, not a bundle, so the same auth
-// token signs once for each process — which is exactly what a multi-question vote does.
+// vote proof from it. The CSP consumes an election per user, not a process, so the same auth
+// token signs once for each election — which is exactly what a multi-question vote does.
 func (f *relayVotingFixture) proofFor(t *testing.T, processID internal.HexBytes) *models.Proof {
 	t.Helper()
 	voterAddr := f.voter.Address().Bytes()
-	signature := testCSPSign(t, f.bundleID, f.authToken, processID, voterAddr)
+	signature := testCSPSign(t, f.pid, f.authToken, processID, voterAddr)
 	return testGenerateVoteProof(processID, voterAddr, signature, 1)
 }
 
-// setupRelayVoting builds the full CSP voting setup shared by the relay tests: an
-// organization with an on-chain account and a plan, processes many on-chain elections
-// whose census root is the CSP, a published group census bundled with them, and a voter
-// authenticated against that bundle.
+// setupRelayVoting builds the full CSP voting setup shared by the relay tests: a
+// provisioned organization with a plan, a published process with as many questions (each
+// its own on-chain election) and a voter authenticated against it.
 func setupRelayVoting(t *testing.T, processes int) *relayVotingFixture {
 	t.Helper()
 	c := qt.New(t)
 
-	// create a user and organization
 	token := testCreateUser(t, "superpassword123")
-	vocdoniClient := testNewVocdoniClient(t)
-	orgAddress := testCreateOrganization(t, token)
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
-	// subscribe the organization to a plan
-	plans, err := testDB.Plans()
-	c.Assert(err, qt.IsNil)
-	c.Assert(len(plans) > 1, qt.IsTrue)
-	c.Assert(testDB.SetOrganizationSubscription(orgAddress, &db.OrganizationSubscription{
-		PlanID:          plans[1].ID,
-		StartDate:       time.Now(),
-		RenewalDate:     time.Now().Add(time.Hour * 24),
-		LastPaymentDate: time.Now(),
-		Active:          true,
-	}), qt.IsNil)
-
-	// create the organization account on-chain
-	orgName := fmt.Sprintf("relayorg-%d", internal.RandomInt(1000))
-	orgInfoURI := fmt.Sprintf("https://example.com/%d", internal.RandomInt(1000))
-	nonce := uint32(0)
-	accountTx := &models.Tx{Payload: &models.Tx_SetAccount{SetAccount: &models.SetAccountTx{
-		Nonce:   &nonce,
-		Txtype:  models.TxType_CREATE_ACCOUNT,
-		Account: orgAddress.Bytes(),
-		Name:    &orgName,
-		InfoURI: &orgInfoURI,
-	}}}
-	signRemoteSignerAndSendVocdoniTx(t, accountTx, token, vocdoniClient, orgAddress)
-
-	// create the on-chain processes, whose census root is the CSP public key
-	cspPubKey, err := testCSP.PubKey()
-	c.Assert(err, qt.IsNil)
-	processIDs := make([]internal.HexBytes, processes)
-	rawProcessIDs := make([][]byte, processes)
-	for i := range processIDs {
-		processNonce := fetchVocdoniAccountNonce(t, vocdoniClient, orgAddress)
-		processTx := &models.Tx{Payload: &models.Tx_NewProcess{NewProcess: &models.NewProcessTx{
-			Txtype: models.TxType_NEW_PROCESS,
-			Nonce:  processNonce,
-			Process: &models.Process{
-				EntityId:      orgAddress.Bytes(),
-				Duration:      120,
-				Status:        models.ProcessStatus_READY,
-				CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA,
-				CensusRoot:    cspPubKey,
-				MaxCensusSize: 10,
-				EnvelopeType:  &models.EnvelopeType{Anonymous: false, CostFromWeight: false},
-				VoteOptions:   &models.ProcessVoteOptions{MaxCount: 1, MaxValue: 5},
-				Mode:          &models.ProcessMode{AutoStart: true, Interruptible: true},
-			},
-		}}}
-		rawProcessIDs[i] = signRemoteSignerAndSendVocdoniTx(t, processTx, token, vocdoniClient, orgAddress)
-		processIDs[i] = internal.HexBytes(rawProcessIDs[i])
-		t.Logf("Created process with ID: %x", rawProcessIDs[i])
-
-		// the relay handler requires the process to be known by its on-chain address
-		_, err = testDB.SetProcess(&db.Process{OrgAddress: orgAddress, Address: processIDs[i]})
-		c.Assert(err, qt.IsNil)
-	}
-
-	// create a census, add members and publish a group-based census
 	authFields := db.OrgMemberAuthFields{
 		db.OrgMemberAuthFieldsName,
 		db.OrgMemberAuthFieldsSurname,
@@ -265,7 +126,7 @@ func setupRelayVoting(t *testing.T, processes int) *relayVotingFixture {
 	twoFaFields := db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail}
 
 	suffix := internal.RandomInt(1000000)
-	members := []apicommon.OrgMember{{
+	members := postOrgMembers(t, token, orgAddress, apicommon.OrgMember{
 		Name:         "Relay",
 		Surname:      "Voter",
 		MemberNumber: fmt.Sprintf("R%06d", suffix),
@@ -274,29 +135,15 @@ func setupRelayVoting(t *testing.T, processes int) *relayVotingFixture {
 		Email:        fmt.Sprintf("relay.voter.%d@example.com", suffix),
 		Phone:        "+34699000001",
 		Weight:       "1",
-	}}
-	postedOrgMembers := postOrgMembers(t, token, orgAddress, members...)
-	idMap := make(map[string]string, len(postedOrgMembers))
-	for _, m := range postedOrgMembers {
-		idMap[m.NationalID] = m.ID
-	}
-	for i := range members {
-		members[i].ID = idMap[members[i].NationalID]
-	}
-
-	group := postGroup(t, token, orgAddress, memberIDs(members)...)
-	censusID := postCensus(t, token, orgAddress, authFields, twoFaFields)
-	requestAndParse[apicommon.PublishedCensusResponse](
-		t, http.MethodPost, token, &apicommon.PublishCensusGroupRequest{
-			AuthFields:  authFields,
-			TwoFaFields: twoFaFields,
-		}, "census", censusID, "group", group.ID, "publish")
-
-	// create a bundle linking the census and every process
-	bundleID, _ := postProcessBundle(t, token, censusID, rawProcessIDs...)
+	})
+	pid, processIDs := publishCensusProcess(t, token, orgAddress, apicommon.CensusSpec{
+		AuthFields:  authFields,
+		TwoFaFields: twoFaFields,
+		MemberIDs:   memberIDs(members),
+	}, processes)
 
 	// authenticate the voter with the CSP
-	authToken := testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+	authToken := testCSPAuthenticateWithFields(t, pid, &handlers.AuthRequest{
 		Name:         members[0].Name,
 		Surname:      members[0].Surname,
 		MemberNumber: members[0].MemberNumber,
@@ -308,10 +155,10 @@ func setupRelayVoting(t *testing.T, processes int) *relayVotingFixture {
 
 	return &relayVotingFixture{
 		token:      token,
-		client:     vocdoniClient,
+		client:     testNewVocdoniClient(t),
 		orgAddress: orgAddress,
 		processIDs: processIDs,
-		bundleID:   bundleID,
+		pid:        pid,
 		authToken:  authToken,
 		voter:      voter,
 	}
@@ -379,38 +226,6 @@ func TestRelayVote(t *testing.T) {
 	}
 	requestAndAssertError(errors.ErrVoteBatchTooLarge, t, http.MethodPost, "",
 		&apicommon.VerifyVotesRequest{Nullifiers: tooMany}, "votes", "verify")
-}
-
-// TestBundleSignRefusesRevokedParticipant pins the census re-check on the bundle sign path. The
-// auth token does not expire, so a member dropped from the census after minting one would otherwise
-// keep being signed for — the check had been commented out, leaving the deprecated bundle flow
-// without the defence its /processes sibling has.
-func TestBundleSignRefusesRevokedParticipant(t *testing.T) {
-	c := qt.New(t)
-	f := setupRelayVoting(t, 1)
-	processID := f.processIDs[0]
-
-	// the fixture's token is verified, so it signs while the member is still a participant
-	bundle, err := testDB.ProcessBundle(internal.HexBytesFromString(f.bundleID))
-	c.Assert(err, qt.IsNil)
-	auth, err := testDB.CSPAuth(f.authToken)
-	c.Assert(err, qt.IsNil)
-	memberID := auth.UserID.String()
-	censusID := bundle.Census.ID.Hex()
-	_, err = testDB.CensusParticipant(censusID, memberID)
-	c.Assert(err, qt.IsNil)
-
-	// drop the participant row underneath the live token — what a group edit does to a voter —
-	// without touching the token itself, so only the sign-time re-check can catch it
-	c.Assert(testDB.DelCensusParticipant(censusID, memberID), qt.IsNil)
-
-	_, code := testRequest(t, http.MethodPost, "", &handlers.SignRequest{
-		AuthToken: f.authToken,
-		ProcessID: processID,
-		Payload:   hex.EncodeToString(f.voter.Address().Bytes()),
-	}, "process", "bundle", f.bundleID, "sign")
-	c.Assert(code, qt.Equals, errors.ErrCensusParticipantNotFound.HTTPstatus,
-		qt.Commentf("a token minted before the removal must not keep signing on the bundle path"))
 }
 
 // TestRelayVotesBatch relays the votes of a multi-question process in a single call and
@@ -487,13 +302,13 @@ func TestRelayVotesRejectsBatch(t *testing.T) {
 	chainID := fetchVocdoniChainID(t, testNewVocdoniClient(t))
 
 	// two organizations, each owning a process the backend knows about. No chain
-	// interaction is needed: every case below is rejected by the synchronous checks.
+	// interaction is needed: every case below is rejected by the synchronous checks. The
+	// processes are legacy rows, which keeps parseRelayVote's legacy lookup covered.
 	newOrgProcess := func() (common.Address, internal.HexBytes) {
 		token := testCreateUser(t, "superpassword123")
 		orgAddress := testCreateOrganization(t, token)
 		processID := internal.HexBytes(randomProcessID())
-		_, err := testDB.SetProcess(&db.Process{OrgAddress: orgAddress, Address: processID})
-		c.Assert(err, qt.IsNil)
+		insertLegacyDoc(t, "processes", db.Process{ID: bson.NewObjectID(), OrgAddress: orgAddress, Address: processID})
 		return orgAddress, processID
 	}
 	_, processA := newOrgProcess()

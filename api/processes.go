@@ -640,8 +640,7 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 	if isManager {
 		draft = db.AllProcesses
 	}
-	// the optional published filter narrows that default view. Asking for drafts is manager-only,
-	// mirroring organizationListProcessDraftsHandler on the legacy routes.
+	// the optional published filter narrows that default view. Asking for drafts is manager-only.
 	if s := r.URL.Query().Get("published"); s != "" {
 		published, err := strconv.ParseBool(s)
 		if err != nil {
@@ -1042,10 +1041,9 @@ func (a *API) electionResultsBatch(
 // votingProcessParticipantHandler godoc
 //
 //	@Summary		Get a voting process participant
-//	@Description	Public participant info for a published voting process, mirroring the bundle
-//	@Description	participant endpoint. PLACEHOLDER: validates the process (published only) and the
-//	@Description	participant id, and currently returns null — participant election info is not yet
-//	@Description	surfaced (the bundle equivalent is likewise a stub pending the CSP indexer lookup).
+//	@Description	Public participant info for a published voting process. PLACEHOLDER: validates the
+//	@Description	process (published only) and the participant id, and currently returns null —
+//	@Description	participant election info is not yet surfaced (pending the CSP indexer lookup).
 //	@Tags			processes
 //	@Produce		json
 //	@Param			processId		path		string		true	"Process ID"
@@ -1074,8 +1072,7 @@ func (a *API) votingProcessParticipantHandler(w http.ResponseWriter, r *http.Req
 		errors.ErrProcessNotFound.Withf("process not found").Write(w)
 		return
 	}
-	// mirrors processBundleParticipantInfoHandler: participant election info is not yet surfaced
-	// (the bundle equivalent returns nil pending the CSP indexer lookup).
+	// participant election info is not yet surfaced (pending the CSP indexer lookup).
 	apicommon.HTTPWriteJSON(w, nil)
 }
 

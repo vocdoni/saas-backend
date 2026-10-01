@@ -381,7 +381,7 @@ func (ms *MongoStorage) DecrementOrganizationUsersCounter(address common.Address
 
 // IncrementOrganizationProcessesCounter atomically increments the processes counter for the organization with the
 // given address. The plan limit is enforced upstream by HasTxPermission; this uses an atomic $inc so concurrent
-// NEW_PROCESS operations (via /transactions and /publish) cannot lose an update.
+// publishes cannot lose an update.
 func (ms *MongoStorage) IncrementOrganizationProcessesCounter(address common.Address) error {
 	return ms.addToOrganizationCounter(address, "processes", 1)
 }

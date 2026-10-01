@@ -157,10 +157,10 @@ func (c *CSP) BlindSign(token, processID, blindedMsg internal.HexBytes) (signatu
 // prepareSaltedKeySigner method prepares the data for the Ethereum signer.
 // It ensures the following conditions:
 // - The auth token is valid and it is already verified.
-// - The user belongs to the bundle.
+// - The user belongs to the token's anchor.
 // - The user belongs to the process.
 // - The process has not been consumed yet.
-// Then generates a bundle CA and encodes it to be signed. It returns userID,
+// Then generates a CA bundle and encodes it to be signed. It returns userID,
 // the salt as nil and the encoded CA as a message to sign.
 //
 //revive:disable:function-result-limit
