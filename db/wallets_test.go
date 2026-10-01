@@ -116,9 +116,8 @@ func TestWalletCreditAndDebit(t *testing.T) {
 	c.Assert(other.BalanceCents, qt.Equals, int64(0))
 }
 
-// TestWalletDebitConcurrency proves the no-double-spend property: with a balance that
-// covers exactly one process, N concurrent debits for distinct processes let exactly one
-// through; and N concurrent debits for the same process debit at most once in total.
+// TestWalletDebitConcurrency: concurrent debits never overspend, and one process is debited
+// at most once.
 func TestWalletDebitConcurrency(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
@@ -188,11 +187,8 @@ func TestWalletInvalidInputs(t *testing.T) {
 	}), qt.ErrorIs, ErrInvalidData)
 }
 
-// TestWalletConcurrentFirstCredits: top-ups that race the creation of the wallet must all
-// land. Each one misses the filter on a wallet that does not exist yet and upserts, so all
-// but the first collide on _id — a collision that means "someone else created it", not
-// "already credited". Reading it as the latter drops that top-up's money while still
-// writing its ledger row.
+// TestWalletConcurrentFirstCredits: top-ups racing the wallet's creation all land; an _id
+// collision is not "already credited".
 func TestWalletConcurrentFirstCredits(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
@@ -220,10 +216,8 @@ func TestWalletConcurrentFirstCredits(t *testing.T) {
 	c.Assert(total, qt.Equals, int64(credits))
 }
 
-// TestWalletAppliedKeysBounded pins the two halves of the idempotency guard: the in-document
-// key list stays bounded (an unbounded one eventually hits the 16 MB limit and freezes the
-// wallet), and a replay whose key has aged out of it is still caught — by the ledger, which
-// is the permanent record.
+// TestWalletAppliedKeysBounded: the key window stays bounded, and a replay whose key aged out
+// is still caught by the ledger.
 func TestWalletAppliedKeysBounded(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
