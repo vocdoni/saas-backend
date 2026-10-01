@@ -1,5 +1,7 @@
 package db
 
+import "github.com/vocdoni/saas-backend/pricing"
+
 const (
 	// user roles
 	AdminRole   UserRole = "admin"
@@ -21,8 +23,9 @@ const (
 	CodeTypeOrgInvite       CodeType = "organization_invite"
 	CodeTypeOrgInviteUpdate CodeType = "organization_invite_update"
 
-	// max census size allowed for user test purposes
-	TestMaxCensusSize = 10
+	// max census size allowed for user test purposes; the same size prices to a free base,
+	// so it is defined once, by pricing
+	TestMaxCensusSize = pricing.FreeCensusSize
 	// max vote overwrites per process
 	MaxVoteOverwritesPerProcess = 10
 	// MaxQuestionsPerProcess bounds the number of questions a voting process may hold, and so the
