@@ -10,7 +10,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
-	"github.com/google/uuid"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
@@ -122,20 +121,6 @@ type Pagination struct {
 type PaginationParams struct {
 	Page  int64 `json:"page,omitempty"`
 	Limit int64 `json:"limit,omitempty"`
-}
-
-// ProcessInfo is the voter-facing response for a single voting process. It embeds the
-// stored process and adds the Vocdoni chain ID the process lives on.
-type ProcessInfo struct {
-	*db.Process
-	ChainID string `json:"chainId"`
-}
-
-// ProcessBundleInfo is the voter-facing response for a process bundle. It embeds the
-// stored bundle and adds the Vocdoni chain ID the bundle's processes live on.
-type ProcessBundleInfo struct {
-	*db.ProcessesBundle
-	ChainID string `json:"chainId"`
 }
 
 // OrganizationInfo represents an organization in the API.
@@ -404,47 +389,6 @@ type ListOrganizationMemberGroupResponse struct {
 	Members []OrgMember `json:"members"`
 }
 
-// ListOrganizationProcesses represents the response for listing the processes of an organization.
-// swagger:model ListOrganizationProcesses
-type ListOrganizationProcesses struct {
-	// Pagination fields
-	Pagination *Pagination `json:"pagination"`
-	// List of organization processes
-	Processes []db.Process `json:"processes"`
-}
-
-// OrganizationBundle represents an organization bundle. It contains the bundle ID and the main process ID.
-// swagger:model OrganizationBundle
-type OrganizationBundle struct {
-	// The ID of the bundle
-	BundleID string `json:"bundleId"`
-	// The ID of the primary process which identifies the set of processes in
-	// the bundle, no matter how many (one or more)
-	PrimaryProcessID string `json:"primaryProcessId"`
-	// The list of processes IDs in the bundle
-	Processes []string `json:"processes"`
-}
-
-// ListOrganizationBundles represents the response for listing the bundles of an organization.
-// swagger:model ListOrganizationBundles
-type ListOrganizationBundles struct {
-	// Pagination fields
-	Pagination *Pagination `json:"pagination"`
-	// List of organization bundles
-	Bundles []OrganizationBundle `json:"bundles"`
-}
-
-// ValidateMemberGroupRequest validates the request for creating or updating an organization member group.
-// Validates that either AuthFields or TwoFaFields are provided and checks for duplicates or empty fields.
-// swagger:model ValidateMemberGroupRequest
-type ValidateMemberGroupRequest struct {
-	// Defines which member data should be used for authentication
-	AuthFields db.OrgMemberAuthFields `json:"authFields,omitempty"`
-
-	// Defines which member data should be used for two-factor authentication
-	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
-}
-
 // UserInfo represents user information and is used for user registration.
 // swagger:model UserInfo
 type UserInfo struct {
@@ -555,29 +499,6 @@ type LoginResponse struct {
 
 	// Token expiration time
 	Expirity time.Time `json:"expirity"`
-}
-
-// TransactionData contains the data of a transaction to be signed or a signed transaction.
-// swagger:model TransactionData
-type TransactionData struct {
-	// Blockchain address
-	Address common.Address `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
-
-	// Transaction payload bytes
-	TxPayload []byte `json:"txPayload" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
-}
-
-// MessageSignature contains a payload and its signature.
-// swagger:model MessageSignature
-type MessageSignature struct {
-	// Blockchain address
-	Address common.Address `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
-
-	// Message payload bytes
-	Payload []byte `json:"payload,omitempty" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
-
-	// Cryptographic signature
-	Signature internal.HexBytes `json:"signature,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
 // OrganizationFromDB converts a db.Organization to an OrganizationInfo, if the parent
@@ -1017,64 +938,6 @@ type OrganizationCensus struct {
 	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
 }
 
-// CreateCensusRequest represents a request to create a new census for an organization.
-// swagger:model CreateCensusRequest
-type CreateCensusRequest struct {
-	// Organization address
-	OrgAddress common.Address `json:"orgAddress"`
-
-	// Optional for defining which member data should be used for authentication
-	AuthFields db.OrgMemberAuthFields `json:"authFields,omitempty"`
-
-	// Optional for defining which member data should be used for two-factor authentication
-	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
-}
-
-// CreateCensusResponse represents the response after creating a census returning the census ID.
-// swagger:model CreateCensusResponse
-type CreateCensusResponse struct {
-	// Unique identifier for the census
-	ID string `json:"id,omitempty"`
-}
-
-// PublishedCensusResponse represents a published census.
-// swagger:model PublishedCensusResponse
-type PublishedCensusResponse struct {
-	// URI of the published census
-	URI string `json:"uri" bson:"uri"`
-
-	// Merkle root of the census
-	Root internal.HexBytes `json:"root" bson:"root" swaggertype:"string" format:"hex" example:"deadbeef"`
-
-	// Size of the published census
-	Size int64 `json:"size"`
-}
-
-// PublishCensusGroupRequest represents a request to publish a census group.
-// swagger:model PublishCensusGroupRequest
-type PublishCensusGroupRequest struct {
-	// Member data fields used for authentication (e.g. nationalId, birthDate). At least one
-	// of authFields or twoFaFields must be provided; supplying only authFields publishes an
-	// auth-only (no OTP) CSP census. A request with both empty is rejected (ErrCensusTypeNotFound).
-	AuthFields db.OrgMemberAuthFields `json:"authFields,omitempty"`
-
-	// Member data fields used for two-factor authentication (email and/or phone, sent as an OTP
-	// challenge). At least one of authFields or twoFaFields must be provided.
-	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
-
-	// Indicates if the census is weighted
-	Weighted bool `json:"weighted,omitempty"`
-}
-
-// CensusParticipantsResponse returns the memberIDs of the participants of a census.
-// swagger:model CensusParticipantsResponse
-type CensusParticipantsResponse struct {
-	// Unique identifier for the census
-	CensusID string `json:"censusId"`
-	// List of member IDs of the participants
-	MemberIDs []string `json:"memberIds"`
-}
-
 // OrganizationCensusFromDB converts a db.Census to an OrganizationCensus.
 func OrganizationCensusFromDB(census *db.Census) OrganizationCensus {
 	if census == nil {
@@ -1307,65 +1170,6 @@ type UpdateOrganizationMemberGroupResponse struct {
 
 // Request types for process operations
 
-// CreateProcessRequest defines the payload for creating a new voting process.
-// swagger:model CreateProcessRequest
-type CreateProcessRequest struct {
-	// Organization address
-	OrgAddress common.Address `json:"orgAddress"`
-
-	// Vochain ID/Address of the process
-	Address internal.HexBytes `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
-
-	// Census ID
-	CensusID internal.HexBytes `json:"censusId" swaggertype:"string" format:"hex" example:"deadbeef"`
-
-	// Additional metadata for the process
-	// Can be any key-value pairs
-	Metadata map[string]any `json:"metadata"`
-
-	// Optional high-level election parameters (used later at publish time)
-	ElectionParams *db.ElectionParams `json:"electionParams,omitempty"`
-}
-
-// UpdateProcessRequest defines the payload for updating an existing voting process.
-// swagger:model UpdateProcessRequest
-type UpdateProcessRequest struct {
-	// Vochain ID/Address of the process
-	Address internal.HexBytes `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
-
-	// Census ID
-	CensusID internal.HexBytes `json:"censusId" swaggertype:"string" format:"hex" example:"deadbeef"`
-
-	// Additional metadata for the process
-	// Can be any key-value pairs
-	Metadata map[string]any `json:"metadata"`
-
-	// Optional high-level election parameters (used later at publish time)
-	ElectionParams *db.ElectionParams `json:"electionParams,omitempty"`
-}
-
-// PublishProcessResponse is returned by POST /process/{processId}/publish with the
-// on-chain process id and status after a draft has been published as an election.
-// swagger:model PublishProcessResponse
-type PublishProcessResponse struct {
-	// On-chain process id (Vochain election id)
-	Address internal.HexBytes `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
-
-	// Process status (e.g. "READY")
-	Status string `json:"status"`
-}
-
-// ProcessResultsResponse is the trimmed on-chain election state returned by
-// GET /process/{processId}/results.
-type ProcessResultsResponse struct {
-	Status       string     `json:"status"`
-	VoteCount    uint64     `json:"voteCount"`
-	StartDate    time.Time  `json:"startDate"`
-	EndDate      time.Time  `json:"endDate"`
-	FinalResults bool       `json:"finalResults"`
-	Results      [][]string `json:"results,omitempty"`
-}
-
 // RelayVoteRequest is the body of POST /vote: a hex-encoded, already-signed voter
 // transaction (a marshaled models.SignedTx wrapping a Vote tx). The target process
 // is taken from the inner Vote envelope.
@@ -1420,27 +1224,11 @@ type VerifyVotesResponse struct {
 	Votes []VerifiedVote `json:"votes"`
 }
 
-// RelayVoteResponse is returned by POST /vote with the vote nullifier (voteID)
-// assigned on chain.
-// swagger:model RelayVoteResponse
-type RelayVoteResponse struct {
-	// On-chain vote nullifier
-	VoteID internal.HexBytes `json:"voteID" swaggertype:"string" format:"hex" example:"deadbeef"`
-}
-
-// SetProcessStatusRequest is the body of PUT /process/{processId}/status.
+// SetProcessStatusRequest is the body of PUT /processes/{processId}/questions/{questionId}/status.
 // swagger:model SetProcessStatusRequest
 type SetProcessStatusRequest struct {
 	// One of: READY, PAUSED, ENDED, CANCELED (case-insensitive on input; stored/returned uppercase)
 	Status string `json:"status" example:"PAUSED"`
-}
-
-// SetProcessStatusResponse is returned by PUT /process/{processId}/status with the
-// new (cached) status.
-// swagger:model SetProcessStatusResponse
-type SetProcessStatusResponse struct {
-	// Process status (e.g. "PAUSED")
-	Status string `json:"status"`
 }
 
 // EnqueuedResponse is returned with 202 Accepted by the async transaction endpoints
@@ -1449,131 +1237,6 @@ type SetProcessStatusResponse struct {
 type EnqueuedResponse struct {
 	// Opaque job id; poll GET /jobs/{jobId} for the outcome
 	JobID string `json:"jobId" example:"a1b2c3"`
-}
-
-// InitiateAuthRequest defines the payload for participant authentication.
-// swagger:model InitiateAuthRequest
-type InitiateAuthRequest struct {
-	// Unique participant ID
-	ParticipantID string `json:"participantId"`
-
-	// Participant's email address (optional)
-	Email string `json:"email,omitempty"`
-
-	// Participant's phone number (optional)
-	Phone string `json:"phone,omitempty"`
-
-	// Participant's password (optional)
-	Password string `json:"password,omitempty"`
-}
-
-// VerifyAuthRequest defines the payload for auth code verification.
-// swagger:model VerifyAuthRequest
-type VerifyAuthRequest struct {
-	// Authentication token
-	Token string `json:"token"`
-
-	// Verification code
-	Code string `json:"code"`
-}
-
-// GenerateProofRequest defines the payload for generating voting proof.
-// swagger:model GenerateProofRequest
-type GenerateProofRequest struct {
-	// Authentication token
-	Token string `json:"token"`
-
-	// Blinded address for proof generation
-	BlindedAddress []byte `json:"blindedAddress" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
-}
-
-// Two-factor authentication types
-
-// AuthRequest defines the payload for requesting authentication.
-// swagger:model AuthRequest
-type AuthRequest struct {
-	// Authentication token
-	AuthToken *uuid.UUID `json:"authToken,omitempty"`
-
-	// Authentication data (reserved for the auth handler)
-	AuthData []string `json:"authData,omitempty"`
-}
-
-// SignRequest defines the payload for requesting a signature.
-// swagger:model SignRequest
-type SignRequest struct {
-	// Token R value
-	TokenR internal.HexBytes `json:"tokenR" swaggertype:"string" format:"hex" example:"deadbeef"`
-
-	// Authentication token
-	AuthToken *uuid.UUID `json:"authToken"`
-
-	// Blockchain address
-	Address string `json:"address,omitempty"`
-
-	// Payload to sign
-	Payload string `json:"payload,omitempty"`
-
-	// Election ID
-	ElectionID internal.HexBytes `json:"electionId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
-}
-
-// CreateProcessBundleRequest defines the payload for creating a new process bundle.
-// swagger:model CreateProcessBundleRequest
-type CreateProcessBundleRequest struct {
-	// Census ID
-	CensusID string `json:"censusId"`
-
-	// List of processes to include in the bundle. Each entry is either the 24-hex ProcessID or the
-	// 64-hex on-chain election id.
-	Processes []string `json:"processes"`
-}
-
-// CreateProcessBundleResponse defines the response for a successful process bundle creation.
-// swagger:model CreateProcessBundleResponse
-type CreateProcessBundleResponse struct {
-	// URI of the created process bundle
-	URI string `json:"uri"`
-
-	// Merkle root of the process bundle
-	Root internal.HexBytes `json:"root" swaggertype:"string" format:"hex" example:"deadbeef"`
-}
-
-// CheckBundleParticipantsRequest is the payload for the bundle participant
-// membership check endpoint. fieldName must be one of: "email", "phone",
-// "memberNumber", "nationalId". value is the raw value to look up — for
-// "phone" the caller passes the plaintext number and the backend hashes it
-// server-side before the lookup. processID is the hex ID of the process whose
-// voting status is reported in the response (hasVoted is true when the member
-// has consumed that process).
-// swagger:model CheckBundleParticipantsRequest
-type CheckBundleParticipantsRequest struct {
-	FieldName string            `json:"fieldName"`
-	Value     string            `json:"value"`
-	ProcessID internal.HexBytes `json:"processID" swaggertype:"string" format:"hex" example:"deadbeef"`
-}
-
-// CheckBundleParticipantsResponseEntry describes a single org member that
-// matched the lookup and is a participant of the bundle's census. HasVoted is
-// true when the member has a used CSP process for the request's processID
-// (i.e. has consumed the process to cast a ballot).
-// swagger:model CheckBundleParticipantsResponseEntry
-type CheckBundleParticipantsResponseEntry struct {
-	MemberID     string `json:"memberId"`
-	Name         string `json:"name,omitempty"`
-	Surname      string `json:"surname,omitempty"`
-	Email        string `json:"email,omitempty"`
-	MemberNumber string `json:"memberNumber,omitempty"`
-	HasVoted     bool   `json:"hasVoted"`
-}
-
-// CheckBundleParticipantsResponse is the response for the bundle participant
-// membership check endpoint. The participants slice contains only members that
-// match the lookup AND are participants of the bundle's census. An empty
-// slice means no match.
-// swagger:model CheckBundleParticipantsResponse
-type CheckBundleParticipantsResponse struct {
-	Participants []CheckBundleParticipantsResponseEntry `json:"participants"`
 }
 
 // OAuthLoginRequest defines the payload for register/login through the OAuth service.

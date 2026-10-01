@@ -16,7 +16,7 @@ import (
 
 // newSyncTestElection creates one READY on-chain election owned by orgAddress and returns its id.
 func newSyncTestElection(
-	t *testing.T, token string, orgAddress common.Address, censusRoot []byte,
+	t *testing.T, orgAddress common.Address, censusRoot []byte,
 ) internal.HexBytes {
 	t.Helper()
 	c := qt.New(t)
@@ -37,14 +37,14 @@ func newSyncTestElection(
 			Mode:          &models.ProcessMode{AutoStart: true, Interruptible: true},
 		},
 	}}}
-	id := signRemoteSignerAndSendVocdoniTx(t, tx, token, client, orgAddress)
+	id := signAsOrgAndSendVocdoniTx(t, tx, orgAddress, client)
 	c.Assert(id, qt.Not(qt.HasLen), 0)
 	return internal.HexBytes(id)
 }
 
 // setSyncTestElectionStatus submits a SET_PROCESS_STATUS tx moving an election to the given status.
 func setSyncTestElectionStatus(
-	t *testing.T, token string, orgAddress common.Address,
+	t *testing.T, orgAddress common.Address,
 	processID internal.HexBytes, status models.ProcessStatus,
 ) {
 	t.Helper()
@@ -57,7 +57,7 @@ func setSyncTestElectionStatus(
 		ProcessId: processID.Bytes(),
 		Status:    &st,
 	}}}
-	signRemoteSignerAndSendVocdoniTx(t, tx, token, client, orgAddress)
+	signAsOrgAndSendVocdoniTx(t, tx, orgAddress, client)
 }
 
 // TestStatusSync exercises the enqueue-driven syncer end to end against a live chain: a
@@ -94,14 +94,14 @@ func TestStatusSync(t *testing.T) {
 		Name:    &orgName,
 		InfoURI: &orgInfoURI,
 	}}}
-	signRemoteSignerAndSendVocdoniTx(t, accountTx, token, vocdoniClient, orgAddress)
+	signAsOrgAndSendVocdoniTx(t, accountTx, orgAddress, vocdoniClient)
 
 	cspPubKey, err := testCSP.PubKey()
 	c.Assert(err, qt.IsNil)
 
 	// two READY elections
-	electionEnded := newSyncTestElection(t, token, orgAddress, cspPubKey)
-	electionPaused := newSyncTestElection(t, token, orgAddress, cspPubKey)
+	electionEnded := newSyncTestElection(t, orgAddress, cspPubKey)
+	electionPaused := newSyncTestElection(t, orgAddress, cspPubKey)
 
 	// seed a published voting process with two questions pointing at the elections, both "ready"
 	vpID, err := testDB.SetVotingProcess(&db.VotingProcess{
@@ -122,9 +122,9 @@ func TestStatusSync(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 
 	// drive the elections to distinct on-chain statuses
-	setSyncTestElectionStatus(t, token, orgAddress, electionEnded, models.ProcessStatus_ENDED)
+	setSyncTestElectionStatus(t, orgAddress, electionEnded, models.ProcessStatus_ENDED)
 	waitForElectionStatus(t, electionEnded, "ENDED", "RESULTS")
-	setSyncTestElectionStatus(t, token, orgAddress, electionPaused, models.ProcessStatus_PAUSED)
+	setSyncTestElectionStatus(t, orgAddress, electionPaused, models.ProcessStatus_PAUSED)
 	waitForElectionStatus(t, electionPaused, "PAUSED")
 
 	// maxAttempts == 1 (interval == confirmTimeout) makes ProcessPending deterministic: a confirm

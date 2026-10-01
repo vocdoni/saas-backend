@@ -45,9 +45,9 @@ func seedMemberAndCensus(t *testing.T, addr common.Address, suffix string) (memb
 	return member.ID, censusOID
 }
 
-// TestDeleteCSPByBundleAndProcess covers DeleteCSPAuthByBundle and DeleteCSPProcessByProcess:
+// TestDeleteCSPByAnchorAndProcess covers DeleteCSPAuthByAnchor and DeleteCSPProcessByProcess:
 // they remove only the rows matching the given bundle/process and leave unrelated rows intact.
-func TestDeleteCSPByBundleAndProcess(t *testing.T) {
+func TestDeleteCSPByAnchorAndProcess(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
@@ -62,7 +62,7 @@ func TestDeleteCSPByBundleAndProcess(t *testing.T) {
 	c.Assert(testDB.SetCSPAuth(internal.HexBytes("tokB1"), internal.HexBytes("u1"), bundleB, ""), qt.IsNil)
 
 	// delete bundle A's tokens → only bundle B's token survives
-	n, err := testDB.DeleteCSPAuthByBundle(bundleA)
+	n, err := testDB.DeleteCSPAuthByAnchor(bundleA)
 	c.Assert(err, qt.IsNil)
 	c.Assert(n, qt.Equals, int64(2))
 	// bundle A's tokens are gone
@@ -74,7 +74,7 @@ func TestDeleteCSPByBundleAndProcess(t *testing.T) {
 	c.Assert(last.Token, qt.DeepEquals, internal.HexBytes("tokB1"))
 
 	// nil bundleID is rejected
-	_, err = testDB.DeleteCSPAuthByBundle(nil)
+	_, err = testDB.DeleteCSPAuthByAnchor(nil)
 	c.Assert(err, qt.ErrorIs, ErrBadInputs)
 
 	// seed two CSP process-status rows (ConsumeCSPProcess requires a verified token) and delete
@@ -109,21 +109,20 @@ func TestDeleteProcessesByOrg(t *testing.T) {
 	seedOrg(t, orgB)
 
 	// orgA: one draft (nil Address) + one published (non-nil Address); orgB: one published
-	draftA, err := testDB.SetProcess(&Process{OrgAddress: orgA})
-	c.Assert(err, qt.IsNil)
-	pubA, err := testDB.SetProcess(&Process{OrgAddress: orgA, Address: internal.HexBytes{0xaa}})
-	c.Assert(err, qt.IsNil)
-	_, err = testDB.SetProcess(&Process{OrgAddress: orgB, Address: internal.HexBytes{0xbb}})
-	c.Assert(err, qt.IsNil)
+	draftA := &Process{OrgAddress: orgA}
+	pubA := &Process{OrgAddress: orgA, Address: internal.HexBytes{0xaa}}
+	insertLegacyProcess(c, draftA)
+	insertLegacyProcess(c, pubA)
+	insertLegacyProcess(c, &Process{OrgAddress: orgB, Address: internal.HexBytes{0xbb}})
 
 	n, err := testDB.DeleteProcessesByOrg(orgA)
 	c.Assert(err, qt.IsNil)
 	c.Assert(n, qt.Equals, int64(2))
 
 	// orgA's processes are gone
-	_, err = testDB.Process(draftA)
+	_, err = testDB.Process(draftA.ID)
 	c.Assert(err, qt.ErrorIs, ErrNotFound)
-	_, err = testDB.Process(pubA)
+	_, err = testDB.Process(pubA.ID)
 	c.Assert(err, qt.ErrorIs, ErrNotFound)
 	// orgB's process survives
 	_, err = testDB.ProcessByAddress(internal.HexBytes{0xbb})
@@ -147,10 +146,8 @@ func TestDeleteProcessBundlesByOrg(t *testing.T) {
 	_, censusA := seedMemberAndCensus(t, orgA, "a")
 	_, censusB := seedMemberAndCensus(t, orgB, "b")
 
-	_, err := testDB.SetProcessBundle(&ProcessesBundle{OrgAddress: orgA, Census: Census{ID: censusA}})
-	c.Assert(err, qt.IsNil)
-	_, err = testDB.SetProcessBundle(&ProcessesBundle{OrgAddress: orgB, Census: Census{ID: censusB}})
-	c.Assert(err, qt.IsNil)
+	insertLegacyBundle(c, &ProcessesBundle{OrgAddress: orgA, Census: Census{ID: censusA}})
+	insertLegacyBundle(c, &ProcessesBundle{OrgAddress: orgB, Census: Census{ID: censusB}})
 
 	n, err := testDB.DeleteProcessBundlesByOrg(orgA)
 	c.Assert(err, qt.IsNil)

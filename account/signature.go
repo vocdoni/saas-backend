@@ -11,10 +11,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-var AllowedSignMessagesHash = map[string]*struct{}{
-	"55c85f40d49bf654adcd277bd44f91fb1ac51b680e34b9f0d022b96c4f91e5ea": nil, // SIK generation message
-}
-
 // SignTransaction signs a transaction with the account's private key.
 // Returns the payload of the signed protobuf transaction (models.SignedTx).
 func (a *Account) SignTransaction(tx *models.Tx, signer *ethereum.SignKeys) ([]byte, error) {
@@ -40,21 +36,6 @@ func (a *Account) SignTransaction(tx *models.Tx, signer *ethereum.SignKeys) ([]b
 		return nil, fmt.Errorf("could not marshal signed tx: %w", err)
 	}
 	return stx, nil
-}
-
-// SignMessage signs a message with the account's private key. It uses the Ethereum message signature format.
-// Only a subset of messages are allowed to be signed.
-func SignMessage(message []byte, signer *ethereum.SignKeys) ([]byte, error) {
-	// check if the message is allowed to be signed
-	hash := hex.EncodeToString(ethereum.Hash(message))
-	if _, ok := AllowedSignMessagesHash[hash]; !ok {
-		return nil, fmt.Errorf("message not allowed to be signed")
-	}
-	signature, err := signer.SignEthereum(message)
-	if err != nil {
-		return nil, fmt.Errorf("could not sign message: %w", err)
-	}
-	return signature, nil
 }
 
 // VerifySignature recovers the signer address from the given message and

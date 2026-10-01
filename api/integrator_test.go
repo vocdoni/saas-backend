@@ -10,14 +10,13 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
-	"go.vocdoni.io/proto/build/go/models"
-	"google.golang.org/protobuf/proto"
+	"github.com/vocdoni/saas-backend/errors"
 )
 
 // TestIntegratorManagedOrgs exercises the integrator layer: a non-integrator org is
 // rejected, an integrator can create managed orgs up to its quota, the integrator info
 // and managed-org list reflect usage, and publishing under a managed org enforces the
-// integrator's aggregate process/census quota.
+// integrator's aggregate process quota.
 func TestIntegratorManagedOrgs(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "integratorpass123")
@@ -39,12 +38,13 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
 
 	// subscribe the integrator to a plan whose top-level limits bound managed publishing:
-	// MaxProcesses 1, MaxCensus 1000.
+	// MaxProcesses 1, MaxCensus 1000. Managed orgs also draw their draft cap from it.
 	integratorPlan := &db.Plan{
 		ID:           "prod_test_integrator_caps",
 		Name:         "Integrator Caps",
-		Organization: db.PlanLimits{MaxProcesses: 1, MaxCensus: 1000, MaxVotes: 5000, MaxDuration: 30},
+		Organization: db.PlanLimits{MaxDrafts: 10, MaxProcesses: 1, MaxCensus: 1000, MaxVotes: 5000, MaxDuration: 30},
 		Features:     db.Features{TwoFaSms: 50, TwoFaEmail: 100},
+		VotingTypes:  db.VotingTypes{Single: true},
 	}
 	c.Assert(testDB.SetPlan(integratorPlan), qt.IsNil)
 	defer func() { _ = testDB.DelPlan(&db.Plan{ID: integratorPlan.ID}) }()
@@ -112,188 +112,47 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 	)
 	c.Assert(list.Organizations, qt.HasLen, 2)
 
-	// publish under a managed org: give it a process-capable plan
-	plans, err := testDB.Plans()
-	c.Assert(err, qt.IsNil)
-	c.Assert(len(plans) > 1, qt.IsTrue)
-	c.Assert(testDB.SetOrganizationSubscription(firstManaged, &db.OrganizationSubscription{
-		PlanID:          plans[1].ID,
-		StartDate:       time.Now(),
-		RenewalDate:     time.Now().Add(24 * time.Hour),
-		LastPaymentDate: time.Now(),
-		Active:          true,
-	}), qt.IsNil)
+	// give the managed org a process-capable plan
+	setOrganizationSubscription(t, firstManaged, mockPremiumPlan.ID)
 
-	// a managed org may not publish a process whose declared census size exceeds the
-	// integrator plan's MaxCensus (1000): the per-process bound applies to managed orgs even
-	// though the aggregate process-count quota is what governs how many they may publish.
-	overCapDraft, err := testDB.SetProcess(&db.Process{
-		OrgAddress: firstManaged,
-		ElectionParams: &db.ElectionParams{
-			Title:         db.MultiLangString{"default": "Over-cap managed election"},
-			EndDate:       time.Now().Add(2 * time.Hour),
-			MaxCensusSize: 2000,
-			Questions: []db.Question{{
-				Title: db.MultiLangString{"default": "Q1"},
-				Choices: []db.Choice{
-					{Title: db.MultiLangString{"default": "Yes"}, Value: 0},
-					{Title: db.MultiLangString{"default": "No"}, Value: 1},
-				},
-			}},
-			VoteType:     db.VoteType{MaxCount: 1, MaxValue: 1},
-			ElectionType: db.ElectionType{Autostart: true, Interruptible: true},
-		},
-	})
-	c.Assert(err, qt.IsNil)
-	_, code = testRequest(t, http.MethodPost, token, nil, "process", overCapDraft.Hex(), "publish")
-	c.Assert(code, qt.Equals, http.StatusUnauthorized) // ErrProcessCensusSizeExceedsPlanLimit, wrapped
-
-	// seed + publish a draft (MaxCensusSize 100, within the 1000 integrator cap)
-	draftID, err := testDB.SetProcess(&db.Process{
-		OrgAddress: firstManaged,
-		ElectionParams: &db.ElectionParams{
-			Title:         db.MultiLangString{"default": "Managed election"},
-			EndDate:       time.Now().Add(2 * time.Hour),
-			MaxCensusSize: 100,
-			Questions: []db.Question{{
-				Title: db.MultiLangString{"default": "Q1"},
-				Choices: []db.Choice{
-					{Title: db.MultiLangString{"default": "Yes"}, Value: 0},
-					{Title: db.MultiLangString{"default": "No"}, Value: 1},
-				},
-			}},
-			VoteType:     db.VoteType{MaxCount: 1, MaxValue: 1},
-			ElectionType: db.ElectionType{Autostart: true, Interruptible: true},
-		},
-	})
-	c.Assert(err, qt.IsNil)
-	pubJob := enqueueAndPollJob(t, http.MethodPost, token, nil, "process", draftID.Hex(), "publish")
-	c.Assert(pubJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", pubJob.Errors))
-	c.Assert(len(pubJob.Result.Address) > 0, qt.IsTrue)
-
-	// the integrator's aggregate process counter was bumped
+	// publish under the managed org: a non-test-sized census (> TestMaxCensusSize voters) draws a
+	// slot from the integrator's aggregate process quota
+	members := memberIDs(postOrgMembers(t, token, firstManaged, newOrgMembers(db.TestMaxCensusSize+1)...))
+	census := func(ids []string) apicommon.CensusSpec {
+		return apicommon.CensusSpec{AuthFields: db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber}, MemberIDs: ids}
+	}
+	publishCensusProcess(t, token, firstManaged, census(members), 1)
 	integratorOrg, err = testDB.Organization(integratorAddr)
 	c.Assert(err, qt.IsNil)
 	c.Assert(integratorOrg.Counters.ManagedProcesses, qt.Equals, 1)
 
-	// a second publish is blocked by the aggregate quota (plan MaxProcesses == 1)
-	draftID2, err := testDB.SetProcess(&db.Process{
-		OrgAddress: firstManaged,
-		ElectionParams: &db.ElectionParams{
-			Title:         db.MultiLangString{"default": "Managed election 2"},
-			EndDate:       time.Now().Add(2 * time.Hour),
-			MaxCensusSize: 100,
-			Questions: []db.Question{{
-				Title: db.MultiLangString{"default": "Q1"},
-				Choices: []db.Choice{
-					{Title: db.MultiLangString{"default": "Yes"}, Value: 0},
-					{Title: db.MultiLangString{"default": "No"}, Value: 1},
-				},
-			}},
-			VoteType:     db.VoteType{MaxCount: 1, MaxValue: 1},
-			ElectionType: db.ElectionType{Autostart: true, Interruptible: true},
-		},
-	})
+	// a second one is blocked by the aggregate quota (plan MaxProcesses == 1) at the publish
+	// preflight, before any reservation, so the counter is untouched
+	req := minimalVotingProcessRequest(firstManaged)
+	req.StartDate = ""
+	req.Census = census(members)
+	pid := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint).ProcessID
+	resp, code := testRequest(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
+	c.Assert(string(resp), qt.Contains, errors.ErrIntegratorQuotaExceeded.Err.Error())
+	integratorOrg, err = testDB.Organization(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	_, code = testRequest(t, http.MethodPost, token, nil, "process", draftID2.Hex(), "publish")
-	c.Assert(code, qt.Equals, http.StatusBadRequest) // ErrIntegratorQuotaExceeded
-}
+	c.Assert(integratorOrg.Counters.ManagedProcesses, qt.Equals, 1)
 
-// TestIntegratorProcessQuotaViaTransactions guards the regression where the remote-signer
-// /transactions path stopped enforcing the integrator's shared process quota for managed orgs.
-// A managed org creating elections through /transactions must consume, and be capped by, the
-// integrator's aggregate ManagedProcesses quota — exactly like /process/{id}/publish does.
-func TestIntegratorProcessQuotaViaTransactions(t *testing.T) {
-	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
-
-	token := testCreateUser(t, "integratorpass123")
-	integratorAddr := testCreateOrganization(t, token)
-
-	// enable integrator (override) and subscribe it to a plan whose top-level MaxProcesses (1)
-	// is the shared process cap across all of its managed orgs.
-	integratorOrg, err := testDB.Organization(integratorAddr)
+	// a test-sized census is exempt: it publishes with the pool full and does not consume it
+	publishCensusProcess(t, token, firstManaged, census(members[:1]), 1)
+	integratorOrg, err = testDB.Organization(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	integratorOrg.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 1}
-	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
-
-	integratorPlan := &db.Plan{
-		ID:           "prod_test_tx_quota",
-		Name:         "Integrator Tx Quota",
-		Organization: db.PlanLimits{MaxProcesses: 1, MaxCensus: 1000, MaxVotes: 5000, MaxDuration: 30},
-		Features:     db.Features{TwoFaSms: 50, TwoFaEmail: 100},
-	}
-	c.Assert(testDB.SetPlan(integratorPlan), qt.IsNil)
-	defer func() { _ = testDB.DelPlan(&db.Plan{ID: integratorPlan.ID}) }()
-	c.Assert(testDB.SetOrganizationSubscription(integratorAddr, &db.OrganizationSubscription{
-		PlanID:          integratorPlan.ID,
-		StartDate:       time.Now(),
-		RenewalDate:     time.Now().Add(24 * time.Hour),
-		LastPaymentDate: time.Now(),
-		Active:          true,
-	}), qt.IsNil)
-
-	// create a managed org: its on-chain account is provisioned eagerly and the calling user
-	// becomes its admin, so it can fund and sign NEW_PROCESS txs through /transactions.
-	managed := requestAndParse[apicommon.OrganizationInfo](
-		t, http.MethodPost, token,
-		&apicommon.CreateManagedOrganizationRequest{
-			OrganizationInfo: apicommon.OrganizationInfo{Type: string(db.CompanyType), Website: "https://managed.example"},
-		},
-		"integrator", "organizations",
-	)
-	c.Assert(managed.Address, qt.Not(qt.Equals), common.Address{})
-
-	// newProcessTx builds a marshalled NEW_PROCESS tx for the managed org with the given census
-	// size. No overwrite/anonymous/weighted features are requested so the plan's feature gates
-	// in HasTxPermission pass.
-	newProcessTx := func(maxCensusSize uint64) []byte {
-		tx := &models.Tx{Payload: &models.Tx_NewProcess{NewProcess: &models.NewProcessTx{
-			Txtype: models.TxType_NEW_PROCESS,
-			Process: &models.Process{
-				EntityId:      managed.Address.Bytes(),
-				MaxCensusSize: maxCensusSize,
-				Duration:      86400,
-				EnvelopeType:  &models.EnvelopeType{},
-				VoteOptions:   &models.ProcessVoteOptions{MaxCount: 1, MaxValue: 1},
-			},
-		}}}
-		b, err := proto.Marshal(tx)
-		c.Assert(err, qt.IsNil)
-		return b
-	}
-	postTx := func(payload []byte) int {
-		_, code := testRequest(t, http.MethodPost, token,
-			&apicommon.TransactionData{Address: managed.Address, TxPayload: payload}, "transactions")
-		return code
-	}
-	managedProcesses := func() int {
-		org, err := testDB.Organization(integratorAddr)
-		c.Assert(err, qt.IsNil)
-		return org.Counters.ManagedProcesses
-	}
-
-	// first non-test-sized process is signed and consumes one slot of the integrator pool.
-	c.Assert(postTx(newProcessTx(100)), qt.Equals, http.StatusOK)
-	c.Assert(managedProcesses(), qt.Equals, 1)
-
-	// the second is capped by the integrator's aggregate quota (plan MaxProcesses == 1).
-	// Before the fix this path enforced nothing and returned 200, leaving the counter at 0.
-	c.Assert(postTx(newProcessTx(100)), qt.Equals, http.StatusBadRequest) // ErrIntegratorQuotaExceeded
-	c.Assert(managedProcesses(), qt.Equals, 1)                            // reservation never taken / rolled back
-
-	// a test-sized election (<= TestMaxCensusSize) is exempt: allowed even with the pool full,
-	// and it does not consume the integrator quota.
-	c.Assert(postTx(newProcessTx(uint64(db.TestMaxCensusSize))), qt.Equals, http.StatusOK)
-	c.Assert(managedProcesses(), qt.Equals, 1)
+	c.Assert(integratorOrg.Counters.ManagedProcesses, qt.Equals, 1)
 }
 
 // TestIntegratorTopLevelOrgCannotOwnElections closes the freeride: an integrator top-level org
 // (integrator-enabled, not itself managed) must not own elections, because both the /integrator
 // dashboard and the pool-quota checks aggregate strictly across managed orgs (managedBy=integrator)
 // and would silently exclude anything the integrator ran on its own top-level org. The guard fires
-// at draft-create on both API generations and at /transactions NEW_PROCESS (defense in depth), and
-// is independent of census size — the rule is "no elections here", not "no billable elections here".
+// at draft-create (and again at publish, in reserveManagedProcessSlot), and is independent of census
+// size — the rule is "no elections here", not "no billable elections here".
 func TestIntegratorTopLevelOrgCannotOwnElections(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
@@ -321,35 +180,12 @@ func TestIntegratorTopLevelOrgCannotOwnElections(t *testing.T) {
 		LastPaymentDate: time.Now(), Active: true,
 	}), qt.IsNil)
 
-	// legacy draft-create on the integrator top-level org — rejected.
-	_, code := testRequest(t, http.MethodPost, token,
-		&apicommon.CreateProcessRequest{OrgAddress: integratorAddr}, "process")
-	c.Assert(code, qt.Equals, http.StatusForbidden) // ErrIntegratorTopLevelOrgCannotOwnProcess
-
-	// new /processes draft-create on the integrator top-level org — rejected.
-	_, code = testRequest(t, http.MethodPost, token, &apicommon.CreateVotingProcessRequest{
+	// /processes draft-create on the integrator top-level org — rejected.
+	_, code := testRequest(t, http.MethodPost, token, &apicommon.CreateVotingProcessRequest{
 		OrgAddress: integratorAddr.Bytes(),
 		Title:      db.MultiLangString{"default": "Freeride attempt"},
 		Questions:  []apicommon.VotingProcessQuestionRequest{{Title: db.MultiLangString{"default": "Q1"}}},
 	}, "processes")
-	c.Assert(code, qt.Equals, http.StatusForbidden) // ErrIntegratorTopLevelOrgCannotOwnProcess
-
-	// direct /transactions NEW_PROCESS on the integrator top-level org — rejected too, even
-	// size-independent: a test-sized election would previously slip through reserveManagedProcessSlot.
-	tx := &models.Tx{Payload: &models.Tx_NewProcess{NewProcess: &models.NewProcessTx{
-		Txtype: models.TxType_NEW_PROCESS,
-		Process: &models.Process{
-			EntityId:      integratorAddr.Bytes(),
-			MaxCensusSize: uint64(db.TestMaxCensusSize), // test-sized: previously exempt from the guard
-			Duration:      86400,
-			EnvelopeType:  &models.EnvelopeType{},
-			VoteOptions:   &models.ProcessVoteOptions{MaxCount: 1, MaxValue: 1},
-		},
-	}}}
-	payload, err := proto.Marshal(tx)
-	c.Assert(err, qt.IsNil)
-	_, code = testRequest(t, http.MethodPost, token,
-		&apicommon.TransactionData{Address: integratorAddr, TxPayload: payload}, "transactions")
 	c.Assert(code, qt.Equals, http.StatusForbidden) // ErrIntegratorTopLevelOrgCannotOwnProcess
 }
 
@@ -405,13 +241,8 @@ func TestManagedOrgOnIntegratorPlanCanCreateDraft(t *testing.T) {
 	c.Assert(managedOrg.ManagedBy, qt.Not(qt.Equals), common.Address{})
 	c.Assert(managedOrg.Subscription.PlanID, qt.Equals, plan.ID)
 
-	// legacy /process draft-create — must succeed, not 403.
-	_, code := testRequest(t, http.MethodPost, token,
-		&apicommon.CreateProcessRequest{OrgAddress: managed.Address}, "process")
-	c.Assert(code, qt.Equals, http.StatusOK)
-
-	// new /processes draft-create — must succeed too.
-	_, code = testRequest(t, http.MethodPost, token, &apicommon.CreateVotingProcessRequest{
+	// /processes draft-create — must succeed, not 403.
+	_, code := testRequest(t, http.MethodPost, token, &apicommon.CreateVotingProcessRequest{
 		OrgAddress: managed.Address.Bytes(),
 		Title:      db.MultiLangString{"default": "Managed draft"},
 		Questions: []apicommon.VotingProcessQuestionRequest{{

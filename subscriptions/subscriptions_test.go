@@ -1,7 +1,6 @@
 package subscriptions
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -57,9 +56,13 @@ func TestHasTxPermission(t *testing.T) {
 
 	// Create a mock transaction
 	tx := &models.Tx{
-		Payload: &models.Tx_SetAccount{
-			SetAccount: &models.SetAccountTx{
-				Txtype: models.TxType_SET_ACCOUNT_INFO_URI,
+		Payload: &models.Tx_NewProcess{
+			NewProcess: &models.NewProcessTx{
+				Txtype: models.TxType_NEW_PROCESS,
+				Process: &models.Process{
+					EnvelopeType: &models.EnvelopeType{},
+					VoteOptions:  &models.ProcessVoteOptions{},
+				},
 			},
 		},
 	}
@@ -83,16 +86,16 @@ func TestHasTxPermission(t *testing.T) {
 	}
 
 	// Test case 1: Organization without a plan
-	_, err := subs.HasTxPermission(tx, models.TxType_SET_ACCOUNT_INFO_URI, orgWithoutPlan, user)
+	_, err := subs.HasTxPermission(tx, models.TxType_NEW_PROCESS, orgWithoutPlan, user)
 	c.Assert(err, qt.ErrorIs, errors.ErrOrganizationHasNoSubscription)
 
 	// Test case 2: Organization with a plan
-	hasPermission, err := subs.HasTxPermission(tx, models.TxType_SET_ACCOUNT_INFO_URI, orgWithPlan, user)
+	hasPermission, err := subs.HasTxPermission(tx, models.TxType_NEW_PROCESS, orgWithPlan, user)
 	c.Assert(err, qt.IsNil)
 	c.Assert(hasPermission, qt.IsTrue)
 
 	// Test case 3: Nil organization
-	_, err = subs.HasTxPermission(tx, models.TxType_SET_ACCOUNT_INFO_URI, nil, user)
+	_, err = subs.HasTxPermission(tx, models.TxType_NEW_PROCESS, nil, user)
 	c.Assert(err, qt.ErrorIs, errors.ErrInvalidData)
 }
 
@@ -314,7 +317,7 @@ func TestCanCreateManagedOrg(t *testing.T) {
 	c.Assert(err, qt.ErrorIs, errors.ErrMaxManagedOrgsReached)
 }
 
-func TestCanPublishForManagedOrg(t *testing.T) {
+func TestCanReserveManagedPublish(t *testing.T) {
 	c := qt.New(t)
 	mockDB := &mockMongoStorage{
 		plans: map[string]*db.Plan{
@@ -335,14 +338,14 @@ func TestCanPublishForManagedOrg(t *testing.T) {
 	}
 
 	// a non-integrator org (no override, no plan) is refused
-	err := subs.CanPublishForManagedOrg(&db.Organization{})
+	err := subs.CanReserveManagedPublish(&db.Organization{})
 	c.Assert(err, qt.ErrorIs, errors.ErrNotAnIntegrator)
 
 	// within the process quota is allowed
-	c.Assert(subs.CanPublishForManagedOrg(integrator(4)), qt.IsNil)
+	c.Assert(subs.CanReserveManagedPublish(integrator(4)), qt.IsNil)
 
 	// process count at the limit is rejected
-	c.Assert(subs.CanPublishForManagedOrg(integrator(5)), qt.ErrorIs, errors.ErrIntegratorQuotaExceeded)
+	c.Assert(subs.CanReserveManagedPublish(integrator(5)), qt.ErrorIs, errors.ErrIntegratorQuotaExceeded)
 }
 
 // TestManagedOrgLimitsUseIntegratorPlan asserts that a managed org's limits are governed
@@ -396,9 +399,6 @@ func TestManagedOrgLimitsUseIntegratorPlan(t *testing.T) {
 		sentSMSManagedBy:    map[string]int{integratorAddr.String(): 10},
 		sentVotesManagedBy:  map[string]int{integratorAddr.String(): 10},
 		orgMembers:          map[string]int64{standaloneAddr.String(): 5},
-		groups: map[string]*db.OrganizationMemberGroup{
-			"group-1": {MemberIDs: []string{"a", "b", "c"}},
-		},
 	}
 	subs := &Subscriptions{db: mockDB}
 
@@ -441,33 +441,11 @@ func TestManagedOrgLimitsUseIntegratorPlan(t *testing.T) {
 	_, err = subs.HasTxPermission(newProcessTx(), models.TxType_NEW_PROCESS, standaloneOrg, adminUser)
 	c.Assert(err, qt.Not(qt.IsNil))
 
-	// A SET_PROCESS_CENSUS tx carries a SetProcess payload; the census update is bounded by the
-	// governing plan's MaxCensus and must be read with GetSetProcess (reading it as a NewProcess
-	// would nil-panic).
-	setProcessCensusTx := func(censusSize uint64) *models.Tx {
-		return &models.Tx{
-			Payload: &models.Tx_SetProcess{
-				SetProcess: &models.SetProcessTx{
-					Txtype:     models.TxType_SET_PROCESS_CENSUS,
-					ProcessId:  []byte{0x01},
-					CensusSize: &censusSize,
-				},
-			},
-		}
-	}
-	// Managed org: a census update within the integrator plan's MaxCensus (1000) is allowed.
-	ok, err = subs.HasTxPermission(setProcessCensusTx(500), models.TxType_SET_PROCESS_CENSUS, managedOrg, adminUser)
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsTrue)
-	// Managed org: a census update beyond the integrator plan's MaxCensus is rejected.
-	_, err = subs.HasTxPermission(setProcessCensusTx(2000), models.TxType_SET_PROCESS_CENSUS, managedOrg, adminUser)
-	c.Assert(err, qt.ErrorIs, errors.ErrProcessCensusSizeExceedsPlanLimit)
-
-	// --- MaxDrafts value cap (OrgHasPermission) ---
+	// --- MaxDrafts value cap (OrgCanCreateVotingProcessDraft) ---
 	// Managed org: governed by integrator MaxDrafts (10) — allowed; standalone tiny plan
 	// (MaxDrafts 0) — rejected.
-	c.Assert(subs.OrgHasPermission(managedAddr, CreateDraft), qt.IsNil)
-	c.Assert(subs.OrgHasPermission(standaloneAddr, CreateDraft), qt.ErrorIs, errors.ErrMaxDraftsReached)
+	c.Assert(subs.OrgCanCreateVotingProcessDraft(managedAddr), qt.IsNil)
+	c.Assert(subs.OrgCanCreateVotingProcessDraft(standaloneAddr), qt.ErrorIs, errors.ErrMaxDraftsReached)
 
 	// --- Members shared pool (OrgCanAddNMembers) ---
 	// Managed org: integrator MaxCensus (1000) vs shared-pool count (5) — allowed.
@@ -485,25 +463,25 @@ func TestManagedOrgLimitsUseIntegratorPlan(t *testing.T) {
 	c.Assert(subs.OrgCanAddCensusParticipants(standaloneAddr, "census-x", 10),
 		qt.ErrorIs, errors.ErrProcessCensusSizeExceedsPlanLimit)
 
-	// --- 2FA shared pool (OrgCanPublishGroupCensus) ---
+	// --- 2FA shared pool (OrgCanPublishCensus) ---
 	emailCensus := func(orgAddr common.Address) *db.Census {
 		return &db.Census{OrgAddress: orgAddr, TwoFaFields: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail}}
 	}
 	// Managed org: integrator TwoFaEmail (100) - shared sent (10) = 90 remaining >= 3 members — allowed.
-	c.Assert(subs.OrgCanPublishGroupCensus(emailCensus(managedAddr), "group-1"), qt.IsNil)
+	c.Assert(subs.OrgCanPublishCensus(emailCensus(managedAddr), 3, 3), qt.IsNil)
 	// Standalone tiny plan: TwoFaEmail 0 - 0 = 0 remaining < 3 members — rejected.
-	c.Assert(subs.OrgCanPublishGroupCensus(emailCensus(standaloneAddr), "group-1"),
+	c.Assert(subs.OrgCanPublishCensus(emailCensus(standaloneAddr), 3, 3),
 		qt.ErrorIs, errors.ErrProcessCensusSizeExceedsEmailAllowance)
 
-	// --- Vote shared pool (OrgCanPublishGroupCensus) ---
+	// --- Vote shared pool (OrgCanPublishCensus) ---
 	// A census with no 2FA fields isolates the vote allowance from the email/sms checks.
 	plainCensus := func(orgAddr common.Address) *db.Census {
 		return &db.Census{OrgAddress: orgAddr}
 	}
 	// Managed org: integrator MaxVotes (100) - shared sent (10) = 90 remaining >= 3 members — allowed.
-	c.Assert(subs.OrgCanPublishGroupCensus(plainCensus(managedAddr), "group-1"), qt.IsNil)
+	c.Assert(subs.OrgCanPublishCensus(plainCensus(managedAddr), 3, 3), qt.IsNil)
 	// Standalone tiny plan: MaxVotes 1 - own sent (0) = 1 remaining < 3 members — rejected.
-	c.Assert(subs.OrgCanPublishGroupCensus(plainCensus(standaloneAddr), "group-1"),
+	c.Assert(subs.OrgCanPublishCensus(plainCensus(standaloneAddr), 3, 3),
 		qt.ErrorIs, errors.ErrProcessCensusSizeExceedsVoteAllowance)
 }
 
@@ -540,9 +518,6 @@ func TestManagedOrgSharedPoolExceeded(t *testing.T) {
 		membersManagedBy:   map[string]int64{integratorAddr.String(): 99},
 		sentSMSManagedBy:   map[string]int{integratorAddr.String(): 50},
 		sentVotesManagedBy: map[string]int{integratorAddr.String(): 50},
-		groups: map[string]*db.OrganizationMemberGroup{
-			"group-1": {MemberIDs: []string{"a"}},
-		},
 	}
 	subs := &Subscriptions{db: mockDB}
 
@@ -550,11 +525,11 @@ func TestManagedOrgSharedPoolExceeded(t *testing.T) {
 	c.Assert(subs.OrgCanAddNMembers(managedAddr, 2), qt.ErrorIs, errors.ErrExceedsOrganizationMembersLimit)
 	// 2FA SMS: pool at 50, integrator TwoFaSms 50 → 0 remaining, 1 member needed → rejected.
 	smsCensus := &db.Census{OrgAddress: managedAddr, TwoFaFields: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldPhone}}
-	c.Assert(subs.OrgCanPublishGroupCensus(smsCensus, "group-1"),
+	c.Assert(subs.OrgCanPublishCensus(smsCensus, 1, 1),
 		qt.ErrorIs, errors.ErrProcessCensusSizeExceedsSMSAllowance)
 	// votes: pool at 50, integrator MaxVotes 50 → 0 remaining, 1 member needed → rejected.
 	voteCensus := &db.Census{OrgAddress: managedAddr}
-	c.Assert(subs.OrgCanPublishGroupCensus(voteCensus, "group-1"),
+	c.Assert(subs.OrgCanPublishCensus(voteCensus, 1, 1),
 		qt.ErrorIs, errors.ErrProcessCensusSizeExceedsVoteAllowance)
 }
 
@@ -640,10 +615,6 @@ type mockMongoStorage struct {
 	sentVotesManagedBy  map[string]int
 	// keyed by orgAddress string
 	orgMembers map[string]int64
-	// keyed by groupID
-	groups map[string]*db.OrganizationMemberGroup
-	// keyed by orgAddress string; draft process count
-	draftCounts map[string]int64
 	// keyed by orgAddress string; draft voting-process count
 	votingDraftCounts map[string]int64
 }
@@ -706,18 +677,6 @@ func (*mockMongoStorage) CountCensusParticipants(string) (int64, error) {
 	return 0, nil
 }
 
-func (m *mockMongoStorage) CountProcesses(addr common.Address, _ db.DraftFilter) (int64, error) {
-	return m.draftCounts[addr.String()], nil
-}
-
 func (m *mockMongoStorage) CountVotingProcesses(addr common.Address, _ db.DraftFilter) (int64, error) {
 	return m.votingDraftCounts[addr.String()], nil
-}
-
-func (m *mockMongoStorage) OrganizationMemberGroup(groupID string, _ common.Address) (*db.OrganizationMemberGroup, error) {
-	group, ok := m.groups[groupID]
-	if !ok {
-		return nil, fmt.Errorf("group not found in mock")
-	}
-	return group, nil
 }

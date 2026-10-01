@@ -126,17 +126,6 @@ func SaltBlindPubKey(pubKey *blind.PublicKey, salt [saltedkey.SaltSize]byte) (*b
 	return (*blind.PublicKey)(pubKey.Point().Add(&s)), nil
 }
 
-// SaltECDSAPubKey returns the salted plain public key of pubKey applying the salt.
-func SaltECDSAPubKey(pubKey *ecdsa.PublicKey, salt [saltedkey.SaltSize]byte) ([]byte, error) {
-	if pubKey == nil {
-		return nil, fmt.Errorf("public key is nil")
-	}
-	x, y := pubKey.ScalarBaseMult(salt[:])
-	//nolint:staticcheck // SA1019: mutating X/Y is the point of salted-key derivation; predates the Go 1.26 deprecation
-	pubKey.X, pubKey.Y = pubKey.Add(pubKey.X, pubKey.Y, x, y)
-	return ethcrypto.FromECDSAPub(pubKey), nil
-}
-
 // rootKeyBytes returns the root key as a fixed 32-byte big-endian slice. big.Int.Bytes() drops
 // leading zero bytes, which would make a key starting with 0x00 too short for the signers.
 func (sk *SaltedKey) rootKeyBytes() []byte {

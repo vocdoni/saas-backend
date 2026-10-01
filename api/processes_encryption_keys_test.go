@@ -49,7 +49,7 @@ func TestProcessesEncryptionKeys(t *testing.T) {
 		Name:    &orgName,
 		InfoURI: &orgInfoURI,
 	}}}
-	signRemoteSignerAndSendVocdoniTx(t, accountTx, token, vocdoniClient, orgAddress)
+	signAsOrgAndSendVocdoniTx(t, accountTx, orgAddress, vocdoniClient)
 
 	cspPubKey, err := testCSP.PubKey()
 	c.Assert(err, qt.IsNil)
@@ -71,7 +71,7 @@ func TestProcessesEncryptionKeys(t *testing.T) {
 			Mode:          &models.ProcessMode{AutoStart: true, Interruptible: true},
 		},
 	}}}
-	encElection := internal.HexBytes(signRemoteSignerAndSendVocdoniTx(t, processTx, token, vocdoniClient, orgAddress))
+	encElection := internal.HexBytes(signAsOrgAndSendVocdoniTx(t, processTx, orgAddress, vocdoniClient))
 
 	// wait until the keykeepers publish the election encryption keys on chain
 	nodeKeys := waitUntilElectionKeys(t, vocdoniClient, encElection.Bytes())

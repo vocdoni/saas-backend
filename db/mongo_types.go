@@ -38,10 +38,6 @@ type CensusParticipantsCollection struct {
 	CensusParticipants []CensusParticipant `json:"censusParticipants" bson:"censusParticipants"`
 }
 
-type PublishedCensusesCollection struct {
-	PublishedCensuses []PublishedCensus `json:"publishedCensuses" bson:"publishedCensuses"`
-}
-
 type ProcessesCollection struct {
 	Processes []Process `json:"processes" bson:"processes"`
 }
@@ -55,6 +51,5 @@ type Collection struct {
 	OrgMembersCollection
 	OrgMemberGroupsCollection
 	CensusParticipantsCollection
-	PublishedCensusesCollection
 	ProcessesCollection
 }

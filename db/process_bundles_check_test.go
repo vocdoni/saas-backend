@@ -70,14 +70,7 @@ func setupCheckBundleFixture(t *testing.T) *checkBundleFixture {
 		}), qt.IsNil)
 	}
 
-	bundleObjID := testDB.NewBundleID()
-	_, err = testDB.SetProcessBundle(&ProcessesBundle{
-		ID:         bundleObjID,
-		OrgAddress: testOrgAddress,
-		Census:     *census,
-	})
-	c.Assert(err, qt.IsNil)
-	bundleID := internal.HexBytesFromString(bundleObjID.Hex())
+	bundleID := internal.HexBytesFromString(bson.NewObjectID().Hex())
 
 	return &checkBundleFixture{
 		org:      org,

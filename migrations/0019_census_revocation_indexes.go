@@ -23,8 +23,8 @@ func upCensusRevocationIndexes(ctx context.Context, database *mongo.Database) er
 	// the hot voter-auth path — and its userid prefix serves the revocation cascade's
 	// DeleteMany({userid: $in}) just as a bare {userid: 1} would.
 	//
-	// bundleid alone is the second: DeleteCSPAuthByBundle and the two Count*ByBundle helpers
-	// predicate on bundleid with no userid, so the compound index cannot serve them (a non-leading
+	// bundleid alone is the second: DeleteCSPAuthByAnchor predicates on bundleid with no userid,
+	// so the compound index cannot serve it (a non-leading
 	// field is not a usable prefix). The delete runs once per bundle in a loop on org teardown and
 	// GDPR erasure, so those are the scans that repeat.
 	if _, err := database.Collection("cspTokens").Indexes().CreateMany(ctx, []mongo.IndexModel{

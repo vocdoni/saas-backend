@@ -41,12 +41,6 @@ const (
 	// POST /users/password/reset to reset the user password
 	usersResetPasswordEndpoint = "/users/password/reset"
 
-	// signer routes
-	// POST /transactions to sign a transaction
-	signTxEndpoint = "/transactions"
-	// POST /transactions/message to sign a message
-	signMessageEndpoint = "/transactions/message"
-
 	// async job routes
 	// GET /jobs/{jobId} to poll the status/result of an async transaction job (public; the
 	// 32-byte job id is the capability — results carry only public on-chain data)
@@ -83,8 +77,6 @@ const (
 	organizationSubscriptionEndpoint = "/organizations/{orgAddress}/subscription"
 	// GET /organizations/{orgAddress}/censuses to get the organization censuses
 	organizationCensusesEndpoint = "/organizations/{orgAddress}/censuses"
-	// GET /organizations/{orgAddress}/processes/drafts to get the organization draft processes
-	organizationListProcessDraftsEndpoint = "/organizations/{orgAddress}/processes/drafts"
 
 	// GET /organizations/{orgAddress}/members to get the organization members
 	organizationMembersEndpoint = "/organizations/{orgAddress}/members"
@@ -105,10 +97,6 @@ const (
 	organizationGroupEndpoint = "/organizations/{orgAddress}/groups/{groupId}"
 	// GET /organizations/{orgAddress}/groups/{groupId}/members to get the members of an organization member group
 	organizationGroupMembersEndpoint = "/organizations/{orgAddress}/groups/{groupId}/members"
-	// POST /organizations/{orgAddress}/groups/{groupId}/validate to validate the member data of an organization member group
-	organizationGroupValidateEndpoint = "/organizations/{orgAddress}/groups/{groupId}/validate"
-	// GET /organizations/{orgAddress}/processes to get the organization bundle processes
-	organizationBundlesEndpoint = "/organizations/{orgAddress}/processes"
 	// GET /integrator to get integrator quota and usage for the caller's own integrator org.
 	// Path-less: the integrator org is resolved from the API key (its org) or the user session.
 	integratorEndpoint = "/integrator"
@@ -140,38 +128,6 @@ const (
 	// GET /storage/{origin}/{filename} to download an image from the object storage
 	objectStorageDownloadTypedEndpoint = "/storage/{objectName}"
 
-	// census routes
-	// POST /census to create a new census
-	censusEndpoint = "/census"
-	// GET /census/{id} to get census information
-	// POST /census/{id} to add organization members to census by member ID
-	censusIDEndpoint = "/census/{id}"
-	// POST /census/{id}/publish to publish a census
-	censusPublishEndpoint = "/census/{id}/publish"
-	// POST /census/{id}/group/{groupId}/publish to publish a group census
-	censusGroupPublishEndpoint = "/census/{id}/group/{groupId}/publish"
-	// GET /census/{id}/participants to get the census participants
-	censusParticipantsEndpoint = "/census/{id}/participants"
-
-	// process routes
-	// POST /process/{processId} to create a new process
-	processCreateEndpoint = "/process"
-	// GET /process/{processId} to get process information
-	processEndpoint = "/process/{processId}"
-	// POST /process/{processId}/auth to check if the voter is authorized
-	// processAuthEndpoint = "/process/{processId}/auth"
-	// POST /process/{processId}/sign-info to get the sign info for the process.
-	// {processId} accepts the 24-hex ProcessID (preferred) or, for backwards
-	// compatibility, the 64-hex on-chain election id.
-	processSignInfoEndpoint = "/process/{processId}/sign-info"
-
-	// POST /process/{processId}/publish to publish a draft process as an on-chain election
-	processPublishEndpoint = "/process/{processId}/publish"
-
-	// PUT /process/{processId}/status to change an on-chain election status.
-	// {processId} is the 24-hex ProcessID (not the on-chain election id).
-	processStatusEndpoint = "/process/{processId}/status"
-
 	// POST /vote to relay an already-signed vote (public). The target process is taken
 	// from the signed vote envelope itself, so no process id appears in the path.
 	voteEndpoint = "/vote"
@@ -184,37 +140,6 @@ const (
 	// POST /votes/verify to check whether the Vochain knows the given vote nullifiers
 	// (public), so a voter can confirm on chain the ballots relayed on their behalf.
 	votesVerifyEndpoint = "/votes/verify"
-
-	// GET /process/{processId}/results to get the trimmed on-chain election results (public).
-	// {processId} is the 24-hex ProcessID (not the on-chain election id).
-	processResultsEndpoint = "/process/{processId}/results"
-
-	// GET /process/{processId}/metadata to get the election metadata JSON (public).
-	// {processId} is the 24-hex ProcessID (not the on-chain election id).
-	processMetadataEndpoint = "/process/{processId}/metadata"
-
-	// two-factor process bundle routes
-	// POST /process/bundle to create a new bundle
-	processBundleEndpoint = "/process/bundle"
-	// PUT /process/bundle/{bundleId} to add new processes to the bundle
-	processBundleUpdateEndpoint = "/process/bundle/{bundleId}"
-	// GET /process/bundle/{bundleId} to get the bundle information
-	processBundleInfoEndpoint = "/process/bundle/{bundleId}"
-	// POST /process/bundle/{bundleId}/auth/{step} to check if the voter is authorized
-	processBundleAuthEndpoint = "/process/bundle/{bundleId}/auth/{step}"
-	// POST /process/bundle/{bundleId}/auth/resend to resend the auth challenge
-	processBundleAuthResendEndpoint = "/process/bundle/{bundleId}/auth/resend"
-	// POST /process/bundle/{bundleId}/weight to get the voter weight for the bundle
-	processBundleWeightEndpoint = "/process/bundle/{bundleId}/weight"
-	// POST /process/bundle/{bundleId}/sign to sign with two-factor authentication
-	processBundleSignEndpoint = "/process/bundle/{bundleId}/sign"
-	// POST /process/bundle/{bundleId}/check to check census membership for a CSP auth token
-	processBundleCheckEndpoint = "/process/bundle/{bundleId}/check"
-	// GET /process/bundle/{bundleId}/{participantId} to get the process information
-	processBundleMemberEndpoint = "/process/bundle/{bundleId}/{participantId}"
-	// POST /process/bundle/{bundleId}/participants/check to check whether an org member is a
-	// participant of the bundle's census. Manager/Admin only.
-	processBundleParticipantsCheckEndpoint = "/process/bundle/{bundleId}/participants/check"
 
 	// multi-question voting-process routes (new /processes API, plural namespace)
 	// POST /processes to create a draft; GET /processes to list (paginated, filterable)
@@ -266,12 +191,4 @@ const (
 	processesBlindPointEndpoint = "/processes/{processId}/blind-point"
 	processesBlindSignEndpoint  = "/processes/{processId}/blind-sign"
 	processesWeightEndpoint     = "/processes/{processId}/weight"
-
-	// // census auth routes (currently not implemented)
-	// // POST /process/{processId}/auth/0 to initiate auth
-	// processAuthInitEndpoint = "/process/{processId}/auth/0"
-	// // POST /process/{processId}/auth/1 to verify auth code
-	// processAuthVerifyEndpoint = "/process/{processId}/auth/1"
-	// // POST /process/{processId}/proof to generate proof
-	// processProofEndpoint = "/process/{processId}/proof"
 )

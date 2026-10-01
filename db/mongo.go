@@ -44,7 +44,6 @@ type MongoStorage struct {
 	orgMemberGroups     *mongo.Collection
 	censusParticipants  *mongo.Collection
 	censuses            *mongo.Collection
-	publishedCensuses   *mongo.Collection
 	processes           *mongo.Collection
 	processBundles      *mongo.Collection
 	votingProcesses     *mongo.Collection
@@ -316,27 +315,6 @@ func (ms *MongoStorage) String() string {
 		censusParticipants.CensusParticipants = append(censusParticipants.CensusParticipants, censusParticipant)
 	}
 
-	// get all published censuses
-	ctx, cancel13 := context.WithTimeout(context.Background(), exportTimeout)
-	defer cancel13()
-	pubCensusCur, err := ms.publishedCensuses.Find(ctx, bson.D{{}})
-	if err != nil {
-		log.Warnw("error decoding published census", "error", err)
-		return "{}"
-	}
-	// append all published censuses to the export data
-	ctx, cancel14 := context.WithTimeout(context.Background(), exportTimeout)
-	defer cancel14()
-	var publishedCensuses PublishedCensusesCollection
-	for pubCensusCur.Next(ctx) {
-		var pubCensus PublishedCensus
-		err := pubCensusCur.Decode(&pubCensus)
-		if err != nil {
-			log.Warnw("error finding published censuses", "error", err)
-		}
-		publishedCensuses.PublishedCensuses = append(publishedCensuses.PublishedCensuses, pubCensus)
-	}
-
 	// get all processes
 	ctx, cancel15 := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel15()
@@ -403,7 +381,7 @@ func (ms *MongoStorage) String() string {
 	// encode the data to JSON and return it
 	data, err := json.Marshal(&Collection{
 		users, verifications, organizations, organizationInvites, censuses,
-		orgMembers, orgGroups, censusParticipants, publishedCensuses, processes,
+		orgMembers, orgGroups, censusParticipants, processes,
 	})
 	if err != nil {
 		log.Warnw("error marshaling data", "error", err)
@@ -485,18 +463,6 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 		_, err := ms.censusParticipants.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
 			log.Warnw("error upserting census participant", "error", err, "censusParticipant", censusParticipant.ParticipantID)
-		}
-	}
-
-	// upsert published censuses collection
-	log.Infow("importing published censuses", "count", len(collection.PublishedCensuses))
-	for _, pubCensus := range collection.PublishedCensuses {
-		filter := bson.M{"root": pubCensus.Root, "uri": pubCensus.URI}
-		update := bson.M{"$set": pubCensus}
-		opts := options.UpdateOne().SetUpsert(true)
-		_, err := ms.publishedCensuses.UpdateOne(ctx, filter, update, opts)
-		if err != nil {
-			log.Warnw("error upserting published census", "error", err, "publishedCensus", pubCensus.Root)
 		}
 	}
 
