@@ -63,3 +63,22 @@ func TestJobResponseFromDBBatchVoteTerminal(t *testing.T) {
 			qt.Commentf("an import job's added==total does not mean it is finished"))
 	})
 }
+
+// TestUpsertOrgMemberRequestWeight pins the weight a member update carries: left out keeps the
+// stored one, cleared is the default 1 rather than the 0 ParseUint64 reads "" as.
+func TestUpsertOrgMemberRequestWeight(t *testing.T) {
+	c := qt.New(t)
+
+	update, err := (&UpsertOrgMemberRequest{}).ToDB()
+	c.Assert(err, qt.IsNil)
+	c.Assert(update.Weight, qt.IsNil)
+
+	for weight, want := range map[string]uint64{"": 1, "0": 0, "42": 42} {
+		update, err := (&UpsertOrgMemberRequest{Weight: new(weight)}).ToDB()
+		c.Assert(err, qt.IsNil)
+		c.Assert(*update.Weight, qt.Equals, want, qt.Commentf("weight %q", weight))
+	}
+
+	_, err = (&UpsertOrgMemberRequest{Weight: new("heavy")}).ToDB()
+	c.Assert(err, qt.ErrorMatches, `invalid weight "heavy"`)
+}

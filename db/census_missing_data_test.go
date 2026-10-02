@@ -312,9 +312,9 @@ func TestCensusMembersEmptyValues(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(size, qt.Equals, int64(1))
 
-		// an empty field keeps the stored value on update: whitespace is what clears it
-		member.Name = "   "
-		_, _, err = testDB.UpsertOrgMemberAndCensusParticipants(&Organization{Address: testOrgAddress}, member, "salt")
+		// a blank name normalizes to empty, clearing the stored one
+		update := &OrgMemberUpdate{ID: member.ID, Name: new("   ")}
+		_, _, err = testDB.UpsertOrgMemberAndCensusParticipants(&Organization{Address: testOrgAddress}, update, "salt")
 		c.Assert(err, qt.IsNil)
 		p, err := testDB.CensusParticipant(census.ID.Hex(), memberID)
 		c.Assert(err, qt.IsNil)

@@ -607,7 +607,7 @@ func TestUpsertOrgMemberPartialUpdateKeepsLoginHash(t *testing.T) {
 
 	// a partial update carrying only the weight: every hashed field is absent from the request
 	_, created, err := testDB.UpsertOrgMemberAndCensusParticipants(
-		org, &OrgMember{ID: member.ID, Weight: 7}, "test_salt",
+		org, &OrgMemberUpdate{ID: member.ID, Weight: new(uint64(7))}, "test_salt",
 	)
 	c.Assert(err, qt.IsNil)
 	c.Assert(created, qt.IsFalse)
@@ -626,6 +626,78 @@ func TestUpsertOrgMemberPartialUpdateKeepsLoginHash(t *testing.T) {
 	c.Assert(found.ParticipantID, qt.Equals, member.ID.Hex())
 }
 
+// TestUpsertOrgMemberClearsFields pins that an update setting a field to the empty string clears
+// it, while a field the update leaves nil keeps its stored value, and that a census the member can
+// no longer log in to drops their login hashes.
+func TestUpsertOrgMemberClearsFields(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	org := &Organization{Address: testOrgAddress, CreatedAt: time.Now()}
+	c.Assert(testDB.SetOrganization(org), qt.IsNil)
+
+	member := &OrgMember{
+		ID:           bson.NewObjectID(),
+		OrgAddress:   testOrgAddress,
+		MemberNumber: "clear-fields-1",
+		Name:         "Ada",
+		Surname:      "Lovelace",
+		NationalID:   "12345678Z",
+		BirthDate:    "1990-05-17",
+		Email:        "ada.clear@example.com",
+	}
+	member.PlaintextPhone = "+34600000001"
+	_, err := testDB.SetOrgMember("test_salt", member)
+	c.Assert(err, qt.IsNil)
+
+	census := &Census{
+		OrgAddress:  testOrgAddress,
+		AuthFields:  OrgMemberAuthFields{OrgMemberAuthFieldsName},
+		TwoFaFields: OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail},
+	}
+	censusID, err := testDB.SetCensus(census)
+	c.Assert(err, qt.IsNil)
+	added, memberErrs, err := testDB.AddCensusParticipantsByMemberIDs(censusID, []string{member.ID.Hex()})
+	c.Assert(err, qt.IsNil)
+	c.Assert(memberErrs, qt.HasLen, 0)
+	c.Assert(added, qt.Equals, 1)
+
+	stored, err := testDB.OrgMember(testOrgAddress, member.ID.Hex())
+	c.Assert(err, qt.IsNil)
+	c.Assert(stored.Phone.IsEmpty(), qt.IsFalse)
+
+	// surname is left nil (kept), name is changed, the rest is cleared
+	_, created, err := testDB.UpsertOrgMemberAndCensusParticipants(org, &OrgMemberUpdate{
+		ID:           member.ID,
+		Name:         new("Augusta"),
+		MemberNumber: new(""),
+		NationalID:   new(""),
+		BirthDate:    new(""),
+		Email:        new(""),
+		Phone:        new(""),
+	}, "test_salt")
+	c.Assert(err, qt.IsNil)
+	c.Assert(created, qt.IsFalse)
+
+	after, err := testDB.OrgMember(testOrgAddress, member.ID.Hex())
+	c.Assert(err, qt.IsNil)
+	c.Assert(after.Name, qt.Equals, "Augusta")
+	c.Assert(after.Surname, qt.Equals, "Lovelace")
+	c.Assert(after.MemberNumber, qt.Equals, "")
+	c.Assert(after.NationalID, qt.Equals, "")
+	c.Assert(after.BirthDate, qt.Equals, "")
+	c.Assert(after.ParsedBirthDate.IsZero(), qt.IsTrue)
+	c.Assert(after.Email, qt.Equals, "")
+	c.Assert(after.Phone.IsEmpty(), qt.IsTrue)
+
+	// without an email the member has no 2FA channel left for this census
+	participant, err := testDB.CensusParticipant(censusID, member.ID.Hex())
+	c.Assert(err, qt.IsNil)
+	c.Assert(participant.LoginHash, qt.HasLen, 0)
+	c.Assert(participant.LoginHashEmail, qt.HasLen, 0)
+}
+
 // TestUpsertOrgMemberReportsCreated pins the created flag the census propagation hooks key off:
 // a brand new member must be propagated to the auto group's censuses, an edited one must not.
 func TestUpsertOrgMemberReportsCreated(t *testing.T) {
@@ -636,17 +708,17 @@ func TestUpsertOrgMemberReportsCreated(t *testing.T) {
 	org := &Organization{Address: testOrgAddress, CreatedAt: time.Now()}
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
-	id, created, err := testDB.UpsertOrgMemberAndCensusParticipants(org, &OrgMember{
-		MemberNumber: "created-1",
-		Name:         "Grace",
-		Email:        "grace.created@example.com",
+	id, created, err := testDB.UpsertOrgMemberAndCensusParticipants(org, &OrgMemberUpdate{
+		MemberNumber: new("created-1"),
+		Name:         new("Grace"),
+		Email:        new("grace.created@example.com"),
 	}, "test_salt")
 	c.Assert(err, qt.IsNil)
 	c.Assert(created, qt.IsTrue)
 
-	_, created, err = testDB.UpsertOrgMemberAndCensusParticipants(org, &OrgMember{
+	_, created, err = testDB.UpsertOrgMemberAndCensusParticipants(org, &OrgMemberUpdate{
 		ID:   id,
-		Name: "Grace Hopper",
+		Name: new("Grace Hopper"),
 	}, "test_salt")
 	c.Assert(err, qt.IsNil)
 	c.Assert(created, qt.IsFalse)
