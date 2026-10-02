@@ -3,6 +3,8 @@ package apicommon
 //revive:disable:max-public-structs
 
 import (
+	"time"
+
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -164,6 +166,11 @@ type VotingProcessResponse struct {
 	// Legacy marks a process projected read-only from the deprecated /process generation or from a
 	// process bundle: not editable through /processes, and its questions may share one upstreamId.
 	Legacy bool `json:"legacy,omitempty"`
+	// EndedAt is the UTC timestamp at which the process was ended early: the latest question endedAt,
+	// present only when every published question has one (i.e. was stopped before its scheduled end).
+	// Formatted as "2006-01-02T15:04:05Z". Absent when the process ran to its scheduled end, or while
+	// any published question is still open or has no recorded endedAt yet.
+	EndedAt string `json:"endedAt,omitempty"`
 }
 
 // VotingProcessListResponse is the paginated list of voting processes.
@@ -263,6 +270,10 @@ type PublicQuestionResponse struct {
 	// Manager/Admin of the owning organization; an anonymous or non-manager read never carries it.
 	// An empty/absent list on a manager read means the question is open to the whole census.
 	EligibleMemberIDs []string `json:"eligibleMemberIds,omitempty"`
+	// EndedAt is the UTC timestamp at which this question's election was ended early, present only
+	// when the vote was manually ended before its scheduled end. Formatted as "2006-01-02T15:04:05Z".
+	// Absent when the question ran to its scheduled end.
+	EndedAt string `json:"endedAt,omitempty"`
 }
 
 // PublicQuestionResponseFromDB builds the public question read from a question and its parent
@@ -285,6 +296,9 @@ func PublicQuestionResponseFromDB(q *db.VotingProcessQuestion, census *db.Census
 		Status:            q.Status,
 		EncryptionKeys:    q.EncryptionKeys,
 		Results:           q.Results,
+	}
+	if !q.EndedAt.IsZero() {
+		resp.EndedAt = q.EndedAt.UTC().Format("2006-01-02T15:04:05Z")
 	}
 	if census != nil {
 		resp.Census = CensusSpec{
@@ -325,6 +339,12 @@ func VotingProcessResponseFromDB(
 		// match the stored value when echoed back as a conditional-update token
 		resp.UpdatedAt = vp.UpdatedAt.UTC().Format(UpdatedAtLayout)
 	}
+	// process-level endedAt: the latest question EndedAt, but only when every published question
+	// (with a non-empty UpstreamID) has a non-zero EndedAt — so a partially-ended process does
+	// not get a process-level endedAt.
+	if latestEndedAt := processEndedAt(questions); !latestEndedAt.IsZero() {
+		resp.EndedAt = latestEndedAt.UTC().Format("2006-01-02T15:04:05Z")
+	}
 	if census != nil {
 		resp.Census = CensusSpec{
 			Weighted:    census.Weighted,
@@ -340,4 +360,29 @@ func VotingProcessResponseFromDB(
 		}
 	}
 	return resp
+}
+
+// processEndedAt returns the latest question EndedAt across all published questions of a process,
+// but only when every published question (non-empty UpstreamID) has a non-zero EndedAt. Returns a
+// zero time when the process has no published questions, or when any published question has not yet
+// recorded its end time (i.e. not all questions were ended early).
+func processEndedAt(questions []db.VotingProcessQuestion) time.Time {
+	var latest time.Time
+	hasPublished := false
+	for _, q := range questions {
+		if len(q.UpstreamID) == 0 {
+			continue // unpublished draft question
+		}
+		hasPublished = true
+		if q.EndedAt.IsZero() {
+			return time.Time{} // at least one published question has no endedAt
+		}
+		if q.EndedAt.After(latest) {
+			latest = q.EndedAt
+		}
+	}
+	if !hasPublished {
+		return time.Time{}
+	}
+	return latest
 }

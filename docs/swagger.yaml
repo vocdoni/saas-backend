@@ -1117,6 +1117,12 @@ definitions:
         items:
           $ref: '#/definitions/db.EncryptionKey'
         type: array
+      endedAt:
+        description: |-
+          EndedAt is the UTC timestamp at which this question's election was ended early, present only
+          when the vote was manually ended before its scheduled end. Formatted as "2006-01-02T15:04:05Z".
+          Absent when the question ran to its scheduled end.
+        type: string
       id:
         type: string
       metadata:
@@ -1742,6 +1748,13 @@ definitions:
         $ref: '#/definitions/db.MultiLangString'
       endDate:
         type: string
+      endedAt:
+        description: |-
+          EndedAt is the UTC timestamp at which the process was ended early: the latest question endedAt,
+          present only when every published question has one (i.e. was stopped before its scheduled end).
+          Formatted as "2006-01-02T15:04:05Z". Absent when the process ran to its scheduled end, or while
+          any published question is still open or has no recorded endedAt yet.
+        type: string
       header:
         type: string
       id:
@@ -2083,6 +2096,14 @@ definitions:
         items:
           $ref: '#/definitions/db.EncryptionKey'
         type: array
+      endedAt:
+        description: |-
+          EndedAt is the actual on-chain moment this question's election stopped accepting votes,
+          set only when the vote was ended early (before its scheduled end, i.e. ManuallyEnded on
+          the chain). Absent while the vote is open or when it ran to its scheduled end. Recorded by
+          the status syncer, and filled on the first detail read for questions it no longer visits
+          (RESULTS), so older votes get it on GET /processes/{id} or GET /processes/{id}/questions/{qid}.
+        type: string
       id:
         type: string
       metadata:
