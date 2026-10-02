@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	stripeapi "github.com/stripe/stripe-go/v82"
+	stripeapi "github.com/stripe/stripe-go/v86"
 	"github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/dvote/log"
 )
@@ -122,6 +122,16 @@ func (s *Service) handleSubscriptionCreateOrUpdate(subscriptionInfo *Subscriptio
 	org.Subscription.StartDate = subscriptionInfo.StartDate
 	org.Subscription.RenewalDate = subscriptionInfo.EndDate
 	org.Subscription.Active = (subscriptionInfo.Status == stripeapi.SubscriptionStatusActive)
+	// webhook payloads carry the customer as a bare ID, so its email and metadata are
+	// only known after fetching it; best-effort, the subscription is saved regardless
+	if subscriptionInfo.Customer.Metadata == nil {
+		if customer, err := s.client.GetCustomer(subscriptionInfo.Customer.ID); err != nil {
+			log.Warnw("stripe webhook: could not fetch customer",
+				"customer", subscriptionInfo.Customer.ID, "error", err)
+		} else {
+			subscriptionInfo.Customer = customer
+		}
+	}
 	org.Subscription.Email = subscriptionInfo.Customer.Email
 
 	// Save subscription
@@ -130,11 +140,15 @@ func (s *Service) handleSubscriptionCreateOrUpdate(subscriptionInfo *Subscriptio
 			subscriptionInfo.ID, plan.ID, subscriptionInfo.Status, subscriptionInfo.OrgAddress, err)
 	}
 
-	// Update if needed customer metadata with organization address
-	if subscriptionInfo.Customer.Metadata["address"] != "" {
-		return fmt.Errorf("customer metadata address mismatch")
-	}
-	if err := s.client.UpdateCustomerMetadata(
+	// Stamp the organization address on the customer so future checkouts can find it.
+	// Skip when already set: every subscription update re-fires this handler, and failing
+	// here after the successful save above would make Stripe retry the event forever.
+	if existing := subscriptionInfo.Customer.Metadata["address"]; existing != "" {
+		if existing != subscriptionInfo.OrgAddress.String() {
+			log.Warnw("stripe webhook: customer metadata address mismatch",
+				"customer", subscriptionInfo.Customer.ID, "existing", existing, "org", subscriptionInfo.OrgAddress)
+		}
+	} else if err := s.client.UpdateCustomerMetadata(
 		subscriptionInfo.Customer.ID,
 		map[string]string{"address": subscriptionInfo.OrgAddress.String()},
 	); err != nil {
@@ -306,7 +320,7 @@ func parseSubscriptionFromEvent(event *stripeapi.Event) (*SubscriptionInfo, erro
 	}
 
 	if subscription.Items.Data[0].Price.Type == stripeapi.PriceTypeRecurring {
-		subscriptionInfo.BillingPeriod = db.BillingPeriod((subscription.Items.Data[0].Price.Recurring.Interval))
+		subscriptionInfo.BillingPeriod = db.BillingPeriod(subscription.Items.Data[0].Price.Recurring.Interval)
 	}
 
 	return subscriptionInfo, nil

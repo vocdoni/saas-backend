@@ -2173,6 +2173,11 @@ definitions:
     properties:
       customer_email:
         type: string
+      payment_status:
+        description: |-
+          PaymentStatus is the payment outcome of the session, in every mode: "paid",
+          "unpaid" or "no_payment_required" (e.g. a subscription that starts with a trial).
+        type: string
       status:
         type: string
       subscription_status:
