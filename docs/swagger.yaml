@@ -1534,8 +1534,8 @@ definitions:
         description: Member's surname
         type: string
       weight:
-        description: Member's census weight, 1 for a new member that does not set
-          it
+        description: Member's census weight. Empty sets the default 1, as does leaving
+          it out of a new member.
         type: string
     type: object
   apicommon.UpsertOrgMemberResponse:

@@ -1125,7 +1125,7 @@ type UpsertOrgMemberRequest struct {
 	// Member's password (for authentication)
 	Password *string `json:"password,omitempty"`
 
-	// Member's census weight, 1 for a new member that does not set it
+	// Member's census weight. Empty sets the default 1, as does leaving it out of a new member.
 	Weight *string `json:"weight,omitempty"`
 
 	// Additional custom fields, replaced as a whole
@@ -1153,9 +1153,13 @@ func (r *UpsertOrgMemberRequest) ToDB() (*db.OrgMemberUpdate, error) {
 		update.ID = id
 	}
 	if r.Weight != nil {
-		weight, ok := math.ParseUint64(*r.Weight)
-		if !ok {
-			return nil, fmt.Errorf("invalid weight %q", *r.Weight)
+		// a cleared weight is the default, not 0: ParseUint64 reads "" as 0
+		weight := uint64(1)
+		if *r.Weight != "" {
+			var ok bool
+			if weight, ok = math.ParseUint64(*r.Weight); !ok {
+				return nil, fmt.Errorf("invalid weight %q", *r.Weight)
+			}
 		}
 		update.Weight = &weight
 	}
