@@ -1093,6 +1093,75 @@ func (p *OrgMember) ToDB() *db.OrgMember {
 	}
 }
 
+// UpsertOrgMemberRequest creates or updates an organization member. On an update a field left
+// out of the request keeps its stored value, while a field sent empty is cleared. Phone and
+// password are never returned in plaintext, so leave them out to keep them.
+// swagger:model UpsertOrgMemberRequest
+type UpsertOrgMemberRequest struct {
+	// Member's internal unique ID. Empty, or one naming no member of the organization, creates one.
+	ID string `json:"id"`
+
+	// Unique member number as defined by the organization
+	MemberNumber *string `json:"memberNumber,omitempty"`
+
+	// Member's name
+	Name *string `json:"name,omitempty"`
+
+	// Member's surname
+	Surname *string `json:"surname,omitempty"`
+
+	// Member's National ID No
+	NationalID *string `json:"nationalId,omitempty"`
+
+	// Member's date of birth in format YYYY-MM-DD
+	BirthDate *string `json:"birthDate,omitempty"`
+
+	// Member's email address
+	Email *string `json:"email,omitempty"`
+
+	// Member's phone number
+	Phone *string `json:"phone,omitempty"`
+
+	// Member's password (for authentication)
+	Password *string `json:"password,omitempty"`
+
+	// Member's census weight, 1 for a new member that does not set it
+	Weight *string `json:"weight,omitempty"`
+
+	// Additional custom fields, replaced as a whole
+	Other map[string]any `json:"other,omitempty"`
+}
+
+// ToDB converts the request into a db.OrgMemberUpdate.
+func (r *UpsertOrgMemberRequest) ToDB() (*db.OrgMemberUpdate, error) {
+	update := &db.OrgMemberUpdate{
+		MemberNumber: r.MemberNumber,
+		Name:         r.Name,
+		Surname:      r.Surname,
+		NationalID:   r.NationalID,
+		BirthDate:    r.BirthDate,
+		Email:        r.Email,
+		Phone:        r.Phone,
+		Password:     r.Password,
+		Other:        r.Other,
+	}
+	if r.ID != "" {
+		id, err := bson.ObjectIDFromHex(r.ID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid member id %q: %w", r.ID, err)
+		}
+		update.ID = id
+	}
+	if r.Weight != nil {
+		weight, ok := math.ParseUint64(*r.Weight)
+		if !ok {
+			return nil, fmt.Errorf("invalid weight %q", *r.Weight)
+		}
+		update.Weight = &weight
+	}
+	return update, nil
+}
+
 func OrgMemberFromDb(p db.OrgMember) OrgMember {
 	return OrgMember{
 		ID:           p.ID.Hex(),

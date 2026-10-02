@@ -850,6 +850,42 @@ func TestUpsertMemberEditAtCensusQuota(t *testing.T) {
 	c.Assert(count, qt.Equals, int64(limit))
 }
 
+// TestUpsertMemberClearsEmptiedFields reproduces vocdoni-app#1805: a field sent as "" must be
+// cleared on the stored member, while a field left out of the request keeps its value.
+func TestUpsertMemberClearsEmptiedFields(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(1)...)
+	c.Assert(members, qt.HasLen, 1)
+	original := members[0]
+	c.Assert(original.Email, qt.Not(qt.Equals), "")
+	c.Assert(original.NationalID, qt.Not(qt.Equals), "")
+	c.Assert(original.BirthDate, qt.Not(qt.Equals), "")
+	c.Assert(original.Phone, qt.Not(qt.Equals), "")
+
+	requestAndParse[apicommon.UpsertOrgMemberResponse](t, http.MethodPut, token, map[string]any{
+		"id":           original.ID,
+		"memberNumber": original.MemberNumber,
+		"name":         original.Name,
+		"email":        "",
+		"nationalId":   "  ",
+		"birthDate":    "",
+		// surname and phone left out: kept
+	}, organizationMembersURL(orgAddress.String()))
+
+	got := getOrgMember(t, token, orgAddress, original.ID)
+	c.Assert(got.Email, qt.Equals, "")
+	c.Assert(got.NationalID, qt.Equals, "")
+	c.Assert(got.BirthDate, qt.Equals, "")
+	c.Assert(got.Name, qt.Equals, original.Name)
+	c.Assert(got.Surname, qt.Equals, original.Surname)
+	c.Assert(got.MemberNumber, qt.Equals, original.MemberNumber)
+	c.Assert(got.Phone, qt.Equals, original.Phone)
+}
+
 // TestOrganizationMembersSort asserts the members list honours sortBy/sortOrder and rejects values
 // outside the supported set rather than falling back to a default order.
 func TestOrganizationMembersSort(t *testing.T) {

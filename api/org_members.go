@@ -326,13 +326,17 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 //	@Description	Create or update an organization member. Requires Manager/Admin role.
 //	@Description	Automatically updates census participant hashes when member data changes.
 //	@Description
+//	@Description	On an update, a field left out of the body keeps its stored value and a field sent as an
+//	@Description	empty string is cleared. Phone and password are never returned in plaintext: leave them out
+//	@Description	to keep them.
+//	@Description
 //	@Description	Also callable with a scoped API key (scope: `members:write`).
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			orgAddress	path		string								true	"Organization address"
-//	@Param			request		body		apicommon.OrgMember					true	"Member data to insert or update"
+//	@Param			request		body		apicommon.UpsertOrgMemberRequest	true	"Member data to insert or update"
 //	@Success		200			{object}	apicommon.UpsertOrgMemberResponse	"Member id, plus any census resize jobs and errors"
 //	@Failure		400			{object}	errors.Error						"Invalid input data"
 //	@Failure		401			{object}	errors.Error						"Unauthorized"
@@ -358,10 +362,15 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	// decode the member data from the request body
-	member := &apicommon.OrgMember{}
+	member := &apicommon.UpsertOrgMemberRequest{}
 	if err := json.NewDecoder(r.Body).Decode(member); err != nil {
 		log.Error(err)
 		errors.ErrMalformedBody.Withf("invalid member data").Write(w)
+		return
+	}
+	update, err := member.ToDB()
+	if err != nil {
+		errors.ErrMalformedBody.WithErr(err).Write(w)
 		return
 	}
 
@@ -400,7 +409,7 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	// upsert the member in the database
-	memberID, created, err := a.db.UpsertOrgMemberAndCensusParticipants(org, member.ToDB(), passwordSalt)
+	memberID, created, err := a.db.UpsertOrgMemberAndCensusParticipants(org, update, passwordSalt)
 	switch {
 	case errors.Is(err, db.ErrUpdateWouldCreateDuplicates):
 		errors.ErrInvalidData.WithErr(err).Write(w)

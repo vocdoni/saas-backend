@@ -658,15 +658,18 @@ func TestCensusParticipant(t *testing.T) {
 		member0, err := testDB.OrgMemberByMemberNumber(testOrgAddress, members[0].MemberNumber)
 		c.Assert(err, qt.IsNil)
 		// set member0 email and phone same as member1
-		member0.Name = members[1].Name
-		member0.MemberNumber = members[1].MemberNumber
-		member0.Email = members[1].Email
-		member0.PlaintextPhone = members[1].PlaintextPhone
+		update0 := &OrgMemberUpdate{
+			ID:           member0.ID,
+			Name:         new(members[1].Name),
+			MemberNumber: new(members[1].MemberNumber),
+			Email:        new(members[1].Email),
+			Phone:        new(members[1].PlaintextPhone),
+		}
 
 		{
-			_, _, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, member0, "test_salt")
+			_, _, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, update0, "test_salt")
 			c.Assert(err, qt.ErrorMatches, ".*update would create duplicates.*",
-				qt.Commentf("trying to UpdateOrgMember(%+v) should create a conflict with %+v", member0, members[1]))
+				qt.Commentf("trying to UpdateOrgMember(%+v) should create a conflict with %+v", update0, members[1]))
 
 			member, err := testDB.OrgMemberByMemberNumber(testOrgAddress, members[0].MemberNumber)
 			c.Assert(err, qt.IsNil)
@@ -677,9 +680,9 @@ func TestCensusParticipant(t *testing.T) {
 		member1, err := testDB.OrgMemberByMemberNumber(testOrgAddress, members[1].MemberNumber)
 		c.Assert(err, qt.IsNil)
 		oldHashedPhone := member1.Phone
-		member1.PlaintextPhone = "+34698123321"
 		{
-			_, created, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, member1, "test_salt")
+			update1 := &OrgMemberUpdate{ID: member1.ID, Phone: new("+34698123321")}
+			_, created, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, update1, "test_salt")
 			c.Assert(err, qt.IsNil)
 			c.Assert(created, qt.IsFalse)
 
@@ -691,24 +694,24 @@ func TestCensusParticipant(t *testing.T) {
 		// Trying to add a NEW member with the same details that caused a conflict should also succeed,
 		// since duplicates in memberbase are allowed, and a new member is not part of any census
 		{
-			member0.ID = bson.NilObjectID
-			newMemberID, created, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, member0, "test_salt")
+			update0.ID = bson.NilObjectID
+			newMemberID, created, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, update0, "test_salt")
 			c.Assert(err, qt.IsNil)
 			c.Assert(created, qt.IsTrue)
 			member, err := testDB.OrgMember(testOrgAddress, newMemberID.Hex())
 			c.Assert(err, qt.IsNil)
-			c.Assert(member.Email, qt.Equals, member0.Email)
+			c.Assert(member.Email, qt.Equals, *update0.Email)
 		}
 
 		// Passing an arbitrary (new) memberID should also work OK and create a new member
 		{
-			member0.ID = bson.NewObjectID()
-			newMemberID, created, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, member0, "test_salt")
+			update0.ID = bson.NewObjectID()
+			newMemberID, created, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, update0, "test_salt")
 			c.Assert(err, qt.IsNil)
 			c.Assert(created, qt.IsTrue)
 			member, err := testDB.OrgMember(testOrgAddress, newMemberID.Hex())
 			c.Assert(err, qt.IsNil)
-			c.Assert(member.Email, qt.Equals, member0.Email)
+			c.Assert(member.Email, qt.Equals, *update0.Email)
 		}
 	})
 }
