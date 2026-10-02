@@ -166,10 +166,10 @@ type VotingProcessResponse struct {
 	// Legacy marks a process projected read-only from the deprecated /process generation or from a
 	// process bundle: not editable through /processes, and its questions may share one upstreamId.
 	Legacy bool `json:"legacy,omitempty"`
-	// EndedAt is the UTC timestamp at which the process was ended early, present only when every
-	// published question was manually ended before its scheduled end. Formatted as
-	// "2006-01-02T15:04:05Z". Absent when the process ran to its scheduled end or when some
-	// questions have not yet reached a terminal status.
+	// EndedAt is the UTC timestamp at which the process was ended early: the latest question endedAt,
+	// present only when every published question has one (i.e. was stopped before its scheduled end).
+	// Formatted as "2006-01-02T15:04:05Z". Absent when the process ran to its scheduled end, or while
+	// any published question is still open or has no recorded endedAt yet.
 	EndedAt string `json:"endedAt,omitempty"`
 }
 
