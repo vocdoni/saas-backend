@@ -1240,7 +1240,8 @@ func questionSetProblem(vp *db.VotingProcess, questions []db.VotingProcessQuesti
 
 // writeSubscriptionError writes a typed API error verbatim, falling back to 500.
 func writeSubscriptionError(w http.ResponseWriter, err error) {
-	if apiErr, ok := err.(errors.Error); ok {
+	var apiErr errors.Error
+	if errors.As(err, &apiErr) {
 		apiErr.Write(w)
 		return
 	}
