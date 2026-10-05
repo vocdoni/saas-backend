@@ -9,9 +9,8 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-// TestMigrationPaygBilling checks migration 0026: the billing collections exist with
-// their indexes (the walletLedger idempotencyKey unique index is the one that matters —
-// it is a money-idempotency guard, not an optimization), and Up is idempotent.
+// TestMigrationPaygBilling: the billing collections and indexes exist (notably the unique
+// walletLedger idempotencyKey), and Up is idempotent.
 func TestMigrationPaygBilling(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })

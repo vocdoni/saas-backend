@@ -94,9 +94,8 @@ func (ms *MongoStorage) SetOrganization(org *Organization) error {
 	if err != nil {
 		return err
 	}
-	// The branding claim and paid stamp are a conditional-write state machine: written back
-	// from a stale read, they would resurrect a released claim or a refunded add-on. Only
-	// their dedicated methods write them.
+	// the branding fields are written only by their conditional methods: a stale read written
+	// back would resurrect a released claim or a refunded add-on
 	if set, ok := updateDoc["$set"].(bson.M); ok {
 		delete(set, "brandingPaidAt")
 		delete(set, "brandingClaimedBy")
@@ -284,26 +283,15 @@ func (ms *MongoStorage) SetOrganizationSubscription(address common.Address, orgS
 	return nil
 }
 
-// BrandingClaimStaleAfter bounds how long another process's branding claim is respected
-// once its payment no longer backs it (absent, failed, refunded, or stored without
-// branding). Every paying attempt refreshes the claimant's brandingClaimedAt before it stores
-// its payment, so a claim this old is not in the middle of one. It is a var so tests can
-// shorten it.
+// BrandingClaimStaleAfter is how long a claim its payment no longer backs is still respected.
+// Paying attempts refresh the claim first, so an older one is abandoned. A var for tests.
 var BrandingClaimStaleAfter = 2 * time.Minute
 
-// ClaimOrganizationBranding wins the once-per-organization branding add-on for processID,
-// the way ClaimVotingProcessForPublish wins a publish: the filter is the claim, so matching
-// it is winning it. Returns the claim time it wrote, or zero without error when another
-// process holds the claim, which tells the caller to re-price without branding before charging
-// anything. The time is what ReleaseOrganizationBrandingClaim pins, so it is truncated to what
-// the database stores.
-//
-// observedClaimant is the claim the caller read and judged releasable — zero when it saw
-// none. It is part of the filter together with the stale cutoff, so a claim taken, stolen or
-// refreshed by its own claimant in between is never overwritten: a claimant retrying its
-// payment refreshes brandingClaimedAt before storing the new payment, and a sibling that read
-// the old payment in that window no longer matches. An organization that already paid
-// branding can never be claimed again.
+// ClaimOrganizationBranding takes the once-per-organization branding claim for processID and
+// returns the stored claim time, or zero when another process holds it (re-price without
+// branding). observedClaimant is the stale claim the caller judged releasable (zero if none);
+// it is in the filter, so a claim taken or refreshed meanwhile is never overwritten. A paid
+// organization is never claimed again.
 func (ms *MongoStorage) ClaimOrganizationBranding(
 	orgAddress common.Address, processID, observedClaimant bson.ObjectID,
 ) (time.Time, error) {
@@ -335,21 +323,15 @@ func (ms *MongoStorage) ClaimOrganizationBranding(
 	if err != nil {
 		return time.Time{}, fmt.Errorf("failed to claim organization branding: %w", err)
 	}
-	// MatchedCount, never ModifiedCount: re-claiming within the same millisecond writes the
-	// timestamp already stored and the server reports nothing modified — a won claim read as
-	// lost (same reason as ClaimVotingProcessForPublish).
+	// MatchedCount: a same-millisecond re-claim modifies nothing but still wins
 	if res.MatchedCount != 1 {
 		return time.Time{}, nil
 	}
 	return claimedAt, nil
 }
 
-// ReleaseOrganizationBrandingClaim undoes one paying attempt's branding claim: the one
-// processID wrote at claimedAt, which the attempt then abandoned before any money moved. It is
-// pinned to that exact claim, so a later re-claim by a concurrent attempt of the same draft —
-// one that may be storing the payment backing it — is left alone, as is a claim that moved on.
-// Only the claim is removed, never brandingPaidAt: undoing a paid add-on is the refund's job
-// (ReleaseOrganizationBranding). A no-op when nothing matches.
+// ReleaseOrganizationBrandingClaim removes the claim processID took at claimedAt, abandoned
+// before any money moved. Pinned to that exact claim; never touches brandingPaidAt.
 func (ms *MongoStorage) ReleaseOrganizationBrandingClaim(
 	orgAddress common.Address, processID bson.ObjectID, claimedAt time.Time,
 ) error {
@@ -372,12 +354,7 @@ func (ms *MongoStorage) ReleaseOrganizationBrandingClaim(
 	return nil
 }
 
-// SetOrganizationBrandingPaid stamps the once-per-organization branding add-on as paid,
-// but only the first time: the conditional filter matches only while brandingPaidAt is
-// absent (it is omitempty, so an organization that never paid branding has no such
-// field). It reports whether this call was the one that set it. Idempotent — a second
-// call, or a concurrent one that lost the race, matches nothing and returns false
-// without error, so pricing suppresses the branding line from then on.
+// SetOrganizationBrandingPaid stamps branding as paid once, reporting whether this call did.
 func (ms *MongoStorage) SetOrganizationBrandingPaid(address common.Address, when time.Time) (bool, error) {
 	if (address.Cmp(common.Address{}) == 0) || when.IsZero() {
 		return false, ErrInvalidData

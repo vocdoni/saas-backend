@@ -194,10 +194,8 @@ func TestProcessPaymentPaidByWallet(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 }
 
-// TestProcessPaymentPendingPinsReplacedSession: a pending payment may only be replaced by
-// a caller that observed the session it is replacing. Without that condition two
-// simultaneous checkouts both store successfully, and the session the loser opened stays
-// open and payable while the record points at the winner's — money that fulfills nothing.
+// TestProcessPaymentPendingPinsReplacedSession: a pending payment is replaced only by a caller
+// that observed its session, so two concurrent checkouts cannot both store.
 func TestProcessPaymentPendingPinsReplacedSession(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })

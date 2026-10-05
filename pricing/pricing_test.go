@@ -7,9 +7,8 @@ import (
 	qt "github.com/frankban/quicktest"
 )
 
-// TestBasePriceBrackets pins the base-price formula to the spec's examples and to the
-// values at every bracket boundary. Expected values are EUR cents, hand-derived from
-// the spec formulas (R5 = round to the nearest €5).
+// TestBasePriceBrackets pins the formula at the spec's examples and every bracket boundary
+// (EUR cents, R5 = round to the nearest €5).
 func TestBasePriceBrackets(t *testing.T) {
 	c := qt.New(t)
 	cases := []struct {
@@ -154,9 +153,7 @@ func TestQuoteHash(t *testing.T) {
 	c.Assert(QuoteHash(in, quote.TotalCents+1), qt.Not(qt.Equals), base)
 }
 
-// TestComputeRejectsOutOfRangeCensus: the formula multiplies the census size by per-voter
-// cents and by 500 when rounding, so an unbounded size overflows int64 into a
-// negative total — reachable from the unauthenticated /pricing calculator.
+// TestComputeRejectsOutOfRangeCensus: an unbounded size would overflow int64 to a negative total.
 func TestComputeRejectsOutOfRangeCensus(t *testing.T) {
 	c := qt.New(t)
 

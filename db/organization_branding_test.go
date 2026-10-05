@@ -9,9 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-// TestSetOrganizationBrandingPaid pins the once-per-organization semantics: the first
-// call stamps and reports true, later calls (and concurrent racers) match nothing and
-// report false, and the stored timestamp never moves.
+// TestSetOrganizationBrandingPaid: only the first call stamps; the timestamp never moves.
 func TestSetOrganizationBrandingPaid(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
@@ -46,10 +44,8 @@ func TestSetOrganizationBrandingPaid(t *testing.T) {
 	c.Assert(err, qt.ErrorIs, ErrInvalidData)
 }
 
-// TestClaimOrganizationBrandingConcurrent is the race the claim exists for: several drafts
-// of one organization quoting branding at the same moment. Exactly one may win, because the
-// loser is what tells the API to re-price without branding — two winners means the
-// organization is charged €149 twice for a once-per-organization add-on.
+// TestClaimOrganizationBrandingConcurrent: of concurrent claimants exactly one wins, or
+// branding is charged twice.
 func TestClaimOrganizationBrandingConcurrent(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
@@ -91,10 +87,8 @@ func TestClaimOrganizationBrandingConcurrent(t *testing.T) {
 	c.Assert(again.IsZero(), qt.IsFalse)
 }
 
-// TestClaimOrganizationBrandingTakeover pins the ways a claim changes hands and the ways it
-// cannot: a caller that observed the current claimant may take it over once the claim is
-// stale, never while it is fresh; one that observed an outdated claimant may not; and no one
-// may claim branding the organization has paid.
+// TestClaimOrganizationBrandingTakeover: a claim is taken over only when stale and as observed,
+// and never once branding is paid.
 func TestClaimOrganizationBrandingTakeover(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
@@ -142,9 +136,7 @@ func TestClaimOrganizationBrandingTakeover(t *testing.T) {
 	c.Assert(err, qt.ErrorIs, ErrInvalidData)
 }
 
-// TestReleaseOrganizationBrandingClaim: a refused paying attempt gives back exactly the claim it
-// wrote — not a newer one a concurrent attempt of the same draft refreshed it to, not another
-// process's, and never an add-on the organization has paid.
+// TestReleaseOrganizationBrandingClaim: a release removes only the exact claim it wrote.
 func TestReleaseOrganizationBrandingClaim(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
@@ -187,9 +179,8 @@ func TestReleaseOrganizationBrandingClaim(t *testing.T) {
 	c.Assert(err, qt.ErrorIs, ErrInvalidData)
 }
 
-// TestSetOrganizationKeepsBrandingState: a read-modify-write of the organization (an org PUT,
-// a subscription webhook) must not write the branding claim back from a stale read, or it
-// would resurrect a claim released in between.
+// TestSetOrganizationKeepsBrandingState: a stale organization save does not resurrect a
+// released branding claim.
 func TestSetOrganizationKeepsBrandingState(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
