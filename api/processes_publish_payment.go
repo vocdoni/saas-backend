@@ -97,7 +97,7 @@ func (a *API) debitManagedProcessWallet(vp *db.VotingProcess, org *db.Organizati
 	if quote.TotalCents == 0 {
 		return nil
 	}
-	err = a.chargeManagedProcessWallet(managedProcessCharge{
+	_, err = a.chargeManagedProcessWallet(managedProcessCharge{
 		vp: vp, org: org, quote: quote, branding: input.Branding,
 	})
 	// refused before the debit, nothing backs the claim; any later failure keeps it, since
@@ -123,6 +123,7 @@ type managedProcessCharge struct {
 // its price charge the same way: only the delta, at most once per (process, price). Returns a
 // typed ErrInsufficientWalletBalance carrying the shortfall when the balance does not cover
 // it, or ErrQuoteRequired when the price needs a custom quote, without touching the wallet.
+// It returns what it debited: 0 when the price was already covered.
 //
 // Charges to one wallet run one at a time, and what the process paid already is read inside
 // that lock: two headroom purchases racing at different prices would otherwise both charge
@@ -133,7 +134,7 @@ type managedProcessCharge struct {
 // would be computed from nothing. A card-owned record the wallet may not overwrite is refused
 // before any money moves; a record write that still fails is an error the caller must stop on,
 // and a retry heals it, since the debit key is already applied and charges nothing.
-func (a *API) chargeManagedProcessWallet(c managedProcessCharge) error {
+func (a *API) chargeManagedProcessWallet(c managedProcessCharge) (pricing.Cents, error) {
 	// ponytail: in-memory lock, like orgTxLocks — one API instance; a DB CAS if that changes
 	walletLock := a.walletLocks.lock(c.org.ManagedBy)
 	defer walletLock.Unlock()
@@ -141,10 +142,10 @@ func (a *API) chargeManagedProcessWallet(c managedProcessCharge) error {
 	// price a second time.
 	paid, err := a.db.ProcessPayment(c.vp.ID)
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
-		return fmt.Errorf("failed to get process payment: %w", err)
+		return 0, fmt.Errorf("failed to get process payment: %w", err)
 	}
 	if err == nil && !walletMayRecord(paid) {
-		return errors.ErrPaymentSessionConflict.Withf(
+		return 0, errors.ErrPaymentSessionConflict.Withf(
 			"process %s has a %s card payment; the integrator wallet cannot pay for it", c.vp.ID.Hex(), paid.Status)
 	}
 	var alreadyCents pricing.Cents
@@ -152,12 +153,12 @@ func (a *API) chargeManagedProcessWallet(c managedProcessCharge) error {
 		alreadyCents = paid.AmountCents
 	}
 	if alreadyCents >= c.quote.TotalCents {
-		return nil // this price is already covered
+		return 0, nil // this price is already covered
 	}
 	// above the self-service limit a price is a custom quote, never a wallet debit: the same
 	// refusal card checkout answers, so a managed organization cannot self-serve past it either
 	if c.quote.QuoteRequired {
-		return errors.ErrQuoteRequired
+		return 0, errors.ErrQuoteRequired
 	}
 	dueCents := c.quote.TotalCents - alreadyCents
 	if err := a.db.DebitWalletForProcess(db.WalletDebit{
@@ -169,14 +170,14 @@ func (a *API) chargeManagedProcessWallet(c managedProcessCharge) error {
 		if errors.Is(err, db.ErrInsufficientWalletBalance) {
 			wallet, werr := a.db.Wallet(c.org.ManagedBy)
 			if werr != nil {
-				return errors.ErrInsufficientWalletBalance
+				return 0, errors.ErrInsufficientWalletBalance
 			}
-			return errors.ErrInsufficientWalletBalance.WithData(map[string]pricing.Cents{
+			return 0, errors.ErrInsufficientWalletBalance.WithData(map[string]pricing.Cents{
 				"requiredCents":  dueCents,
 				"availableCents": wallet.BalanceCents,
 			})
 		}
-		return fmt.Errorf("failed to debit integrator wallet: %w", err)
+		return 0, fmt.Errorf("failed to debit integrator wallet: %w", err)
 	}
 	walletPayment := &db.ProcessPayment{
 		ProcessID:   c.vp.ID,
@@ -196,10 +197,10 @@ func (a *API) chargeManagedProcessWallet(c managedProcessCharge) error {
 	// debit from the wallet ledger closes that if it ever shows up
 	recorded, err := a.db.SetProcessPaymentPaidByWallet(walletPayment)
 	if err != nil {
-		return fmt.Errorf("wallet debited but its process payment was not recorded: %w", err)
+		return 0, fmt.Errorf("wallet debited but its process payment was not recorded: %w", err)
 	}
 	if !recorded {
-		return errors.ErrPaymentSessionConflict.Withf(
+		return 0, errors.ErrPaymentSessionConflict.Withf(
 			"the payment of process %s changed while the wallet paid for it; retry", c.vp.ID.Hex())
 	}
 	// stamp the once-per-organization branding add-on as paid when the debited quote
@@ -211,7 +212,7 @@ func (a *API) chargeManagedProcessWallet(c managedProcessCharge) error {
 				"processId", c.vp.ID.Hex(), "orgAddress", c.vp.OrgAddress.String(), "error", err)
 		}
 	}
-	return nil
+	return dueCents, nil
 }
 
 // walletMayRecord reports whether SetProcessPaymentPaidByWallet may write over payment: an

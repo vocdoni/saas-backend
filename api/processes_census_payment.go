@@ -1,12 +1,17 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"strconv"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/pricing"
+	"github.com/vocdoni/saas-backend/stripe"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -166,4 +171,161 @@ func (a *API) censusGrowthPaymentError(g censusGrowth) error {
 			CensusSize: size,
 			Currency:   "eur",
 		})
+}
+
+// createProcessCensusCheckoutHandler godoc
+//
+//	@Summary		Buy census headroom for a paid process
+//	@Description	Opens a one-time Stripe checkout for the difference between what the process
+//	@Description	already paid and what its census would cost at censusSize, so a census that
+//	@Description	outgrew its price can be grown (or a paid draft republished) instead of being
+//	@Description	stuck behind a 402. Add-ons are priced exactly as the original payment priced
+//	@Description	them, so the branding add-on is never charged twice. The paid amount is raised
+//	@Description	when the payment is verified by webhook — never before, so the census stays
+//	@Description	refused until the money lands. A managed organization pays from its integrator
+//	@Description	wallet instead: the difference is debited synchronously and the response carries
+//	@Description	no checkout session, so the census can grow immediately. 400 when the process has
+//	@Description	no completed payment, or when the target does not cost more than was already
+//	@Description	paid. Requires Admin role.
+//	@Tags			processes
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			processId	path		string									true	"Process ID"
+//	@Param			request		body		apicommon.ProcessCensusCheckoutRequest	true	"Census headroom to buy"
+//	@Success		200			{object}	apicommon.ProcessCheckoutResponse
+//	@Failure		400			{object}	errors.Error	"No completed payment, or nothing left to buy"
+//	@Failure		402			{object}	errors.Error	"Integrator wallet does not cover the difference"
+//	@Failure		401			{object}	errors.Error
+//	@Failure		403			{object}	errors.Error	"API key used to buy an unmanaged organization's headroom by card"
+//	@Failure		404			{object}	errors.Error
+//	@Failure		422			{object}	errors.Error	"Census size requires a custom quote"
+//	@Failure		500			{object}	errors.Error
+//	@Router			/processes/{processId}/census/checkout [post]
+func (a *API) createProcessCensusCheckoutHandler(w http.ResponseWriter, r *http.Request) {
+	if a.paymentGW == nil {
+		errors.ErrStripeError.Withf("stripe service not available").Write(w)
+		return
+	}
+	oid, ok := a.votingProcessID(w, r)
+	if !ok {
+		return
+	}
+	req := &apicommon.ProcessCensusCheckoutRequest{}
+	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	if req.CensusSize < 1 {
+		errors.ErrMalformedBody.Withf("censusSize must be a positive integer").Write(w)
+		return
+	}
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	vp, ok := a.loadVotingProcess(w, oid)
+	if !ok {
+		return
+	}
+	if !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
+		errors.ErrUnauthorized.Withf("user is not admin of the organization").Write(w)
+		return
+	}
+	census, err := a.db.Census(vp.CensusID.Hex())
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	p, projected, err := a.paidProcessProjection(vp, census, nil)
+	if err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+	if !projected {
+		errors.ErrMalformedBody.
+			Withf("process has no completed payment to extend; pay it through POST /processes/{processId}/checkout").
+			Write(w)
+		return
+	}
+	quote, err := quoteProcessAtCensusSize(p, req.CensusSize)
+	if err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+	if quote.QuoteRequired {
+		errors.ErrQuoteRequired.Write(w)
+		return
+	}
+	dueCents := quote.TotalCents - p.payment.AmountCents
+	if dueCents <= 0 {
+		errors.ErrMalformedBody.Withf("a census of %d is already covered by the %d eur cents paid",
+			req.CensusSize, p.payment.AmountCents).Write(w)
+		return
+	}
+	// A managed organization has no card: the difference comes out of its integrator's
+	// prepaid wallet, the same debit a re-publish would have done, and takes effect at once.
+	// The caller named the target size, so — unlike the growth guard, which can only project
+	// an upper bound — this charges for headroom that was actually asked for.
+	if p.org.ManagedBy != (common.Address{}) {
+		// what was actually debited: a concurrent purchase may have covered part or all of it
+		debited, err := a.chargeManagedProcessWallet(managedProcessCharge{
+			vp: vp, org: p.org, quote: quote, branding: p.payment.Branding,
+		})
+		if err != nil {
+			writeSubscriptionError(w, err)
+			return
+		}
+		log.Infow("census headroom debited from the integrator wallet", "processId", oid.Hex(),
+			"censusSize", req.CensusSize, "paidCents", p.payment.AmountCents, "targetCents", quote.TotalCents,
+			"debitedCents", debited)
+		apicommon.HTTPWriteJSON(w, &apicommon.ProcessCheckoutResponse{
+			AmountCents: debited,
+			Currency:    "eur",
+		})
+		return
+	}
+	// A card is the organization's own: API keys are allowed on this route for the integrator's
+	// wallet branch above, never to open a card checkout (POST /processes/{id}/checkout is not
+	// on the key allowlist either).
+	if _, isKey := apicommon.APIKeyFromContext(r.Context()); isKey {
+		errors.ErrAPIKeyNotAllowed.Withf("census headroom of an unmanaged organization is paid by card").Write(w)
+		return
+	}
+	// One line for the difference, not the re-priced breakdown: the customer is buying the
+	// increase, and billing them the full new total would charge the base price twice.
+	session, err := a.paymentGW.CreatePaymentSession(&stripe.PaymentSessionParams{
+		LineItems: []stripe.PaymentLineItem{{
+			Description: fmt.Sprintf("census headroom up to %d voters", req.CensusSize),
+			AmountCents: dueCents,
+		}},
+		Metadata: map[string]string{
+			stripe.MetadataKeyProcessID:             oid.Hex(),
+			stripe.MetadataKeyProcessTopUpCents:     strconv.FormatInt(int64(quote.TotalCents), 10),
+			stripe.MetadataKeyProcessTopUpFromCents: strconv.FormatInt(int64(p.payment.AmountCents), 10),
+			stripe.MetadataKeyRequestedBy:           user.Email,
+		},
+		OrgAddress:    vp.OrgAddress.String(),
+		CustomerEmail: user.Email,
+		ReturnURL:     req.ReturnURL,
+		Locale:        req.Locale,
+	})
+	if err != nil {
+		errors.ErrStripeError.Withf("cannot create census top-up checkout session").WithErr(err).Write(w)
+		return
+	}
+	// Nothing is stored: the payment record keeps its own session, and the envelope is
+	// raised by the webhook from the base to the target amount carried in the session metadata.
+	// An abandoned top-up therefore leaves no state to reconcile. Of two opened against the same
+	// base, the first paid raises it and the other is refunded: its difference was priced from
+	// an amount the payment no longer has.
+	log.Infow("census headroom checkout opened", "processId", oid.Hex(), "censusSize", req.CensusSize,
+		"paidCents", p.payment.AmountCents, "targetCents", quote.TotalCents, "sessionId", session.ID)
+	apicommon.HTTPWriteJSON(w, &apicommon.ProcessCheckoutResponse{
+		ClientSecret: session.ClientSecret,
+		SessionID:    session.ID,
+		AmountCents:  dueCents,
+		Currency:     "eur",
+	})
 }

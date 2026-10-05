@@ -308,6 +308,37 @@ func TestStripeCheckoutWebhookUnderpaidSession(t *testing.T) {
 	c.Assert(vp.Published, qt.IsFalse)
 }
 
+// TestStripeCheckoutWebhookStraySessionRefunded: a paid session the process does not
+// reference — superseded, or orphaned by a checkout whose expiry did not take — recorded
+// nothing, so its money goes straight back instead of waiting on a human.
+func TestStripeCheckoutWebhookStraySessionRefunded(t *testing.T) {
+	c := qt.New(t)
+	installStripeWebhookService(t)
+	installFakePaymentGW(t)
+	refundIntents, _ := stubStripeRefunds(t)
+
+	token := testCreateUser(t, "webhookstray1234")
+	orgAddress := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	pid := newPricedVotingProcess(t, token, orgAddress)
+	oid, err := bson.ObjectIDFromHex(pid)
+	c.Assert(err, qt.IsNil)
+	_ = requestAndParse[apicommon.ProcessCheckoutResponse](
+		t, http.MethodPost, token, &apicommon.ProcessCheckoutRequest{ReturnURL: "https://x.example"},
+		"processes", pid, "checkout")
+
+	stray := checkoutSessionObject("cs_stray_session", "paid", 1_515, map[string]string{
+		stripe.MetadataKeyProcessID: pid,
+	})
+	stray["payment_intent"] = "pi_stray"
+	code := postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8), "checkout.session.completed", stray)
+	c.Assert(code, qt.Equals, http.StatusOK)
+	c.Assert(*refundIntents, qt.DeepEquals, []string{"pi_stray"})
+	payment, err := testDB.ProcessPayment(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPending)
+}
+
 // TestStripeCheckoutWebhookPaymentFailed: the async failure returns the payment to the
 // payable state through the signed endpoint.
 func TestStripeCheckoutWebhookPaymentFailed(t *testing.T) {

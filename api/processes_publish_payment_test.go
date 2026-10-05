@@ -491,9 +491,10 @@ func TestManagedWalletConcurrentChargesPayOnce(t *testing.T) {
 	errs := make(chan error, 10)
 	for i := range 10 {
 		wg.Go(func() {
-			errs <- testAPI.chargeManagedProcessWallet(managedProcessCharge{
+			_, err := testAPI.chargeManagedProcessWallet(managedProcessCharge{
 				vp: vp, org: org, quote: pricing.Quote{TotalCents: pricing.Cents(2_000 + 100*i)},
 			})
+			errs <- err
 		})
 	}
 	wg.Wait()
@@ -545,7 +546,7 @@ func TestManagedWalletChargeRefusesCardOwnedPayment(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(moved, qt.IsTrue)
 
-	err = testAPI.chargeManagedProcessWallet(managedProcessCharge{
+	_, err = testAPI.chargeManagedProcessWallet(managedProcessCharge{
 		vp: vp, org: org, quote: pricing.Quote{TotalCents: 1_515},
 	})
 	c.Assert(errors.Is(err, errors.ErrPaymentSessionConflict), qt.IsTrue, qt.Commentf("got %v", err))
