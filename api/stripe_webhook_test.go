@@ -235,11 +235,14 @@ func TestStripeWebhook(t *testing.T) {
 			c.Assert(err, qt.ErrorMatches, ".* invoice missing effective date")
 		}
 
+		// an invoice that is not a subscription's (a one-time payment's receipt has no parent)
+		// is skipped, not refused: an error would only make Stripe retry it for days
 		{
 			s := mockStripeInvoicePayment(orgAddress, date)
 			s.Parent.SubscriptionDetails = nil
-			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeInvoicePaymentSucceeded, s))
-			c.Assert(err, qt.ErrorMatches, ".* invoice missing subscription details")
+			c.Assert(service.HandleEvent(mockStripeEvent(stripeapi.EventTypeInvoicePaymentSucceeded, s)), qt.IsNil)
+			s.Parent = nil
+			c.Assert(service.HandleEvent(mockStripeEvent(stripeapi.EventTypeInvoicePaymentSucceeded, s)), qt.IsNil)
 		}
 
 		{
