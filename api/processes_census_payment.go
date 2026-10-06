@@ -233,6 +233,10 @@ func (a *API) createProcessCensusCheckoutHandler(w http.ResponseWriter, r *http.
 		errors.ErrUnauthorized.Withf("user is not admin of the organization").Write(w)
 		return
 	}
+	if err := a.refuseRefundedDraft(oid); err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
 	census, err := a.db.Census(vp.CensusID.Hex())
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)

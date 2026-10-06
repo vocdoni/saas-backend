@@ -1,6 +1,7 @@
 package stripe
 
 import (
+	"encoding/json"
 	goerrors "errors"
 	"fmt"
 	"net/http"
@@ -16,7 +17,7 @@ import (
 
 // RefundInfo is the outcome of a refund: its id, and whether Stripe already settled it.
 // A refund normally succeeds straight away, but it can stay pending and fail later, which
-// arrives as a charge.refund.updated webhook.
+// arrives as a refund.updated webhook.
 type RefundInfo struct {
 	ID     string
 	Status string
@@ -115,4 +116,44 @@ func processRefund(processID bson.ObjectID, paymentIntentID string) (live *strip
 		return nil, 0, errors.ErrStripeError.Withf("failed to list refunds of payment intent %s: %v", paymentIntentID, err)
 	}
 	return nil, failed, nil
+}
+
+// handleRefundUpdated reacts to a refund that changed state after it was issued. Only a
+// refund that will never pay out matters: the money did not go back, so the payment returns
+// to paid and stops looking settled. The draft it paid for is already deleted and cannot be
+// restored, so this is deliberately a manual-reconciliation signal — logged at error level,
+// not quietly absorbed.
+func (s *Service) handleRefundUpdated(event *stripeapi.Event) error {
+	var refund stripeapi.Refund
+	if err := json.Unmarshal(event.Data.Raw, &refund); err != nil {
+		return fmt.Errorf("failed to parse refund from event %s: %w", event.ID, err)
+	}
+	rawProcessID := refund.Metadata[MetadataKeyProcessID]
+	if rawProcessID == "" {
+		// the event covers every refund on the account, subscriptions' and the dashboard's too
+		log.Debugw("ignoring refund not issued for a process", "refundId", refund.ID)
+		return nil
+	}
+	if refund.Status != stripeapi.RefundStatusFailed && refund.Status != stripeapi.RefundStatusCanceled {
+		return nil // still pending, or succeeded as expected
+	}
+	processID, err := bson.ObjectIDFromHex(rawProcessID)
+	if err != nil {
+		return fmt.Errorf("invalid process id %q in refund %s metadata (%v): %w",
+			rawProcessID, refund.ID, err, errPermanentEvent)
+	}
+	reverted, err := s.db.MarkProcessPaymentRefundFailed(processID, refund.ID)
+	if err != nil {
+		return fmt.Errorf("failed to mark process payment refund failed: %w", err)
+	}
+	if !reverted {
+		// a replay, or a census top-up's refund: the payment's status names only the first
+		// refund, but a top-up that did not come back is money owed all the same
+		log.Errorw(fmt.Errorf("refund %s of %d cents ended %s", refund.ID, refund.Amount, refund.Status),
+			fmt.Sprintf("process %s may hold unreturned money and needs manual reconciliation", processID.Hex()))
+		return nil
+	}
+	log.Errorw(fmt.Errorf("refund %s of %d cents ended %s", refund.ID, refund.Amount, refund.Status),
+		fmt.Sprintf("the deleted process %s was not refunded and needs manual reconciliation", processID.Hex()))
+	return nil
 }

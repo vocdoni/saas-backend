@@ -4203,7 +4203,8 @@ paths:
         The organization's process payments as stored, filtered by status — by default the
         ones still open (pending, processing), which is how the drafts whose checkout
         blocks publication are found. No live Stripe state is read: poll
-        GET /processes/{processId}/checkout for that. Requires Manager/Admin of the organization.
+        GET /processes/{processId}/checkout for that. A payment whose process was deleted
+        (refunded) is listed with an empty title. Requires Manager/Admin of the organization.
       parameters:
       - description: Organization address
         in: path
@@ -4933,8 +4934,12 @@ paths:
         published process has on-chain elections and cannot be deleted. Requires
         Manager/Admin role of the organization that owns the process.
 
-        A paid draft cannot be deleted. A draft whose payment is still processing, or whose
-        checkout was just completed, is refused: retry once it settles.
+        A paid draft is refunded before it is deleted, the way it was paid: a card payment
+        is refunded (VAT included) and a managed organization's payment is credited back to
+        its integrator wallet. The payment record is kept as the audit trail, and the
+        organization's branding add-on is released so its next process can buy it. A draft
+        whose payment is still processing, or whose checkout was just completed, is refused:
+        retry once it settles.
 
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
@@ -4959,11 +4964,11 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Process already published, or its payment is paid or in flight
+          description: Process already published, or its payment is in flight
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
-          description: Internal server error
+          description: Internal server error, or the payment could not be refunded
           schema:
             $ref: '#/definitions/errors.Error'
       security:

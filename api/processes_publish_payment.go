@@ -19,6 +19,9 @@ import (
 // debited inside the publish path instead). A free process with a checkout still open or
 // processing is refused with a 409 errors.Error instead.
 func (a *API) paymentDueForPublish(vp *db.VotingProcess) (*pricing.Quote, error) {
+	if err := a.refuseRefundedDraft(vp.ID); err != nil {
+		return nil, err
+	}
 	org, err := a.db.Organization(vp.OrgAddress)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get organization: %w", err)
@@ -146,7 +149,7 @@ func (a *API) chargeManagedProcessWallet(c managedProcessCharge) (pricing.Cents,
 	}
 	if err == nil && !walletMayRecord(paid) {
 		return 0, errors.ErrPaymentSessionConflict.Withf(
-			"process %s has a %s card payment; the integrator wallet cannot pay for it", c.vp.ID.Hex(), paid.Status)
+			"process %s has a %s payment the integrator wallet cannot pay for", c.vp.ID.Hex(), paid.Status)
 	}
 	var alreadyCents pricing.Cents
 	if err == nil && paid.Status == db.ProcessPaymentPaid {
@@ -216,14 +219,15 @@ func (a *API) chargeManagedProcessWallet(c managedProcessCharge) (pricing.Cents,
 }
 
 // walletMayRecord reports whether SetProcessPaymentPaidByWallet may write over payment: an
-// abandoned or unpaid checkout, or a payment the wallet itself made. Anything else belongs to a
-// card checkout (or to a refund), and debiting the wallet for it would take money nothing records.
+// abandoned or unpaid checkout, or a payment the wallet itself made that no delete is refunding.
+// Anything else belongs to a card checkout or to a refund, and debiting the wallet for it would
+// take money nothing records.
 func walletMayRecord(payment *db.ProcessPayment) bool {
 	switch payment.Status {
 	case db.ProcessPaymentPending, db.ProcessPaymentFailed:
 		return true
 	case db.ProcessPaymentPaid:
-		return payment.CheckoutSessionID == ""
+		return payment.CheckoutSessionID == "" && payment.RefundWithheldCents == nil
 	default:
 		return false
 	}

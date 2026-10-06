@@ -23,8 +23,12 @@ import (
 //	@Description	published process has on-chain elections and cannot be deleted. Requires
 //	@Description	Manager/Admin role of the organization that owns the process.
 //	@Description
-//	@Description	A paid draft cannot be deleted. A draft whose payment is still processing, or whose
-//	@Description	checkout was just completed, is refused: retry once it settles.
+//	@Description	A paid draft is refunded before it is deleted, the way it was paid: a card payment
+//	@Description	is refunded (VAT included) and a managed organization's payment is credited back to
+//	@Description	its integrator wallet. The payment record is kept as the audit trail, and the
+//	@Description	organization's branding add-on is released so its next process can buy it. A draft
+//	@Description	whose payment is still processing, or whose checkout was just completed, is refused:
+//	@Description	retry once it settles.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
@@ -34,8 +38,8 @@ import (
 //	@Success		200			{string}	string			"OK"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		404			{object}	errors.Error	"Process not found"
-//	@Failure		409			{object}	errors.Error	"Process already published, or its payment is paid or in flight"
-//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		409			{object}	errors.Error	"Process already published, or its payment is in flight"
+//	@Failure		500			{object}	errors.Error	"Internal server error, or the payment could not be refunded"
 //	@Router			/processes/{processId} [delete]
 func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)
@@ -52,15 +56,32 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrDuplicateConflict.Withf("process already published and not in draft mode").Write(w)
 		return
 	}
-	// deleting mid-publish would orphan on chain whatever the worker has already mined.
-	if refusePublishInProgress(w, vp) {
+	// Deleting mid-publish would orphan on chain whatever the worker has already mined, and
+	// refund it. So delete takes the claim a publish takes, and the two exclude each other:
+	// checking the marker on the read above would let a publish claim the draft right after.
+	// Every refusal below releases it; a deleted draft takes the marker with it.
+	claimed, err := a.db.ClaimVotingProcessForPublish(oid)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+	if !claimed {
+		errors.ErrPublishInProgress.Write(w)
+		return
+	}
+	deleted := false
+	defer func() {
+		if deleted {
+			return
+		}
+		if e := a.db.ClearVotingProcessPublishing(oid); e != nil {
+			log.Warnw("could not release the delete's claim on a draft", "processId", oid.Hex(), "error", e)
+		}
+	}()
 	// a processing payment refuses deletion: money is in flight and its outcome unknown.
-	// A paid one is refused too, or the money would be kept for a process that is gone; a
-	// pending one is released by expiring its open session so it can never be paid, and its
-	// payment record goes with the draft.
-	if a.refusePaymentLocked(w, oid, db.ProcessPaymentPaid) {
+	// A paid one is refunded below; a pending one is released by expiring its open session
+	// so it can never be paid, and its payment record goes with the draft.
+	if a.refusePaymentLocked(w, oid) {
 		return
 	}
 	payment, err := a.db.ProcessPayment(oid)
@@ -76,6 +97,15 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	switch {
 	case payment == nil:
 		// free process, or never quoted: nothing to release
+	case payment.Status == db.ProcessPaymentPaid:
+		// the money goes back before the draft goes away, and the payment row stays as
+		// the record that it did
+		if !a.refundPaidProcess(w, vp, payment) {
+			return
+		}
+	case payment.Status == db.ProcessPaymentRefunded:
+		// an earlier delete refunded it and then failed to drop the draft: the row is
+		// already the audit record, so only the draft is left to go
 	case payment.Status == db.ProcessPaymentPending && payment.CheckoutSessionID != "":
 		if claimHolder, err = a.db.Organization(vp.OrgAddress); err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -89,12 +119,12 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		// pending (released above, or never checked out) or failed: nothing was paid, so
 		// the payment state goes with the draft — conditionally, since the status may have
 		// moved on since it was read
-		deleted, err := a.db.DeleteProcessPayment(oid)
+		dropped, err := a.db.DeleteProcessPayment(oid)
 		if err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
-		if !deleted {
+		if !dropped {
 			errors.ErrPaymentSessionConflict.Withf("the draft payment changed while deleting it; retry").Write(w)
 			return
 		}
@@ -102,8 +132,8 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 			a.releaseDroppedCheckoutClaim(vp, claimHolder)
 		}
 	default:
-		// processing or paid since the check above: money is in flight or was taken, and
-		// its record must outlive neither the draft nor this request
+		// processing since the check above (a delayed payment method completing): money is
+		// in flight, and its record must not go with the draft
 		errors.ErrPaymentSessionConflict.Withf("the draft payment is %s; retry once it settles", payment.Status).Write(w)
 		return
 	}
@@ -111,6 +141,7 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+	deleted = true
 	// best-effort: drop the draft's inline census so it is not orphaned.
 	if !vp.CensusID.IsZero() {
 		_ = a.db.DelCensus(vp.CensusID.Hex())

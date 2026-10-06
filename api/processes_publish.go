@@ -319,6 +319,11 @@ func (a *API) startProcessPublish(t publishTarget) (string, error) {
 			log.Warnw("could not clear voting process publishing state", "error", e)
 		}
 	}()
+	// again under the claim, which a delete takes too: one that refunded and failed between
+	// the payment gate and here would otherwise go on chain unpaid
+	if err := a.refuseRefundedDraft(oid); err != nil {
+		return "", err
+	}
 
 	org, err := a.db.Organization(vp.OrgAddress)
 	if err != nil {
