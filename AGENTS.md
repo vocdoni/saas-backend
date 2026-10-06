@@ -200,7 +200,7 @@ user's call.
 ## CI
 
 `.github/workflows/main.yml` gates PRs on: `golangci-lint` (v2.12.2, `only-new-issues`),
-`./scripts/check-qt-patterns.sh`, a clean `go mod tidy` diff, and `go test -failfast -timeout=30m ./...`
+`./scripts/check-qt-patterns.sh`, a clean `go mod tidy` diff, and `go test -failfast -timeout=45m ./...`
 with coverage (a diff report is posted as a PR comment). It runs on pull requests and on pushes to
 `main` only, so in practice every push to `main` builds and pushes a Docker image, while its `-race`
 step and the `stage`/`release*`/`aragon` Docker conditions never fire. The branch flow is
