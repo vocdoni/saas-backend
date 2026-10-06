@@ -1505,6 +1505,46 @@ definitions:
       removed:
         type: integer
     type: object
+  apicommon.UpsertOrgMemberRequest:
+    properties:
+      birthDate:
+        description: Member's date of birth in format YYYY-MM-DD
+        type: string
+      email:
+        description: Member's email address
+        type: string
+      id:
+        description: |-
+          Member's internal unique ID. Empty, or an unused one, creates a member; the ID of another
+          organization's member is rejected.
+        type: string
+      memberNumber:
+        description: Unique member number as defined by the organization
+        type: string
+      name:
+        description: Member's name
+        type: string
+      nationalId:
+        description: Member's National ID No
+        type: string
+      other:
+        additionalProperties: {}
+        description: Additional custom fields, replaced as a whole
+        type: object
+      password:
+        description: Member's password (for authentication)
+        type: string
+      phone:
+        description: Member's phone number
+        type: string
+      surname:
+        description: Member's surname
+        type: string
+      weight:
+        description: Member's census weight. Empty sets the default 1, as does leaving
+          it out of a new member.
+        type: string
+    type: object
   apicommon.UpsertOrgMemberResponse:
     properties:
       censusJobIds:
@@ -3708,6 +3748,10 @@ paths:
         Create or update an organization member. Requires Manager/Admin role.
         Automatically updates census participant hashes when member data changes.
 
+        On an update, a field left out of the body keeps its stored value and a field sent as an
+        empty string is cleared. Phone and password are never returned in plaintext: leave them out
+        to keep them.
+
         Also callable with a scoped API key (scope: `members:write`).
       parameters:
       - description: Organization address
@@ -3720,7 +3764,7 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/apicommon.OrgMember'
+          $ref: '#/definitions/apicommon.UpsertOrgMemberRequest'
       produces:
       - application/json
       responses:

@@ -63,3 +63,39 @@ func TestJobResponseFromDBBatchVoteTerminal(t *testing.T) {
 			qt.Commentf("an import job's added==total does not mean it is finished"))
 	})
 }
+
+// TestUpsertOrgMemberRequestWeight pins the weight a member update carries: left out keeps the
+// stored one, cleared is the default 1 rather than the 0 ParseUint64 reads "" as.
+func TestUpsertOrgMemberRequestWeight(t *testing.T) {
+	c := qt.New(t)
+
+	update, err := (&UpsertOrgMemberRequest{}).ToDB()
+	c.Assert(err, qt.IsNil)
+	c.Assert(update.Weight, qt.IsNil)
+
+	for weight, want := range map[string]uint64{"": 1, "0": 0, "42": 42} {
+		update, err := (&UpsertOrgMemberRequest{Weight: new(weight)}).ToDB()
+		c.Assert(err, qt.IsNil)
+		c.Assert(*update.Weight, qt.Equals, want, qt.Commentf("weight %q", weight))
+	}
+
+	_, err = (&UpsertOrgMemberRequest{Weight: new("heavy")}).ToDB()
+	c.Assert(err, qt.ErrorMatches, `invalid weight "heavy"`)
+}
+
+// TestOrgMemberWeight pins the weight a bulk-imported member carries: empty is the default 1, and
+// an unparsable weight is rejected rather than stored as 0 or MaxUint64.
+func TestOrgMemberWeight(t *testing.T) {
+	c := qt.New(t)
+
+	for weight, want := range map[string]uint64{"": 1, "0": 0, "42": 42} {
+		member, err := (&OrgMember{Weight: weight}).ToDB()
+		c.Assert(err, qt.IsNil)
+		c.Assert(member.Weight, qt.Equals, want, qt.Commentf("weight %q", weight))
+	}
+
+	for _, weight := range []string{"heavy", "18446744073709551616"} {
+		_, err := (&AddMembersRequest{Members: []OrgMember{{}, {Weight: weight}}}).ToDB()
+		c.Assert(err, qt.ErrorMatches, `member 1: invalid weight ".*"`, qt.Commentf("weight %q", weight))
+	}
+}

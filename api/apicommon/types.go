@@ -975,12 +975,16 @@ type AddMembersRequest struct {
 }
 
 // ToDB converts the members in the request to db.OrgMember objects.
-func (r *AddMembersRequest) ToDB() []*db.OrgMember {
+func (r *AddMembersRequest) ToDB() ([]*db.OrgMember, error) {
 	members := make([]*db.OrgMember, 0, len(r.Members))
-	for _, p := range r.Members {
-		members = append(members, p.ToDB())
+	for i, p := range r.Members {
+		member, err := p.ToDB()
+		if err != nil {
+			return nil, fmt.Errorf("member %d: %w", i, err)
+		}
+		members = append(members, member)
 	}
-	return members
+	return members, nil
 }
 
 // AddCensusParticipantsRequest defines the payload for adding existing
@@ -1055,7 +1059,7 @@ type OrgMember struct {
 }
 
 // ToDB converts an OrgMember to a db.OrgMember.
-func (p *OrgMember) ToDB() *db.OrgMember {
+func (p *OrgMember) ToDB() (*db.OrgMember, error) {
 	// TODO: this could happen right during UnmarshalJSON,
 	// if apicommon.OrgMember.ID is an ObjectID rather than a string.
 	id := bson.NilObjectID
@@ -1067,15 +1071,10 @@ func (p *OrgMember) ToDB() *db.OrgMember {
 			log.Warnf("failed to convert member ID %s to ObjectID: %v", p.ID, err)
 		}
 	}
-	// if the weight is provided convert it to int, defaults to 1
 	// we are performing the conversion here to avoid having a parsedweight field in the db
-	weight := uint64(1)
-	if p.Weight != "" {
-		// convert only if non-empty string since ParseUint64 returns 0 if empty string
-		var ok bool
-		if weight, ok = math.ParseUint64(p.Weight); !ok {
-			log.Warnf("Failed to convert member weight %s to int", p.Weight)
-		}
+	weight, err := parseMemberWeight(p.Weight)
+	if err != nil {
+		return nil, err
 	}
 
 	return &db.OrgMember{
@@ -1090,7 +1089,90 @@ func (p *OrgMember) ToDB() *db.OrgMember {
 		Password:       p.Password,
 		Weight:         weight,
 		Other:          p.Other,
+	}, nil
+}
+
+// parseMemberWeight parses a member's census weight. Empty is the default 1, not the 0
+// ParseUint64 reads it as.
+func parseMemberWeight(s string) (uint64, error) {
+	if s == "" {
+		return 1, nil
 	}
+	weight, ok := math.ParseUint64(s)
+	if !ok {
+		return 0, fmt.Errorf("invalid weight %q", s)
+	}
+	return weight, nil
+}
+
+// UpsertOrgMemberRequest creates or updates an organization member. On an update a field left
+// out of the request keeps its stored value, while a field sent empty is cleared. Phone and
+// password are never returned in plaintext, so leave them out to keep them.
+// swagger:model UpsertOrgMemberRequest
+type UpsertOrgMemberRequest struct {
+	// Member's internal unique ID. Empty, or an unused one, creates a member; the ID of another
+	// organization's member is rejected.
+	ID string `json:"id"`
+
+	// Unique member number as defined by the organization
+	MemberNumber *string `json:"memberNumber,omitempty"`
+
+	// Member's name
+	Name *string `json:"name,omitempty"`
+
+	// Member's surname
+	Surname *string `json:"surname,omitempty"`
+
+	// Member's National ID No
+	NationalID *string `json:"nationalId,omitempty"`
+
+	// Member's date of birth in format YYYY-MM-DD
+	BirthDate *string `json:"birthDate,omitempty"`
+
+	// Member's email address
+	Email *string `json:"email,omitempty"`
+
+	// Member's phone number
+	Phone *string `json:"phone,omitempty"`
+
+	// Member's password (for authentication)
+	Password *string `json:"password,omitempty"`
+
+	// Member's census weight. Empty sets the default 1, as does leaving it out of a new member.
+	Weight *string `json:"weight,omitempty"`
+
+	// Additional custom fields, replaced as a whole
+	Other map[string]any `json:"other,omitempty"`
+}
+
+// ToDB converts the request into a db.OrgMemberUpdate.
+func (r *UpsertOrgMemberRequest) ToDB() (*db.OrgMemberUpdate, error) {
+	update := &db.OrgMemberUpdate{
+		MemberNumber: r.MemberNumber,
+		Name:         r.Name,
+		Surname:      r.Surname,
+		NationalID:   r.NationalID,
+		BirthDate:    r.BirthDate,
+		Email:        r.Email,
+		Phone:        r.Phone,
+		Password:     r.Password,
+		Other:        r.Other,
+	}
+	if r.ID != "" {
+		id, err := bson.ObjectIDFromHex(r.ID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid member id %q: %w", r.ID, err)
+		}
+		update.ID = id
+	}
+	if r.Weight != nil {
+		weight, err := parseMemberWeight(*r.Weight)
+		if err != nil {
+			return nil, err
+		}
+		update.Weight = &weight
+	}
+	return update, nil
 }
 
 func OrgMemberFromDb(p db.OrgMember) OrgMember {

@@ -323,6 +323,59 @@ type OrgMember struct {
 	UpdatedAt       time.Time      `json:"updatedAt" bson:"updatedAt"`
 }
 
+// OrgMemberUpdate is a change to an organization member. A nil field leaves the stored value as
+// it is; a non-nil one replaces it, the empty string clearing the field.
+type OrgMemberUpdate struct {
+	ID           bson.ObjectID
+	MemberNumber *string
+	Name         *string
+	Surname      *string
+	NationalID   *string
+	BirthDate    *string
+	Email        *string
+	// Phone is in plaintext, it is hashed when the member is written
+	Phone *string
+	// Password is in plaintext, it is hashed when the member is written
+	Password *string
+	Weight   *uint64
+	Other    map[string]any
+}
+
+// applyTo returns a copy of the stored member with the update applied.
+func (u *OrgMemberUpdate) applyTo(stored OrgMember) *OrgMember {
+	member := stored
+	member.ID = u.ID
+	set := func(field *string, value *string) {
+		if value != nil {
+			*field = *value
+		}
+	}
+	set(&member.MemberNumber, u.MemberNumber)
+	set(&member.Name, u.Name)
+	set(&member.Surname, u.Surname)
+	set(&member.NationalID, u.NationalID)
+	set(&member.Email, u.Email)
+	if u.BirthDate != nil {
+		member.BirthDate = *u.BirthDate
+		member.ParsedBirthDate = time.Time{}
+	}
+	if u.Phone != nil {
+		member.Phone = nil
+		member.PlaintextPhone = *u.Phone
+	}
+	if u.Password != nil {
+		member.HashedPass = nil
+		member.Password = *u.Password
+	}
+	if u.Weight != nil {
+		member.Weight = *u.Weight
+	}
+	if u.Other != nil {
+		member.Other = u.Other
+	}
+	return &member
+}
+
 // Normalized returns a copy of the member with every field that can feed the CSP
 // login hash reduced to its canonical form: surrounding whitespace trimmed, the
 // email lowercased, the birthdate canonicalized to YYYY-MM-DD.
