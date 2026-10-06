@@ -95,8 +95,8 @@ Component packages (each is a focused service composed in `main.go`):
 - **`api/`** — the HTTP server (chi router + JWT auth via `jwtauth`). `initRouter()` in `api/api.go`
   registers all routes in two `chi` groups: a **protected group** (behind `jwtauth.Verifier` +
   `a.authenticator`) and a **public group** (login, registration, webhooks, voter-facing CSP
-  endpoints, `/ping`). Handlers live in topic files (`organizations.go`, `census.go`, `process.go`,
-  `org_members.go`, `organization_groups.go`, etc.). Route path constants are defined alongside.
+  endpoints, `/ping`). Handlers live in topic files (`organizations.go`, `processes*.go`,
+  `org_members.go`, `organization_groups.go`, etc.); every route path constant is in `api/routes.go`.
   `api/apicommon/` holds shared request/response types and helpers (`HTTPWriteJSON`, `UserFromContext`).
 - **`db/`** — MongoDB storage layer (`MongoStorage`). One file per collection/domain
   (`organizations.go`, `org_members.go`, `census.go`, `process.go`, `jobs.go`...). Collections are
@@ -154,23 +154,36 @@ These come from `.clinerules/` and `.gemini/styleguide.md` (the Vocdoni Go style
   reflexively agree ("You're absolutely right!") when the statement may be wrong; state uncertainty
   explicitly rather than speculating.
 
-## API changes ripple into vocdoni.io and the integrator SDK
+## API source of truth, and what follows it downstream
 
-This repo holds two endpoint references: the generated `docs/swagger.yaml` (`make swagger`, published
-to GitHub Pages by `.github/workflows/swag.yml`) and the hand-written `api/docs.md` (linked from
-`README.md`), which nothing regenerates — update it in the same PR. The developer guides that
-integrators actually read (quickstart, census, voting processes, casting votes, jobs, results, quotas...) live in the
-[`vocdoni/vocdoni.io`](https://github.com/vocdoni/vocdoni.io) repository under
-`content/developers/docs/en/`, and nothing syncs them automatically — they go stale whenever the API
-changes without a matching docs update.
+**The API code is the source of truth**: the route constants in `api/routes.go`, the handlers in
+`api/` and `csp/handlers/`, and every type they expose (`api/apicommon`, plus the `csp/handlers` and
+`db` types that reach the wire). `docs/swagger.yaml` is generated from their swag annotations
+(`make swagger`) and published to GitHub Pages by `.github/workflows/swag.yml`; it is the only API
+reference in this repo. Never edit it by hand, and don't add hand-written endpoint docs or request
+collections here; the hand-maintained `api/docs.md` and its companion `api/examples.http` were removed
+after they drifted out of date. If the spec is wrong, fix the annotations: a `@Router` path must match
+the route constant the handler is registered under.
 
-So whenever a change alters anything an API consumer can observe — a route added, removed or renamed,
+Everything else follows the API and goes stale whenever it changes without a matching update:
+
+- the developer guides integrators actually read (quickstart, census, voting processes, casting
+  votes, jobs, results, quotas...), which live in [`vocdoni/vocdoni.io`](https://github.com/vocdoni/vocdoni.io)
+  under `content/developers/docs/en/`;
+- the [`vocdoni/vocdoni-integrator-sdk`](https://github.com/vocdoni/vocdoni-integrator-sdk) (see below).
+
+When one of them disagrees with the code, the code is right and they are what needs fixing — never
+"fix" the API or the spec to match stale docs.
+
+Whenever a change alters anything an API consumer can observe — a route added, removed or renamed,
 a request/response field, a status or error code, auth or permission rules, job/polling behaviour,
 quota checks, or the voter (CSP) flow — **suggest opening an issue or a PR in `vocdoni/vocdoni.io`**
 naming the affected page(s) and what changed. Mind vocdoni.io's branches: its `main` ships to
 production with the next `lts` release, while `stage` is a content-only branch shown through the docs
 version selector (`?version=stage`). Docs for a change that has not reached this repo's production
-branch (`lts`) belong on `stage`, not `main`; vocdoni.io's own AGENTS.md has the details.
+branch (`lts`) belong on `stage`, not `main`. `stage` is never deployed on its own, so once the
+backend change reaches `lts`, the same follow-up must also get those docs onto vocdoni.io `main`
+(e.g. a PR porting them from `stage`); vocdoni.io's own AGENTS.md has the details.
 
 The same goes for the [`vocdoni/vocdoni-integrator-sdk`](https://github.com/vocdoni/vocdoni-integrator-sdk)
 TypeScript SDK, which wraps this API (`@vocdoni/api-types` mirrors the request/response types,
@@ -188,6 +201,9 @@ user's call.
 
 `.github/workflows/main.yml` gates PRs on: `golangci-lint` (v2.12.2, `only-new-issues`),
 `./scripts/check-qt-patterns.sh`, a clean `go mod tidy` diff, and `go test -failfast -timeout=30m ./...`
-with coverage (a diff report is posted as a PR comment). `-race` runs only on `stage`/`release`
-branches. Merges to `main`/`stage`/`release`/`aragon` push Docker images — so the branch flow is
-`main → stage → release`, and promotion PRs (head branch `main`) skip commit linting.
+with coverage (a diff report is posted as a PR comment). It runs on pull requests and on pushes to
+`main` only, so in practice every push to `main` builds and pushes a Docker image, while its `-race`
+step and the `stage`/`release*`/`aragon` Docker conditions never fire. The branch flow is
+`main → stage → lts` (`lts` is production), and promotion PRs (head branch `main`) skip commit
+linting. `.github/workflows/swag.yml` regenerates `docs/swagger.yaml` on PRs (posting the diff as a
+comment) and, on pushes to `stage`, commits the regenerated spec and deploys the Swagger UI.

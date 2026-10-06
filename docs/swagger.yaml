@@ -2555,6 +2555,42 @@ paths:
       summary: Login to get a JWT token
       tags:
       - auth
+  /auth/oauth:
+    post:
+      consumes:
+      - application/json
+      description: Link an OAuth provider to an existing authenticated account
+      parameters:
+      - description: OAuth link information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.OAuthLinkRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid provider or provider already linked
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized or signature verification failed
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Link OAuth provider to account
+      tags:
+      - auth
   /auth/oauth/{provider}:
     delete:
       consumes:
@@ -2590,42 +2626,6 @@ paths:
       security:
       - BearerAuth: []
       summary: Unlink OAuth provider from account
-      tags:
-      - auth
-  /auth/oauth/link:
-    post:
-      consumes:
-      - application/json
-      description: Link an OAuth provider to an existing authenticated account
-      parameters:
-      - description: OAuth link information
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.OAuthLinkRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Invalid provider or provider already linked
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized or signature verification failed
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Link OAuth provider to account
       tags:
       - auth
   /auth/refresh:
@@ -6090,6 +6090,36 @@ paths:
       summary: Update user password
       tags:
       - users
+  /users/password/recovery:
+    post:
+      consumes:
+      - application/json
+      description: Request a password recovery code for a user
+      parameters:
+      - description: User email information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.UserInfo'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Recover user password
+      tags:
+      - users
   /users/password/reset:
     post:
       consumes:
@@ -6130,36 +6160,6 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Reset user password
-      tags:
-      - users
-  /users/recovery:
-    post:
-      consumes:
-      - application/json
-      description: Request a password recovery code for a user
-      parameters:
-      - description: User email information
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.UserInfo'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      summary: Recover user password
       tags:
       - users
   /users/verify:

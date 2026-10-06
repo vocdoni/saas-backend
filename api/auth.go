@@ -292,7 +292,7 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		400		{object}	errors.Error				"Invalid provider or provider already linked"
 //	@Failure		401		{object}	errors.Error				"Unauthorized or signature verification failed"
 //	@Failure		500		{object}	errors.Error				"Internal server error"
-//	@Router			/auth/oauth/link [post]
+//	@Router			/auth/oauth [post]
 func (a *API) oauthLinkHandler(w http.ResponseWriter, r *http.Request) {
 	// get the authenticated user from context
 	user, ok := apicommon.UserFromContext(r.Context())

@@ -579,7 +579,7 @@ func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) 
 //	@Success		200		{string}	string				"OK"
 //	@Failure		400		{object}	errors.Error		"Invalid input data"
 //	@Failure		500		{object}	errors.Error		"Internal server error"
-//	@Router			/users/recovery [post]
+//	@Router			/users/password/recovery [post]
 func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user info from the request body
 	userInfo := &apicommon.UserInfo{}

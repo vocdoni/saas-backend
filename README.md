@@ -47,7 +47,15 @@ Vocdoni SaaS backend is a service that works on top of the [Vocdoni Protocol](ht
 
 This service also allows to the SDK to user it as remote signer, which makes that the use of this service transparent to the [Vocdoni SDK](https://github.com/vocdoni/vocdoni-sdk).
 
-Check out the service [API documentation](./api/docs.md) here.
+## API documentation
+
+The API itself is the source of truth. Its reference is [`docs/swagger.yaml`](./docs/swagger.yaml),
+generated from the handlers' annotations (`make swagger`) and browsable as
+[Swagger UI](https://vocdoni.github.io/saas-backend/) (built from the `stage` branch, so it can be
+ahead of production). The integrator guides live in the
+[developer docs](https://vocdoni.io/developers/docs), and the
+[Vocdoni Integrator SDK](https://github.com/vocdoni/vocdoni-integrator-sdk) wraps the API for TypeScript;
+both follow the API, so when either disagrees with it, the API is right and they need updating.
 
 ## Local Development
 
