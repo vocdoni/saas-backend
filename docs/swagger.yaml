@@ -1508,8 +1508,9 @@ definitions:
         description: Member's email address
         type: string
       id:
-        description: Member's internal unique ID. Empty, or one naming no member of
-          the organization, creates one.
+        description: |-
+          Member's internal unique ID. Empty, or an unused one, creates a member; the ID of another
+          organization's member is rejected.
         type: string
       memberNumber:
         description: Unique member number as defined by the organization

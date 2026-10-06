@@ -466,9 +466,14 @@ func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, 
 		return bson.NilObjectID, false, fmt.Errorf("failed to read stored org member: %w", err)
 	}
 
-	preparedMember, validationErrors := prepareOrgMember(org, update.applyTo(stored), salt, time.Now())
+	now := time.Now()
+	preparedMember, validationErrors := prepareOrgMember(org, update.applyTo(stored), salt, now)
 	if len(validationErrors) > 0 {
 		return bson.NilObjectID, false, fmt.Errorf("errors: %s", errorsAsStrings(validationErrors))
+	}
+	// prepareOrgMember only stamps CreatedAt when it assigns the ID, not for a client-chosen one
+	if created {
+		preparedMember.CreatedAt = now
 	}
 
 	// Update the census participants first, to bail out early in case this would create any duplicates conflict

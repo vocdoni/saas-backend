@@ -82,3 +82,20 @@ func TestUpsertOrgMemberRequestWeight(t *testing.T) {
 	_, err = (&UpsertOrgMemberRequest{Weight: new("heavy")}).ToDB()
 	c.Assert(err, qt.ErrorMatches, `invalid weight "heavy"`)
 }
+
+// TestOrgMemberWeight pins the weight a bulk-imported member carries: empty is the default 1, and
+// an unparsable weight is rejected rather than stored as 0 or MaxUint64.
+func TestOrgMemberWeight(t *testing.T) {
+	c := qt.New(t)
+
+	for weight, want := range map[string]uint64{"": 1, "0": 0, "42": 42} {
+		member, err := (&OrgMember{Weight: weight}).ToDB()
+		c.Assert(err, qt.IsNil)
+		c.Assert(member.Weight, qt.Equals, want, qt.Commentf("weight %q", weight))
+	}
+
+	for _, weight := range []string{"heavy", "18446744073709551616"} {
+		_, err := (&AddMembersRequest{Members: []OrgMember{{}, {Weight: weight}}}).ToDB()
+		c.Assert(err, qt.ErrorMatches, `member 1: invalid weight ".*"`, qt.Commentf("weight %q", weight))
+	}
+}

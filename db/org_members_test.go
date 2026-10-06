@@ -723,3 +723,26 @@ func TestUpsertOrgMemberReportsCreated(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(created, qt.IsFalse)
 }
+
+// TestUpsertOrgMemberClientChosenIDStampsCreatedAt pins that a member created under an ID the
+// client picked gets a creation time, like one whose ID the storage assigns.
+func TestUpsertOrgMemberClientChosenIDStampsCreatedAt(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	org := &Organization{Address: testOrgAddress, CreatedAt: time.Now()}
+	c.Assert(testDB.SetOrganization(org), qt.IsNil)
+
+	id, created, err := testDB.UpsertOrgMemberAndCensusParticipants(org, &OrgMemberUpdate{
+		ID:    bson.NewObjectID(),
+		Name:  new("Grace"),
+		Email: new("grace.chosen@example.com"),
+	}, "test_salt")
+	c.Assert(err, qt.IsNil)
+	c.Assert(created, qt.IsTrue)
+
+	member, err := testDB.OrgMember(testOrgAddress, id.Hex())
+	c.Assert(err, qt.IsNil)
+	c.Assert(member.CreatedAt.IsZero(), qt.IsFalse)
+}
