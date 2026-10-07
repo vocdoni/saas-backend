@@ -154,6 +154,24 @@ const (
 	processesCensusEndpoint = "/processes/{processId}/census"
 	// GET /processes/{processId}/validation publish-readiness dry-run (protected)
 	processesValidateEndpoint = "/processes/{processId}/validation"
+
+	// GET routes to get the server-side price of a voting process
+	processesPriceEndpoint = "/processes/{processId}/price"
+
+	// GET routes to compute a price from formula inputs (public calculator)
+	pricingEndpoint = "/pricing"
+
+	// GET the caller's integrator wallet (balance + ledger, path-less)
+	walletEndpoint = "/wallet"
+
+	// POST starts a one-time checkout that tops up the integrator wallet
+	walletTopUpEndpoint = "/wallet/topup"
+
+	// GET lists the organization's process payments, filtered by status
+	organizationPaymentsEndpoint = "/organizations/{orgAddress}/payments"
+	// POST starts (or resumes) the one-time checkout of a voting process;
+	// GET reports its payment status; DELETE cancels its open checkout
+	processesCheckoutEndpoint = "/processes/{processId}/checkout"
 	// POST /processes/{processId}/check voter eligibility/status (public CSP)
 	processesCheckEndpoint = "/processes/{processId}/check"
 	// POST /processes/{processId}/publish to publish the process (one election per question)

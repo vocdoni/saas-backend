@@ -148,6 +148,31 @@ func (ms *MongoStorage) VotingProcess(id bson.ObjectID) (*VotingProcess, error) 
 	return vp, nil
 }
 
+// VotingProcessesByIDs returns the voting processes with those ids, keyed by id, carrying only
+// their title and published flag: what a listing that names its rows needs. An id with no
+// process is simply absent from the map.
+func (ms *MongoStorage) VotingProcessesByIDs(ids []bson.ObjectID) (map[bson.ObjectID]*VotingProcess, error) {
+	found := make(map[bson.ObjectID]*VotingProcess, len(ids))
+	if len(ids) == 0 {
+		return found, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	cursor, err := ms.votingProcesses.Find(ctx, bson.M{"_id": bson.M{"$in": ids}},
+		options.Find().SetProjection(bson.M{"title": 1, "published": 1}))
+	if err != nil {
+		return nil, fmt.Errorf("failed to query voting processes by id: %w", err)
+	}
+	var processes []VotingProcess
+	if err := cursor.All(ctx, &processes); err != nil {
+		return nil, fmt.Errorf("failed to decode voting processes: %w", err)
+	}
+	for i := range processes {
+		found[processes[i].ID] = &processes[i]
+	}
+	return found, nil
+}
+
 // ProcessWithQuestions returns a voting process together with its questions ordered by
 // their Order field.
 func (ms *MongoStorage) ProcessWithQuestions(id bson.ObjectID) (*VotingProcess, []VotingProcessQuestion, error) {

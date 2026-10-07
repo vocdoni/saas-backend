@@ -34,6 +34,34 @@ func (ms *MongoStorage) ProcessPayment(processID bson.ObjectID) (*ProcessPayment
 	return payment, nil
 }
 
+// ProcessPaymentsQuery selects a page of an organization's process payments.
+type ProcessPaymentsQuery struct {
+	Statuses  []ProcessPaymentStatus
+	Ascending bool // by creation time; newest first when false
+	Page      int64
+	Limit     int64
+}
+
+// OrganizationProcessPayments returns a page of an organization's process payments in the
+// query's statuses, ordered by creation time.
+//
+// ponytail: served by the orgAddress index with an in-memory sort; add an
+// {orgAddress, createdAt} index if an organization ever holds enough payments to matter.
+func (ms *MongoStorage) OrganizationProcessPayments(
+	orgAddress common.Address, query ProcessPaymentsQuery,
+) (int64, []ProcessPayment, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 || len(query.Statuses) == 0 {
+		return 0, nil, ErrInvalidData
+	}
+	order := -1
+	if query.Ascending {
+		order = 1
+	}
+	return paginatedDocuments[ProcessPayment](ms.processPayments, query.Page, query.Limit,
+		bson.M{"orgAddress": orgAddress, "status": bson.M{"$in": query.Statuses}},
+		options.Find().SetSort(bson.D{{Key: "createdAt", Value: order}, {Key: "_id", Value: order}}))
+}
+
 // SetProcessPaymentPending stores a new open checkout session. It applies only while there is
 // no payment or a pending/failed one, and only if the stored session is still replacesSessionID
 // (the one the caller expired; empty if it saw none), so two concurrent checkouts cannot both
