@@ -27,7 +27,7 @@ require (
 require (
 	github.com/lestrrat-go/jwx/v3 v3.2.0
 	github.com/moby/moby/api v1.55.0
-	github.com/stripe/stripe-go/v82 v82.5.1
+	github.com/stripe/stripe-go/v87 v87.0.0
 	github.com/testcontainers/testcontainers-go/modules/mongodb v0.44.0
 	github.com/vocdoni/go-blindsecp256k1 v0.2.0
 	go.mongodb.org/mongo-driver/v2 v2.8.2
@@ -89,6 +89,7 @@ require (
 	github.com/pion/webrtc/v4 v4.1.2 // indirect
 	github.com/probe-lab/go-libdht v0.4.0 // indirect
 	github.com/shirou/gopsutil/v4 v4.26.6 // indirect
+	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/slok/go-http-metrics v0.13.0 // indirect
 	github.com/urfave/cli/v2 v2.27.6 // indirect
 	github.com/valyala/fastjson v1.6.10 // indirect

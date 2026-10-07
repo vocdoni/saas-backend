@@ -108,7 +108,8 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 	}
 	// quota / eligibility checks (all enforcement lives in the subscriptions package)
 	if err := a.subscriptions.CanCreateManagedOrg(integrator); err != nil {
-		if apiErr, ok := err.(errors.Error); ok {
+		var apiErr errors.Error
+		if errors.As(err, &apiErr) {
 			apiErr.Write(w)
 			return
 		}
