@@ -15,10 +15,27 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-// AuthToken method generates a new authentication token for a user,
-// anchored to a voting process. It generates a new token, secret and code from the
-// attempt number. It composes the notification challenge and pushes it to
-// the queue to be sent. It returns the token as HexBytes.
+// challengeDelivery is where and how a challenge code is sent.
+type challengeDelivery struct {
+	to    string
+	ctype notifications.ChallengeType
+	lang  string
+	org   notifications.OrganizationInfo
+}
+
+// AuthToken method generates a new authentication token for a user, anchored to
+// a voting process, and sends its challenge code.
+//
+// While the user's previous code is still usable (unverified, not expired and
+// not locked by failed attempts), it is reused rather than replaced: the new
+// token answers the same challenge, so every code the user received keeps
+// working. The code is re-sent only once the notification cooldown has passed;
+// inside it the token is returned without sending anything. Each call still
+// returns a distinct token, so whoever only knows the user's login data never
+// holds the token the user verifies.
+//
+// Once the previous code is no longer usable, a new challenge is created, still
+// subject to the cooldown since the last send. It returns the token as HexBytes.
 func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 	ctype notifications.ChallengeType, lang string,
 	orgName, orgLogo string, orgAddress common.Address,
@@ -35,8 +52,15 @@ func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 	if to == "" && ctype == "" {
 		return c.createAuthOnlyToken(anchorID, uID)
 	}
+	delivery := challengeDelivery{
+		to:    to,
+		ctype: ctype,
+		lang:  lang,
+		org:   notifications.OrganizationInfo{Address: orgAddress, Name: orgName, Logo: orgLogo},
+	}
 
-	// get last token for the user and anchor
+	// get last token for the user and anchor, and the challenge it answers
+	var challenge *db.CSPAuth
 	lastToken, err := c.Storage.LastCSPAuth(uID, anchorID)
 	if err != nil && err != db.ErrTokenNotFound {
 		log.Warnw("error getting last token",
@@ -45,9 +69,30 @@ func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 			"error", err)
 		return nil, ErrStorageFailure
 	}
-	// check if the last token was created less than the cooldown time
 	if lastToken != nil {
-		remainingTime := c.notificationCoolDownTime - time.Since(lastToken.CreatedAt)
+		if challenge, err = c.challengeOf(lastToken); err != nil && err != db.ErrTokenNotFound {
+			return nil, ErrStorageFailure
+		}
+	}
+
+	if challenge != nil && !lastToken.Verified && c.challengeUsable(challenge) {
+		token := newAuthToken()
+		if err := c.Storage.SetCSPAuthForChallenge(token, challenge); err != nil {
+			log.Warnw("error setting token for pending challenge",
+				"userID", uID,
+				"anchorID", anchorID,
+				"error", err)
+			return nil, ErrStorageFailure
+		}
+		if _, err := c.resendChallengeCode(challenge, delivery); err != nil {
+			return nil, err
+		}
+		return token, nil
+	}
+
+	// check if the last code was sent less than the cooldown time ago
+	if challenge != nil {
+		remainingTime := c.notificationCoolDownTime - time.Since(challenge.LastSent())
 		if remainingTime > 0 {
 			log.Warnw("cooldown time not reached",
 				"userID", uID,
@@ -71,35 +116,15 @@ func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 		"userID", uID,
 		"anchorID", anchorID,
 		"token", token)
-	// compose the notification challenge, advertising the OTP validity window
-	// (the challenge TTL, not the notification cooldown) as the code's expiry
-	orgInfo := notifications.OrganizationInfo{
-		Address: orgAddress,
-		Name:    orgName,
-		Logo:    orgLogo,
-	}
-	ch, err := notifications.NewNotificationChallenge(ctype, lang, uID, anchorID, to, code, orgInfo, c.notificationTTL.String())
-	if err != nil {
-		log.Warnw("error composing notification challenge",
-			"userID", uID,
-			"anchorID", anchorID,
-			"token", token,
-			"error", err)
-		return nil, ErrNotificationFailure
-	}
-	ch.ExpiresAt = time.Now().Add(c.notificationTTL)
-	// push the challenge to the queue to be sent
-	if err := c.pushChallenge(ch); err != nil {
-		log.Warnw("error pushing notification challenge",
-			"userID", uID,
-			"anchorID", anchorID,
-			"token", token,
-			"error", err)
-		return nil, ErrNotificationFailure
+	if err := c.pushChallengeCode(uID, anchorID, code, time.Now().Add(c.notificationTTL), delivery); err != nil {
+		return nil, err
 	}
 	return token, nil
 }
 
+// ResendChallenge re-sends the challenge code a pending token answers, at most
+// once per notification cooldown: inside it, it fails with
+// ErrAttemptCoolDownTime carrying the remaining milliseconds.
 func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 	ctype notifications.ChallengeType, lang string,
 	orgName, orgLogo string, orgAddress common.Address,
@@ -120,8 +145,15 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 			"error", err)
 		return ErrInvalidAuthToken
 	}
+	challenge, err := c.challengeOf(authTokenData)
+	if err != nil {
+		if err == db.ErrTokenNotFound {
+			return ErrTokenExpired
+		}
+		return ErrStorageFailure
+	}
 
-	remainingTime := c.notificationTTL - time.Since(authTokenData.CreatedAt)
+	remainingTime := c.notificationTTL - time.Since(challenge.CreatedAt)
 	// an already-verified token is always reported as such, regardless of age,
 	// so it never masquerades as merely expired
 	if authTokenData.Verified {
@@ -138,57 +170,113 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 			"token", authTokenData.Token)
 		return ErrTokenExpired
 	}
-	// reject unverified tokens without a stored challenge secret (legacy rows or
-	// auth-only tokens): regenerating a code from an empty secret would yield a
-	// guessable value, so such tokens are discarded. ErrTokenExpired prompts the
-	// client to restart the OTP flow rather than treating it as a hard failure.
-	if authTokenData.Secret == "" {
-		log.Warnw("resend requested for token without challenge secret",
+	// reject tokens whose challenge has no stored secret (legacy rows, auth-only
+	// tokens, or a challenge already solved through another token): regenerating
+	// a code from an empty secret would yield a guessable value. Reject as well a
+	// challenge locked by failed attempts, whose code can no longer be accepted.
+	// ErrTokenExpired prompts the client to restart the OTP flow rather than
+	// treating it as a hard failure.
+	if challenge.Secret == "" || challenge.Attempts >= MaxChallengeAttempts {
+		log.Warnw("resend requested for token without usable challenge",
 			"userID", authTokenData.UserID,
 			"anchorID", authTokenData.AnchorID,
-			"token", token)
+			"token", token,
+			"attempts", challenge.Attempts)
 		return ErrTokenExpired
 	}
-	// compose the notification challenge
-	orgInfo := notifications.OrganizationInfo{
-		Address: orgAddress,
-		Name:    orgName,
-		Logo:    orgLogo,
+	sent, err := c.resendChallengeCode(challenge, challengeDelivery{
+		to:    to,
+		ctype: ctype,
+		lang:  lang,
+		org:   notifications.OrganizationInfo{Address: orgAddress, Name: orgName, Logo: orgLogo},
+	})
+	if err != nil {
+		return err
 	}
-	code, err := c.regenerateTokenCode(authTokenData.Secret)
+	if !sent {
+		coolDown := max(c.notificationCoolDownTime-time.Since(challenge.LastSent()), time.Millisecond)
+		return errors.ErrAttemptCoolDownTime.WithData(map[string]any{"coolDownTime": coolDown.Milliseconds()})
+	}
+	return nil
+}
+
+// challengeOf returns the row holding the OTP challenge the given token answers,
+// which is the token itself unless it was issued for an existing challenge. It
+// returns db.ErrTokenNotFound if that row no longer exists.
+func (c *CSP) challengeOf(authToken *db.CSPAuth) (*db.CSPAuth, error) {
+	if len(authToken.ChallengeID) == 0 {
+		return authToken, nil
+	}
+	challenge, err := c.Storage.CSPAuth(authToken.ChallengeID)
+	if err != nil && err != db.ErrTokenNotFound {
+		log.Warnw("error getting challenge of token",
+			"token", authToken.Token,
+			"challenge", authToken.ChallengeID,
+			"error", err)
+	}
+	return challenge, err
+}
+
+// challengeUsable reports whether the challenge's code can still be accepted: it
+// has a secret (not yet solved), is not expired and is not locked by attempts.
+func (c *CSP) challengeUsable(challenge *db.CSPAuth) bool {
+	return challenge.Secret != "" &&
+		challenge.Attempts < MaxChallengeAttempts &&
+		time.Since(challenge.CreatedAt) < c.notificationTTL
+}
+
+// resendChallengeCode sends the code of an existing challenge again, unless it
+// was sent less than the notification cooldown ago, in which case it sends
+// nothing and returns sent=false.
+func (c *CSP) resendChallengeCode(challenge *db.CSPAuth, delivery challengeDelivery) (sent bool, err error) {
+	claimed, err := c.Storage.ClaimCSPAuthSend(challenge.Token, c.notificationCoolDownTime)
+	if err != nil {
+		log.Warnw("error recording challenge send",
+			"userID", challenge.UserID,
+			"anchorID", challenge.AnchorID,
+			"challenge", challenge.Token,
+			"error", err)
+		return false, ErrStorageFailure
+	}
+	if !claimed {
+		return false, nil
+	}
+	code, err := c.regenerateTokenCode(challenge.Secret)
 	if err != nil {
 		log.Warnw("error regenerating token code",
-			"userID", authTokenData.UserID,
-			"anchorID", authTokenData.AnchorID,
-			"token", token,
+			"userID", challenge.UserID,
+			"anchorID", challenge.AnchorID,
+			"challenge", challenge.Token,
 			"error", err)
-		return ErrChallengeCodeFailure
+		return false, ErrChallengeCodeFailure
 	}
-	ch, err := notifications.NewNotificationChallenge(
-		ctype,
-		lang,
-		authTokenData.UserID,
-		authTokenData.AnchorID,
-		to,
-		code,
-		orgInfo,
-		remainingTime.String(),
-	)
+	expiresAt := challenge.CreatedAt.Add(c.notificationTTL)
+	if err := c.pushChallengeCode(challenge.UserID, challenge.AnchorID, code, expiresAt, delivery); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// pushChallengeCode composes the notification carrying a challenge code,
+// advertising the time left until the code expires, and pushes it to the queue
+// to be sent.
+func (c *CSP) pushChallengeCode(uID, anchorID internal.HexBytes, code string,
+	expiresAt time.Time, delivery challengeDelivery,
+) error {
+	ch, err := notifications.NewNotificationChallenge(delivery.ctype, delivery.lang, uID, anchorID,
+		delivery.to, code, delivery.org, time.Until(expiresAt).Round(time.Second).String())
 	if err != nil {
 		log.Warnw("error composing notification challenge",
-			"userID", authTokenData.UserID,
-			"anchorID", authTokenData.AnchorID,
-			"token", token,
+			"userID", uID,
+			"anchorID", anchorID,
 			"error", err)
 		return ErrNotificationFailure
 	}
-	ch.ExpiresAt = time.Now().Add(c.notificationTTL)
-	// push the challenge to the queue to be sent
+	ch.ExpiresAt = expiresAt
 	if err := c.pushChallenge(ch); err != nil {
 		log.Warnw("error pushing notification challenge",
-			"userID", authTokenData.UserID,
-			"anchorID", authTokenData.AnchorID,
-			"token", token,
+			"userID", uID,
+			"anchorID", anchorID,
 			"error", err)
 		return ErrNotificationFailure
 	}
@@ -217,13 +305,21 @@ func (c *CSP) VerifyAuthToken(token internal.HexBytes, solution string) error {
 			"error", err)
 		return ErrInvalidAuthToken
 	}
-	// reject tokens without a stored challenge secret. This covers legacy rows
-	// created before per-token secrets existed, auth-only tokens, and tokens
-	// already verified (whose secret was wiped): in all cases the OTP would be
-	// derived from an empty secret and thus trivially guessable, so the token is
-	// not OTP-verifiable. ErrTokenExpired prompts the client to restart the OTP
-	// flow rather than treating it as a hard failure.
-	if authTokenData.Secret == "" {
+	challenge, err := c.challengeOf(authTokenData)
+	if err != nil {
+		if err == db.ErrTokenNotFound {
+			return ErrTokenExpired
+		}
+		return ErrStorageFailure
+	}
+	// reject tokens whose challenge has no stored secret. This covers legacy rows
+	// created before per-token secrets existed, auth-only tokens, and challenges
+	// already solved (whose secret was wiped), through this token or another one
+	// sharing the challenge: in all cases the OTP would be derived from an empty
+	// secret and thus trivially guessable, so the token is not OTP-verifiable. An
+	// already-verified token is rejected the same way. ErrTokenExpired prompts
+	// the client to restart the OTP flow rather than treating it as a hard failure.
+	if authTokenData.Verified || challenge.Secret == "" {
 		log.Warnw("verification attempted for token without challenge secret",
 			"userID", authTokenData.UserID,
 			"anchorID", authTokenData.AnchorID,
@@ -231,30 +327,31 @@ func (c *CSP) VerifyAuthToken(token internal.HexBytes, solution string) error {
 		return ErrTokenExpired
 	}
 	// reject if the OTP window has passed
-	if time.Since(authTokenData.CreatedAt) > c.notificationTTL {
+	if time.Since(challenge.CreatedAt) > c.notificationTTL {
 		log.Warnw("OTP expired",
 			"userID", authTokenData.UserID,
 			"anchorID", authTokenData.AnchorID,
 			"token", token)
 		return ErrTokenExpired
 	}
-	// reject tokens that exhausted the maximum number of attempts
-	if authTokenData.Attempts >= MaxChallengeAttempts {
+	// reject tokens whose challenge exhausted the maximum number of attempts,
+	// which are counted per challenge so issuing more tokens grants no more
+	if challenge.Attempts >= MaxChallengeAttempts {
 		log.Warnw("too many challenge attempts",
 			"userID", authTokenData.UserID,
 			"anchorID", authTokenData.AnchorID,
 			"token", token,
-			"attempts", authTokenData.Attempts)
+			"attempts", challenge.Attempts)
 		return ErrTooManyAttempts
 	}
 	// verify the solution, and if the solution is not correct, atomically record
 	// the failed attempt while enforcing the cap
-	if !c.verifySolution(authTokenData.Secret, solution) {
+	if !c.verifySolution(challenge.Secret, solution) {
 		log.Warnw("challenge code does not match",
 			"userID", authTokenData.UserID,
 			"anchorID", authTokenData.AnchorID,
 			"token", token)
-		recorded, err := c.Storage.IncrementCSPAuthAttempts(token, MaxChallengeAttempts)
+		recorded, err := c.Storage.IncrementCSPAuthAttempts(challenge.Token, MaxChallengeAttempts)
 		if err != nil {
 			// fail closed: if we cannot persist the attempt, do not allow the
 			// verification to proceed, otherwise attempt limiting could be
@@ -272,6 +369,10 @@ func (c *CSP) VerifyAuthToken(token internal.HexBytes, solution string) error {
 	}
 	// set the token as verified
 	if err := c.Storage.VerifyCSPAuth(token); err != nil {
+		if err == db.ErrChallengeConsumed {
+			// a concurrent verification solved the challenge first
+			return ErrTokenExpired
+		}
 		log.Warnw("error verifying token",
 			"userID", authTokenData.UserID,
 			"anchorID", authTokenData.AnchorID,
@@ -287,10 +388,15 @@ func (c *CSP) VerifyAuthToken(token internal.HexBytes, solution string) error {
 func (*CSP) generateToken() (bToken internal.HexBytes, secret, code string) {
 	secret = gotp.RandomSecret(16)
 	code = gotp.NewDefaultHOTP(secret).At(0)
+	return newAuthToken(), secret, code
+}
+
+// newAuthToken returns a new random bearer token.
+func newAuthToken() internal.HexBytes {
 	// a uuid.UUID is a [16]byte; slice its bytes directly to avoid the fallible
 	// MarshalBinary call (and the panic path it would require).
 	id := uuid.New()
-	return internal.HexBytes(id[:]), secret, code
+	return internal.HexBytes(id[:])
 }
 
 // regenerateTokenCode recomputes the OTP code for a stored secret (used for resend).
