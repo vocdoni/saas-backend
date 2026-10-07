@@ -36,8 +36,8 @@ type Config struct {
 	// NotificationTTL is how long a CSP OTP challenge remains valid. After
 	// this window ResendChallenge returns ErrTokenExpired and queued but
 	// undelivered notifications are dropped. Distinct from
-	// NotificationCoolDownTime (the anti-spam rate limit on new token
-	// requests). Zero uses notifications.DefaultOTPExpiry.
+	// NotificationCoolDownTime (the anti-spam minimum interval between sends
+	// of a challenge code). Zero uses notifications.DefaultOTPExpiry.
 	NotificationTTL time.Duration
 	// NotificationQueueWorkers is the number of concurrent notification senders.
 	// It bounds the maximum number of in-flight provider sends. Zero uses the

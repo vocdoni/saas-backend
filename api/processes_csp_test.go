@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
@@ -140,6 +141,18 @@ func TestProcessCSP(t *testing.T) {
 			ProcessID: openElection,
 			Payload:   hex.EncodeToString(voter.Address().Bytes()),
 		}, "processes", pid, "sign")
+
+	// asking again inside the cooldown returns another token for the same code, without error
+	again := requestAndParse[handlers.AuthResponse](
+		t, http.MethodPost, "", authReq(0), "processes", pid, "auth", "0",
+	)
+	c.Assert(again.AuthToken, qt.Not(qt.DeepEquals), step0.AuthToken)
+
+	// resending inside the cooldown is refused, then allowed once it passes
+	requestAndAssertError(errors.ErrAttemptCoolDownTime, t, http.MethodPost, "",
+		&handlers.AuthResendRequest{AuthToken: step0.AuthToken, Email: members[0].Email},
+		"processes", pid, "auth", "resend")
+	time.Sleep(cspNotificationCoolDownTime)
 
 	// resend the OTP challenge for the mid-challenge token
 	resend := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "",

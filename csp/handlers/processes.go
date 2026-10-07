@@ -89,6 +89,11 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 //	@Description	- Step 0: handlers.AuthRequest — member identification fields (name, surname,
 //	@Description	memberNumber, nationalId, birthDate, email, phone); which are required depends on the
 //	@Description	census auth configuration. If valid, a challenge is sent and a token returned.
+//	@Description	While the voter's previous code is still usable (not verified, expired or locked by
+//	@Description	failed attempts), a repeated step 0 returns a new token for that same code instead of
+//	@Description	a new code, re-sending it only once the cooldown since the last send has passed.
+//	@Description	Otherwise a new code is sent, and a request inside the cooldown fails with 40103,
+//	@Description	whose data.coolDownTime holds the milliseconds left.
 //	@Description	- Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
 //	@Description	If valid the token is marked verified and returned. Auth-only censuses may not require
 //	@Description	a challenge solution.
@@ -132,6 +137,8 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 //	@Description	Resend the challenge for an existing (non-verified) authentication token of a voting
 //	@Description	process. The request must include the auth token and a valid contact method for the
 //	@Description	census type (email/phone). The same token is returned if the challenge is queued.
+//	@Description	A code is sent at most once per cooldown: inside it the request fails with 40103,
+//	@Description	whose data.coolDownTime holds the milliseconds left.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -139,7 +146,7 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 //	@Param			request		body		handlers.AuthResendRequest	true	"Resend request with auth token and contact data"
 //	@Success		200			{object}	handlers.AuthResponse
 //	@Failure		400			{object}	errors.Error	"Malformed body, missing auth token, invalid contact, or token already verified"
-//	@Failure		401			{object}	errors.Error	"Invalid/expired token, token not belonging to the process, or contact mismatch"
+//	@Failure		401			{object}	errors.Error	"Invalid/expired/locked token, cooldown not reached, foreign token, or contact mismatch"
 //	@Failure		404			{object}	errors.Error	"Census or organization not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/auth/resend [post]

@@ -4738,6 +4738,11 @@ paths:
         - Step 0: handlers.AuthRequest — member identification fields (name, surname,
         memberNumber, nationalId, birthDate, email, phone); which are required depends on the
         census auth configuration. If valid, a challenge is sent and a token returned.
+        While the voter's previous code is still usable (not verified, expired or locked by
+        failed attempts), a repeated step 0 returns a new token for that same code instead of
+        a new code, re-sending it only once the cooldown since the last send has passed.
+        Otherwise a new code is sent, and a request inside the cooldown fails with 40103,
+        whose data.coolDownTime holds the milliseconds left.
         - Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
         If valid the token is marked verified and returned. Auth-only censuses may not require
         a challenge solution.
@@ -4792,6 +4797,8 @@ paths:
         Resend the challenge for an existing (non-verified) authentication token of a voting
         process. The request must include the auth token and a valid contact method for the
         census type (email/phone). The same token is returned if the challenge is queued.
+        A code is sent at most once per cooldown: inside it the request fails with 40103,
+        whose data.coolDownTime holds the milliseconds left.
       parameters:
       - description: Process ID
         in: path
@@ -4817,8 +4824,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Invalid/expired token, token not belonging to the process,
-            or contact mismatch
+          description: Invalid/expired/locked token, cooldown not reached, foreign
+            token, or contact mismatch
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
