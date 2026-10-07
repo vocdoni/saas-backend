@@ -1,0 +1,2 @@
+// pricing.Cents is a named int64: document it as the plain integer it is on the wire
+replace github.com/vocdoni/saas-backend/pricing.Cents integer
