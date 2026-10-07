@@ -28,6 +28,15 @@ const (
 	// MetadataKeyWalletTopUpOrg marks a session as a wallet top-up for an integrator
 	// organization (value: the org address).
 	MetadataKeyWalletTopUpOrg = "wallet_topup_org"
+	// MetadataKeyProcessTopUpCents marks a session as census headroom bought for an
+	// already-paid process, carrying the *target* amount its payment must be raised to (not
+	// the difference charged), so a replay is idempotent.
+	MetadataKeyProcessTopUpCents = "process_topup_cents"
+	// MetadataKeyProcessTopUpFromCents carries the amount a census top-up was priced from. The
+	// top-up applies only while the payment is still at it: of two top-ups opened against the
+	// same amount the first paid wins, and the other, which charged a difference from a base
+	// that no longer holds, is refunded in full.
+	MetadataKeyProcessTopUpFromCents = "process_topup_from_cents"
 	// MetadataKeyRequestedBy carries the email of the user who started the checkout.
 	MetadataKeyRequestedBy = "requested_by"
 )
@@ -207,6 +216,10 @@ func (s *Service) handleCheckoutSessionResult(event *stripeapi.Event) error {
 		return err
 	}
 	switch {
+	case session.Metadata[MetadataKeyProcessTopUpCents] != "":
+		// before the process branch: a top-up also carries the process id, but it buys
+		// census headroom for a payment that is already paid, not the payment itself
+		return s.raiseProcessPayment(session)
 	case session.Metadata[MetadataKeyProcessID] != "":
 		return s.fulfillProcessPayment(session)
 	case session.Metadata[MetadataKeyWalletTopUpOrg] != "":
@@ -283,26 +296,51 @@ func (s *Service) fulfillProcessPayment(session *stripeapi.CheckoutSession) erro
 		return fmt.Errorf("failed to mark process payment paid: %w", err)
 	}
 	if !won {
-		// either a replayed event (payment already paid — fine) or money arrived for a
-		// session the process no longer references — that one must not pass silently
+		// either a replayed event (payment already recorded — fine) or money arrived for a
+		// session the process no longer references — that one goes back
 		payment, err := s.db.ProcessPayment(processID)
 		if err != nil && !errors.Is(err, db.ErrNotFound) {
 			// transient: answering 500 has Stripe redeliver, and the replay below needs it
 			return fmt.Errorf("failed to read process payment %s: %w", rawProcessID, err)
 		}
-		if err != nil || payment.Status != db.ProcessPaymentPaid || payment.CheckoutSessionID != session.ID {
-			return fmt.Errorf("payment received for session %s, which process %s does not reference"+
-				" — needs manual reconciliation: %w", session.ID, rawProcessID, errPermanentEvent)
+		if err == nil && payment.CheckoutSessionID == session.ID {
+			switch payment.Status {
+			case db.ProcessPaymentPaid:
+				// A replay of a payment this service already recorded. Run the side effects
+				// again rather than returning: the CAS only proves the status was written, not
+				// that anything after it ran, and a crash (or a full tx queue) between the two
+				// would otherwise strand a paid process unpublished forever — Stripe's retry is
+				// the only thing that ever comes back for it. Both side effects are idempotent.
+				return s.afterProcessPaid(processID)
+			case db.ProcessPaymentRefunded:
+				return nil // a replay of a payment a draft delete already returned
+			default:
+			}
 		}
-		// A replay of a payment this service already recorded. Run the side effects
-		// again rather than returning: the CAS only proves the status was written, not
-		// that anything after it ran, and a crash (or a full tx queue) between the two
-		// would otherwise strand a paid process unpublished forever — Stripe's retry is
-		// the only thing that ever comes back for it. Both side effects are idempotent.
-		return s.afterProcessPaid(processID)
+		return s.refundSessionForNothing(processID, session, "checkout session the process does not reference")
 	}
 	log.Infow("process payment fulfilled", "processId", processID.Hex(), "sessionId", session.ID)
 	return s.afterProcessPaid(processID)
+}
+
+// refundSessionForNothing returns the money of a paid session that bought nothing: a session the
+// process does not reference (superseded by a newer checkout, or orphaned by a checkout that lost
+// the race to store it, whose expiry did not take), or a census top-up that raised nothing. what
+// names which, in the error and the log. The refund is keyed per intent like every other refund
+// of the process, so a replay of the event cannot refund twice.
+func (s *Service) refundSessionForNothing(processID bson.ObjectID, session *stripeapi.CheckoutSession, what string) error {
+	if session.PaymentIntent == nil || session.PaymentIntent.ID == "" {
+		return fmt.Errorf("%s %s of process %s bought nothing and has no payment intent to refund"+
+			" — needs manual reconciliation: %w", what, session.ID, processID.Hex(), errPermanentEvent)
+	}
+	refund, err := s.RefundProcessPayment(processID, session.PaymentIntent.ID, 0)
+	if err != nil {
+		return fmt.Errorf("failed to refund %s %s: %w", what, session.ID, err)
+	}
+	log.Warnw(what+" bought nothing and was refunded",
+		"processId", processID.Hex(), "sessionId", session.ID, "amountCents", session.AmountTotal,
+		"refundId", refund.ID)
+	return nil
 }
 
 // refuseUnderpaidSession refuses a session that paid less than the payment it settles, which

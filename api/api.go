@@ -167,12 +167,15 @@ type API struct {
 	txQueueMu  sync.Mutex
 	orgTxLocks *orgTxMutex
 	// walletLocks serializes charges against one integrator's prepaid wallet
-	walletLocks   *orgTxMutex
-	otpExpiry     time.Duration
-	otpCooldown   time.Duration
-	notifySync    bool
-	statusSyncer  StatusEnqueuer
-	electionCache *lru.Cache[string, *dvoteapi.Election]
+	walletLocks *orgTxMutex
+	// censusGrowthLocks makes the pay-per-process growth check and the census write it
+	// allows one step per organization, so parallel growth cannot pass the same check
+	censusGrowthLocks *orgTxMutex
+	otpExpiry         time.Duration
+	otpCooldown       time.Duration
+	notifySync        bool
+	statusSyncer      StatusEnqueuer
+	electionCache     *lru.Cache[string, *dvoteapi.Election]
 	// liveElectionCache holds not-yet-final legacy elections for legacyLiveElectionTTL.
 	liveElectionCache *expirable.LRU[string, *dvoteapi.Election]
 	// legacyProjectionCache holds fully-final legacy records already projected onto /processes.
@@ -268,6 +271,7 @@ func New(ctx context.Context, conf *Config) *API {
 		oauthServiceURL:       conf.OAuthServiceURL,
 		orgTxLocks:            newOrgTxMutex(),
 		walletLocks:           newOrgTxMutex(),
+		censusGrowthLocks:     newOrgTxMutex(),
 		otpExpiry:             otpExpiry,
 		otpCooldown:           otpCooldown,
 		notifySync:            conf.NotificationsSyncDelivery,
@@ -425,6 +429,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, processesCheckoutEndpoint, a.createProcessCheckoutHandler)
 		handle(r, http.MethodGet, processesCheckoutEndpoint, a.processCheckoutStatusHandler)
 		handle(r, http.MethodDelete, processesCheckoutEndpoint, a.cancelProcessCheckoutHandler)
+		handle(r, http.MethodPost, processesCensusCheckoutEndpoint, a.createProcessCensusCheckoutHandler)
 		handle(r, http.MethodGet, organizationPaymentsEndpoint, a.organizationProcessPaymentsHandler)
 		handle(r, http.MethodPut, processesQuestionsStatusEndpoint, a.setVotingProcessQuestionsStatusHandler)
 		handle(r, http.MethodPut, processesQuestionStatusEndpoint, a.setVotingProcessQuestionStatusHandler)

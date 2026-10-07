@@ -88,6 +88,10 @@ func (s *Service) HandleEvent(event *stripeapi.Event) error {
 	case stripeapi.EventTypeCheckoutSessionAsyncPaymentFailed,
 		stripeapi.EventTypeCheckoutSessionExpired:
 		return s.handleCheckoutSessionFailed(event)
+	// refund.updated covers every refund; charge.refund.updated is its legacy form, emitted only for
+	// some payment methods, still accepted for an endpoint subscribed to it (handling is idempotent)
+	case stripeapi.EventTypeRefundUpdated, stripeapi.EventTypeChargeRefundUpdated:
+		return s.handleRefundUpdated(event)
 	default:
 		log.Debugf("stripe webhook: received unhandled event type %s (id %s)", event.Type, event.ID)
 		return nil

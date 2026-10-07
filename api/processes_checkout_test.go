@@ -25,12 +25,16 @@ type fakePaymentGW struct {
 	sessions map[string]*stripe.PaymentSessionInfo
 	created  []*stripe.PaymentSessionParams
 	expired  []string
+	refunds  []fakeRefund
 	// expireErr, when set, makes ExpirePaymentSession fail (Stripe unreachable)
 	expireErr error
 	// createErr, when set, makes CreatePaymentSession fail (Stripe unreachable)
 	createErr error
 	// expireFn, when set, runs once after a session is expired: a request racing the expiry
 	expireFn func(sessionID string)
+	// createFn, when set, runs as a session is created: a request racing the checkout
+	createFn func()
+	refundFn func(processID bson.ObjectID, paymentIntentID string) (*stripe.RefundInfo, error)
 }
 
 func newFakePaymentGW() *fakePaymentGW {
@@ -38,6 +42,9 @@ func newFakePaymentGW() *fakePaymentGW {
 }
 
 func (f *fakePaymentGW) CreatePaymentSession(params *stripe.PaymentSessionParams) (*stripe.PaymentSessionInfo, error) {
+	if f.createFn != nil {
+		f.createFn()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.createErr != nil {
@@ -308,6 +315,36 @@ func TestProcessCheckoutSessionStates(t *testing.T) {
 	c.Assert(fake.expired, qt.HasLen, 0)
 }
 
+// TestProcessCheckoutExcludesDelete: checkout holds the draft's publish claim until its pending
+// payment is stored. A delete landing in between would otherwise drop the draft and leave a payable
+// payment behind for a process that no longer exists — paying it would keep the money.
+func TestProcessCheckoutExcludesDelete(t *testing.T) {
+	c := qt.New(t)
+	fake := installFakePaymentGW(t)
+	token := testCreateUser(t, "checkoutdelete123")
+	orgAddress := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	pid := newPricedVotingProcess(t, token, orgAddress)
+
+	deleteCode := 0
+	fake.createFn = func() {
+		_, deleteCode = testRequest(t, http.MethodDelete, token, nil, "processes", pid)
+	}
+	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, token,
+		&apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}, "processes", pid, "checkout")
+	c.Assert(deleteCode, qt.Equals, http.StatusConflict)
+
+	// the draft and its payment survive together, and the claim is given back
+	oid, err := bson.ObjectIDFromHex(pid)
+	c.Assert(err, qt.IsNil)
+	payment, err := testDB.ProcessPayment(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.CheckoutSessionID, qt.Equals, checkout.SessionID)
+	vp, err := testDB.VotingProcess(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(vp.Publishing.IsZero(), qt.IsTrue)
+}
+
 func TestProcessCheckoutRefusals(t *testing.T) {
 	c := qt.New(t)
 	installFakePaymentGW(t)
@@ -432,6 +469,15 @@ func TestFreePublishRefusedOverOpenCheckout(t *testing.T) {
 
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
+
+	// the cancelled checkout gives way to the €0 envelope, or the census could grow for free
+	oid, err := bson.ObjectIDFromHex(pid)
+	c.Assert(err, qt.IsNil)
+	payment, err := testDB.ProcessPayment(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPaid)
+	c.Assert(payment.AmountCents, qt.Equals, pricing.Cents(0))
+	c.Assert(payment.CheckoutSessionID, qt.Equals, "")
 }
 
 func TestOrganizationProcessPayments(t *testing.T) {

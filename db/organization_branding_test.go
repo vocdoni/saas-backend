@@ -179,6 +179,34 @@ func TestReleaseOrganizationBrandingClaim(t *testing.T) {
 	c.Assert(err, qt.ErrorIs, ErrInvalidData)
 }
 
+// TestReleaseOrganizationBranding: the release a refund runs is idempotent, so a delete retried
+// after it can run it again, and it never touches branding another process holds.
+func TestReleaseOrganizationBranding(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	c.Assert(testDB.SetOrganization(&Organization{Address: testOrgAddress}), qt.IsNil)
+	payer, other := bson.NewObjectID(), bson.NewObjectID()
+	_, err := testDB.ClaimOrganizationBranding(testOrgAddress, payer, bson.NilObjectID)
+	c.Assert(err, qt.IsNil)
+	stamped, err := testDB.SetOrganizationBrandingPaid(testOrgAddress, time.Now())
+	c.Assert(err, qt.IsNil)
+	c.Assert(stamped, qt.IsTrue)
+
+	// another process's release leaves the payer's branding alone
+	c.Assert(testDB.ReleaseOrganizationBranding(testOrgAddress, other), qt.IsNil)
+	org, err := testDB.Organization(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(org.BrandingPaidAt.IsZero(), qt.IsFalse)
+
+	for range 2 { // the second run is a retry's: a no-op
+		c.Assert(testDB.ReleaseOrganizationBranding(testOrgAddress, payer), qt.IsNil)
+		org, err = testDB.Organization(testOrgAddress)
+		c.Assert(err, qt.IsNil)
+		c.Assert(org.BrandingPaidAt.IsZero(), qt.IsTrue)
+		c.Assert(org.BrandingClaimedBy, qt.Equals, bson.NilObjectID)
+	}
+}
+
 // TestSetOrganizationKeepsBrandingState: a stale organization save does not resurrect a
 // released branding claim.
 func TestSetOrganizationKeepsBrandingState(t *testing.T) {
