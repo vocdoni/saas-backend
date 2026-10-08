@@ -1,7 +1,6 @@
 package db
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -60,17 +59,15 @@ func TestUpsertOrgMemberCensusUpdateIsAllOrNothing(t *testing.T) {
 
 	// m0 participates in censuses A and B (A inserted first, so it is processed first);
 	// m1 participates only in B, so updating m0 to m1's identity conflicts only in B
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
 	stored0, err := testDB.OrgMember(testOrgAddress, m0.ID.Hex())
 	c.Assert(err, qt.IsNil)
 	stored1, err := testDB.OrgMember(testOrgAddress, m1.ID.Hex())
 	c.Assert(err, qt.IsNil)
-	n, err := testDB.setBulkCensusParticipant(ctx, censusA,
+	n, err := testDB.setBulkCensusParticipant(censusA,
 		[]censusMember{{id: stored0.ID, hashes: calculateParticipantHashes(*censusA, *stored0)}})
 	c.Assert(err, qt.IsNil)
 	c.Assert(n, qt.Equals, int64(1))
-	n, err = testDB.setBulkCensusParticipant(ctx, censusB, []censusMember{
+	n, err = testDB.setBulkCensusParticipant(censusB, []censusMember{
 		{id: stored0.ID, hashes: calculateParticipantHashes(*censusB, *stored0)},
 		{id: stored1.ID, hashes: calculateParticipantHashes(*censusB, *stored1)},
 	})
