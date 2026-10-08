@@ -100,20 +100,29 @@ func (ms *MongoStorage) SetOrganization(org *Organization) error {
 		delete(set, "brandingPaidAt")
 		delete(set, "brandingClaimedBy")
 		delete(set, "brandingClaimedAt")
+		// the signer seed takes part in the organization key derivation, so it is written
+		// only when the document is created and never rewritten afterwards
+		delete(set, "signerSeed")
+	}
+	if org.SignerSeed != "" {
+		updateDoc["$setOnInsert"] = bson.M{"signerSeed": org.SignerSeed}
 	}
 	// set upsert to true to create the document if it doesn't exist
 	opts := options.UpdateOne().SetUpsert(true)
-	if _, err := ms.organizations.UpdateOne(ctx, bson.M{"_id": org.Address}, updateDoc, opts); err != nil {
+	res, err := ms.organizations.UpdateOne(ctx, bson.M{"_id": org.Address}, updateDoc, opts)
+	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			return ErrAlreadyExists
 		}
 		return err
 	}
-	// assing organization to the creator if it's not empty including the address
-	// in the organizations list of the user if it's not already there as admin
-	if org.Creator != "" {
+	// grant the creator the admin role only when the organization was just created. Updates
+	// must not touch memberships — and must never delete the organization on a failure, which
+	// previously let any failing update wipe an existing organization and could re-admin a
+	// creator whose role had been changed or removed.
+	if res.UpsertedCount > 0 && org.Creator != "" {
 		if err := ms.addOrganizationToUser(ctx, org.Creator, org.Address, AdminRole); err != nil {
-			// if an error occurs, delete the organization from the database
+			// roll back the freshly created organization so creation stays all-or-nothing
 			if _, delErr := ms.organizations.DeleteOne(ctx, bson.M{"_id": org.Address}); delErr != nil {
 				return errors.Join(err, delErr)
 			}
@@ -626,6 +635,34 @@ func (ms *MongoStorage) managedOrgAddresses(ctx context.Context, integratorAddr 
 		return nil, ErrInvalidData
 	}
 	filter := bson.M{"managedBy": integratorAddr}
+	opts := options.Find().SetProjection(bson.M{"_id": 1})
+	cursor, err := ms.organizations.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, fmt.Errorf("could not list managed organizations: %w", err)
+	}
+	defer func() { _ = cursor.Close(ctx) }()
+
+	var orgs []Organization
+	if err := cursor.All(ctx, &orgs); err != nil {
+		return nil, fmt.Errorf("could not decode managed organizations: %w", err)
+	}
+	addrs := make([]common.Address, len(orgs))
+	for i := range orgs {
+		addrs[i] = orgs[i].Address
+	}
+	return addrs, nil
+}
+
+// OrgAddressesManagedBy returns, out of the candidate addresses, those that belong to an
+// organization managed by owner, projected to just their _id to keep the read lightweight.
+// Used to confine an API key's reach to its own organization and the ones it manages.
+func (ms *MongoStorage) OrgAddressesManagedBy(owner common.Address, candidates []common.Address) ([]common.Address, error) {
+	if owner.Cmp(common.Address{}) == 0 || len(candidates) == 0 {
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	filter := bson.M{"_id": bson.M{"$in": candidates}, "managedBy": owner}
 	opts := options.Find().SetProjection(bson.M{"_id": 1})
 	cursor, err := ms.organizations.Find(ctx, filter, opts)
 	if err != nil {

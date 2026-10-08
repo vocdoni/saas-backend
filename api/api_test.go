@@ -557,7 +557,7 @@ func signAsOrgAndSendVocdoniTx(
 	c := qt.New(t)
 	org, err := testDB.Organization(orgAddress)
 	c.Assert(err, qt.IsNil)
-	signer, err := account.OrganizationSigner(testSecret, org.Creator, org.Nonce)
+	signer, err := account.OrganizationSigner(testSecret, org.SignerSeedValue(), org.Nonce)
 	c.Assert(err, qt.IsNil)
 	tx, _, err = testAPI.account.FundTransaction(tx, signer.Address())
 	c.Assert(err, qt.IsNil)

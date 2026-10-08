@@ -95,11 +95,17 @@ type Organization struct {
 	Creator   string           `json:"creator" bson:"creator"`
 	CreatedAt time.Time        `json:"createdAt" bson:"createdAt"`
 	Nonce     string           `json:"nonce" bson:"nonce"`
-	Size      string           `json:"size" bson:"size"`
-	Color     string           `json:"color" bson:"color"`
-	Subdomain string           `json:"subdomain" bson:"subdomain"`
-	Country   string           `json:"country" bson:"country"`
-	Timezone  string           `json:"timezone" bson:"timezone"`
+	// SignerSeed is the immutable per-organization component of the signer key derivation
+	// (secret + seed + nonce). It is set once at creation (historically to the creator's
+	// email, which migration 0028 backfills) and never rewritten — unlike Creator, which
+	// ReplaceCreatorEmail rewrites on an email change — so the derived on-chain key cannot
+	// silently change. Never exposed over the API.
+	SignerSeed string `json:"-" bson:"signerSeed,omitempty"`
+	Size       string `json:"size" bson:"size"`
+	Color      string `json:"color" bson:"color"`
+	Subdomain  string `json:"subdomain" bson:"subdomain"`
+	Country    string `json:"country" bson:"country"`
+	Timezone   string `json:"timezone" bson:"timezone"`
 	// DefaultLang is the language of the notifications sent on behalf of the organization
 	// (see apicommon.NotificationLang). Every organization has one, defaulting to "en".
 	// It can be changed but not cleared, dynamicUpdateDocument skipping zero-valued fields.
@@ -158,6 +164,16 @@ func (o *Organization) DisplayName() string {
 		return ""
 	}
 	return metaDefaultString(o.Meta["name"])
+}
+
+// SignerSeedValue returns the seed component used to derive the organization signer,
+// falling back to the creator email for rows the backfill migration has not stamped yet
+// (which is also what the seed was historically derived from).
+func (o *Organization) SignerSeedValue() string {
+	if o.SignerSeed != "" {
+		return o.SignerSeed
+	}
+	return o.Creator
 }
 
 // LogoURL returns the organization logo URL stored in its metadata,

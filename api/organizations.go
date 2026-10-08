@@ -155,6 +155,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		Address:        signer.Address(),
 		Website:        orgInfo.Website,
 		Creator:        user.Email,
+		SignerSeed:     user.Email,
 		CreatedAt:      time.Now(),
 		Nonce:          nonce,
 		Type:           db.OrganizationType(orgInfo.Type),

@@ -161,6 +161,7 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		Address:        signer.Address(),
 		Website:        req.Website,
 		Creator:        creatorEmail,
+		SignerSeed:     creatorEmail,
 		CreatedAt:      time.Now(),
 		Nonce:          nonce,
 		Type:           db.OrganizationType(req.Type),
