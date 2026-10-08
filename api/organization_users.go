@@ -207,6 +207,7 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 //	@Failure		409			{object}	errors.Error							"User already has a role in the organization"
 //	@Failure		410			{object}	errors.Error							"Invitation expired"
 //	@Failure		500			{object}	errors.Error							"Internal server error"
+//	@Failure		503			{object}	errors.Error							"Server busy, retry after the Retry-After delay"
 //	@Router			/organizations/{orgAddress}/users/accept [post]
 func (a *API) acceptOrganizationUserInvitationHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
@@ -265,7 +266,10 @@ func (a *API) acceptOrganizationUserInvitationHandler(w http.ResponseWriter, r *
 		// is verified because it is an invitation and the email is already
 		// checked in the invitation so just hash the password and create the
 		// user with the first name and last name provided
-		hPassword := internal.HexHashPassword(passwordSalt, invitationReq.User.Password)
+		hPassword, ok := hashPassword(w, r, invitationReq.User.Password)
+		if !ok {
+			return
+		}
 		dbUser = &db.User{
 			Email:     invitation.NewUserEmail,
 			Password:  hPassword,
