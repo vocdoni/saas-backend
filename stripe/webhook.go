@@ -115,11 +115,25 @@ func (s *Service) HandleEvent(event *stripeapi.Event) error {
 	}
 }
 
-// handleSubscription processes a subscription creation or update event
+// handleSubscription processes a subscription creation, update or deletion event. The event
+// payload is only trusted to identify the subscription: Stripe does not guarantee delivery
+// order and the processed-events map is empty after a restart, so a stale redelivered event
+// (e.g. an "active" update arriving after a cancellation) must never write old state. The
+// subscription is re-fetched from the Stripe API and its live state is what gets acted upon
+// — Stripe's recommended pattern for state-bearing webhook events.
 func (s *Service) handleSubscription(event *stripeapi.Event) error {
-	subscriptionInfo, err := parseSubscriptionFromEvent(event)
+	eventInfo, err := parseSubscriptionFromEvent(event)
 	if err != nil {
 		return fmt.Errorf("failed to parse subscription from event: %w", err)
+	}
+
+	liveSubscription, err := s.client.GetSubscription(eventInfo.ID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch subscription %s from stripe: %w", eventInfo.ID, err)
+	}
+	subscriptionInfo, err := newSubscriptionInfo(liveSubscription)
+	if err != nil {
+		return fmt.Errorf("failed to parse live subscription %s: %w", liveSubscription.ID, err)
 	}
 
 	// Use per-organization locking
@@ -348,7 +362,12 @@ func parseSubscriptionFromEvent(event *stripeapi.Event) (*SubscriptionInfo, erro
 	if err := json.Unmarshal(event.Data.Raw, &subscription); err != nil {
 		return nil, fmt.Errorf("failed to parse subscription from event: %v", err)
 	}
+	return newSubscriptionInfo(&subscription)
+}
 
+// newSubscriptionInfo maps a Stripe subscription onto the fields the application acts on,
+// validating that everything it needs (org address metadata, customer, plan, price) is there.
+func newSubscriptionInfo(subscription *stripeapi.Subscription) (*SubscriptionInfo, error) {
 	orgAddress := common.HexToAddress(subscription.Metadata["address"])
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return nil, fmt.Errorf("subscription missing address metadata")

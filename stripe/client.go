@@ -9,6 +9,7 @@ import (
 	stripecustomer "github.com/stripe/stripe-go/v87/customer"
 	stripeprice "github.com/stripe/stripe-go/v87/price"
 	stripeproduct "github.com/stripe/stripe-go/v87/product"
+	stripesubscription "github.com/stripe/stripe-go/v87/subscription"
 	stripewebhook "github.com/stripe/stripe-go/v87/webhook"
 	"github.com/vocdoni/saas-backend/errors"
 )
@@ -86,6 +87,19 @@ func (*Client) GetCustomerByAddress(address string) (*stripeapi.Customer, error)
 	}
 
 	return customers.Customer(), nil
+}
+
+// GetSubscription retrieves a subscription by ID straight from the Stripe API, with its
+// customer expanded. Webhook handling uses it to act on the subscription's live state
+// instead of a possibly stale or out-of-order event payload (Stripe's recommended pattern).
+func (*Client) GetSubscription(subscriptionID string) (*stripeapi.Subscription, error) {
+	params := &stripeapi.SubscriptionParams{}
+	params.AddExpand("customer")
+	subscription, err := stripesubscription.Get(subscriptionID, params)
+	if err != nil {
+		return nil, errors.ErrStripeError.Withf("failed to get subscription: %v", err)
+	}
+	return subscription, nil
 }
 
 // GetProduct retrieves a product by ID with expanded default price

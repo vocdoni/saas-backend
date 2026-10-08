@@ -2,7 +2,10 @@ package api
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,6 +119,36 @@ func mockStripeInvoicePayment(orgAddress common.Address, date time.Time) *stripe
 	}
 }
 
+// stubStripeSubscriptionBackend points the Stripe client at a stub that serves the live
+// state of the given subscriptions (by ID), plus the mock customer. The webhook handler
+// re-fetches a subscription from the API before acting, so tests register the live state
+// here and deliver events that may agree with it or be stale.
+func stubStripeSubscriptionBackend(t *testing.T, subs map[string]*stripeapi.Subscription) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/v1/subscriptions/"):
+			sub, ok := subs[strings.TrimPrefix(r.URL.Path, "/v1/subscriptions/")]
+			if !ok {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","code":"resource_missing"}}`))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(sub)
+		case strings.HasPrefix(r.URL.Path, "/v1/customers/"):
+			_ = json.NewEncoder(w).Encode(mockCustomer)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error"}}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	previous := stripeapi.GetBackend(stripeapi.APIBackend)
+	stripeapi.SetBackend(stripeapi.APIBackend, stripeapi.GetBackendWithConfig(stripeapi.APIBackend,
+		&stripeapi.BackendConfig{URL: stripeapi.String(srv.URL), MaxNetworkRetries: stripeapi.Int64(0)}))
+	t.Cleanup(func() { stripeapi.SetBackend(stripeapi.APIBackend, previous) })
+}
+
 func TestStripeWebhook(t *testing.T) {
 	c := qt.New(t)
 
@@ -124,6 +157,10 @@ func TestStripeWebhook(t *testing.T) {
 	orgAddress := testCreateOrganization(t, token)
 
 	service := newStripeService(t)
+
+	// live subscription state the webhook handler re-fetches before acting
+	liveSubs := map[string]*stripeapi.Subscription{}
+	stubStripeSubscriptionBackend(t, liveSubs)
 
 	t.Run("SubscriptionCreateUpgradeAndCancel", func(*testing.T) {
 		// Get default plan details
@@ -140,9 +177,10 @@ func TestStripeWebhook(t *testing.T) {
 		}
 
 		// Mock a new subscription
+		essential := mockStripeSubscription(orgAddress, mockEssentialPlan.ID)
+		liveSubs[essential.ID] = essential
 		{
-			s := mockStripeSubscription(orgAddress, mockEssentialPlan.ID)
-			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionCreated, s))
+			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionCreated, essential))
 			c.Assert(err, qt.IsNil)
 		}
 
@@ -154,8 +192,9 @@ func TestStripeWebhook(t *testing.T) {
 			c.Assert(org.Subscription.PlanID, qt.Equals, mockEssentialPlan.ID)
 		}
 
-		// Mock a subscription upgrade
+		// Mock a subscription upgrade: a new subscription replaces the essential one
 		premium := mockStripeSubscription(orgAddress, mockPremiumPlan.ID)
+		liveSubs[premium.ID] = premium
 		{
 			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionUpdated, premium))
 			c.Assert(err, qt.IsNil)
@@ -169,34 +208,43 @@ func TestStripeWebhook(t *testing.T) {
 			c.Assert(org.Subscription.PlanID, qt.Equals, mockPremiumPlan.ID)
 		}
 
-		// The cancellation of a subscription the organization is no longer on (e.g. replaced by a
-		// plan change, delivered late) must not downgrade it
+		// The replaced (essential) subscription's late cancellation must be ignored:
+		// it is no longer the subscription the organization is on
+		essential.Status = stripeapi.SubscriptionStatusCanceled
+		essential.CanceledAt = time.Now().Unix()
 		{
-			s := mockStripeSubscription(orgAddress, mockEssentialPlan.ID)
-			s.Status = stripeapi.SubscriptionStatusCanceled
-			s.CanceledAt = time.Now().Unix()
-			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionDeleted, s))
+			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionDeleted, essential))
 			c.Assert(err, qt.IsNil)
 			org, err := testDB.Organization(orgAddress)
 			c.Assert(err, qt.IsNil)
 			c.Assert(org.Subscription.PlanID, qt.Equals, mockPremiumPlan.ID)
 		}
 
-		// Cancel subscription
+		// A stale redelivered "active" update must not resurrect the paid plan once the
+		// subscription is canceled in Stripe: the handler acts on the live (canceled) state
+		stale := *premium
+		stale.Status = stripeapi.SubscriptionStatusActive
+		premium.Status = stripeapi.SubscriptionStatusCanceled
+		premium.CanceledAt = time.Now().Unix()
 		{
-			s := mockStripeSubscription(orgAddress, mockPremiumPlan.ID)
-			s.ID = premium.ID
-			s.Status = stripeapi.SubscriptionStatusCanceled
-			s.CanceledAt = time.Now().Unix()
-			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionDeleted, s))
+			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionUpdated, &stale))
 			c.Assert(err, qt.IsNil)
 		}
 
-		// Get organization from database again, should have changed plan
+		// Get organization from database again, should be back on the default plan
 		{
 			org, err := testDB.Organization(orgAddress)
 			c.Assert(err, qt.IsNil)
 			c.Assert(org.Subscription.Active, qt.IsTrue)
+			c.Assert(org.Subscription.PlanID, qt.Equals, defaultPlan.ID)
+		}
+
+		// The actual deletion event arriving afterwards is an idempotent no-op
+		{
+			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionDeleted, premium))
+			c.Assert(err, qt.IsNil)
+			org, err := testDB.Organization(orgAddress)
+			c.Assert(err, qt.IsNil)
 			c.Assert(org.Subscription.PlanID, qt.Equals, defaultPlan.ID)
 		}
 	})
