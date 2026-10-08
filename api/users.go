@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"go.vocdoni.io/dvote/log"
+	"go.vocdoni.io/dvote/util"
 )
 
 // registerHandler godoc
@@ -437,7 +440,9 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 // updateUserInfoHandler godoc
 //
 //	@Summary		Update user information
-//	@Description	Update information for the authenticated user
+//	@Description	Update information for the authenticated user. Changing the email does not take
+//	@Description	effect immediately: a verification code is sent to the requested address and the
+//	@Description	email is switched only once the code is confirmed via POST /users/me/email/verify.
 //	@Tags			users
 //	@Accept			json
 //	@Produce		json
@@ -446,6 +451,7 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 //	@Success		200		{object}	apicommon.LoginResponse
 //	@Failure		400		{object}	errors.Error	"Invalid input data"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		409		{object}	errors.Error	"Email already in use"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/users/me [put]
 func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
@@ -459,73 +465,222 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrMalformedBody.Write(w)
 		return
 	}
-	// create a flag to check if the user information has changed and needs to
-	// be updated and store the current email to check if it has changed
-	// specifically
-	updateUser := false
-	currentEmail := user.Email
-	// check the email is correct format if it is not empty
-	if userInfo.Email != "" {
+	// an email change must prove ownership of the new mailbox: it is recorded as a pending
+	// email and only applied once the code sent to it is confirmed
+	pendingEmail := ""
+	if userInfo.Email != "" && userInfo.Email != user.Email {
 		if !internal.ValidEmail(userInfo.Email) {
 			errors.ErrEmailMalformed.Write(w)
 			return
 		}
 		// an organization's signing key is derived from its creator's email (account.OrganizationSigner),
 		// so changing that email would leave the organization unable to sign for its on-chain account
-		if userInfo.Email != currentEmail {
-			isCreator, err := a.db.IsOrganizationCreator(currentEmail)
-			if err != nil {
-				errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-				return
-			}
-			if isCreator {
-				errors.ErrNotSupported.Withf("the creator of an organization cannot change their email").Write(w)
-				return
-			}
+		isCreator, err := a.db.IsOrganizationCreator(user.Email)
+		if err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
 		}
-		// update the user email and set the flag to true to update the user
-		// info
-		user.Email = userInfo.Email
-		updateUser = true
+		if isCreator {
+			errors.ErrNotSupported.Withf("the creator of an organization cannot change their email").Write(w)
+			return
+		}
+		// refuse an address already bound to another account (the unique index would reject
+		// the switch later anyway; failing now gives the owner a clear answer)
+		if _, err := a.db.UserByEmail(userInfo.Email); err == nil {
+			errors.ErrDuplicateConflict.With("email already in use").Write(w)
+			return
+		} else if err != db.ErrNotFound {
+			errors.ErrGenericInternalServerError.Write(w)
+			return
+		}
+		pendingEmail = userInfo.Email
+	} else if userInfo.Email != "" && !internal.ValidEmail(userInfo.Email) {
+		errors.ErrEmailMalformed.Write(w)
+		return
 	}
-	// check the first name is not empty
-	if userInfo.FirstName != "" {
-		// update the user first name and set the flag to true to update the
-		// user info
-		user.FirstName = userInfo.FirstName
-		updateUser = true
-	}
-	// check the last name is not empty
-	if userInfo.LastName != "" {
-		// update the user last name and set the flag to true to update the
-		// user info
-		user.LastName = userInfo.LastName
-		updateUser = true
-	}
-	// update the user information if needed
-	if updateUser {
-		if _, err := a.db.SetUser(user); err != nil {
+	// update the profile fields with a field-specific write: the user snapshot in the context
+	// was loaded at authentication time, and writing it back whole could restore memberships
+	// an admin revoked (or a password that changed) while this request was in flight
+	if userInfo.FirstName != "" || userInfo.LastName != "" {
+		if err := a.db.UpdateUserProfile(user.ID, userInfo.FirstName, userInfo.LastName); err != nil {
 			log.Warnw("could not update user", "error", err)
 			errors.ErrGenericInternalServerError.Write(w)
 			return
 		}
-		// if user email has changed, update the creator email in the
-		// organizations where the user is creator
-		if user.Email != currentEmail {
-			if err := a.db.ReplaceCreatorEmail(currentEmail, user.Email); err != nil {
-				// revert the user update if the creator email update fails
-				user.Email = currentEmail
-				if _, err := a.db.SetUser(user); err != nil {
-					log.Warnw("could not revert user update", "error", err)
-				}
-				// return an error
-				errors.ErrGenericInternalServerError.Write(w)
-				return
-			}
+	}
+	// store the pending email change and send the verification code to the new address
+	if pendingEmail != "" {
+		if err := a.sendEmailUpdateCode(r.Context(), user, pendingEmail); err != nil {
+			log.Warnw("could not send email update code", "error", err)
+			errors.ErrGenericInternalServerError.Write(w)
+			return
 		}
 	}
-	// generate a new token bound to the user's ID and current session version
+	// the identity (user ID) is unchanged, so the current token stays valid; return a fresh
+	// one anyway to keep the previous response contract
 	res, err := a.buildLoginResponse(user)
+	if err != nil {
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+	apicommon.HTTPWriteJSON(w, res)
+}
+
+// sendEmailUpdateCode generates an email-update verification code for the user, stores it
+// (sealed to the pending address) and mails it to that address. The user's email is only
+// switched once the code is confirmed by updateUserEmailVerifyHandler.
+func (a *API) sendEmailUpdateCode(ctx context.Context, user *db.User, pendingEmail string) error {
+	// generate the code only when the mail service is available, mirroring
+	// generateVerificationCodeAndLink's mocked verification for test setups
+	code := ""
+	if a.mail != nil {
+		code = util.RandomHex(apicommon.VerificationCodeLength)
+	}
+	// seal the code to the pending address, so it only opens for that exact email
+	sealedCode, err := internal.SealToken(code, pendingEmail, a.secret)
+	if err != nil {
+		return fmt.Errorf("could not seal email update code: %w", err)
+	}
+	expiration := time.Now().Add(a.otpExpiry)
+	if err := a.db.SetVerificationCode(&db.UserVerification{
+		UserID:       user.ID,
+		SealedCode:   sealedCode,
+		Type:         db.CodeTypeUpdateEmail,
+		PendingEmail: pendingEmail,
+		Expiration:   expiration,
+	}); err != nil {
+		return fmt.Errorf("could not store email update code: %w", err)
+	}
+	link, err := a.buildWebAppURL(mailtemplates.VerifyAccountNotification.WebAppURI, map[string]any{
+		"email": pendingEmail,
+		"code":  code,
+	})
+	if err != nil {
+		return fmt.Errorf("could not build email update link: %w", err)
+	}
+	if err := a.sendMail(ctx, nil, pendingEmail, mailtemplates.VerifyAccountNotification,
+		struct {
+			Code string
+			Link string
+		}{code, link},
+		expiration,
+	); err != nil {
+		return fmt.Errorf("could not send email update code: %w", err)
+	}
+	return nil
+}
+
+// updateUserEmailVerifyHandler godoc
+//
+//	@Summary		Confirm a pending email change
+//	@Description	Confirm the email change requested via PUT /users/me with the code sent to the
+//	@Description	new address. On success the account email is switched, every existing session is
+//	@Description	revoked and a fresh token is returned.
+//	@Tags			users
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			request	body		apicommon.UserVerification	true	"Verification code"
+//	@Success		200		{object}	apicommon.LoginResponse
+//	@Failure		400		{object}	errors.Error	"Invalid input data or max attempts reached"
+//	@Failure		401		{object}	errors.Error	"Unauthorized or code mismatch"
+//	@Failure		409		{object}	errors.Error	"Email already in use"
+//	@Failure		410		{object}	errors.Error	"Verification code expired"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Router			/users/me/email/verify [post]
+func (a *API) updateUserEmailVerifyHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	verification := &apicommon.UserVerification{}
+	if err := json.NewDecoder(r.Body).Decode(verification); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	if a.mail != nil && verification.Code == "" {
+		errors.ErrInvalidUserData.With("no verification code provided").Write(w)
+		return
+	}
+	// load the pending email change
+	userVerification, err := a.db.UserVerificationCode(user, db.CodeTypeUpdateEmail)
+	if err != nil {
+		if err != db.ErrNotFound {
+			log.Warnw("could not get email update code", "error", err)
+		}
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	// check the verification code is not expired
+	if userVerification.Expiration.Before(time.Now()) {
+		errors.ErrVerificationCodeExpired.Write(w)
+		return
+	}
+	// bound brute-force: atomically spend one verification attempt, failing closed once the
+	// per-code cap is reached (same guard as account verification and password reset)
+	recorded, err := a.db.VerificationCodeCheckAndAddAttempt(user, db.CodeTypeUpdateEmail, apicommon.VerificationCodeMaxAttempts)
+	if err != nil {
+		if err != db.ErrNotFound {
+			log.Warnw("could not record email update attempt", "error", err)
+		}
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	if !recorded {
+		errors.ErrVerificationMaxAttempts.Write(w)
+		return
+	}
+	// check the verification code is correct (sealed to the pending address)
+	code, err := internal.OpenToken(userVerification.SealedCode, userVerification.PendingEmail, a.secret)
+	if err != nil {
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+	if code != verification.Code {
+		errors.ErrUnauthorized.With("code mismatch").Write(w)
+		return
+	}
+	// re-check the creator guard: the user may have created an organization after requesting
+	// the change, and the organization signing key is derived from its creator's email
+	isCreator, err := a.db.IsOrganizationCreator(user.Email)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if isCreator {
+		errors.ErrNotSupported.Withf("the creator of an organization cannot change their email").Write(w)
+		return
+	}
+	// consume the exact code before switching the email so it can never be redeemed twice,
+	// even by concurrent requests: exactly one delete wins
+	if err := a.db.ConsumeVerificationCode(user, db.CodeTypeUpdateEmail, userVerification.SealedCode); err != nil {
+		if err != db.ErrNotFound {
+			log.Warnw("could not consume email update code", "error", err)
+			errors.ErrGenericInternalServerError.Write(w)
+			return
+		}
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	// switch the email; the same atomic update bumps the session version, revoking every
+	// outstanding session (they were bound to an account reachable through the old address)
+	if err := a.db.UpdateUserEmail(user.ID, userVerification.PendingEmail); err != nil {
+		if err == db.ErrAlreadyExists {
+			errors.ErrDuplicateConflict.With("email already in use").Write(w)
+			return
+		}
+		log.Warnw("could not update user email", "error", err)
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+	// reload the user to mint a token for the new session version
+	updated, err := a.db.User(user.ID)
+	if err != nil {
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+	res, err := a.buildLoginResponse(updated)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Write(w)
 		return

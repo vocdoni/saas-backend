@@ -11,8 +11,10 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 )
 
-// TestUpdateUserInfo covers the updateUserInfoHandler (PUT /users/me): updating
-// names and email, malformed-email rejection, and the unauthenticated case.
+// TestUpdateUserInfo covers the updateUserInfoHandler (PUT /users/me) and the
+// updateUserEmailVerifyHandler (POST /users/me/email/verify): updating names, the
+// pending-email confirmation flow (including session revocation and single-use codes),
+// malformed-email rejection, and the unauthenticated case.
 func TestUpdateUserInfo(t *testing.T) {
 	token := testCreateUser(t, testPass)
 	c := qt.New(t)
@@ -31,17 +33,40 @@ func TestUpdateUserInfo(t *testing.T) {
 	c.Assert(me.FirstName, qt.Equals, "Renamed")
 	c.Assert(me.LastName, qt.Equals, "Person")
 
-	// Update the email; the JWT subject is the email, so a new token is issued.
+	// Requesting an email change does not switch the email: a code is sent to the new
+	// address and the change stays pending until that code is confirmed.
 	newEmail := fmt.Sprintf("updated-%d@test.com", internal.RandomInt(100000000000))
 	res2 := requestAndParse[apicommon.LoginResponse](t, http.MethodPut, res.Token,
 		&apicommon.UserInfo{Email: newEmail}, usersMeEndpoint)
 	c.Assert(res2.Token, qt.Not(qt.Equals), "")
 
 	me2 := requestAndParse[apicommon.UserInfo](t, http.MethodGet, res2.Token, nil, usersMeEndpoint)
-	c.Assert(me2.Email, qt.Equals, newEmail)
+	c.Assert(me2.Email, qt.Equals, me.Email, qt.Commentf("email must not change before confirmation"))
+
+	// The verification code is delivered to the NEW address, proving mailbox ownership.
+	mailBody := waitForEmail(t, newEmail)
+	mailCode := verificationCodeRgx.FindStringSubmatch(mailBody)
+	c.Assert(len(mailCode) > 1, qt.IsTrue)
+
+	// A wrong code must not switch the email.
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, res2.Token,
+		&apicommon.UserVerification{Code: mailCode[1] + "x"}, usersMeEmailVerifyEndpoint)
+
+	// Confirming the code switches the email and returns a fresh token.
+	res3 := requestAndParse[apicommon.LoginResponse](t, http.MethodPost, res2.Token,
+		&apicommon.UserVerification{Code: mailCode[1]}, usersMeEmailVerifyEndpoint)
+	me3 := requestAndParse[apicommon.UserInfo](t, http.MethodGet, res3.Token, nil, usersMeEndpoint)
+	c.Assert(me3.Email, qt.Equals, newEmail)
+
+	// The email switch revokes every pre-change session.
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodGet, res2.Token, nil, usersMeEndpoint)
+
+	// The consumed code cannot be redeemed again.
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, res3.Token,
+		&apicommon.UserVerification{Code: mailCode[1]}, usersMeEmailVerifyEndpoint)
 
 	// A malformed email must be rejected with 400.
-	requestAndAssertError(errors.ErrEmailMalformed, t, http.MethodPut, res2.Token,
+	requestAndAssertError(errors.ErrEmailMalformed, t, http.MethodPut, res3.Token,
 		&apicommon.UserInfo{Email: "not-an-email"}, usersMeEndpoint)
 
 	// Without a token the endpoint must reject with 401.
@@ -71,10 +96,16 @@ func TestUpdateUserPassword(t *testing.T) {
 		&apicommon.UserPasswordUpdate{OldPassword: "wrongpassword", NewPassword: "newpassword123"},
 		usersPasswordEndpoint)
 
-	// Success runs last, as it changes the stored password.
-	requestAndAssertCode(http.StatusOK, t, http.MethodPut, token,
+	// Success runs last, as it changes the stored password. The response carries a
+	// fresh token for the caller, since the change revokes every existing session.
+	res := requestAndParse[apicommon.LoginResponse](t, http.MethodPut, token,
 		&apicommon.UserPasswordUpdate{OldPassword: testPass, NewPassword: "newpassword123"},
 		usersPasswordEndpoint)
+	c.Assert(res.Token, qt.Not(qt.Equals), "")
+
+	// The pre-change token is revoked; the returned one works.
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodGet, token, nil, usersMeEndpoint)
+	requestAndAssertCode(http.StatusOK, t, http.MethodGet, res.Token, nil, usersMeEndpoint)
 
 	// Without a token the endpoint must reject with 401.
 	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPut, "",

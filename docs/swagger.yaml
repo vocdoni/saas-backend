@@ -6642,7 +6642,10 @@ paths:
     put:
       consumes:
       - application/json
-      description: Update information for the authenticated user
+      description: |-
+        Update information for the authenticated user. Changing the email does not take
+        effect immediately: a verification code is sent to the requested address and the
+        email is switched only once the code is confirmed via POST /users/me/email/verify.
       parameters:
       - description: User information to update
         in: body
@@ -6665,6 +6668,10 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
+        "409":
+          description: Email already in use
+          schema:
+            $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
           schema:
@@ -6672,6 +6679,53 @@ paths:
       security:
       - BearerAuth: []
       summary: Update user information
+      tags:
+      - users
+  /users/me/email/verify:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Confirm the email change requested via PUT /users/me with the code sent to the
+        new address. On success the account email is switched, every existing session is
+        revoked and a fresh token is returned.
+      parameters:
+      - description: Verification code
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.UserVerification'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.LoginResponse'
+        "400":
+          description: Invalid input data or max attempts reached
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized or code mismatch
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Email already in use
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "410":
+          description: Verification code expired
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Confirm a pending email change
       tags:
       - users
   /users/password:
