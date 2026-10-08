@@ -1,13 +1,13 @@
 package account
 
 import (
-	"context"
 	"fmt"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
 	dvoteapi "go.vocdoni.io/dvote/api"
+	"go.vocdoni.io/dvote/apiclient"
 	dvotetypes "go.vocdoni.io/dvote/types"
 )
 
@@ -84,12 +84,24 @@ func (a *Account) AccountNonce(org common.Address) (uint32, error) {
 }
 
 // WaitTxMined blocks (up to 40s) until the transaction with the given hash is mined,
-// used to confirm a batch item that was accepted by the mempool.
+// used to confirm a batch item that was accepted by the mempool. It polls every
+// TxPollInterval and, like apiclient's WaitUntilTxIsMined, waits half an interval more once
+// the tx is indexed so its block is committed before the caller builds on it.
 func (a *Account) WaitTxMined(hash internal.HexBytes) error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*40)
-	defer cancel()
-	if _, err := a.client.WaitUntilTxIsMined(ctx, dvotetypes.HexBytes(hash)); err != nil {
-		return fmt.Errorf("could not wait for tx to be mined: %w", err)
+	interval := a.TxPollInterval
+	if interval <= 0 {
+		interval = apiclient.PollInterval
 	}
-	return nil
+	timeout := time.After(40 * time.Second)
+	for {
+		if _, err := a.client.TransactionReference(dvotetypes.HexBytes(hash)); err == nil {
+			time.Sleep(interval / 2)
+			return nil
+		}
+		select {
+		case <-time.After(interval):
+		case <-timeout:
+			return fmt.Errorf("could not wait for tx to be mined: tx %s not mined after 40s", hash.String())
+		}
+	}
 }

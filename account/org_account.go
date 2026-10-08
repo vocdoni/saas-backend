@@ -1,10 +1,9 @@
 package account
 
 import (
-	"context"
 	"fmt"
-	"time"
 
+	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/proto/build/go/models"
 )
@@ -45,10 +44,8 @@ func (a *Account) CreateOrgAccount(orgSigner *ethereum.SignKeys, name, infoURI s
 	if err != nil {
 		return fmt.Errorf("could not submit create account tx: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*40)
-	defer cancel()
-	if _, err := a.client.WaitUntilTxIsMined(ctx, hash); err != nil {
-		return fmt.Errorf("could not wait for create account tx to be mined: %w", err)
+	if err := a.WaitTxMined(internal.HexBytes(hash)); err != nil {
+		return fmt.Errorf("create account tx: %w", err)
 	}
 	return nil
 }
