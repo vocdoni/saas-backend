@@ -26,8 +26,9 @@ var MetadataUpdateStaleAfter = PendingMetadataFinalAfter + time.Minute
 
 // ClaimVotingProcessMetadataUpdate atomically marks a published process as having a metadata
 // update in flight, so a second update cannot be enqueued until every tx of the first one is final
-// and the claim is cleared, which keeps at most one pending version per question. It returns true when this call won the claim. A claim older than MetadataUpdateStaleAfter is
-// reclaimable, so a crash mid-job cannot block edits forever.
+// and the claim is cleared, which keeps at most one pending version per question. It returns true
+// when this call won the claim. A claim older than MetadataUpdateStaleAfter is reclaimable, so a
+// crash mid-job cannot block edits forever.
 func (ms *MongoStorage) ClaimVotingProcessMetadataUpdate(id bson.ObjectID) (bool, error) {
 	if id == bson.NilObjectID {
 		return false, ErrInvalidData

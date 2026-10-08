@@ -246,17 +246,11 @@ func TestVotingProcessMetadataPublishedRejects(t *testing.T) {
 			comment := qt.Commentf("question %d", i)
 			c.Assert(q.Title, qt.DeepEquals, published.Questions[i].Title, comment)
 			c.Assert(q.MetadataURL, qt.Not(qt.Equals), published.Questions[i].MetadataURL, comment)
-			var doc struct {
-				Meta struct {
-					Process struct {
-						Title       db.MultiLangString `json:"title"`
-						Description db.MultiLangString `json:"description"`
-					} `json:"process"`
-				} `json:"meta"`
-			}
+			var doc dvoteapi.ElectionMetadata
 			c.Assert(json.Unmarshal(servedMetadata(t, q.MetadataURL), &doc), qt.IsNil, comment)
-			c.Assert(doc.Meta.Process.Title, qt.DeepEquals, titleOnly.Title, comment)
-			c.Assert(doc.Meta.Process.Description, qt.DeepEquals, titleOnly.Description, comment)
+			docMeta, ok := doc.Meta.(map[string]any)
+			c.Assert(ok, qt.IsTrue, comment)
+			c.Assert(docMeta["process"], qt.DeepEquals, metaProcessOf(titleOnly.Title, titleOnly.Description), comment)
 		}
 		meta = titleOnly
 	})
