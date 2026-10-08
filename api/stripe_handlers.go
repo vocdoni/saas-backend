@@ -214,7 +214,7 @@ func (h *StripeHandlers) CreateSubscriptionPortalSession(w http.ResponseWriter, 
 		return
 	}
 
-	session, err := h.service.CreatePortalSession(org.Creator)
+	session, err := h.service.CreatePortalSession(org)
 	if err != nil {
 		errors.ErrStripeError.Withf("cannot create customer portal session").WithErr(err).Write(w)
 		return

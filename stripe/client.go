@@ -47,18 +47,28 @@ func (*Client) GetCustomer(customerID string) (*stripeapi.Customer, error) {
 	return customer, nil
 }
 
-// GetCustomerByEmail retrieves a customer by email address
+// GetCustomerByEmail retrieves the customer with the given email address. Emails are not
+// unique across Stripe customers, so an ambiguous match is an error: acting on "the first"
+// customer of an email could hand a caller another account that happens to share it.
 func (*Client) GetCustomerByEmail(email string) (*stripeapi.Customer, error) {
 	params := &stripeapi.CustomerListParams{
 		Email: new(email),
 	}
+	params.Filters.AddFilter("limit", "", "2")
 
 	customers := stripecustomer.List(params)
 	if !customers.Next() {
+		if err := customers.Err(); err != nil {
+			return nil, errors.ErrStripeError.Withf("failed to list customers: %v", err)
+		}
 		return nil, errors.ErrStripeError.Withf("customer with email %s not found", email)
 	}
+	customer := customers.Customer()
+	if customers.Next() {
+		return nil, errors.ErrStripeError.Withf("more than one customer matches email %s", email)
+	}
 
-	return customers.Customer(), nil
+	return customer, nil
 }
 
 // UpdateCustomerMetadata updates a customer's metadata
@@ -270,15 +280,10 @@ func checkoutSessionStatus(session *stripeapi.CheckoutSession) *CheckoutSessionS
 	return status
 }
 
-// CreatePortalSession creates a billing portal session for a customer
-func (c *Client) CreatePortalSession(customerEmail string) (*stripeapi.BillingPortalSession, error) {
-	customer, err := c.GetCustomerByEmail(customerEmail)
-	if err != nil {
-		return nil, err
-	}
-
+// CreatePortalSession creates a billing portal session for the given customer ID
+func (*Client) CreatePortalSession(customerID string) (*stripeapi.BillingPortalSession, error) {
 	params := &stripeapi.BillingPortalSessionParams{
-		Customer: &customer.ID,
+		Customer: new(customerID),
 	}
 
 	session, err := stripeportalsession.New(params)
