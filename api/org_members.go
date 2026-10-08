@@ -310,19 +310,21 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 		var lastProgress *db.BulkOrgMembersJob
 		for p := range progressChan {
 			lastProgress = p
-			// Persist progress live so GET /jobs reflects it; stamp the final count + errors +
-			// completedAt only at the end.
-			if p.Progress == 100 {
-				if err := a.db.CompleteJob(jobID.String(), p.Added, p.ErrorsAsStrings()); err != nil {
-					log.Warnw("failed to persist job completion", "error", err, "jobId", jobID.String())
-				}
-			} else if err := a.db.UpdateJobProgress(jobID.String(), p.Added); err != nil {
+			// Persist progress live so GET /jobs reflects it.
+			if err := a.db.UpdateJobProgress(jobID.String(), p.Added); err != nil {
 				log.Warnw("failed to persist job progress", "error", err, "jobId", jobID.String())
+			}
+		}
+		// The channel closes once every batch ran, so the job ends here even when some rows
+		// failed to insert and Progress never reached 100.
+		if lastProgress != nil {
+			if err := a.db.CompleteJob(jobID.String(), lastProgress.Added, lastProgress.ErrorsAsStrings()); err != nil {
+				log.Warnw("failed to persist job completion", "error", err, "jobId", jobID.String())
 			}
 		}
 
 		// The members that were actually inserted join the auto group's censuses. Discarding the
-		// result is deliberate: the import job has already completed above, and CompleteJob $sets
+		// result is deliberate: the import job has already been completed, and CompleteJob $sets
 		// errors wholesale, so a second write would clobber the import errors rather than merge
 		// the propagation ones — a failure here is logged, not reported. #628 tracks surfacing it.
 		if lastProgress != nil {
@@ -432,7 +434,7 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 	// upsert the member in the database
 	memberID, created, err := a.db.UpsertOrgMemberAndCensusParticipants(org, update, passwordSalt)
 	switch {
-	case errors.Is(err, db.ErrUpdateWouldCreateDuplicates):
+	case errors.Is(err, db.ErrUpdateWouldCreateDuplicates), errors.Is(err, db.ErrInvalidData):
 		errors.ErrInvalidData.WithErr(err).Write(w)
 		return
 	case err != nil:
