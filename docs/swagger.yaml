@@ -1880,6 +1880,10 @@ definitions:
         $ref: '#/definitions/db.MultiLangString'
       metadata:
         additionalProperties: {}
+        description: |-
+          Metadata is the question's free-form display info, published in its election document:
+          each entry of metadata.choices ({value, description, image, ...}) becomes the meta of the
+          choice with that value (without the value), and every other key the question's meta.
         type: object
       secretUntilTheEnd:
         type: boolean
@@ -5826,9 +5830,10 @@ paths:
         GET /jobs/{jobId}. Idempotent once published.
         409 (40172) means the stored questions do not match the process and the draft has to be
         saved again before it can be published.
-        The parent's document also commits, in meta.mediaHashes, the SHA-256 of every image (the
-        header) by content, read from this backend's storage or fetched from its external URL;
-        the video stream is never hashed, only its URL is committed. 422 (40179) means an image
+        Every document also commits, in meta.mediaHashes, the SHA-256 of its images by content
+        (the parent's header; each question's choice images, from metadata.choices[].image),
+        read from this backend's storage or fetched from their external URL; the video
+        stream is never hashed, only its URL is committed. 422 (40179) means an image
         could not be fetched or hashed; the message names its URL.
         402 (40178) means the process is priced and unpaid — the current quote travels in the
         error data; start checkout via POST /processes/{processId}/checkout. For a managed

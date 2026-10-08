@@ -164,6 +164,56 @@ func TestProcessMetadataMediaHashes(t *testing.T) {
 			map[string]any{headerURL: hex.EncodeToString(sum[:])})
 	})
 
+	t.Run("choice images", func(t *testing.T) {
+		c := qt.New(t)
+		local := testPNG(t)
+		localURL := testUploadImage(t, token, local)
+		external := testPNG(t)
+		externalURL := testImageServer(t, external).URL + "/image.png"
+		localSum, externalSum := sha256.Sum256(local), sha256.Sum256(external)
+
+		req := mediaProcessRequest(orgAddress, members, "", streamURI)
+		req.Questions[0].Metadata = map[string]any{"choices": []any{
+			map[string]any{"value": 0, "image": localURL},
+			// the same url twice is hashed once
+			map[string]any{"value": 1, "image": map[string]any{"default": externalURL, "thumbnail": localURL}},
+		}}
+		pid, _ := publishProcessRequest(t, token, req)
+		got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+
+		parent, code := testRequest(t, http.MethodGet, "", nil, "storage", path.Base(got.MetadataURL))
+		c.Assert(code, qt.Equals, http.StatusOK)
+		var parentDoc dvoteapi.ElectionMetadata
+		c.Assert(json.Unmarshal(parent, &parentDoc), qt.IsNil)
+		parentMeta, ok := parentDoc.Meta.(map[string]any)
+		c.Assert(ok, qt.IsTrue)
+		_, hasHashes := parentMeta["mediaHashes"]
+		c.Assert(hasHashes, qt.IsFalse) // no header; choice images belong to the question document
+
+		doc, code := testRequest(t, http.MethodGet, "", nil, "storage", path.Base(got.Questions[0].MetadataURL))
+		c.Assert(code, qt.Equals, http.StatusOK)
+		var metadata dvoteapi.ElectionMetadata
+		c.Assert(json.Unmarshal(doc, &metadata), qt.IsNil)
+		c.Assert(metadata.Meta, qt.DeepEquals, map[string]any{"mediaHashes": map[string]any{
+			localURL:    hex.EncodeToString(localSum[:]),
+			externalURL: hex.EncodeToString(externalSum[:]),
+		}})
+		c.Assert(metadata.Questions[0].Choices[0].Meta, qt.DeepEquals, map[string]any{"image": localURL})
+		docSum := sha256.Sum256(doc)
+		c.Assert([]byte(got.Questions[0].MetadataHash), qt.DeepEquals, docSum[:])
+	})
+
+	t.Run("unreachable choice image refuses the publish", func(t *testing.T) {
+		req := mediaProcessRequest(orgAddress, members, "", streamURI)
+		req.Questions[0].Metadata = map[string]any{"choices": []any{
+			map[string]any{"value": 0, "image": testImageServer(t, testPNG(t)).URL + "/missing.png"},
+		}}
+		pid := requestAndParse[apicommon.CreateVotingProcessResponse](
+			t, http.MethodPost, token, req, processesCreateEndpoint,
+		).ProcessID
+		requestAndAssertError(errors.ErrMediaUnavailable, t, http.MethodPost, token, nil, "processes", pid, "publish")
+	})
+
 	t.Run("unreachable header refuses the publish", func(t *testing.T) {
 		headerURL := testImageServer(t, testPNG(t)).URL + "/missing.png"
 		req := mediaProcessRequest(orgAddress, members, headerURL, streamURI)

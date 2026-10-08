@@ -50,6 +50,13 @@ func setupParentProcess(t *testing.T) *parentProcessFixture {
 	second := req.Questions[0]
 	second.Title = db.MultiLangString{"default": "Q2"}
 	req.Questions = append(req.Questions, second)
+	// display info of the first question and its first choice, which its document must carry
+	req.Questions[0].Metadata = map[string]any{
+		"note": "first question",
+		"choices": []any{map[string]any{
+			"value": 0, "description": map[string]any{"default": "The yes option"}, "extra": "kept verbatim",
+		}},
+	}
 	pid, elections := publishProcessRequest(t, token, req)
 	return &parentProcessFixture{
 		token: token, orgAddress: orgAddress, req: req, members: members, pid: pid, elections: elections,
@@ -128,6 +135,15 @@ func TestProcessParentElection(t *testing.T) {
 			qt.Assert(t, doc.Media, qt.Equals, dvoteapi.ProcessMedia{}, comment)
 			qt.Assert(t, doc.Meta, qt.IsNil, comment)
 			qt.Assert(t, doc.Questions, qt.HasLen, 1, comment)
+			if i == 0 {
+				qt.Assert(t, doc.Questions[0].Meta, qt.DeepEquals, map[string]any{"note": "first question"})
+				qt.Assert(t, doc.Questions[0].Choices[0].Meta, qt.DeepEquals, map[string]any{
+					"description": map[string]any{"default": "The yes option"}, "extra": "kept verbatim",
+				})
+				qt.Assert(t, doc.Questions[0].Choices[1].Meta, qt.IsNil)
+			} else {
+				qt.Assert(t, doc.Questions[0].Meta, qt.IsNil, comment)
+			}
 		}
 	})
 

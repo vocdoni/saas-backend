@@ -14,7 +14,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/vocdoni/saas-backend/account"
+	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 const (
@@ -118,41 +121,107 @@ func fetchImage(client *http.Client, rawURL string) ([]byte, error) {
 	return data, nil
 }
 
-// imageHashes returns the lowercase hex SHA-256 of the content of each image url, keyed by url
+// imageHasher hashes images by content for election metadata documents, each url once however
+// many documents or choices name it.
+type imageHasher struct {
+	a      *API
+	client *http.Client
+	cache  map[string]string
+}
+
+// newImageHasher returns an imageHasher with an empty cache.
+func (a *API) newImageHasher() *imageHasher {
+	return &imageHasher{a: a, cache: make(map[string]string)}
+}
+
+// hashes returns the lowercase hex SHA-256 of the content of each image url, keyed by url
 // exactly as given; empty urls are skipped and nil is returned when there is none. An image this
 // backend's object storage serves is read from it; any other is fetched (see fetchImage). Images
 // are always hashed by content so the metadata hash pins what voters see, not just where it lives;
 // videos are never passed here (only their URL is committed). An image that cannot be read or
 // fetched is an ErrMediaUnavailable naming its url.
-func (a *API) imageHashes(urls ...string) (map[string]string, error) {
+func (h *imageHasher) hashes(urls ...string) (map[string]string, error) {
 	var hashes map[string]string
-	var client *http.Client
 	for _, u := range urls {
 		if u == "" {
 			continue
 		}
-		var data []byte
-		if name, ok := a.objectStorage.LocalName(u); ok {
-			object, err := a.objectStorage.GetByName(name)
-			if err != nil {
-				return nil, errors.ErrMediaUnavailable.Withf("image %q: %v", u, err)
-			}
-			data = object.Data
-		} else {
-			if client == nil {
-				client = newMediaHTTPClient(mediaIPAllowed)
-			}
-			fetched, err := fetchImage(client, u)
-			if err != nil {
-				return nil, errors.ErrMediaUnavailable.Withf("image %q: %v", u, err)
-			}
-			data = fetched
+		sum, err := h.hash(u)
+		if err != nil {
+			return nil, errors.ErrMediaUnavailable.Withf("image %q: %v", u, err)
 		}
 		if hashes == nil {
 			hashes = make(map[string]string)
 		}
-		sum := sha256.Sum256(data)
-		hashes[u] = hex.EncodeToString(sum[:])
+		hashes[u] = sum
 	}
 	return hashes, nil
+}
+
+// hash returns the hex SHA-256 of the content of one image url, reading it once.
+func (h *imageHasher) hash(u string) (string, error) {
+	if sum, ok := h.cache[u]; ok {
+		return sum, nil
+	}
+	var data []byte
+	if name, ok := h.a.objectStorage.LocalName(u); ok {
+		object, err := h.a.objectStorage.GetByName(name)
+		if err != nil {
+			return "", err
+		}
+		data = object.Data
+	} else {
+		if h.client == nil {
+			h.client = newMediaHTTPClient(mediaIPAllowed)
+		}
+		fetched, err := fetchImage(h.client, u)
+		if err != nil {
+			return "", err
+		}
+		data = fetched
+	}
+	sum := sha256.Sum256(data)
+	h.cache[u] = hex.EncodeToString(sum[:])
+	return h.cache[u], nil
+}
+
+// questionImageURLs returns the image urls of a question's choices (see account.ChoiceImageURLs),
+// in choice order.
+func questionImageURLs(q *db.VotingProcessQuestion) []string {
+	_, choicesMeta := account.QuestionDisplayMeta(q.Metadata)
+	var urls []string
+	for _, ch := range q.Choices {
+		urls = append(urls, account.ChoiceImageURLs(choicesMeta[ch.Value])...)
+	}
+	return urls
+}
+
+// publishMediaHashes hashes the images the election documents of a publish commit: the header for
+// the parent election (unless it is already on chain) and each not yet published question's
+// choice images, keyed by question id. A question without images has no entry.
+func (a *API) publishMediaHashes(
+	vp *db.VotingProcess, questions []db.VotingProcessQuestion,
+) (parent map[string]string, byQuestion map[bson.ObjectID]map[string]string, err error) {
+	h := a.newImageHasher()
+	if len(vp.UpstreamID) == 0 {
+		if parent, err = h.hashes(vp.Header); err != nil {
+			return nil, nil, err
+		}
+	}
+	for i := range questions {
+		if len(questions[i].UpstreamID) > 0 {
+			continue
+		}
+		hashes, err := h.hashes(questionImageURLs(&questions[i])...)
+		if err != nil {
+			return nil, nil, err
+		}
+		if hashes != nil {
+			if byQuestion == nil {
+				byQuestion = make(map[bson.ObjectID]map[string]string)
+			}
+			byQuestion[questions[i].ID] = hashes
+		}
+	}
+	return parent, byQuestion, nil
 }

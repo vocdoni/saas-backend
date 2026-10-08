@@ -8,6 +8,7 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/proto/build/go/models"
 )
@@ -240,4 +241,49 @@ func TestBuildElectionMetadataMediaHashes(t *testing.T) {
 	got = api.ElectionMetadata{}
 	c.Assert(json.Unmarshal(data, &got), qt.IsNil)
 	c.Assert(got.Meta, qt.DeepEquals, map[string]any{"mediaHashes": map[string]any{params.Header: "00ff"}})
+}
+
+// TestQuestionDisplayMeta checks that a question's free-form metadata is split into its own meta
+// (every key but choices) and each choice's entry minus its value, whether it was decoded from
+// JSON or from Mongo, and that both reach the document.
+func TestQuestionDisplayMeta(t *testing.T) {
+	c := qt.New(t)
+	metadata := map[string]any{
+		"note": "n",
+		"choices": bson.A{
+			bson.M{"value": int32(1), "description": map[string]any{"default": "B"}, "image": "https://img.example/b.png"},
+			map[string]any{"value": float64(0), "image": map[string]any{"default": "https://img.example/a.png"}},
+			map[string]any{"description": "no value, dropped"},
+			map[string]any{"value": float64(2)},
+		},
+	}
+	questionMeta, choicesMeta := QuestionDisplayMeta(metadata)
+	c.Assert(questionMeta, qt.DeepEquals, map[string]any{"note": "n"})
+	c.Assert(choicesMeta, qt.DeepEquals, map[uint32]map[string]any{
+		0: {"image": map[string]any{"default": "https://img.example/a.png"}},
+		1: {"description": map[string]any{"default": "B"}, "image": "https://img.example/b.png"},
+	})
+	c.Assert(ChoiceImageURLs(choicesMeta[1]), qt.DeepEquals, []string{"https://img.example/b.png"})
+	c.Assert(ChoiceImageURLs(map[string]any{
+		"image": map[string]any{"default": "https://img.example/d.png", "thumbnail": "https://img.example/t.png"},
+	}), qt.DeepEquals, []string{"https://img.example/d.png", "https://img.example/t.png"})
+
+	params := &db.ElectionParams{Questions: []db.Question{{
+		Title:       db.MultiLangString{"default": "q"},
+		Choices:     []db.Choice{{Value: 0}, {Value: 1}, {Value: 2}},
+		Meta:        questionMeta,
+		ChoicesMeta: choicesMeta,
+	}}}
+	data, err := BuildElectionMetadata(params)
+	c.Assert(err, qt.IsNil)
+	got := &api.ElectionMetadata{}
+	c.Assert(json.Unmarshal(data, got), qt.IsNil)
+	c.Assert(got.Questions[0].Meta, qt.DeepEquals, map[string]any{"note": "n"})
+	c.Assert(got.Questions[0].Choices[0].Meta, qt.DeepEquals, map[string]any{
+		"image": map[string]any{"default": "https://img.example/a.png"},
+	})
+	c.Assert(got.Questions[0].Choices[1].Meta, qt.DeepEquals, map[string]any{
+		"description": map[string]any{"default": "B"}, "image": "https://img.example/b.png",
+	})
+	c.Assert(got.Questions[0].Choices[2].Meta, qt.IsNil)
 }

@@ -59,7 +59,10 @@ type VotingProcessQuestionRequest struct {
 	BallotProtocol    *db.BallotProtocol   `json:"ballotProtocol,omitempty"`
 	SecretUntilTheEnd bool                 `json:"secretUntilTheEnd"`
 	Eligibility       *EligibilitySpec     `json:"census,omitempty"`
-	Metadata          map[string]any       `json:"metadata,omitempty"`
+	// Metadata is the question's free-form display info, published in its election document:
+	// each entry of metadata.choices ({value, description, image, ...}) becomes the meta of the
+	// choice with that value (without the value), and every other key the question's meta.
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // CreateVotingProcessRequest is the body of POST /processes (also used by PUT to update a
