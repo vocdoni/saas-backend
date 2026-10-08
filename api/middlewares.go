@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"slices"
@@ -227,6 +228,24 @@ func limitBody(limit int64) func(http.Handler) http.Handler {
 				return
 			}
 			r.Body = http.MaxBytesReader(w, r.Body, limit)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// originSecretHeader carries the secret the edge proxy adds to every request it forwards.
+const originSecretHeader = "X-Origin-Secret"
+
+// requireOriginSecret refuses requests that don't carry the origin secret, i.e. that reached the
+// server without going through the edge proxy. /ping stays open for the platform health checks.
+func requireOriginSecret(secret string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			got := r.Header.Get(originSecretHeader)
+			if r.URL.Path != "/ping" && subtle.ConstantTimeCompare([]byte(got), []byte(secret)) != 1 {
+				errors.ErrOriginNotAllowed.Write(w)
+				return
+			}
 			next.ServeHTTP(w, r)
 		})
 	}

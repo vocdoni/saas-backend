@@ -109,6 +109,10 @@ type Config struct {
 	CSP           *csp.CSP
 	// OAuth service URL
 	OAuthServiceURL string
+	// OriginSecret, when set, is the value the edge proxy puts in the X-Origin-Secret header.
+	// Requests without it are refused, so the origin can't be reached around the proxy and its
+	// rate limits (e.g. through the hosting provider's default domain).
+	OriginSecret string
 	// OTPExpiry overrides the validity window for all one-time codes (account
 	// verification, password reset). Zero uses notifications.DefaultOTPExpiry.
 	OTPExpiry time.Duration
@@ -159,6 +163,7 @@ type API struct {
 	objectStorage   *objectstorage.Client
 	csp             *csp.CSP
 	oauthServiceURL string
+	originSecret    string
 	stripeHandlers  *StripeHandlers
 	txQueue         chan txTask
 	txQueueMu       sync.Mutex
@@ -261,6 +266,7 @@ func New(ctx context.Context, conf *Config) *API {
 		objectStorage:         conf.ObjectStorage,
 		csp:                   conf.CSP,
 		oauthServiceURL:       conf.OAuthServiceURL,
+		originSecret:          conf.OriginSecret,
 		orgTxLocks:            newOrgTxMutex(),
 		otpExpiry:             otpExpiry,
 		otpCooldown:           otpCooldown,
@@ -333,6 +339,9 @@ func (a *API) initRouter() http.Handler {
 	}).Handler)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	if a.originSecret != "" {
+		r.Use(requireOriginSecret(a.originSecret))
+	}
 	r.Use(middleware.Throttle(100))
 	r.Use(middleware.ThrottleBacklog(5000, 40000, 60*time.Second))
 	r.Use(middleware.Timeout(45 * time.Second))
