@@ -140,6 +140,9 @@ func TestProcessCSP(t *testing.T) {
 			ProcessID: openElection,
 			Payload:   hex.EncodeToString(voter.Address().Bytes()),
 		}, "processes", pid, "sign")
+	// nor read the member's weight and voted status
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "",
+		&handlers.CheckMembershipRequest{AuthToken: step0.AuthToken}, "processes", pid, "check")
 
 	// resend the OTP challenge for the mid-challenge token
 	resend := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "",

@@ -402,6 +402,27 @@ func TestResendChallenge(t *testing.T) {
 		mailCode := fetchOTPCodeFromEmail(c, testUserEmail)
 		c.Assert(mailCode, qt.Equals, expectedCode)
 	})
+
+	c.Run("resend limit", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testAnchorID, gotp.RandomSecret(16)), qt.IsNil)
+		resend := func() error {
+			return csp.ResendChallenge(
+				testToken,
+				testUserEmail,
+				notifications.EmailChallenge,
+				apicommon.DefaultLang,
+				testOrgName,
+				testOrgLogo,
+				testAddress.Address(),
+			)
+		}
+		for range MaxChallengeResends {
+			c.Assert(resend(), qt.IsNil)
+		}
+		// every resend sends an email or SMS, so a token cannot be resent forever
+		c.Assert(resend(), qt.ErrorIs, errors.ErrVerificationMaxAttempts)
+	})
 }
 
 func TestAuthTokenResendAndVerifyFlow(t *testing.T) {

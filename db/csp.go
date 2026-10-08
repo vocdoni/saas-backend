@@ -29,6 +29,8 @@ type CSPAuth struct {
 	Attempts   int       `json:"attempts" bson:"attempts"`
 	Verified   bool      `json:"verified" bson:"verified"`
 	VerifiedAt time.Time `json:"verifiedAt" bson:"verifiedat"`
+	// Resends counts the challenge resends of the token, capped by ClaimCSPAuthResend.
+	Resends int `json:"resends" bson:"resends"`
 }
 
 // CSPProcess is the status of a process in a bundle of processes for a user
@@ -169,6 +171,26 @@ func (ms *MongoStorage) IncrementCSPAuthAttempts(token internal.HexBytes, maxAtt
 		return false, err
 	}
 	return false, nil
+}
+
+// ClaimCSPAuthResend atomically records a challenge resend for the token, refusing it (returning
+// false) once maxResends resends have been recorded, so concurrent requests cannot exceed the cap.
+func (ms *MongoStorage) ClaimCSPAuthResend(token internal.HexBytes, maxResends int) (bool, error) {
+	if token == nil {
+		return false, ErrBadInputs
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	// tokens stored before the counter existed have no resends field, which $lt does not match
+	res, err := ms.cspTokens.UpdateOne(ctx,
+		bson.M{"_id": token, "resends": bson.M{"$not": bson.M{"$gte": maxResends}}},
+		bson.M{"$inc": bson.M{"resends": 1}})
+	if err != nil {
+		return false, errors.Join(ErrStoreToken, err)
+	}
+	return res.MatchedCount == 1, nil
 }
 
 // CSPProcess returns the CSPProcess for the given token and processID.

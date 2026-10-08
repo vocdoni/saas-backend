@@ -938,6 +938,12 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
 		return
 	}
+	// an unverified token only proves knowledge of the member's census fields, not control of their
+	// contact, so it must not reveal their weight or which questions they have voted
+	if !auth.Verified {
+		errors.ErrUnauthorized.WithErr(csp.ErrAuthTokenNotVerified).Write(w)
+		return
+	}
 	memberID := auth.UserID.String()
 	resp := &ProcessCheckResponse{}
 	if _, err := c.mainDB.CensusParticipant(vp.CensusID.Hex(), memberID); err == nil {

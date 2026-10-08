@@ -209,9 +209,13 @@ func (c *CSPHandlers) authFirstStep(
 		return nil, err
 	}
 
-	phone, err := db.NewHashedPhone(req.Phone, org)
-	if err != nil {
-		return nil, errors.ErrInvalidData.WithErr(err)
+	// the phone only takes part in the login hash as a 2FA field, and hashing it is deliberately
+	// expensive, so a phone sent to a census that does not use it is ignored instead of hashed
+	var phone db.HashedPhone
+	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone) {
+		if phone, err = db.NewHashedPhone(req.Phone, org); err != nil {
+			return nil, errors.ErrInvalidData.WithErr(err)
+		}
 	}
 
 	// create an empty member and assign the input data where applicable, then

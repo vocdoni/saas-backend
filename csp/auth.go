@@ -149,6 +149,20 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 			"token", token)
 		return ErrTokenExpired
 	}
+	// cap resends: each one sends an email or an SMS paid by the platform, and the token creation
+	// cooldown does not apply to them
+	claimed, err := c.Storage.ClaimCSPAuthResend(token, MaxChallengeResends)
+	if err != nil {
+		log.Warnw("error recording challenge resend",
+			"userID", authTokenData.UserID,
+			"anchorID", authTokenData.AnchorID,
+			"token", token,
+			"error", err)
+		return ErrStorageFailure
+	}
+	if !claimed {
+		return errors.ErrVerificationMaxAttempts.Withf("challenge resend limit reached, request a new token")
+	}
 	// compose the notification challenge
 	orgInfo := notifications.OrganizationInfo{
 		Address: orgAddress,

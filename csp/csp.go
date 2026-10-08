@@ -22,6 +22,11 @@ import (
 // rejected.
 const MaxChallengeAttempts = 5
 
+// MaxChallengeResends is the number of times the challenge of a single authentication token can
+// be resent. New tokens are already spaced by the notification cooldown, so this bounds the
+// emails/SMS a member can be sent per cooldown period.
+const MaxChallengeResends = 3
+
 // Config struct contains the configuration for the CSP service. It includes
 // the database name, the MongoDB client, the notification cooldown time, the
 // notification queue settings, the SMS service and the mail service.
