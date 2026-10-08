@@ -195,7 +195,7 @@ func (ms *MongoStorage) DeleteInvitationsByOrg(orgAddress common.Address) (int64
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 	res, err := ms.organizationInvites.DeleteMany(ctx, bson.M{"organizationAddress": orgAddress})
 	if err != nil {
@@ -221,7 +221,7 @@ func (ms *MongoStorage) DeleteInvitationsByUser(userID uint64, email string) (in
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 	res, err := ms.organizationInvites.DeleteMany(ctx, bson.M{"$or": conditions})
 	if err != nil {

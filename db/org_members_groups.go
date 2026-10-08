@@ -705,7 +705,7 @@ func (ms *MongoStorage) DeleteAllOrgMemberGroups(orgAddress common.Address) (int
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 	res, err := ms.orgMemberGroups.DeleteMany(ctx, bson.M{"orgAddress": orgAddress})
 	if err != nil {

@@ -110,7 +110,7 @@ func (ms *MongoStorage) DeleteProcessBundlesByOrg(orgAddress common.Address) (in
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 	res, err := ms.processBundles.DeleteMany(ctx, bson.M{"orgAddress": orgAddress})
 	if err != nil {

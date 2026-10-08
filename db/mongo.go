@@ -21,8 +21,13 @@ import (
 const (
 	// connectTimeout is used for connection timeout
 	connectTimeout = 10 * time.Second
-	// defaultTimeout is used for simple operations (FindOne, UpdateOne, DeleteOne)
-	defaultTimeout = 100 * time.Second
+	// defaultTimeout is used for point operations (FindOne, UpdateOne, DeleteOne). It is short on
+	// purpose: many of these run under keysLock, so a stuck operation must not hold the lock for
+	// minutes.
+	defaultTimeout = 10 * time.Second
+	// bulkTimeout is used for genuinely bulk operations (collection scans, DeleteMany sweeps,
+	// aggregations and census builds) that may legitimately outlive defaultTimeout.
+	bulkTimeout = 100 * time.Second
 	// batchTimeout is used for batch operations (BulkWrite)
 	batchTimeout = 20 * time.Second
 	// exportTimeout is used for export/import operations (String, Import)

@@ -347,7 +347,7 @@ func (ms *MongoStorage) DeleteJobsByOrg(orgAddress common.Address) (int64, error
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 	res, err := ms.jobs.DeleteMany(ctx, bson.M{"orgAddress": orgAddress})
 	if err != nil {

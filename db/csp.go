@@ -513,7 +513,7 @@ func (ms *MongoStorage) DeleteCSPAuthByAnchor(anchorID internal.HexBytes) (int64
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 	res, err := ms.cspTokens.DeleteMany(ctx, bson.M{"bundleid": anchorID})
 	if err != nil {
@@ -531,7 +531,7 @@ func (ms *MongoStorage) DeleteCSPProcessByProcess(processID internal.HexBytes) (
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 	res, err := ms.cspTokensStatus.DeleteMany(ctx, bson.M{"processid": processID})
 	if err != nil {
