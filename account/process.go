@@ -51,6 +51,9 @@ func BuildElectionMetadata(params *db.ElectionParams) ([]byte, error) {
 		},
 		Questions: make([]api.Question, 0, len(params.Questions)),
 	}
+	if m := electionMeta(params); m != nil {
+		meta.Meta = m
+	}
 	if params.TypeMetadata != nil {
 		meta.Type = api.ElectionProperties{Name: params.TypeMetadata.Name, Properties: params.TypeMetadata.Properties}
 	} else {
@@ -83,6 +86,18 @@ func BuildElectionMetadata(params *db.ElectionParams) ([]byte, error) {
 		return nil, fmt.Errorf("could not marshal election metadata: %w", err)
 	}
 	return data, nil
+}
+
+// electionMeta builds the free-form meta block of the document, or nil when there is nothing to
+// put in it (so no meta key is written). meta.mediaHashes holds the SHA-256 of the document's
+// images (see ElectionParams.MediaHashes): being part of the document, it is covered by the
+// metadata hash committed on chain. Maps marshal with sorted keys, so the same params always
+// produce the same bytes and hash.
+func electionMeta(params *db.ElectionParams) map[string]any {
+	if len(params.MediaHashes) == 0 {
+		return nil
+	}
+	return map[string]any{"mediaHashes": params.MediaHashes}
 }
 
 // NewProcessParams bundles the inputs required to build a NewProcess transaction.

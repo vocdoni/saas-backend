@@ -127,6 +127,10 @@ var (
 	// ErrPaymentSessionConflict: the process's payment is in a state the request cannot act on
 	// (processing, completed, or changed while being read); retry once it settles.
 	ErrPaymentSessionConflict = Error{Code: 40177, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("a payment for this process is already processing or completed")}
+	// ErrMediaUnavailable: an image of the process could not be imported into the object storage when
+	// saving it (unreachable, not an image, too large), or is not a stored object when publishing.
+	// The message names the field (when saving) and the URL.
+	ErrMediaUnavailable = Error{Code: 40179, HTTPstatus: http.StatusUnprocessableEntity, Err: fmt.Errorf("process image could not be imported"), LogLevel: "info"}
 
 	// CSP errors (408)
 	ErrZeroWeightVoter = Error{Code: 40801, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("voter weight cannot be zero")}

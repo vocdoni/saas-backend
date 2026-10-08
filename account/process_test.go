@@ -204,6 +204,34 @@ func TestBuildElectionMetadataNoQuestions(t *testing.T) {
 	c.Assert(hasMeta, qt.IsFalse)
 }
 
+// TestBuildElectionMetadataMediaHashes checks that MediaHashes lands in the document as
+// meta.mediaHashes, and that no meta block is written when there is nothing to hash.
+func TestBuildElectionMetadataMediaHashes(t *testing.T) {
+	c := qt.New(t)
+	params := &db.ElectionParams{
+		Title:     db.MultiLangString{"default": "t"},
+		Header:    "https://saas.example/storage/abc.png",
+		StreamURI: "https://youtube.example/watch?v=x",
+		Questions: []db.Question{{
+			Title:   db.MultiLangString{"default": "q"},
+			Choices: []db.Choice{{Title: db.MultiLangString{"default": "yes"}}},
+		}},
+	}
+
+	data, err := BuildElectionMetadata(params)
+	c.Assert(err, qt.IsNil)
+	var got api.ElectionMetadata
+	c.Assert(json.Unmarshal(data, &got), qt.IsNil)
+	c.Assert(got.Meta, qt.IsNil)
+
+	params.MediaHashes = map[string]string{params.Header: "00ff"}
+	data, err = BuildElectionMetadata(params)
+	c.Assert(err, qt.IsNil)
+	got = api.ElectionMetadata{}
+	c.Assert(json.Unmarshal(data, &got), qt.IsNil)
+	c.Assert(got.Meta, qt.DeepEquals, map[string]any{"mediaHashes": map[string]any{params.Header: "00ff"}})
+}
+
 // TestQuestionDisplayMeta checks that a question's free-form metadata is split into its own meta
 // (every key but choices) and each choice's entry minus its value, whether it was decoded from
 // JSON or from Mongo, and that both reach the document.

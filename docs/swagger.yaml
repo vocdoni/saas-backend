@@ -4958,6 +4958,12 @@ paths:
         yes/no field, so a unique-values ballot admits no vote and the election would tally
         every vote to zero. A `ballotProtocol` whose `uniqueValues` cannot be satisfied
         (fewer legal values than fields) is rejected for the same reason.
+
+        Images (the `header` and each question's `metadata.choices[].image`, a URL or a
+        `{default, thumbnail}` object) are imported: one not served by this backend's storage is
+        fetched (http/https, public addresses only, at most 10s and 32 MiB), stored, and the
+        saved process points at the local copy. 422 (40179) when one cannot be imported; the
+        message names the field and the URL, and nothing is saved. `streamUri` is kept as sent.
       parameters:
       - description: Voting process
         in: body
@@ -4982,6 +4988,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "403":
           description: Forbidden
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "422":
+          description: Image could not be imported (40179)
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -5082,6 +5092,12 @@ paths:
         Census members are handled as on create: those missing required auth data are left out
         and listed in `missingData`, and those the census cannot tell apart are a 400 (40037)
         whose `data.duplicates` lists them.
+
+        Images (the `header` and each question's `metadata.choices[].image`, a URL or a
+        `{default, thumbnail}` object) are imported: one not served by this backend's storage is
+        fetched (http/https, public addresses only, at most 10s and 32 MiB), stored, and the
+        saved process points at the local copy. 422 (40179) when one cannot be imported; the
+        message names the field and the URL, and nothing is saved. `streamUri` is kept as sent.
       parameters:
       - description: Process ID
         in: path
@@ -5115,6 +5131,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "409":
           description: Conflict
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "422":
+          description: Image could not be imported (40179)
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -5847,6 +5867,12 @@ paths:
         GET /jobs/{jobId}. Idempotent once published.
         409 (40172) means the stored questions do not match the process and the draft has to be
         saved again before it can be published.
+        Every document also commits, in meta.mediaHashes, the SHA-256 of its images by content
+        (the parent's header; each question's choice images, from metadata.choices[].image),
+        read from this backend's storage (images are imported when the process is saved, so
+        publishing fetches nothing); the video stream is never hashed, only its URL is
+        committed. 422 (40179) means an image is not a readable stored object; the message
+        names its URL.
         402 (40178) means the process is priced and unpaid — the current quote travels in the
         error data; start checkout via POST /processes/{processId}/checkout. For a managed
         organization, 402 (40175) means its integrator's wallet does not cover the price.
@@ -5890,7 +5916,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "422":
-          description: 'Managed organization: census size requires a custom quote'
+          description: Image not stored (40179), or managed org census needs a custom
+            quote
           schema:
             $ref: '#/definitions/errors.Error'
         "503":

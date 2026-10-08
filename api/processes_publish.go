@@ -220,6 +220,12 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 //	@Description	GET /jobs/{jobId}. Idempotent once published.
 //	@Description	409 (40172) means the stored questions do not match the process and the draft has to be
 //	@Description	saved again before it can be published.
+//	@Description	Every document also commits, in meta.mediaHashes, the SHA-256 of its images by content
+//	@Description	(the parent's header; each question's choice images, from metadata.choices[].image),
+//	@Description	read from this backend's storage (images are imported when the process is saved, so
+//	@Description	publishing fetches nothing); the video stream is never hashed, only its URL is
+//	@Description	committed. 422 (40179) means an image is not a readable stored object; the message
+//	@Description	names its URL.
 //	@Description	402 (40178) means the process is priced and unpaid — the current quote travels in the
 //	@Description	error data; start checkout via POST /processes/{processId}/checkout. For a managed
 //	@Description	organization, 402 (40175) means its integrator's wallet does not cover the price.
@@ -235,7 +241,7 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 //	@Failure		402			{object}	errors.Error	"Payment required (quote in data), or insufficient integrator wallet balance"
 //	@Failure		404			{object}	errors.Error
 //	@Failure		409			{object}	errors.Error	"Publish in progress, questions out of sync, or payment still processing"
-//	@Failure		422			{object}	errors.Error	"Managed organization: census size requires a custom quote"
+//	@Failure		422			{object}	errors.Error	"Image not stored (40179), or managed org census needs a custom quote"
 //	@Failure		503			{object}	errors.Error
 //	@Router			/processes/{processId}/publish [post]
 func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
@@ -327,6 +333,13 @@ var errProcessAlreadyPublished = fmt.Errorf("process already published")
 func (a *API) startProcessPublish(t publishTarget) (string, error) {
 	vp, questions, census, user := t.vp, t.questions, t.census, t.user
 	oid := vp.ID
+	// every election document commits the hash of the images it shows: the parent's the header,
+	// each question's its choice images. One that cannot be hashed refuses the publish here, before
+	// anything is claimed or charged. Elections already on chain (a resume) have nothing to hash.
+	mediaHashes, questionMediaHashes, err := a.publishMediaHashes(vp, questions)
+	if err != nil {
+		return "", err
+	}
 	// atomically claim the process for publishing (duplicate-publish guard)
 	claimed, err := a.db.ClaimVotingProcessForPublish(oid)
 	if err != nil {
@@ -431,7 +444,8 @@ func (a *API) startProcessPublish(t publishTarget) (string, error) {
 	worker := &publishWorker{
 		a: a, vp: vp, questions: questions, census: census, org: org, user: user,
 		orgSigner: orgSigner, cspPubKey: cspPubKey, integratorAddr: integratorAddr,
-		reserved: reserved, nonTestSized: nonTestSized,
+		reserved: reserved, nonTestSized: nonTestSized, mediaHashes: mediaHashes,
+		questionMediaHashes: questionMediaHashes,
 	}
 	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
 		defer orgLock.Unlock()
@@ -466,6 +480,11 @@ type publishWorker struct {
 	integratorAddr common.Address
 	reserved       bool
 	nonTestSized   bool
+	// mediaHashes are the image hashes the parent election's document commits (meta.mediaHashes),
+	// computed before the publish was enqueued.
+	mediaHashes map[string]string
+	// questionMediaHashes are the choice image hashes of each question's document, by question id.
+	questionMediaHashes map[bson.ObjectID]map[string]string
 }
 
 // run publishes the process's parent election, then builds and submits one election per question,
@@ -616,6 +635,7 @@ func (pw *publishWorker) buildBatch(
 		if err != nil {
 			return nil, false, err
 		}
+		ep.MediaHashes = pw.questionMediaHashes[q.ID]
 		metaBytes, err := account.BuildElectionMetadata(ep)
 		if err != nil {
 			return nil, false, err
@@ -725,6 +745,7 @@ func (pw *publishWorker) publishParent() error {
 		return nil
 	}
 	ep := electionParamsForParent(pw.vp)
+	ep.MediaHashes = pw.mediaHashes
 	metaBytes, err := account.BuildElectionMetadata(ep)
 	if err != nil {
 		return err

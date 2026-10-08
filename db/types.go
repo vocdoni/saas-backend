@@ -668,6 +668,11 @@ type ElectionParams struct {
 	ElectionType  ElectionType          `json:"electionType" bson:"electionType"`
 	TypeMetadata  *ElectionTypeMetadata `json:"type,omitempty" bson:"type,omitempty"`
 	MaxCensusSize uint64                `json:"maxCensusSize,omitempty" bson:"maxCensusSize,omitempty"`
+	// MediaHashes maps the image URLs of the document (the parent's Header, a question's choice
+	// images) to the lowercase hex SHA-256 of the bytes stored for them. It is written into the
+	// metadata document as meta.mediaHashes so voters can check the images they were shown. Videos
+	// (StreamURI) are never hashed: only their URL is committed. Publish-time only, never persisted.
+	MediaHashes map[string]string `json:"-" bson:"-"`
 	// InitialStatus is the on-chain status the election is published with. Empty (the default)
 	// means READY; "PAUSED" publishes it in the PAUSED state, so voting only opens once an
 	// admin sets it to READY via SET_PROCESS_STATUS. Only "" / "READY" / "PAUSED" are

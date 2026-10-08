@@ -75,6 +75,32 @@ func ChoiceImageURLs(choiceMeta map[string]any) []string {
 	return urls
 }
 
+// ChoicesMetaEntries returns the entries of a question metadata's "choices" array that are
+// documents, as the maps stored in it (changing one changes the metadata).
+func ChoicesMetaEntries(metadata map[string]any) []map[string]any {
+	raw, ok := asSlice(metadata[questionChoicesMetaKey])
+	if !ok {
+		return nil
+	}
+	entries := make([]map[string]any, 0, len(raw))
+	for _, item := range raw {
+		if entry, ok := asMap(item); ok {
+			entries = append(entries, entry)
+		}
+	}
+	return entries
+}
+
+// ChoiceMetaValue returns the choice value a "choices" metadata entry is joined to its choice by.
+func ChoiceMetaValue(entry map[string]any) (uint32, bool) {
+	return asChoiceValue(entry["value"])
+}
+
+// AsMap reads a decoded document, whether it came from JSON or from Mongo, as the same map.
+func AsMap(v any) (map[string]any, bool) {
+	return asMap(v)
+}
+
 // asMap reads a decoded document, whether it came from JSON or from Mongo.
 func asMap(v any) (map[string]any, bool) {
 	switch m := v.(type) {
