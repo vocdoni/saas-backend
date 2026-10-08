@@ -4,6 +4,7 @@
 package objectstorage
 
 import (
+	stderrors "errors"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -30,6 +31,9 @@ func validateUser(w http.ResponseWriter, r *http.Request) (*db.User, bool) {
 
 // parseMultipartForm parses the multipart form from the request
 func parseMultipartForm(w http.ResponseWriter, r *http.Request) bool {
+	// ParseMultipartForm's argument only sets how much is kept in memory before spilling to disk,
+	// it does not limit the body, so cap it first
+	r.Body = http.MaxBytesReader(w, r.Body, MaxUploadBodySize)
 	// 32 MB is the default used by FormFile() function
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		errors.ErrStorageInvalidObject.Withf("could not parse form: %v", err).Write(w)
@@ -56,6 +60,10 @@ func (osc *Client) processFile(w http.ResponseWriter, fileHeader *multipart.File
 	// Upload the file using the object storage client
 	storedFileID, err := osc.Put(file, fileHeader.Size, userEmail)
 	if err != nil {
+		if stderrors.Is(err, ErrorObjectTooLarge) {
+			errors.ErrRequestBodyTooLarge.Withf("%s: %v", fileHeader.Filename, err).Write(w)
+			return "", false
+		}
 		errors.ErrInternalStorageError.Withf("%s %v", fileHeader.Filename, err).Write(w)
 		return "", false
 	}

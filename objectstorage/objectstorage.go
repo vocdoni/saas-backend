@@ -19,6 +19,18 @@ var (
 	ErrorInvalidObjectID = fmt.Errorf("invalid object ID")
 	// ErrorFileTypeNotSupported is returned when the file type is not in the supported types list.
 	ErrorFileTypeNotSupported = fmt.Errorf("file type not supported")
+	// ErrorObjectTooLarge is returned when an object is empty or exceeds MaxObjectSize.
+	ErrorObjectTooLarge = fmt.Errorf("object is empty or larger than %d bytes", MaxObjectSize)
+)
+
+const (
+	// MaxObjectSize is the largest object (image) that can be stored.
+	MaxObjectSize = 10 << 20
+	// MaxUploadBodySize caps the whole multipart body of an upload request.
+	MaxUploadBodySize = 4 * MaxObjectSize
+	// maxCachedObjectSize is the largest object kept in the in-memory cache: with a fixed number
+	// of cache entries, it is what bounds the memory the cache retains.
+	maxCachedObjectSize = 512 << 10
 )
 
 // ObjectFileType represents the MIME type of a stored object file.
@@ -101,8 +113,10 @@ func (osc *Client) Get(objectID string) (*db.Object, error) {
 		return nil, fmt.Errorf("error retrieving object: %w", err)
 	}
 
-	// store the object in the cache
-	osc.cache.Add(objectID, *object)
+	// store the object in the cache, unless it is large enough to make the cache a memory sink
+	if len(object.Data) <= maxCachedObjectSize {
+		osc.cache.Add(objectID, *object)
+	}
 
 	return object, nil
 }
@@ -164,10 +178,13 @@ func (osc *Client) storagePrefix() string {
 // the URL of the uploaded object image. It stores the object in the database.
 // If an error occurs, it returns an empty string and the error.
 func (osc *Client) Put(data io.Reader, size int64, userID string) (string, error) {
-	// Create a buffer of the appropriate size
+	// check the declared size before allocating a buffer for it
+	if size <= 0 || size > MaxObjectSize {
+		return "", ErrorObjectTooLarge
+	}
 	buff := make([]byte, size)
-	_, err := data.Read(buff)
-	if err != nil {
+	// a single Read may return fewer bytes than requested, which would store a truncated object
+	if _, err := io.ReadFull(data, buff); err != nil {
 		return "", fmt.Errorf("cannot read file %s", err.Error())
 	}
 	// checking the content type
