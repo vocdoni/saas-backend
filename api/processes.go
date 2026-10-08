@@ -539,6 +539,7 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 	for i := range questions {
 		a.enqueueReconcileIfStale(&questions[i])
 	}
+	a.enqueueParentReconcileIfStale(vp)
 	// resolve the vote encryption keys of encrypted questions (so clients can seal encrypted ballots)
 	// and the live on-chain tally of each published question (finalResults marks final), concurrently:
 	// each needs a Vochain round-trip, so bounded pools keep this read fast for a many-question process.

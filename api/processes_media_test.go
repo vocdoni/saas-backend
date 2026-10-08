@@ -11,13 +11,17 @@ import (
 	"image/png"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"path"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	dvoteapi "go.vocdoni.io/dvote/api"
 )
@@ -66,53 +70,152 @@ func testPNG(t *testing.T) []byte {
 	return buf.Bytes()
 }
 
-// TestProcessMetadataMediaHashes publishes a process whose header is stored by this backend and
-// whose stream is external: the published metadata document commits the SHA-256 of the stored
-// header bytes in meta.mediaHashes and leaves the external stream out, and the on-chain metadata
-// hash still covers the whole document.
-func TestProcessMetadataMediaHashes(t *testing.T) {
-	c := qt.New(t)
-	token := testCreateUser(t, "mediapassword123")
-	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	members := postOrgMembers(t, token, orgAddress, newOrgMembers(1)...)
-
-	header := testPNG(t)
-	headerURL := testUploadImage(t, token, header)
-	headerSum := sha256.Sum256(header)
-	served, code := testRequest(t, http.MethodGet, "", nil, "storage", path.Base(headerURL))
-	c.Assert(code, qt.Equals, http.StatusOK)
-	c.Assert(served, qt.DeepEquals, header)
-	const streamURI = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-
+// mediaProcessRequest returns a one-question process draft with the given header and stream,
+// whose census is the given members.
+func mediaProcessRequest(orgAddress common.Address, members []apicommon.OrgMember, header, streamURI string,
+) *apicommon.CreateVotingProcessRequest {
 	req := minimalVotingProcessRequest(orgAddress)
 	req.StartDate = ""
-	req.Header = headerURL
+	req.Header = header
 	req.StreamURI = streamURI
 	req.Census = apicommon.CensusSpec{
 		TwoFaFields: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail},
 		MemberIDs:   memberIDs(members),
 	}
-	pid, _ := publishProcessRequest(t, token, req)
+	return req
+}
 
+// testImageServer serves data as a PNG image at /image.png and anything else as a 404.
+func testImageServer(t *testing.T, data []byte) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/image.png" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(data)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// assertParentMediaHashes publishes req and checks that the parent election's document commits
+// exactly the given meta.mediaHashes (the stream never among them) next to its question
+// elections, and that the on-chain metadata hash covers the whole document.
+func assertParentMediaHashes(t *testing.T, token string, req *apicommon.CreateVotingProcessRequest,
+	want map[string]any,
+) {
+	t.Helper()
+	c := qt.New(t)
+	pid, elections := publishProcessRequest(t, token, req)
 	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
-	c.Assert(got.Questions, qt.HasLen, 1)
-	q := got.Questions[0]
-	doc, code := testRequest(t, http.MethodGet, "", nil, "storage", path.Base(q.MetadataURL))
+	doc, code := testRequest(t, http.MethodGet, "", nil, "storage", path.Base(got.MetadataURL))
 	c.Assert(code, qt.Equals, http.StatusOK)
 
 	var metadata dvoteapi.ElectionMetadata
 	c.Assert(json.Unmarshal(doc, &metadata), qt.IsNil)
-	c.Assert(metadata.Media.Header, qt.Equals, headerURL)
-	c.Assert(metadata.Media.StreamURI, qt.Equals, streamURI)
+	c.Assert(metadata.Media.Header, qt.Equals, req.Header)
+	c.Assert(metadata.Media.StreamURI, qt.Equals, req.StreamURI)
 	c.Assert(metadata.Meta, qt.DeepEquals, map[string]any{
-		"mediaHashes": map[string]any{headerURL: hex.EncodeToString(headerSum[:])},
-		"process":     map[string]any{"title": map[string]any{"default": req.Title["default"]}},
+		"mediaHashes":       want,
+		"questionElections": questionElectionsOf(elections),
 	})
 
 	docSum := sha256.Sum256(doc)
-	c.Assert([]byte(q.MetadataHash), qt.DeepEquals, docSum[:])
-	election, err := testNewVocdoniClient(t).Election(q.UpstreamID.Bytes())
+	c.Assert([]byte(got.MetadataHash), qt.DeepEquals, docSum[:])
+	election, err := testNewVocdoniClient(t).Election(got.UpstreamID.Bytes())
 	c.Assert(err, qt.IsNil)
 	c.Assert([]byte(election.MetadataHash), qt.DeepEquals, docSum[:])
+
+	// the question documents carry no media and so no hashes
+	for _, q := range got.Questions {
+		qdoc, code := testRequest(t, http.MethodGet, "", nil, "storage", path.Base(q.MetadataURL))
+		c.Assert(code, qt.Equals, http.StatusOK)
+		var qmeta dvoteapi.ElectionMetadata
+		c.Assert(json.Unmarshal(qdoc, &qmeta), qt.IsNil)
+		c.Assert(qmeta.Meta, qt.IsNil)
+	}
+}
+
+// TestProcessMetadataMediaHashes checks that the parent election's document commits the SHA-256
+// of every image by content, whether this backend stores it or it is external, and never hashes
+// the video stream, of which only the URL is committed.
+func TestProcessMetadataMediaHashes(t *testing.T) {
+	token := testCreateUser(t, "mediapassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(1)...)
+	const streamURI = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+	t.Run("stored header", func(t *testing.T) {
+		header := testPNG(t)
+		headerURL := testUploadImage(t, token, header)
+		sum := sha256.Sum256(header)
+		assertParentMediaHashes(t, token, mediaProcessRequest(orgAddress, members, headerURL, streamURI),
+			map[string]any{headerURL: hex.EncodeToString(sum[:])})
+	})
+
+	t.Run("external header", func(t *testing.T) {
+		header := testPNG(t)
+		headerURL := testImageServer(t, header).URL + "/image.png"
+		sum := sha256.Sum256(header)
+		assertParentMediaHashes(t, token, mediaProcessRequest(orgAddress, members, headerURL, streamURI),
+			map[string]any{headerURL: hex.EncodeToString(sum[:])})
+	})
+
+	t.Run("unreachable header refuses the publish", func(t *testing.T) {
+		headerURL := testImageServer(t, testPNG(t)).URL + "/missing.png"
+		req := mediaProcessRequest(orgAddress, members, headerURL, streamURI)
+		pid := requestAndParse[apicommon.CreateVotingProcessResponse](
+			t, http.MethodPost, token, req, processesCreateEndpoint,
+		).ProcessID
+		requestAndAssertError(errors.ErrMediaUnavailable, t, http.MethodPost, token, nil, "processes", pid, "publish")
+		vp := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+		qt.Assert(t, vp.Published, qt.IsFalse)
+	})
+}
+
+// TestImageFetchPolicy checks the external image fetcher: production refuses loopback, private,
+// link-local and unspecified addresses at dial time, and a fetch only accepts an image body.
+func TestImageFetchPolicy(t *testing.T) {
+	c := qt.New(t)
+	for _, tc := range []struct {
+		ip     string
+		public bool
+	}{
+		{"8.8.8.8", true},
+		{"2606:4700:4700::1111", true},
+		{"127.0.0.1", false},
+		{"::1", false},
+		{"10.1.2.3", false},
+		{"172.16.0.1", false},
+		{"192.168.1.1", false},
+		{"169.254.169.254", false},
+		{"fe80::1", false},
+		{"fd00::1", false},
+		{"100.64.0.1", false},
+		{"0.0.0.0", false},
+		{"::", false},
+	} {
+		c.Assert(isPublicIP(net.ParseIP(tc.ip)), qt.Equals, tc.public, qt.Commentf("ip %s", tc.ip))
+	}
+
+	srv := testImageServer(t, testPNG(t))
+	_, err := fetchImage(newMediaHTTPClient(isPublicIP), srv.URL+"/image.png")
+	c.Assert(err, qt.ErrorMatches, `.*not allowed.*`)
+
+	_, err = fetchImage(newMediaHTTPClient(mediaIPAllowed), srv.URL+"/image.png")
+	c.Assert(err, qt.IsNil)
+
+	html := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html></html>"))
+	}))
+	defer html.Close()
+	_, err = fetchImage(newMediaHTTPClient(mediaIPAllowed), html.URL)
+	c.Assert(err, qt.ErrorMatches, `.*not an image.*`)
+
+	_, err = fetchImage(newMediaHTTPClient(mediaIPAllowed), "file:///etc/passwd")
+	c.Assert(err, qt.ErrorMatches, `.*unsupported scheme.*`)
 }

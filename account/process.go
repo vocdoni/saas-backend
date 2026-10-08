@@ -26,6 +26,14 @@ const electionMetadataVersion = "1.0"
 // DefaultElectionType is the metadata type used when ElectionParams.TypeMetadata is nil.
 const DefaultElectionType = "single-choice-multiquestion"
 
+// electionDocument is the JSON shape of a stored ElectionMetadata document. It shadows Questions
+// without omitempty so a document without questions (a process's parent election) still writes
+// "questions": [] rather than dropping the key.
+type electionDocument struct {
+	*api.ElectionMetadata
+	Questions []api.Question `json:"questions"`
+}
+
 // BuildElectionMetadata maps the high-level ElectionParams into an on-chain
 // ElectionMetadata document and returns its JSON encoding. The returned bytes are
 // stored content-addressed; their public URL becomes the on-chain process metadata.
@@ -65,7 +73,7 @@ func BuildElectionMetadata(params *db.ElectionParams) ([]byte, error) {
 		}
 		meta.Questions = append(meta.Questions, question)
 	}
-	data, err := json.Marshal(meta)
+	data, err := json.Marshal(&electionDocument{ElectionMetadata: meta, Questions: meta.Questions})
 	if err != nil {
 		return nil, fmt.Errorf("could not marshal election metadata: %w", err)
 	}
@@ -73,19 +81,19 @@ func BuildElectionMetadata(params *db.ElectionParams) ([]byte, error) {
 }
 
 // electionMeta builds the free-form meta block of the document, or nil when there is nothing to
-// put in it (so no meta key is written). meta.process carries the process-level title and
-// description, which voting clients show as the page heading above the question, and
-// meta.mediaHashes the SHA-256 of the media files (see ElectionParams.MediaHashes): being part of
-// the document, both are covered by the metadata hash committed on chain. Maps marshal with sorted
+// put in it (so no meta key is written). meta.questionElections lists, in question order, the
+// lowercase hex ids of the question elections a process's parent election heads, and
+// meta.mediaHashes the SHA-256 of its images (see ElectionParams.MediaHashes): being part of the
+// document, both are covered by the metadata hash committed on chain. Maps marshal with sorted
 // keys, so the same params always produce the same bytes and hash.
 func electionMeta(params *db.ElectionParams) map[string]any {
 	meta := map[string]any{}
-	if len(params.ProcessTitle) > 0 {
-		process := map[string]any{"title": api.LanguageString(params.ProcessTitle)}
-		if len(params.ProcessDescription) > 0 {
-			process["description"] = api.LanguageString(params.ProcessDescription)
+	if len(params.QuestionElections) > 0 {
+		ids := make([]string, 0, len(params.QuestionElections))
+		for _, id := range params.QuestionElections {
+			ids = append(ids, id.String())
 		}
-		meta["process"] = process
+		meta["questionElections"] = ids
 	}
 	if len(params.MediaHashes) > 0 {
 		meta["mediaHashes"] = params.MediaHashes

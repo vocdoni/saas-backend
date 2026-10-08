@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -264,6 +265,9 @@ func pingAPI(endpoint string, retries int) error {
 // starts the API server and waits for it to start before running the tests.
 func TestMain(m *testing.M) {
 	log.Init("debug", "stdout", nil)
+	// external images are served to the suite by loopback httptest servers, which the production
+	// policy refuses; private and link-local addresses stay refused.
+	mediaIPAllowed = func(ip net.IP) bool { return ip.IsLoopback() || isPublicIP(ip) }
 	// This context is the lifetime of the whole package test run: it is handed to
 	// the API server (api.New) and therefore becomes the notify queue's context,
 	// on which the delivery workers live. It must outlast m.Run() — a fixed

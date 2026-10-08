@@ -1966,6 +1966,17 @@ definitions:
           Legacy marks a process projected read-only from the deprecated /process generation or from a
           process bundle: not editable through /processes, and its questions may share one upstreamId.
         type: boolean
+      metadataHash:
+        description: |-
+          MetadataHash is the SHA-256 of the exact bytes served at MetadataURL, as committed on chain by
+          the parent election.
+        example: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+        format: hex
+        type: string
+      metadataURL:
+        description: MetadataURL serves the ElectionMetadata document the parent election
+          points to on chain.
+        type: string
       orgAddress:
         example: a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
         format: hex
@@ -1987,6 +1998,15 @@ definitions:
           UpdatedAt is the process's last-write timestamp, in millisecond precision. Echo it back in a
           PUT to make the update conditional on nothing else having written in between (see
           CreateVotingProcessRequest.UpdatedAt).
+        type: string
+      upstreamId:
+        description: |-
+          UpstreamID is the on-chain id of the process's parent election, published after the question
+          elections. Its metadata document holds the process title, description and media and lists the
+          question elections in order (meta.questionElections). It is never voted on. Absent until
+          published, and for processes published without one.
+        example: deadbeef
+        format: hex
         type: string
     type: object
   apicommon.VotingProcessResultsResponse:
@@ -5796,11 +5816,20 @@ paths:
       consumes:
       - application/json
       description: |-
-        Publish a voting process: one on-chain election per question, submitted as a batch.
-        Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
+        Publish a voting process: one on-chain election per question, submitted as a batch,
+        then the process's parent election. The parent carries the process title,
+        description and media, lists the question elections in order
+        (meta.questionElections) and commits the hash of that document; it is never voted
+        on and is exposed as the process's upstreamId, metadataURL and metadataHash. A
+        publish that failed after the questions were mined publishes only the parent when
+        retried. Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
         GET /jobs/{jobId}. Idempotent once published.
         409 (40172) means the stored questions do not match the process and the draft has to be
         saved again before it can be published.
+        The parent's document also commits, in meta.mediaHashes, the SHA-256 of every image (the
+        header) by content, read from this backend's storage or fetched from its external URL;
+        the video stream is never hashed, only its URL is committed. 422 (40179) means an image
+        could not be fetched or hashed; the message names its URL.
         402 (40178) means the process is priced and unpaid — the current quote travels in the
         error data; start checkout via POST /processes/{processId}/checkout. For a managed
         organization, 402 (40175) means its integrator's wallet does not cover the price.
@@ -5844,7 +5873,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "422":
-          description: 'Managed organization: census size requires a custom quote'
+          description: Image not fetchable (40179), or managed org census needs a
+            custom quote
           schema:
             $ref: '#/definitions/errors.Error'
         "503":
@@ -5972,6 +6002,9 @@ paths:
     put:
       consumes:
       - application/json
+      description: |-
+        The process's parent election follows the process: once every question is at the
+        target status, the same job changes the parent too.
       parameters:
       - description: Process ID
         in: path
@@ -6005,6 +6038,10 @@ paths:
     put:
       consumes:
       - application/json
+      description: |-
+        An empty question list targets every published question. The process's parent
+        election follows the process: once every question is at the target status, the
+        same job changes the parent too.
       parameters:
       - description: Process ID
         in: path
