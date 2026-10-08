@@ -9,6 +9,7 @@ import (
 	"go.vocdoni.io/dvote/log"
 
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 )
 
 func main() {
@@ -30,7 +31,7 @@ func main() {
 	}
 	mongoDB := viper.GetString("mongoDB")
 
-	log.Infow("connecting to MongoDB", "url", mongoURL, "database", mongoDB)
+	log.Infow("connecting to MongoDB", "url", internal.RedactURL(mongoURL), "database", mongoDB)
 	storage, err := db.New(mongoURL, mongoDB)
 	if err != nil {
 		log.Fatalf("failed to connect to MongoDB: %v", err)

@@ -326,3 +326,13 @@ func TestHashLoginFields(t *testing.T) {
 	// no plaintext in the digest
 	c.Assert(string(hash), quicktest.Not(quicktest.Contains), "john")
 }
+
+func TestRedactURL(t *testing.T) {
+	c := quicktest.New(t)
+	redacted := RedactURL("mongodb+srv://user:s3cret@db.example.com/saas?tls=true")
+	c.Assert(redacted, quicktest.Not(quicktest.Contains), "s3cret")
+	c.Assert(redacted, quicktest.Contains, "user:")
+	c.Assert(redacted, quicktest.Contains, "db.example.com/saas?tls=true")
+	c.Assert(RedactURL("mongodb://localhost:27017"), quicktest.Equals, "mongodb://localhost:27017")
+	c.Assert(RedactURL("://user:s3cret@%zz"), quicktest.Not(quicktest.Contains), "s3cret")
+}

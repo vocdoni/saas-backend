@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -100,7 +101,7 @@ func New(url, database string) (*MongoStorage, error) {
 		sb.WriteString(params)
 		url = sb.String()
 	}
-	log.Infow("connecting to mongodb", "url", url)
+	log.Infow("connecting to mongodb", "url", internal.RedactURL(url))
 	// preparing connection
 	opts := options.Client()
 	opts.ApplyURI(url)

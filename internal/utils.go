@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"math/big"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -171,4 +172,14 @@ func OpenToken(sealedToken []byte, email, secret string) (string, error) {
 	}
 
 	return string(plaintext), nil
+}
+
+// RedactURL returns rawURL with any password replaced, so connection strings can be logged.
+// A URL that can't be parsed is not echoed at all, since it may still contain credentials.
+func RedactURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "<unparseable url>"
+	}
+	return u.Redacted()
 }
