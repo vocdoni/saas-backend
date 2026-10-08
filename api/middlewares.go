@@ -105,12 +105,43 @@ func (a *API) optionalUser(r *http.Request) *db.User {
 // user is missing or unverified. Single source of truth for "which user does a key act as", shared by
 // authenticateAPIKey (required auth) and userFromAPIKey (optional public-read auth) so the two cannot
 // drift — a future hardening check on the acting user (e.g. a suspended-user flag) lives here once.
+//
+// The returned user is a copy whose role list is confined to the key's organization and the
+// organizations it manages: a key belongs to one organization, so it must not inherit its creator's
+// roles in unrelated organizations. Downstream HasRoleFor checks then deny those automatically.
 func (a *API) apiKeyActingUser(key *db.APIKey) *db.User {
 	user, err := a.db.UserByEmail(key.CreatedBy)
 	if err != nil || !user.Verified {
 		return nil
 	}
-	return user
+	// split the user's memberships into the key's own org (kept as-is) and candidates that are
+	// only kept when they are organizations managed by the key's org
+	var kept []db.OrganizationUser
+	var candidates []common.Address
+	for _, orgUser := range user.Organizations {
+		if orgUser.Address == key.OrgAddress {
+			kept = append(kept, orgUser)
+			continue
+		}
+		candidates = append(candidates, orgUser.Address)
+	}
+	if len(candidates) > 0 {
+		managed, err := a.db.OrgAddressesManagedBy(key.OrgAddress, candidates)
+		if err != nil {
+			// fail closed: an authorization boundary that cannot be checked is not crossed
+			log.Warnw("could not resolve organizations managed by the api key org",
+				"org", key.OrgAddress, "error", err)
+			managed = nil
+		}
+		for _, orgUser := range user.Organizations {
+			if orgUser.Address != key.OrgAddress && slices.Contains(managed, orgUser.Address) {
+				kept = append(kept, orgUser)
+			}
+		}
+	}
+	scoped := *user
+	scoped.Organizations = kept
+	return &scoped
 }
 
 // userFromAPIKey resolves the db.User an API key acts as, but only when the key is valid (not
