@@ -919,3 +919,51 @@ func TestOrganizationMembersSort(t *testing.T) {
 		requestAndAssertError(errors.ErrMalformedURLParam, t, http.MethodGet, adminToken, nil, membersURL+"?"+query)
 	}
 }
+
+// TestUpsertOrganizationMemberInvalidData pins #733: a member the db layer rejects is a 400, not a 500.
+func TestUpsertOrganizationMemberInvalidData(t *testing.T) {
+	c := qt.New(t)
+	loginToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, loginToken)
+	member := postOrgMembers(t, loginToken, orgAddress, newOrgMembers(1)...)[0]
+
+	for name, edit := range map[string]apicommon.OrgMember{
+		"email":       {ID: member.ID, Email: "not-an-email"},
+		"birthDate":   {ID: member.ID, BirthDate: "garbage"},
+		"maskedPhone": {ID: member.ID, Phone: member.Phone},
+	} {
+		c.Run(name, func(c *qt.C) {
+			err := putOrgMemberAndExpectError(t, loginToken, orgAddress, edit)
+			c.Assert(err.Code, qt.Equals, errors.ErrInvalidData.Code)
+		})
+	}
+
+	c.Run("otherOrgMember", func(c *qt.C) {
+		otherOrg := testCreateOrganization(t, loginToken)
+		err := putOrgMemberAndExpectError(t, loginToken, otherOrg, apicommon.OrgMember{ID: member.ID, Name: "x"})
+		c.Assert(err.Code, qt.Equals, errors.ErrInvalidData.Code)
+	})
+}
+
+// TestAddOrganizationMembersAsyncInsertFailure pins #735: an import whose rows do not all insert
+// still ends, with the rows it did insert and the insert error.
+func TestAddOrganizationMembersAsyncInsertFailure(t *testing.T) {
+	c := qt.New(t)
+	loginToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, loginToken)
+
+	// two members sharing one _id: the second insert fails on the duplicate key
+	members := newOrgMembers(2)
+	members[0].ID = bson.NewObjectID().Hex()
+	members[1].ID = members[0].ID
+
+	resp := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, loginToken,
+		&apicommon.AddMembersRequest{Members: members},
+		"organizations", orgAddress.String(), "members?async=true")
+	job := pollOrgJob(t, loginToken, orgAddress.String(), resp.JobID.String())
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted)
+	c.Assert(job.Result.Added, qt.Equals, 1)
+	c.Assert(job.Result.Total, qt.Equals, 2)
+	c.Assert(job.Errors, qt.HasLen, 1)
+	c.Assert(job.Errors[0], qt.Matches, "lines 1-2: .*duplicate key.*")
+}
