@@ -49,30 +49,60 @@ func waitForElectionStatus(t *testing.T, address internal.HexBytes, accepted ...
 	c.Fatalf("election %s never reached status %v (last seen %q)", address.String(), accepted, lastStatus)
 }
 
+// testVoteHashes are the metadata hashes a vote envelope attests: its election's and, as
+// parentMetadataHash, its parent election's.
+type testVoteHashes struct {
+	metadata, parent []byte
+}
+
+// testStoredVoteHashes returns the hashes stored for the question published as processID, as a
+// voting client attests the ones it read: the question's and its process's parent election's.
+// Processes that are not questions attest none.
+func testStoredVoteHashes(t *testing.T, processID internal.HexBytes) testVoteHashes {
+	t.Helper()
+	question, err := testDB.QuestionByUpstreamID(processID)
+	if err != nil {
+		return testVoteHashes{}
+	}
+	hashes := testVoteHashes{metadata: question.MetadataHash}
+	if len(question.ParentUpstreamID) > 0 {
+		vp, err := testDB.VotingProcess(question.ProcessID)
+		qt.Assert(t, err, qt.IsNil)
+		hashes.parent = vp.MetadataHash
+	}
+	return hashes
+}
+
 // testSignVoteTx builds a vote envelope for processID and signs it as the voter would,
 // returning the marshaled models.SignedTx the relay endpoints take as their payload. The
-// envelope attests the metadata hash stored for the question published as processID, as a
-// voting client attests the one it read; processes that are not questions attest none.
+// envelope attests the stored hashes (testStoredVoteHashes).
 func testSignVoteTx(t *testing.T, signer *ethereum.SignKeys, processID internal.HexBytes,
 	proof *models.Proof, votePackage, memo []byte,
 ) internal.HexBytes {
 	t.Helper()
-	var metadataHash []byte
-	if question, err := testDB.QuestionByUpstreamID(processID); err == nil {
-		metadataHash = question.MetadataHash
-	}
-	return testSignVoteTxWithMetadataHash(t, signer, processID, proof, votePackage, memo, metadataHash)
+	return testSignVoteTxWithHashes(t, signer, processID, proof, votePackage, memo, testStoredVoteHashes(t, processID))
 }
 
-// testSignVoteTxWithMetadataHash is testSignVoteTx attesting the given metadata hash.
+// testSignVoteTxWithMetadataHash is testSignVoteTx attesting the given election metadata hash
+// (and the stored parent hash).
 func testSignVoteTxWithMetadataHash(t *testing.T, signer *ethereum.SignKeys, processID internal.HexBytes,
 	proof *models.Proof, votePackage, memo, metadataHash []byte,
+) internal.HexBytes {
+	t.Helper()
+	hashes := testStoredVoteHashes(t, processID)
+	hashes.metadata = metadataHash
+	return testSignVoteTxWithHashes(t, signer, processID, proof, votePackage, memo, hashes)
+}
+
+// testSignVoteTxWithHashes is testSignVoteTx attesting the given hashes.
+func testSignVoteTxWithHashes(t *testing.T, signer *ethereum.SignKeys, processID internal.HexBytes,
+	proof *models.Proof, votePackage, memo []byte, hashes testVoteHashes,
 ) internal.HexBytes {
 	t.Helper()
 	c := qt.New(t)
 	tx := &models.Tx{Payload: &models.Tx_Vote{Vote: &models.VoteEnvelope{
 		ProcessId: processID.Bytes(), Nonce: internal.RandomBytes(16), Proof: proof, VotePackage: votePackage,
-		Memo: memo, MetadataHash: metadataHash,
+		Memo: memo, MetadataHash: hashes.metadata, ParentMetadataHash: hashes.parent,
 	}}}
 	txBytes, err := proto.Marshal(tx)
 	c.Assert(err, qt.IsNil)

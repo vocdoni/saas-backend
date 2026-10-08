@@ -65,7 +65,8 @@ func setupParentProcess(t *testing.T) *parentProcessFixture {
 
 // assertParentElection checks the parent election of a published process: its document carries
 // the process text and media with no questions, its hash is the SHA-256 of the served bytes, the
-// chain commits both with a census of one, and every question election is linked to it.
+// chain commits both on a metadata-only election (no census), and every question election is
+// linked to it on chain.
 func assertParentElection(t *testing.T, f *parentProcessFixture, got *apicommon.VotingProcessResponse) {
 	t.Helper()
 	c := qt.New(t)
@@ -90,15 +91,21 @@ func assertParentElection(t *testing.T, f *parentProcessFixture, got *apicommon.
 	c.Assert(doc.Media, qt.Equals, dvoteapi.ProcessMedia{StreamURI: f.req.StreamURI})
 	c.Assert(doc.Meta, qt.IsNil)
 
-	election, err := testNewVocdoniClient(t).Election(got.UpstreamID.Bytes())
+	client := testNewVocdoniClient(t)
+	election, err := client.Election(got.UpstreamID.Bytes())
 	c.Assert(err, qt.IsNil)
 	c.Assert(election.MetadataURL, qt.Equals, got.MetadataURL)
 	c.Assert([]byte(election.MetadataHash), qt.DeepEquals, sum[:])
 	c.Assert([]byte(election.OrganizationID), qt.DeepEquals, f.orgAddress.Bytes())
-	// TODO(parent-process): once the parent is metadata-only it has no census, and the chain
-	// reports each question election's parentProcessId.
-	c.Assert(election.Census, qt.Not(qt.IsNil))
-	c.Assert(election.Census.MaxCensusSize, qt.Equals, uint64(parentElectionMaxCensusSize))
+	c.Assert(election.MetadataOnly, qt.IsTrue)
+	c.Assert(election.Census, qt.IsNil)
+	c.Assert(election.ParentElectionID, qt.HasLen, 0)
+	for i, q := range got.Questions {
+		questionElection, err := client.Election(q.UpstreamID.Bytes())
+		c.Assert(err, qt.IsNil, qt.Commentf("question %d", i))
+		c.Assert(questionElection.MetadataOnly, qt.IsFalse, qt.Commentf("question %d", i))
+		c.Assert([]byte(questionElection.ParentElectionID), qt.DeepEquals, got.UpstreamID.Bytes(), qt.Commentf("question %d", i))
+	}
 }
 
 // TestProcessParentElection checks that publishing a process creates one election per question
@@ -198,4 +205,48 @@ func TestProcessPublishResumesAfterParent(t *testing.T) {
 		c.Assert(q.UpstreamID, qt.Not(qt.DeepEquals), f.elections[i], qt.Commentf("question %d", i))
 	}
 	assertParentElection(t, f, &got)
+}
+
+// TestVoteParentMetadataHash checks that a vote on a question election must attest, as
+// parentMetadataHash, the metadata hash its process's parent election commits to: the relay
+// refuses a stale or missing one up front, the chain also rejects it when the relay is bypassed, a
+// vote attesting the current one is accepted, and the chain refuses any vote on the parent.
+func TestVoteParentMetadataHash(t *testing.T) {
+	c := qt.New(t)
+	f := setupRelayVoting(t, 1)
+	processID := f.processIDs[0]
+	stored := testStoredVoteHashes(t, processID)
+	c.Assert(stored.parent, qt.Not(qt.HasLen), 0)
+	c.Assert(stored.parent, qt.DeepEquals, testElectionParentMetadataHash(t, f.client, processID))
+	// one proof serves every attempt: a vote the chain rejects consumes nothing
+	proof := f.proofFor(t, processID)
+	vote := []byte("[\"1\"]")
+
+	stale := testVoteHashes{metadata: stored.metadata, parent: internal.RandomBytes(sha256.Size)}
+	missing := testVoteHashes{metadata: stored.metadata}
+	for name, hashes := range map[string]testVoteHashes{"stale": stale, "missing": missing} {
+		t.Run(name+" parent hash is refused by the relay", func(t *testing.T) {
+			requestAndAssertError(errors.ErrVoteMetadataChanged, t, http.MethodPost, "",
+				&apicommon.RelayVoteRequest{
+					TxPayload: testSignVoteTxWithHashes(t, f.voter, processID, proof, vote, nil, hashes),
+				}, "vote")
+		})
+		t.Run(name+" parent hash is rejected by the chain", func(t *testing.T) {
+			_, _, err := f.client.SendTx(testSignVoteTxWithHashes(t, f.voter, processID, proof, vote, nil, hashes))
+			qt.Assert(t, err, qt.ErrorMatches, `(?s).*parent metadata hash.*`)
+		})
+	}
+	count, err := f.client.ElectionVoteCount(processID.Bytes())
+	c.Assert(err, qt.IsNil)
+	c.Assert(count, qt.Equals, uint32(0))
+
+	t.Run("a vote on the parent election is rejected by the chain", func(t *testing.T) {
+		got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, f.token, nil, "processes", f.pid)
+		_, _, err := f.client.SendTx(testSignVoteTxWithHashes(t, f.voter, got.UpstreamID, proof, vote, nil,
+			testVoteHashes{metadata: got.MetadataHash}))
+		qt.Assert(t, err, qt.ErrorMatches, `(?s).*metadata-only.*`)
+	})
+
+	// the current hashes are accepted
+	testRelayVoteRequest(t, f.voter, processID, proof, vote, nil)
 }
