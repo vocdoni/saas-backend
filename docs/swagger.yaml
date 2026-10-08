@@ -2552,6 +2552,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
+          schema:
+            $ref: '#/definitions/errors.Error'
       summary: Login to get a JWT token
       tags:
       - auth
@@ -2584,6 +2588,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -3103,6 +3111,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Login using OAuth service or classic credentials
@@ -4288,6 +4300,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Accept an invitation to an organization
@@ -5991,6 +6007,10 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
+          schema:
+            $ref: '#/definitions/errors.Error'
       summary: Register a new user
       tags:
       - users
@@ -6085,6 +6105,10 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
+          schema:
+            $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
       summary: Update user password
@@ -6157,6 +6181,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Reset user password
