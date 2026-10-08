@@ -59,6 +59,7 @@ type MongoStorage struct {
 	walletLedger        *mongo.Collection
 	cspTokens           *mongo.Collection
 	cspTokensStatus     *mongo.Collection
+	cspCounters         *mongo.Collection
 	jobs                *mongo.Collection
 	apiKeys             *mongo.Collection
 	migrations          *mongo.Collection

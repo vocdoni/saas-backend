@@ -56,6 +56,12 @@ func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 			return nil, errors.ErrAttemptCoolDownTime.WithData(map[string]any{"coolDownTime": remainingTime.Milliseconds()})
 		}
 	}
+	// cap the challenges (new tokens + resends) this member can be sent for this process today:
+	// the cooldown only spaces sends, so without a cap a member's contact could be flooded with
+	// one email/SMS per cooldown period all day long
+	if err := c.claimDailyChallengeSend(uID, anchorID); err != nil {
+		return nil, err
+	}
 	// generate a new token, secret and code
 	token, secret, code := c.generateToken()
 	// create the new token
@@ -149,6 +155,10 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 			"token", token)
 		return ErrTokenExpired
 	}
+	// resends count against the same daily per-member budget as new tokens
+	if err := c.claimDailyChallengeSend(authTokenData.UserID, authTokenData.AnchorID); err != nil {
+		return err
+	}
 	// cap resends: each one sends an email or an SMS paid by the platform, and the token creation
 	// cooldown does not apply to them
 	claimed, err := c.Storage.ClaimCSPAuthResend(token, MaxChallengeResends)
@@ -207,6 +217,33 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 		return ErrNotificationFailure
 	}
 	return nil
+}
+
+// claimDailyChallengeSend claims one unit of the member's daily challenge-send budget for the
+// anchor process, counting new tokens and resends together. The counter is Mongo-backed, so it
+// survives service restarts. Fails closed on storage errors.
+func (c *CSP) claimDailyChallengeSend(uID, anchorID internal.HexBytes) error {
+	claimed, err := c.Storage.ClaimCSPCounter(db.CSPCounterChallengeSends, dailyCounterKey(uID, anchorID), c.maxDailyChallengeSends)
+	if err != nil {
+		log.Warnw("error claiming daily challenge send",
+			"userID", uID,
+			"anchorID", anchorID,
+			"error", err)
+		return ErrStorageFailure
+	}
+	if !claimed {
+		return errors.ErrVerificationMaxAttempts.Withf("daily challenge limit reached, try again tomorrow")
+	}
+	return nil
+}
+
+// dailyCounterKey joins a member id and an anchor (process) id into the key of a daily
+// per-member-per-process counter.
+func dailyCounterKey(uID, anchorID internal.HexBytes) []byte {
+	key := make([]byte, 0, len(uID)+len(anchorID))
+	key = append(key, uID...)
+	key = append(key, anchorID...)
+	return key
 }
 
 // VerifyAuthToken method verifies the authentication token for a user. It gets the user data from the token and checks
