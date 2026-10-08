@@ -65,11 +65,19 @@ func BuildElectionMetadata(params *db.ElectionParams) ([]byte, error) {
 			Description: api.LanguageString(q.Description),
 			Choices:     make([]api.ChoiceMetadata, 0, len(q.Choices)),
 		}
+		// a nil map stored in an any would marshal as null rather than be omitted
+		if len(q.Meta) > 0 {
+			question.Meta = q.Meta
+		}
 		for _, ch := range q.Choices {
-			question.Choices = append(question.Choices, api.ChoiceMetadata{
+			choice := api.ChoiceMetadata{
 				Title: api.LanguageString(ch.Title),
 				Value: ch.Value,
-			})
+			}
+			if meta := q.ChoicesMeta[ch.Value]; len(meta) > 0 {
+				choice.Meta = meta
+			}
+			question.Choices = append(question.Choices, choice)
 		}
 		meta.Questions = append(meta.Questions, question)
 	}

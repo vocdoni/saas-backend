@@ -609,6 +609,12 @@ type Question struct {
 	Title       MultiLangString `json:"title" bson:"title"`
 	Description MultiLangString `json:"description,omitempty" bson:"description,omitempty"`
 	Choices     []Choice        `json:"choices" bson:"choices"`
+	// Meta is the question's display info beyond its text, written into the metadata document as
+	// questions[i].meta. Publish-time only, never persisted.
+	Meta map[string]any `json:"-" bson:"-"`
+	// ChoicesMeta is each choice's display info (description, image...) keyed by choice value,
+	// written into the metadata document as that choice's meta. Publish-time only, never persisted.
+	ChoicesMeta map[uint32]map[string]any `json:"-" bson:"-"`
 }
 
 // VoteType describes how votes are counted and validated.

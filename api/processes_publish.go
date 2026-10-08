@@ -41,6 +41,7 @@ func electionParamsForQuestion(
 	if maxCensusSize == 0 {
 		return nil, fmt.Errorf("cannot determine census size for question")
 	}
+	questionMeta, choicesMeta := account.QuestionDisplayMeta(q.Metadata)
 	return &db.ElectionParams{
 		Title:       q.Title,
 		Description: q.Description,
@@ -50,6 +51,8 @@ func electionParamsForQuestion(
 			Title:       q.Title,
 			Description: q.Description,
 			Choices:     q.Choices,
+			Meta:        questionMeta,
+			ChoicesMeta: choicesMeta,
 		}},
 		VoteType:      voteType,
 		ElectionType:  account.ElectionTypeFromQuestion(q),

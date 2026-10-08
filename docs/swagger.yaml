@@ -1880,6 +1880,10 @@ definitions:
         $ref: '#/definitions/db.MultiLangString'
       metadata:
         additionalProperties: {}
+        description: |-
+          Metadata is the question's free-form display info, published in its election document:
+          each entry of metadata.choices ({value, description, image, ...}) becomes the meta of the
+          choice with that value (without the value), and every other key the question's meta.
         type: object
       secretUntilTheEnd:
         type: boolean
