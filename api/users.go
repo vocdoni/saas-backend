@@ -474,6 +474,19 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 			errors.ErrEmailMalformed.Write(w)
 			return
 		}
+		// an organization's signing key is derived from its creator's email (account.OrganizationSigner),
+		// so changing that email would leave the organization unable to sign for its on-chain account
+		if userInfo.Email != currentEmail {
+			isCreator, err := a.db.IsOrganizationCreator(currentEmail)
+			if err != nil {
+				errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+				return
+			}
+			if isCreator {
+				errors.ErrNotSupported.Withf("the creator of an organization cannot change their email").Write(w)
+				return
+			}
+		}
 		// update the user email and set the flag to true to update the user
 		// info
 		user.Email = userInfo.Email
