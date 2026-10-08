@@ -729,10 +729,11 @@ func TestCSPVoting(t *testing.T) {
 			tx := models.Tx{
 				Payload: &models.Tx_Vote{
 					Vote: &models.VoteEnvelope{
-						ProcessId:   processID,
-						Nonce:       internal.RandomBytes(16),
-						Proof:       invalidProof,
-						VotePackage: []byte("[\"0\"]"),
+						ProcessId:    processID,
+						Nonce:        internal.RandomBytes(16),
+						Proof:        invalidProof,
+						VotePackage:  []byte("[\"0\"]"),
+						MetadataHash: testElectionMetadataHash(t, vocdoniClient, processID),
 					},
 				},
 			}
@@ -760,10 +761,11 @@ func TestCSPVoting(t *testing.T) {
 			tx := models.Tx{
 				Payload: &models.Tx_Vote{
 					Vote: &models.VoteEnvelope{
-						ProcessId:   processID,
-						Nonce:       internal.RandomBytes(16),
-						Proof:       invalidProof,
-						VotePackage: []byte("[\"1\"]"),
+						ProcessId:    processID,
+						Nonce:        internal.RandomBytes(16),
+						Proof:        invalidProof,
+						VotePackage:  []byte("[\"1\"]"),
+						MetadataHash: testElectionMetadataHash(t, vocdoniClient, processID),
 					},
 				},
 			}

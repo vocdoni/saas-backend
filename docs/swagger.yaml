@@ -1267,6 +1267,17 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
+      metadataHash:
+        description: |-
+          MetadataHash is the SHA-256 of the exact bytes served at MetadataURL, as committed on chain.
+          A vote must attest it in its envelope (metadataHash) or it is rejected.
+        example: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+        format: hex
+        type: string
+      metadataURL:
+        description: MetadataURL serves the ElectionMetadata document the question's
+          election points to on chain.
+        type: string
       parentProcessId:
         type: string
       results:
@@ -2337,6 +2348,17 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
+      metadataHash:
+        description: |-
+          MetadataHash is the SHA-256 of the exact bytes served at MetadataURL, committed on chain at
+          publish. Every vote envelope must attest it (VoteEnvelope.metadataHash) or the chain rejects it.
+        example: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+        format: hex
+        type: string
+      metadataURL:
+        description: MetadataURL serves the ElectionMetadata document this question's
+          election points to on chain.
+        type: string
       parentProcessId:
         type: string
       results:
@@ -6880,7 +6902,8 @@ paths:
         envelope; the target process is taken from that envelope, so no process id is
         passed in the path. Public endpoint: no authentication is required. The request is
         checked synchronously — the body must decode to a Vote envelope (else 400) for a
-        process the backend knows (else 404) — then enqueued for submission on a background
+        process the backend knows (else 404) attesting the metadata hash the election
+        currently commits to (else 409) — then enqueued for submission on a background
         worker; the call returns 202 with a job id. The chain's acceptance or rejection of
         the vote (proof, nullifier, election state) is decided when the worker submits it and
         reported on the job: poll GET /jobs/{jobId} for the voteID on success, or a failure.
@@ -6904,6 +6927,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "404":
           description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: 'Ballot metadata changed: reload the process and vote again'
           schema:
             $ref: '#/definitions/errors.Error'
         "413":
@@ -6933,9 +6960,10 @@ paths:
         endpoint closes that window. Public endpoint: no authentication is required.
         The whole batch is checked synchronously and is accepted or rejected as a unit —
         every payload must decode to a Vote envelope (else 400) for a process the backend
-        knows (else 404), all of them must belong to the same organization (else 400), and
-        the queue must have room for all of them (else 503). A rejected batch enqueues
-        nothing. At most 100 votes per call.
+        knows (else 404), each must attest the metadata hash its election currently commits
+        to (else 409: the ballot changed and the voter must reload it), all of them must
+        belong to the same organization (else 400), and the queue must have room for all of
+        them (else 503). A rejected batch enqueues nothing. At most 100 votes per call.
         The call returns 202 with a single job id covering the batch. Poll
         GET /jobs/{jobId}: its result carries one entry per vote, index-aligned with the
         request, each with the process id and the nullifier — both known before submission,
@@ -6961,6 +6989,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "404":
           description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: 'Ballot metadata changed: reload the process and vote again'
           schema:
             $ref: '#/definitions/errors.Error'
         "413":

@@ -86,9 +86,12 @@ func setupRevocationFixture(t *testing.T) *revocationFixture {
 	c.Assert(err, qt.IsNil)
 
 	upstream := internal.HexBytes{0xE1, 0xEC, 0x71, 0x01}
-	c.Assert(testDB.SetQuestionPublished(restricted, upstream, "url-1", QuestionStatusReady), qt.IsNil)
-	c.Assert(testDB.SetQuestionPublished(
-		openToAll, internal.HexBytes{0xE1, 0xEC, 0x71, 0x02}, "url-2", QuestionStatusReady), qt.IsNil)
+	c.Assert(testDB.SetQuestionPublished(&QuestionPublication{
+		ID: restricted, UpstreamID: upstream, MetadataURL: "url-1", Status: QuestionStatusReady,
+	}), qt.IsNil)
+	c.Assert(testDB.SetQuestionPublished(&QuestionPublication{
+		ID: openToAll, UpstreamID: internal.HexBytes{0xE1, 0xEC, 0x71, 0x02}, MetadataURL: "url-2", Status: QuestionStatusReady,
+	}), qt.IsNil)
 
 	return &revocationFixture{
 		census: census, processID: processID, restricted: restricted, openToAll: openToAll,

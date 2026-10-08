@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -586,6 +587,9 @@ func (pw *publishWorker) buildBatch(
 			return nil, false, err
 		}
 		q.MetadataURL = a.objectStorage.LocalURL(objectName)
+		// the object is served back byte for byte, so this is the hash of what the URL serves
+		metaHash := sha256.Sum256(metaBytes)
+		q.MetadataHash = metaHash[:]
 		nonce := startNonce + uint32(i)
 		tx, err := a.account.BuildNewProcessTx(&account.NewProcessParams{
 			OrgAddress:    pw.vp.OrgAddress,
@@ -594,6 +598,7 @@ func (pw *publishWorker) buildBatch(
 			CensusURI:     a.serverURL,
 			Anonymous:     pw.census.Anonymous,
 			MetadataURL:   q.MetadataURL,
+			MetadataHash:  q.MetadataHash,
 			Nonce:         &nonce,
 			InitialStatus: initialStatus,
 		})
@@ -652,9 +657,13 @@ func (pw *publishWorker) confirmBatch(pending []*db.VotingProcessQuestion, resul
 		if pw.vp.InitialStatus == db.QuestionStatusPaused {
 			initialStatus = db.QuestionStatusPaused
 		}
-		if err := a.db.SetQuestionPublished(
-			pending[i].ID, res.UpstreamID, pending[i].MetadataURL, initialStatus,
-		); err != nil {
+		if err := a.db.SetQuestionPublished(&db.QuestionPublication{
+			ID:           pending[i].ID,
+			UpstreamID:   res.UpstreamID,
+			MetadataURL:  pending[i].MetadataURL,
+			MetadataHash: pending[i].MetadataHash,
+			Status:       initialStatus,
+		}); err != nil {
 			// leave UpstreamID unset so the question stays pending and is retried, rather
 			// than letting the process be marked published with an unpersisted row.
 			log.Warnw("could not persist published question", "error", err)

@@ -1,8 +1,10 @@
 package api
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"net/http"
+	"path"
 	"testing"
 	"time"
 
@@ -46,15 +48,29 @@ func waitForElectionStatus(t *testing.T, address internal.HexBytes, accepted ...
 }
 
 // testSignVoteTx builds a vote envelope for processID and signs it as the voter would,
-// returning the marshaled models.SignedTx the relay endpoints take as their payload.
+// returning the marshaled models.SignedTx the relay endpoints take as their payload. The
+// envelope attests the metadata hash stored for the question published as processID, as a
+// voting client attests the one it read; processes that are not questions attest none.
 func testSignVoteTx(t *testing.T, signer *ethereum.SignKeys, processID internal.HexBytes,
 	proof *models.Proof, votePackage, memo []byte,
+) internal.HexBytes {
+	t.Helper()
+	var metadataHash []byte
+	if question, err := testDB.QuestionByUpstreamID(processID); err == nil {
+		metadataHash = question.MetadataHash
+	}
+	return testSignVoteTxWithMetadataHash(t, signer, processID, proof, votePackage, memo, metadataHash)
+}
+
+// testSignVoteTxWithMetadataHash is testSignVoteTx attesting the given metadata hash.
+func testSignVoteTxWithMetadataHash(t *testing.T, signer *ethereum.SignKeys, processID internal.HexBytes,
+	proof *models.Proof, votePackage, memo, metadataHash []byte,
 ) internal.HexBytes {
 	t.Helper()
 	c := qt.New(t)
 	tx := &models.Tx{Payload: &models.Tx_Vote{Vote: &models.VoteEnvelope{
 		ProcessId: processID.Bytes(), Nonce: internal.RandomBytes(16), Proof: proof, VotePackage: votePackage,
-		Memo: memo,
+		Memo: memo, MetadataHash: metadataHash,
 	}}}
 	txBytes, err := proto.Marshal(tx)
 	c.Assert(err, qt.IsNil)
@@ -378,5 +394,62 @@ func TestRelayVotesRejectsBatch(t *testing.T) {
 			requestAndAssertError(tc.expected, t, http.MethodPost, "",
 				&apicommon.RelayVotesRequest{Votes: tc.votes}, "votes")
 		})
+	}
+}
+
+// TestProcessMetadataHash checks the metadata hash contract of a published process: each question's
+// election commits on chain the SHA-256 of the exact bytes its metadataURL serves, the question reads
+// expose that hash, and the relay rejects up front a vote that attests any other hash.
+func TestProcessMetadataHash(t *testing.T) {
+	c := qt.New(t)
+	f := setupRelayVoting(t, 2)
+
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, f.token, nil, "processes", f.pid)
+	c.Assert(got.Questions, qt.HasLen, 2)
+	for i, q := range got.Questions {
+		comment := qt.Commentf("question %d", i)
+		c.Assert(q.MetadataURL, qt.Not(qt.Equals), "", comment)
+		served, code := testRequest(t, http.MethodGet, "", nil, "storage", path.Base(q.MetadataURL))
+		c.Assert(code, qt.Equals, http.StatusOK, comment)
+		want := sha256.Sum256(served)
+		c.Assert([]byte(q.MetadataHash), qt.DeepEquals, want[:], comment)
+
+		election, err := f.client.Election(q.UpstreamID.Bytes())
+		c.Assert(err, qt.IsNil, comment)
+		c.Assert(election.MetadataURL, qt.Equals, q.MetadataURL, comment)
+		c.Assert([]byte(election.MetadataHash), qt.DeepEquals, want[:], comment)
+
+		public := requestAndParse[apicommon.PublicQuestionResponse](t, http.MethodGet, "", nil,
+			"processes", f.pid, "questions", q.ID.Hex())
+		c.Assert(public.MetadataURL, qt.Equals, q.MetadataURL, comment)
+		c.Assert(public.MetadataHash, qt.DeepEquals, q.MetadataHash, comment)
+	}
+
+	stale := internal.RandomBytes(sha256.Size)
+	current := testSignVoteTx(t, f.voter, f.processIDs[0], nil, []byte("[\"1\"]"), nil)
+	t.Run("single vote with a stale hash", func(t *testing.T) {
+		requestAndAssertError(errors.ErrVoteMetadataChanged, t, http.MethodPost, "",
+			&apicommon.RelayVoteRequest{
+				TxPayload: testSignVoteTxWithMetadataHash(t, f.voter, f.processIDs[1], nil, []byte("[\"1\"]"), nil, stale),
+			}, "vote")
+	})
+	t.Run("single vote without a hash", func(t *testing.T) {
+		requestAndAssertError(errors.ErrVoteMetadataChanged, t, http.MethodPost, "",
+			&apicommon.RelayVoteRequest{
+				TxPayload: testSignVoteTxWithMetadataHash(t, f.voter, f.processIDs[1], nil, []byte("[\"1\"]"), nil, nil),
+			}, "vote")
+	})
+	t.Run("batch with one stale hash", func(t *testing.T) {
+		requestAndAssertError(errors.ErrVoteMetadataChanged, t, http.MethodPost, "",
+			&apicommon.RelayVotesRequest{Votes: []apicommon.RelayVoteRequest{
+				{TxPayload: current},
+				{TxPayload: testSignVoteTxWithMetadataHash(t, f.voter, f.processIDs[1], nil, []byte("[\"1\"]"), nil, stale)},
+			}}, "votes")
+	})
+	// the rejected batch enqueued nothing, so no vote reached the chain
+	for i, processID := range f.processIDs {
+		count, err := f.client.ElectionVoteCount(processID.Bytes())
+		c.Assert(err, qt.IsNil)
+		c.Assert(count, qt.Equals, uint32(0), qt.Commentf("process %d", i))
 	}
 }

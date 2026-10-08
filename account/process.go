@@ -81,6 +81,9 @@ type NewProcessParams struct {
 	// which stays false — the Vochain routes both CA origins to the CSP verifier regardless of it.
 	Anonymous   bool
 	MetadataURL string // public https URL of the stored ElectionMetadata JSON
+	// MetadataHash is the SHA-256 of the exact bytes served at MetadataURL. The chain commits it
+	// on the process and rejects any vote whose envelope does not attest the same hash.
+	MetadataHash []byte
 	// Nonce, when set, is used as the tx account nonce instead of reading the current
 	// on-chain nonce. Batch publishing sets explicit consecutive nonces so N txs can be
 	// signed and submitted together; single publishes leave it nil to read the nonce.
@@ -225,6 +228,7 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 		CensusRoot:    p.CensusRoot,
 		MaxCensusSize: ep.MaxCensusSize,
 		Metadata:      &metadataURL,
+		MetadataHash:  p.MetadataHash,
 		EnvelopeType: &models.EnvelopeType{
 			Serial:         false,
 			Anonymous:      ep.ElectionType.Anonymous,

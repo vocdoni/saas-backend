@@ -932,9 +932,13 @@ type VotingProcessQuestion struct {
 	EligibleMemberIDs []string          `json:"eligibleMemberIds,omitempty" bson:"eligibleMemberIds"`
 	Metadata          map[string]any    `json:"metadata,omitempty" bson:"metadata,omitempty"`
 	UpstreamID        internal.HexBytes `json:"upstreamId,omitempty" bson:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
-	MetadataURL       string            `json:"-" bson:"metadataURL,omitempty"`
-	Status            string            `json:"status,omitempty" bson:"status,omitempty"`
-	SyncedAt          time.Time         `json:"-" bson:"syncedAt,omitempty"`
+	// MetadataURL serves the ElectionMetadata document this question's election points to on chain.
+	MetadataURL string `json:"metadataURL,omitempty" bson:"metadataURL,omitempty"`
+	// MetadataHash is the SHA-256 of the exact bytes served at MetadataURL, committed on chain at
+	// publish. Every vote envelope must attest it (VoteEnvelope.metadataHash) or the chain rejects it.
+	MetadataHash internal.HexBytes `json:"metadataHash,omitempty" bson:"metadataHash,omitempty" swaggertype:"string" format:"hex" example:"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"`
+	Status       string            `json:"status,omitempty" bson:"status,omitempty"`
+	SyncedAt     time.Time         `json:"-" bson:"syncedAt,omitempty"`
 	// EndedAt is the actual on-chain moment this question's election stopped accepting votes,
 	// set only when the vote was ended early (before its scheduled end, i.e. ManuallyEnded on
 	// the chain). Absent while the vote is open or when it ran to its scheduled end. Recorded by

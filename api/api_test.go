@@ -843,8 +843,17 @@ func testGenerateVoteProof(processID, voterAddr, signature internal.HexBytes, we
 	}
 }
 
-// testCastVote casts a vote with the given proof and process ID.
-// It returns the nullifier.
+// testElectionMetadataHash reads the metadata hash an election currently commits to on chain,
+// which every vote envelope cast on it must attest.
+func testElectionMetadataHash(t *testing.T, vocdoniClient *apiclient.HTTPclient, processID internal.HexBytes) []byte {
+	t.Helper()
+	election, err := vocdoniClient.Election(processID.Bytes())
+	qt.Assert(t, err, qt.IsNil)
+	return election.MetadataHash
+}
+
+// testCastVote casts a vote with the given proof and process ID, attesting the election's
+// current metadata hash. It returns the nullifier.
 func testCastVote(t *testing.T, vocdoniClient *apiclient.HTTPclient, signer *ethereum.SignKeys,
 	processID internal.HexBytes, proof *models.Proof, votePackage []byte,
 ) []byte {
@@ -853,10 +862,11 @@ func testCastVote(t *testing.T, vocdoniClient *apiclient.HTTPclient, signer *eth
 	tx := models.Tx{
 		Payload: &models.Tx_Vote{
 			Vote: &models.VoteEnvelope{
-				ProcessId:   processID,
-				Nonce:       internal.RandomBytes(16),
-				Proof:       proof,
-				VotePackage: votePackage,
+				ProcessId:    processID,
+				Nonce:        internal.RandomBytes(16),
+				Proof:        proof,
+				VotePackage:  votePackage,
+				MetadataHash: testElectionMetadataHash(t, vocdoniClient, processID),
 			},
 		},
 	}

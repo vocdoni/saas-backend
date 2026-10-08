@@ -373,7 +373,12 @@ type PublicQuestionResponse struct {
 	Metadata          map[string]any       `json:"metadata,omitempty"`
 	UpstreamID        internal.HexBytes    `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	Status            string               `json:"status,omitempty"`
-	Census            CensusSpec           `json:"census"`
+	// MetadataURL serves the ElectionMetadata document the question's election points to on chain.
+	MetadataURL string `json:"metadataURL,omitempty"`
+	// MetadataHash is the SHA-256 of the exact bytes served at MetadataURL, as committed on chain.
+	// A vote must attest it in its envelope (metadataHash) or it is rejected.
+	MetadataHash internal.HexBytes `json:"metadataHash,omitempty" swaggertype:"string" format:"hex" example:"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"` //nolint:lll
+	Census       CensusSpec        `json:"census"`
 	// EncryptionKeys are the on-chain vote-encryption public keys (only for secretUntilTheEnd
 	// questions). Because of omitempty the field is absent (not an empty array) until the keykeepers
 	// publish the keys, so clients treat its absence as "not yet published" and poll. Voters seal
@@ -413,6 +418,8 @@ func PublicQuestionResponseFromDB(q *db.VotingProcessQuestion, census *db.Census
 		Metadata:          q.Metadata,
 		UpstreamID:        q.UpstreamID,
 		Status:            q.Status,
+		MetadataURL:       q.MetadataURL,
+		MetadataHash:      q.MetadataHash,
 		EncryptionKeys:    q.EncryptionKeys,
 		Results:           q.Results,
 	}
