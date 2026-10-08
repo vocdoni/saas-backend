@@ -626,6 +626,55 @@ func TestUpsertOrgMemberPartialUpdateKeepsLoginHash(t *testing.T) {
 	c.Assert(found.ParticipantID, qt.Equals, member.ID.Hex())
 }
 
+// TestUpsertOrgMemberConflictLeavesCensusesUntouched pins #732: an update rejected for clashing in
+// one census must not have rehashed the member in any other census first.
+func TestUpsertOrgMemberConflictLeavesCensusesUntouched(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	org := &Organization{Address: testOrgAddress, CreatedAt: time.Now()}
+	c.Assert(testDB.SetOrganization(org), qt.IsNil)
+
+	ada := &OrgMember{ID: bson.NewObjectID(), OrgAddress: testOrgAddress, Name: "Ada", Email: "ada@example.com"}
+	xena := &OrgMember{ID: bson.NewObjectID(), OrgAddress: testOrgAddress, Name: "Xena", Email: "xena@example.com"}
+	for _, m := range []*OrgMember{ada, xena} {
+		_, err := testDB.SetOrgMember("test_salt", m)
+		c.Assert(err, qt.IsNil)
+	}
+
+	newCensus := func(memberIDs ...string) *Census {
+		census := &Census{
+			OrgAddress:  testOrgAddress,
+			AuthFields:  OrgMemberAuthFields{OrgMemberAuthFieldsName},
+			TwoFaFields: OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail},
+		}
+		censusID, err := testDB.SetCensus(census)
+		c.Assert(err, qt.IsNil)
+		added, memberErrs, err := testDB.AddCensusParticipantsByMemberIDs(censusID, memberIDs)
+		c.Assert(err, qt.IsNil)
+		c.Assert(memberErrs, qt.HasLen, 0)
+		c.Assert(added, qt.Equals, len(memberIDs))
+		return census
+	}
+	alone := newCensus(ada.ID.Hex())
+	shared := newCensus(ada.ID.Hex(), xena.ID.Hex())
+
+	_, _, err := testDB.UpsertOrgMemberAndCensusParticipants(org, &OrgMemberUpdate{
+		ID: ada.ID, Name: new("Xena"), Email: new("xena@example.com"),
+	}, "test_salt")
+	c.Assert(err, qt.ErrorIs, ErrUpdateWouldCreateDuplicates)
+
+	stored, err := testDB.OrgMember(testOrgAddress, ada.ID.Hex())
+	c.Assert(err, qt.IsNil)
+	c.Assert(stored.Name, qt.Equals, "Ada")
+	for _, census := range []*Census{alone, shared} {
+		found, err := testDB.CensusParticipantByLoginHash(*census, *stored)
+		c.Assert(err, qt.IsNil)
+		c.Assert(found.ParticipantID, qt.Equals, ada.ID.Hex())
+	}
+}
+
 // TestUpsertOrgMemberClearsFields pins that an update setting a field to the empty string clears
 // it, while a field the update leaves nil keeps its stored value, and that a census the member can
 // no longer log in to drops their login hashes.

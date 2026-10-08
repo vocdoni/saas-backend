@@ -476,7 +476,7 @@ func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, 
 		preparedMember.CreatedAt = now
 	}
 
-	// Update the census participants first, to bail out early in case this would create any duplicates conflict
+	// Update the census participants first: a duplicates conflict fails before any write
 	if err := ms.updateCensusParticipantsForMember(ctx, preparedMember); err != nil {
 		return bson.NilObjectID, false, fmt.Errorf("failed to update census participants: %w", err)
 	}
@@ -513,7 +513,9 @@ func (ms *MongoStorage) updateCensusParticipantsForMember(ctx context.Context, m
 		return fmt.Errorf("failed to decode census participants: %w", err)
 	}
 
-	// Process each census participant
+	// Check every census before writing any, so a conflict in one cannot leave the others rehashed
+	type pendingUpdate struct{ filter, update bson.M }
+	pending := make([]pendingUpdate, 0, len(participants))
 	for _, participant := range participants {
 		// Get the census to find AuthFields and TwoFaFields
 		census, err := ms.Census(participant.CensusID)
@@ -528,14 +530,10 @@ func (ms *MongoStorage) updateCensusParticipantsForMember(ctx context.Context, m
 		// the edit left the member without the data to log in: drop its login hashes rather than
 		// re-hash it, so it can neither log in nor clash with another participant
 		if member.MissingLoginData(census.AuthFields, census.TwoFaFields) {
-			unset := bson.M{
+			pending = append(pending, pendingUpdate{participantFilter, bson.M{
 				"$unset": bson.M{"loginHash": "", "loginHashEmail": "", "loginHashPhone": ""},
 				"$set":   bson.M{"updatedAt": time.Now()},
-			}
-			if _, err := ms.censusParticipants.UpdateOne(ctx, participantFilter, unset); err != nil {
-				return fmt.Errorf("failed to update census participant %s in census %s: %w",
-					participant.ParticipantID, participant.CensusID, err)
-			}
+			}})
 			continue
 		}
 
@@ -547,8 +545,7 @@ func (ms *MongoStorage) updateCensusParticipantsForMember(ctx context.Context, m
 			findHashes = append(findHashes, bson.M{k: v})
 		}
 
-		// First "simulate" the update, checks that no conflicts would arise when trying to
-		// update all census participants where participantID == orgMemberID
+		// another participant of this census already holding any of the new hashes is a conflict
 		findFilter := bson.M{
 			"participantID": bson.M{"$ne": participant.ParticipantID},
 			"censusId":      participant.CensusID,
@@ -564,16 +561,16 @@ func (ms *MongoStorage) updateCensusParticipantsForMember(ctx context.Context, m
 				participant.ParticipantID, participant.CensusID, ErrUpdateWouldCreateDuplicates)
 		}
 
-		// Update the census participant
-		// Prepare update document for census participant
 		set := maps.Clone(hashes)
 		set["updatedAt"] = time.Now()
-		participantUpdate := bson.M{"$set": set}
+		pending = append(pending, pendingUpdate{participantFilter, bson.M{"$set": set}})
+	}
 
-		_, err = ms.censusParticipants.UpdateOne(ctx, participantFilter, participantUpdate)
-		if err != nil {
+	// ponytail: a DB error mid-loop still leaves the writes partial; closing that needs a transaction
+	for _, p := range pending {
+		if _, err := ms.censusParticipants.UpdateOne(ctx, p.filter, p.update); err != nil {
 			return fmt.Errorf("failed to update census participant %s in census %s: %w",
-				participant.ParticipantID, participant.CensusID, err)
+				p.filter["participantID"], p.filter["censusId"], err)
 		}
 	}
 
