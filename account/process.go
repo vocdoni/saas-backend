@@ -1,7 +1,6 @@
 package account
 
 import (
-	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -417,10 +416,8 @@ func (a *Account) SubmitSignedTx(stx []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not submit signed tx: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*40)
-	defer cancel()
-	if _, err := a.client.WaitUntilTxIsMined(ctx, hash); err != nil {
-		return nil, fmt.Errorf("could not wait for tx to be mined: %w", err)
+	if err := a.WaitTxMined(internal.HexBytes(hash)); err != nil {
+		return nil, err
 	}
 	return data, nil
 }
