@@ -117,6 +117,9 @@ var (
 	// An integrator's top-level organization is a management shell for its managed orgs; running elections
 	// there would bypass the shared MaxManagedProcesses/MaxVotes/MaxSMS/MaxEmails pool.
 	ErrIntegratorTopLevelOrgCannotOwnProcess = Error{Code: 40174, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("integrator top-level organizations cannot own elections; use a managed organization")}
+	// ErrCheckoutSessionNotFound is the only answer for a checkout session the caller may not
+	// read, whatever the reason (missing, not theirs), so session existence is never revealed.
+	ErrCheckoutSessionNotFound = Error{Code: 40179, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("checkout session not found"), LogLevel: "info"}
 
 	// CSP errors (408)
 	ErrZeroWeightVoter = Error{Code: 40801, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("voter weight cannot be zero")}

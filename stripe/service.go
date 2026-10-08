@@ -89,7 +89,8 @@ func (s *Service) CreateCheckoutSession(params *CheckoutSessionParams) (*stripea
 	return s.client.CreateCheckoutSession(params)
 }
 
-// GetCheckoutSession retrieves a checkout session status
+// GetCheckoutSession retrieves a checkout session status. A session Stripe does not know
+// answers errors.ErrCheckoutSessionNotFound.
 func (s *Service) GetCheckoutSession(sessionID string) (*CheckoutSessionStatus, error) {
 	return s.client.GetCheckoutSession(sessionID)
 }
