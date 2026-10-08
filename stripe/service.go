@@ -94,9 +94,45 @@ func (s *Service) GetCheckoutSession(sessionID string) (*CheckoutSessionStatus, 
 	return s.client.GetCheckoutSession(sessionID)
 }
 
-// CreatePortalSession creates a billing portal session
-func (s *Service) CreatePortalSession(customerEmail string) (*stripeapi.BillingPortalSession, error) {
-	return s.client.CreatePortalSession(customerEmail)
+// CreatePortalSession creates a billing portal session for the organization's own Stripe
+// customer. The customer is resolved from the organization itself — the customer holding
+// its current subscription, or the one stamped with its address metadata — and never by
+// email: the creator's email is shared by every organization they create, so an email
+// match could hand an admin another organization's billing portal.
+func (s *Service) CreatePortalSession(org *db.Organization) (*stripeapi.BillingPortalSession, error) {
+	customerID, err := s.portalCustomerID(org)
+	if err != nil {
+		return nil, err
+	}
+	return s.client.CreatePortalSession(customerID)
+}
+
+// portalCustomerID resolves the Stripe customer that belongs to the organization itself.
+func (s *Service) portalCustomerID(org *db.Organization) (string, error) {
+	if org == nil {
+		return "", fmt.Errorf("organization is required")
+	}
+	if subID := org.Subscription.StripeSubscriptionID; subID != "" {
+		subscription, err := s.client.GetSubscription(subID)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve the customer of subscription %s: %w", subID, err)
+		}
+		// the stored id is only a pointer: the subscription must still be this organization's,
+		// or its customer (and portal) is another organization's
+		if stamped := subscription.Metadata["address"]; common.HexToAddress(stamped) != org.Address {
+			return "", fmt.Errorf("subscription %s belongs to organization %q, not %s", subID, stamped, org.Address)
+		}
+		if subscription.Customer == nil || subscription.Customer.ID == "" {
+			return "", fmt.Errorf("subscription %s has no customer", subID)
+		}
+		return subscription.Customer.ID, nil
+	}
+	// the subscription webhook stamps the organization address on its customer's metadata
+	customer, err := s.client.GetCustomerByAddress(org.Address.String())
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve the customer of organization %s: %w", org.Address, err)
+	}
+	return customer.ID, nil
 }
 
 // planProductMarkerKeys are the metadata keys every vocdoni plan product carries. A Stripe

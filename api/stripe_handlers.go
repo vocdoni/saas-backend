@@ -204,9 +204,11 @@ func (h *StripeHandlers) CreateSubscriptionPortalSession(w http.ResponseWriter, 
 		return
 	}
 
-	session, err := h.service.CreatePortalSession(org.Creator)
+	session, err := h.service.CreatePortalSession(org)
 	if err != nil {
-		errors.ErrStripeError.Withf("cannot create customer portal session").WithErr(err).Write(w)
+		// the detail may name Stripe objects or other organizations: it stays in the log
+		log.Warnw("cannot create customer portal session", "org", org.Address, "error", err)
+		errors.ErrStripeError.With("cannot create customer portal session").Write(w)
 		return
 	}
 

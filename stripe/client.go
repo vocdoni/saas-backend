@@ -48,20 +48,6 @@ func (*Client) GetCustomer(customerID string) (*stripeapi.Customer, error) {
 	return customer, nil
 }
 
-// GetCustomerByEmail retrieves a customer by email address
-func (*Client) GetCustomerByEmail(email string) (*stripeapi.Customer, error) {
-	params := &stripeapi.CustomerListParams{
-		Email: stripeapi.String(email),
-	}
-
-	customers := stripecustomer.List(params)
-	if !customers.Next() {
-		return nil, errors.ErrStripeError.Withf("customer with email %s not found", email)
-	}
-
-	return customers.Customer(), nil
-}
-
 // UpdateCustomerMetadata updates a customer's metadata
 func (*Client) UpdateCustomerMetadata(customerID string, metadata map[string]string) error {
 	params := &stripeapi.CustomerParams{
@@ -274,15 +260,10 @@ func (*Client) GetCheckoutSession(sessionID string) (*CheckoutSessionStatus, err
 	return status, nil
 }
 
-// CreatePortalSession creates a billing portal session for a customer
-func (c *Client) CreatePortalSession(customerEmail string) (*stripeapi.BillingPortalSession, error) {
-	customer, err := c.GetCustomerByEmail(customerEmail)
-	if err != nil {
-		return nil, err
-	}
-
+// CreatePortalSession creates a billing portal session for the given customer ID
+func (*Client) CreatePortalSession(customerID string) (*stripeapi.BillingPortalSession, error) {
 	params := &stripeapi.BillingPortalSessionParams{
-		Customer: &customer.ID,
+		Customer: new(customerID),
 	}
 
 	session, err := stripeportalsession.New(params)
