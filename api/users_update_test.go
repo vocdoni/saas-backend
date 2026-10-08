@@ -74,6 +74,31 @@ func TestUpdateUserInfo(t *testing.T) {
 		&apicommon.UserInfo{FirstName: "X"}, usersMeEndpoint)
 }
 
+// TestCreatorEmailChangeKeepsSigner checks that an organization creator can change their email:
+// the organization follows the new address as its creator, while the signer seed its on-chain
+// key is derived from stays the same.
+func TestCreatorEmailChangeKeepsSigner(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, testPass)
+	orgAddress := testCreateOrganization(t, token)
+	before, err := testDB.Organization(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(before.SignerSeed, qt.Not(qt.Equals), "")
+
+	newEmail := fmt.Sprintf("creator-%d@test.com", internal.RandomInt(100000000000))
+	res := requestAndParse[apicommon.LoginResponse](t, http.MethodPut, token,
+		&apicommon.UserInfo{Email: newEmail}, usersMeEndpoint)
+	mailCode := verificationCodeRgx.FindStringSubmatch(waitForEmail(t, newEmail))
+	c.Assert(len(mailCode) > 1, qt.IsTrue)
+	requestAndParse[apicommon.LoginResponse](t, http.MethodPost, res.Token,
+		&apicommon.UserVerification{Code: mailCode[1]}, usersMeEmailVerifyEndpoint)
+
+	after, err := testDB.Organization(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(after.Creator, qt.Equals, newEmail)
+	c.Assert(after.SignerSeed, qt.Equals, before.SignerSeed)
+}
+
 // TestUpdateUserPassword covers the updateUserPasswordHandler (PUT /users/password):
 // the too-short check runs before the old-password check, then a successful change.
 func TestUpdateUserPassword(t *testing.T) {

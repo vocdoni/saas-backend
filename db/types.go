@@ -97,7 +97,7 @@ type Organization struct {
 	Nonce     string           `json:"nonce" bson:"nonce"`
 	// SignerSeed is the immutable per-organization component of the signer key derivation
 	// (secret + seed + nonce). It is set once at creation (historically to the creator's
-	// email, which migration 0028 backfills) and never rewritten — unlike Creator, which
+	// email, which migration 0029 backfills) and never rewritten — unlike Creator, which
 	// ReplaceCreatorEmail rewrites on an email change — so the derived on-chain key cannot
 	// silently change. Never exposed over the API.
 	SignerSeed string `json:"-" bson:"signerSeed,omitempty"`

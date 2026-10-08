@@ -473,17 +473,6 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 			errors.ErrEmailMalformed.Write(w)
 			return
 		}
-		// an organization's signing key is derived from its creator's email (account.OrganizationSigner),
-		// so changing that email would leave the organization unable to sign for its on-chain account
-		isCreator, err := a.db.IsOrganizationCreator(user.Email)
-		if err != nil {
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
-		}
-		if isCreator {
-			errors.ErrNotSupported.Withf("the creator of an organization cannot change their email").Write(w)
-			return
-		}
 		// refuse an address already bound to another account (the unique index would reject
 		// the switch later anyway; failing now gives the owner a clear answer)
 		if _, err := a.db.UserByEmail(userInfo.Email); err == nil {
@@ -641,17 +630,6 @@ func (a *API) updateUserEmailVerifyHandler(w http.ResponseWriter, r *http.Reques
 		errors.ErrUnauthorized.With("code mismatch").Write(w)
 		return
 	}
-	// re-check the creator guard: the user may have created an organization after requesting
-	// the change, and the organization signing key is derived from its creator's email
-	isCreator, err := a.db.IsOrganizationCreator(user.Email)
-	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-	if isCreator {
-		errors.ErrNotSupported.Withf("the creator of an organization cannot change their email").Write(w)
-		return
-	}
 	// consume the exact code before switching the email so it can never be redeemed twice,
 	// even by concurrent requests: exactly one delete wins
 	if err := a.db.ConsumeVerificationCode(user, db.CodeTypeUpdateEmail, userVerification.SealedCode); err != nil {
@@ -673,6 +651,11 @@ func (a *API) updateUserEmailVerifyHandler(w http.ResponseWriter, r *http.Reques
 		log.Warnw("could not update user email", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)
 		return
+	}
+	// keep the organizations the user created pointing at their current address. The signing key
+	// no longer depends on it (it is derived from the immutable signer seed)
+	if err := a.db.ReplaceCreatorEmail(user.Email, userVerification.PendingEmail); err != nil {
+		log.Errorw(err, "could not update the creator email of the user's organizations")
 	}
 	// reload the user to mint a token for the new session version
 	updated, err := a.db.User(user.ID)

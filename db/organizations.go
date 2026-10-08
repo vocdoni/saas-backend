@@ -161,19 +161,6 @@ func (ms *MongoStorage) ReplaceCreatorEmail(oldEmail, newEmail string) error {
 	return nil
 }
 
-// IsOrganizationCreator reports whether the email is the creator of any organization.
-func (ms *MongoStorage) IsOrganizationCreator(email string) (bool, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-	count, err := ms.organizations.CountDocuments(ctx, bson.M{"creator": email}, options.Count().SetLimit(1))
-	if err != nil {
-		return false, fmt.Errorf("could not count organizations by creator: %w", err)
-	}
-	return count > 0, nil
-}
-
 // OrganizationUsers method returns the users that have a role in the
 // organization with the given address. If an error occurs, it returns the
 // error.
