@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"maps"
 	"math/big"
@@ -14,9 +13,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/nyaruka/phonenumbers"
-	"golang.org/x/crypto/argon2"
 )
 
 const (
@@ -100,30 +97,6 @@ func RandomBytes(n int) []byte {
 // RandomHex helper function allows to generate a random hex string of n bytes.
 func RandomHex(n int) string {
 	return fmt.Sprintf("%x", RandomBytes(n))
-}
-
-// HashPassword helper function allows to hash a password using a salt.
-func HashPassword(salt, password string) []byte {
-	return argon2hash([]byte(password), []byte(salt))
-}
-
-// HexHashPassword helper function allows to hash a password using a salt and
-// return the result as a hex string.
-func HexHashPassword(salt, password string) string {
-	return hex.EncodeToString(HashPassword(salt, password))
-}
-
-// HashOrgData hashes organization data using the organization address as salt.
-func HashOrgData(orgAddress common.Address, data string) []byte {
-	return argon2hash([]byte(data), orgAddress.Bytes())
-}
-
-func argon2hash(data, salt []byte) []byte {
-	// Argon2 parameters for hashing, if modified, the current hashes will be invalidated
-	memory := uint32(64 * 1024)
-	argonTime := uint32(4)
-	argonThreads := uint8(8)
-	return argon2.IDKey([]byte(data), []byte(salt), argonTime, memory, argonThreads, 32)
 }
 
 // SealToken encrypts a token using AES-GCM with a key derived from argon2hash.

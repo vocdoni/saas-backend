@@ -311,7 +311,18 @@ func (a *API) Start() {
 		}()
 	}
 	go func() {
-		if err := http.ListenAndServe(fmt.Sprintf("%s:%d", a.host, a.port), a.initRouter()); err != nil {
+		// socket deadlines: the Timeout middleware only cancels the request context, it cannot
+		// unblock a handler stuck reading from or writing to a slow client, and without an idle
+		// timeout keep-alive connections opened by a request flood are held forever.
+		server := &http.Server{
+			Addr:              fmt.Sprintf("%s:%d", a.host, a.port),
+			Handler:           a.initRouter(),
+			ReadHeaderTimeout: serverReadHeaderTimeout,
+			ReadTimeout:       serverReadTimeout,
+			WriteTimeout:      serverWriteTimeout,
+			IdleTimeout:       serverIdleTimeout,
+		}
+		if err := server.ListenAndServe(); err != nil {
 			log.Fatalf("failed to start the API server: %v", err) //revive:disable:deep-exit
 		}
 	}()
@@ -369,6 +380,7 @@ func (a *API) initRouter() http.Handler {
 		r.Use(jwtauth.Verifier(a.auth))
 		// handle valid JWT tokens
 		r.Use(a.authenticator)
+		r.Use(limitBody(maxProtectedBodyBytes))
 
 		handle(r, http.MethodPost, authRefresTokenEndpoint, a.refreshTokenHandler)
 		handle(r, http.MethodGet, authAddressesEndpoint, a.organizationAddressesHandler)
@@ -442,6 +454,7 @@ func (a *API) initRouter() http.Handler {
 
 	// Public routes
 	r.Group(func(r chi.Router) {
+		r.Use(limitBody(maxPublicBodyBytes))
 		handle(r, http.MethodGet, "/ping", func(w http.ResponseWriter, _ *http.Request) {
 			if _, err := w.Write([]byte(".")); err != nil {
 				log.Warnw("failed to write ping response", "error", err)

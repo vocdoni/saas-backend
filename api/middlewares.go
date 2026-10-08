@@ -215,3 +215,19 @@ func (*API) setLang(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
+
+// limitBody caps the body of every request it wraps at limit bytes, so no handler behind it can
+// buffer an unbounded body even if it decodes with a bare json.Decoder. Handlers with a smaller
+// natural size still cap their own body further.
+func limitBody(limit int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.ContentLength > limit {
+				errors.ErrRequestBodyTooLarge.Withf("the limit is %d bytes", limit).Write(w)
+				return
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+			next.ServeHTTP(w, r)
+		})
+	}
+}

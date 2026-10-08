@@ -13,12 +13,34 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"go.vocdoni.io/dvote/util"
 )
 
 // These consts define the keywords for query (?param=), url (/url/param/) and POST params.
+const (
+	// maxCredentialsBodyBytes caps the body of the login, registration and password endpoints,
+	// whose payloads are a handful of short strings.
+	maxCredentialsBodyBytes = 16 << 10
+	// maxPublicBodyBytes caps every request body on the public route group; the largest public
+	// body is a full batch vote relay (maxVotesBodyBytes).
+	maxPublicBodyBytes = maxVotesBodyBytes + 64<<10
+	// maxProtectedBodyBytes caps every request body on the authenticated route group. It is sized
+	// for bulk member imports (a few hundred thousand members per request); handlers with smaller
+	// natural sizes cap their body further.
+	maxProtectedBodyBytes = 128 << 20
+
+	// HTTP server socket deadlines. The read timeout leaves room for large authenticated uploads
+	// (census imports) on slow links; the write timeout runs from the end of the headers, so it
+	// covers reading the body as well and must exceed the read timeout.
+	serverReadHeaderTimeout = 10 * time.Second
+	serverReadTimeout       = 120 * time.Second
+	serverWriteTimeout      = 180 * time.Second
+	serverIdleTimeout       = 120 * time.Second
+)
+
 // Note: In JS/TS acronyms like "ID" are camelCased as in "Id".
 const (
 	ParamPage      = "page"
@@ -302,4 +324,18 @@ func parseLimit(s string) (int64, error) {
 		limit = apicommon.DefaultItemsPerPage
 	}
 	return limit, nil
+}
+
+// hashPassword hashes a password (or OAuth signature) on behalf of a request handler. Hashing is
+// deliberately expensive and runs on unauthenticated endpoints, so the number of hashes in flight
+// is bounded; when no slot frees up in time it writes a 503 and returns false instead of letting
+// requests queue up behind it.
+func hashPassword(w http.ResponseWriter, r *http.Request, password string) (string, bool) {
+	hash, err := internal.HexHashPasswordContext(r.Context(), passwordSalt, password)
+	if err != nil {
+		w.Header().Set("Retry-After", strconv.Itoa(int(internal.HashSlotWait.Seconds())))
+		errors.ErrServerBusy.WithErr(err).Write(w)
+		return "", false
+	}
+	return hash, true
 }

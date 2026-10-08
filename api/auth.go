@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -12,7 +14,6 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
-	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -80,26 +81,28 @@ func (a *API) refreshTokenHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		400		{object}	errors.Error
 //	@Failure		401		{object}	errors.Error
 //	@Failure		500		{object}	errors.Error
+//	@Failure		503		{object}	errors.Error	"Server busy, retry after the Retry-After delay"
 //	@Router			/auth/login [post]
 func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
-	// het the user info from the request body
+	// get the user info from the request body
 	loginInfo := &apicommon.UserInfo{}
-	if err := json.NewDecoder(r.Body).Decode(loginInfo); err != nil {
-		errors.ErrMalformedBody.Write(w)
+	if apiErr := apicommon.DecodeCappedJSON(w, r, loginInfo, maxCredentialsBodyBytes); apiErr != nil {
+		apiErr.Write(w)
 		return
 	}
 	// get the user information from the database by email
 	user, err := a.db.UserByEmail(loginInfo.Email)
-	if err != nil {
-		if err == db.ErrNotFound {
-			errors.ErrInvalidLoginCredentials.Write(w)
-			return
-		}
+	if err != nil && err != db.ErrNotFound {
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
-	// check the password
-	if pass := internal.HexHashPassword(passwordSalt, loginInfo.Password); pass != user.Password {
+	// hash the password even when the user does not exist, so the response time does not
+	// reveal which emails are registered
+	pass, ok := hashPassword(w, r, loginInfo.Password)
+	if !ok {
+		return
+	}
+	if user == nil || pass != user.Password {
 		errors.ErrInvalidLoginCredentials.Write(w)
 		return
 	}
@@ -169,12 +172,13 @@ func (*API) organizationAddressesHandler(w http.ResponseWriter, r *http.Request)
 //	@Failure		400		{object}	errors.Error
 //	@Failure		401		{object}	errors.Error
 //	@Failure		500		{object}	errors.Error
+//	@Failure		503		{object}	errors.Error	"Server busy, retry after the Retry-After delay"
 //	@Router			/oauth/login [post]
 func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user info from the request body
 	loginInfo := &apicommon.OAuthLoginRequest{}
-	if err := json.NewDecoder(r.Body).Decode(loginInfo); err != nil {
-		errors.ErrMalformedBody.Write(w)
+	if apiErr := apicommon.DecodeCappedJSON(w, r, loginInfo, maxCredentialsBodyBytes); apiErr != nil {
+		apiErr.Write(w)
 		return
 	}
 	// validate provider
@@ -199,20 +203,9 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// fetch oauth service pubkey or address and verify the internal signature
-		resp, err := http.Get(fmt.Sprintf("%s/api/info/getAddress", a.oauthServiceURL))
+		result, err := a.oauthServiceAddress(r.Context())
 		if err != nil {
 			errors.ErrOAuthServerConnectionFailed.WithErr(err).Write(w)
-			return
-		}
-		defer func() {
-			if err := resp.Body.Close(); err != nil {
-				// handle the error, for example log it
-				log.Error("Error closing response body:", err)
-			}
-		}()
-		var result apicommon.OAuthServiceAddressResponse
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
 
@@ -222,6 +215,10 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		signatureHash, ok := hashPassword(w, r, loginInfo.UserOAuthSignature)
+		if !ok {
+			return
+		}
 		// create the new user with OAuth credentials
 		user = &db.User{
 			Email:     loginInfo.Email,
@@ -231,7 +228,7 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 			OAuth: map[string]db.OAuthProvider{
 				loginInfo.Provider: {
 					ExternalID:        loginInfo.Address,
-					SignatureHash:     internal.HexHashPassword(passwordSalt, loginInfo.UserOAuthSignature),
+					SignatureHash:     signatureHash,
 					LinkedAt:          now,
 					LastAuthenticated: now,
 				},
@@ -255,7 +252,11 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// verify the signature hash matches
-		if pass := internal.HexHashPassword(passwordSalt, loginInfo.UserOAuthSignature); pass != oauthProvider.SignatureHash {
+		pass, ok := hashPassword(w, r, loginInfo.UserOAuthSignature)
+		if !ok {
+			return
+		}
+		if pass != oauthProvider.SignatureHash {
 			errors.ErrUnauthorized.Write(w)
 			return
 		}
@@ -292,6 +293,7 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		400		{object}	errors.Error				"Invalid provider or provider already linked"
 //	@Failure		401		{object}	errors.Error				"Unauthorized or signature verification failed"
 //	@Failure		500		{object}	errors.Error				"Internal server error"
+//	@Failure		503		{object}	errors.Error				"Server busy, retry after the Retry-After delay"
 //	@Router			/auth/oauth [post]
 func (a *API) oauthLinkHandler(w http.ResponseWriter, r *http.Request) {
 	// get the authenticated user from context
@@ -326,19 +328,9 @@ func (a *API) oauthLinkHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// fetch oauth service address and verify the OAuth service signature
-	resp, err := http.Get(fmt.Sprintf("%s/api/info/getAddress", a.oauthServiceURL))
+	result, err := a.oauthServiceAddress(r.Context())
 	if err != nil {
 		errors.ErrOAuthServerConnectionFailed.WithErr(err).Write(w)
-		return
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			log.Error("Error closing response body:", err)
-		}
-	}()
-	var result apicommon.OAuthServiceAddressResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 	// verify the signature of the oauth service on the user's email
@@ -357,10 +349,14 @@ func (a *API) oauthLinkHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// all checks passed, link the provider
+	signatureHash, ok := hashPassword(w, r, linkInfo.UserOAuthSignature)
+	if !ok {
+		return
+	}
 	now := time.Now()
 	user.OAuth[linkInfo.Provider] = db.OAuthProvider{
 		ExternalID:        linkInfo.Address,
-		SignatureHash:     internal.HexHashPassword(passwordSalt, linkInfo.UserOAuthSignature),
+		SignatureHash:     signatureHash,
 		LinkedAt:          now,
 		LastAuthenticated: now,
 	}
@@ -428,4 +424,39 @@ func (a *API) oauthUnlinkHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apicommon.HTTPWriteOK(w)
+}
+
+// oauthRequestTimeout bounds the calls to the OAuth service: the default client has no timeout, so
+// a stalled service would hold the login handlers (and their request throttle slots) indefinitely.
+const oauthRequestTimeout = 10 * time.Second
+
+// maxOAuthResponseBytes caps the OAuth service response, which is a single address.
+const maxOAuthResponseBytes = 64 << 10
+
+// oauthServiceAddress fetches the address the OAuth service signs with.
+func (a *API) oauthServiceAddress(ctx context.Context) (*apicommon.OAuthServiceAddressResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		fmt.Sprintf("%s/api/info/getAddress", a.oauthServiceURL), http.NoBody)
+	if err != nil {
+		return nil, fmt.Errorf("could not build the oauth service request: %w", err)
+	}
+	// reuse the default client's transport (tests intercept it), only adding the timeout
+	client := &http.Client{Transport: http.DefaultClient.Transport, Timeout: oauthRequestTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("could not reach the oauth service: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Warnw("could not close the oauth service response body", "error", err)
+		}
+	}()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("oauth service returned status %d", resp.StatusCode)
+	}
+	result := &apicommon.OAuthServiceAddressResponse{}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOAuthResponseBytes)).Decode(result); err != nil {
+		return nil, fmt.Errorf("could not decode the oauth service response: %w", err)
+	}
+	return result, nil
 }

@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"time"
 
@@ -26,16 +25,12 @@ import (
 //	@Failure		400		{object}	errors.Error		"Invalid input data"
 //	@Failure		409		{object}	errors.Error		"User already exists"
 //	@Failure		500		{object}	errors.Error		"Internal server error"
+//	@Failure		503		{object}	errors.Error		"Server busy, retry after the Retry-After delay"
 //	@Router			/users [post]
 func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 	userInfo := &apicommon.UserInfo{}
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		errors.ErrMalformedBody.Write(w)
-		return
-	}
-	if err := json.Unmarshal(body, userInfo); err != nil {
-		errors.ErrMalformedBody.Write(w)
+	if apiErr := apicommon.DecodeCappedJSON(w, r, userInfo, maxCredentialsBodyBytes); apiErr != nil {
+		apiErr.Write(w)
 		return
 	}
 	// check the email is correct format
@@ -58,8 +53,20 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrMalformedBody.Withf("last name is empty").Write(w)
 		return
 	}
+	// reject an already registered email before hashing, so repeated registrations of the same
+	// address do not each cost a password hash (SetUser still enforces uniqueness on insert)
+	if _, err := a.db.UserByEmail(userInfo.Email); err == nil {
+		errors.ErrDuplicateConflict.With("user already exists").Write(w)
+		return
+	} else if err != db.ErrNotFound {
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
 	// hash the password
-	hPassword := internal.HexHashPassword(passwordSalt, userInfo.Password)
+	hPassword, ok := hashPassword(w, r, userInfo.Password)
+	if !ok {
+		return
+	}
 	// add the user to the database
 	userID, err := a.db.SetUser(&db.User{
 		Email:     userInfo.Email,
@@ -530,6 +537,7 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		400		{object}	errors.Error					"Invalid input data"
 //	@Failure		401		{object}	errors.Error					"Unauthorized or old password does not match"
 //	@Failure		500		{object}	errors.Error					"Internal server error"
+//	@Failure		503		{object}	errors.Error					"Server busy, retry after the Retry-After delay"
 //	@Router			/users/password [put]
 func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -543,8 +551,8 @@ func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	userPasswords := &apicommon.UserPasswordUpdate{}
-	if err := json.NewDecoder(r.Body).Decode(userPasswords); err != nil {
-		errors.ErrMalformedBody.Write(w)
+	if apiErr := apicommon.DecodeCappedJSON(w, r, userPasswords, maxCredentialsBodyBytes); apiErr != nil {
+		apiErr.Write(w)
 		return
 	}
 	// check the password is correct format
@@ -553,13 +561,18 @@ func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// hash the password the old password to compare it with the stored one
-	hOldPassword := internal.HexHashPassword(passwordSalt, userPasswords.OldPassword)
+	hOldPassword, ok := hashPassword(w, r, userPasswords.OldPassword)
+	if !ok {
+		return
+	}
 	if hOldPassword != user.Password {
 		errors.ErrUnauthorized.Withf("old password does not match").Write(w)
 		return
 	}
 	// hash and update the new password
-	user.Password = internal.HexHashPassword(passwordSalt, userPasswords.NewPassword)
+	if user.Password, ok = hashPassword(w, r, userPasswords.NewPassword); !ok {
+		return
+	}
 	if _, err := a.db.SetUser(user); err != nil {
 		log.Warnw("could not update user password", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)
@@ -675,6 +688,7 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 //	@Failure		404		{object}	errors.Error				"User not found"
 //	@Failure		410		{object}	errors.Error				"Verification code expired"
 //	@Failure		500		{object}	errors.Error				"Internal server error"
+//	@Failure		503		{object}	errors.Error				"Server busy, retry after the Retry-After delay"
 //	@Router			/users/password/reset [post]
 func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	userPasswords := &apicommon.UserPasswordReset{}
@@ -740,6 +754,13 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// hash the new password before consuming the code: hashing can be refused when the server is
+	// busy, and that must leave the code usable for a retry
+	newPassword, ok := hashPassword(w, r, userPasswords.NewPassword)
+	if !ok {
+		return
+	}
+
 	// invalidate the reset code before updating the password so it cannot be
 	// reused. fail closed: if the code cannot be deleted we must not report
 	// success, otherwise the still-valid code could be replayed.
@@ -749,8 +770,8 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// hash and update the new password
-	user.Password = internal.HexHashPassword(passwordSalt, userPasswords.NewPassword)
+	// update the new password
+	user.Password = newPassword
 	if _, err := a.db.SetUser(user); err != nil {
 		log.Warnw("could not update user password", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)

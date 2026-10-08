@@ -139,4 +139,5 @@ var (
 
 	// Service unavailable errors (503)
 	ErrTxQueueFull = Error{Code: 50301, HTTPstatus: http.StatusServiceUnavailable, Err: fmt.Errorf("transaction queue is full, retry later"), LogLevel: "warn"}
+	ErrServerBusy  = Error{Code: 50302, HTTPstatus: http.StatusServiceUnavailable, Err: fmt.Errorf("server is busy, retry later"), LogLevel: "warn"}
 )
