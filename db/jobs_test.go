@@ -196,3 +196,60 @@ func TestSetJob(t *testing.T) {
 	c.Assert(retrievedJob.Added, qt.Equals, 30)
 	c.Assert(retrievedJob.Errors, qt.HasLen, 2)
 }
+
+// TestFailInterruptedTxJobs pins the startup sweep for jobs orphaned by a restart: the tx queues
+// are in-memory, so a job still pending from a previous process has no worker left and would stay
+// pending forever. The sweep fails them (never replaying the transactions), closes the pending
+// entries of batch vote jobs so they explain the failure too, and leaves completed jobs and
+// statusless import jobs alone.
+func TestFailInterruptedTxJobs(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	org := common.HexToAddress("0x1234567890123456789012345678901234567890")
+
+	// a pending tx job, a completed one, a half-reported batch vote job, and an import job
+	c.Assert(testDB.CreateTxJob("interrupted-tx", JobTypePublishVotingProcess, org), qt.IsNil)
+	c.Assert(testDB.CreateTxJob("finished-tx", JobTypeSetProcessStatus, org), qt.IsNil)
+	c.Assert(testDB.SetJobStatus("finished-tx", JobStatusCompleted, nil, ""), qt.IsNil)
+	votes := []VoteJobResult{
+		{ProcessID: internal.HexBytes{1}, Status: JobStatusPending},
+		{ProcessID: internal.HexBytes{2}, Status: JobStatusPending},
+	}
+	c.Assert(testDB.CreateVoteBatchJob("interrupted-batch", org, votes), qt.IsNil)
+	c.Assert(testDB.RecordBatchVoteOutcome("interrupted-batch", 0, internal.HexBytes{0xaa}, ""), qt.IsNil)
+	c.Assert(testDB.CreateJob("import-job", JobTypeOrgMembers, org, 10), qt.IsNil)
+
+	n, err := testDB.FailInterruptedTxJobs()
+	c.Assert(err, qt.IsNil)
+	c.Assert(n, qt.Equals, int64(2))
+
+	// the pending tx job is failed with the restart explanation
+	job, err := testDB.Job("interrupted-tx")
+	c.Assert(err, qt.IsNil)
+	c.Assert(job.Status, qt.Equals, JobStatusFailed)
+	c.Assert(job.Error, qt.Contains, "restart")
+	c.Assert(job.CompletedAt.IsZero(), qt.IsFalse)
+
+	// the completed job is untouched
+	job, err = testDB.Job("finished-tx")
+	c.Assert(err, qt.IsNil)
+	c.Assert(job.Status, qt.Equals, JobStatusCompleted)
+	c.Assert(job.Error, qt.Equals, "")
+
+	// the batch vote job is failed and only its still-pending entry was closed
+	job, err = testDB.Job("interrupted-batch")
+	c.Assert(err, qt.IsNil)
+	c.Assert(job.Status, qt.Equals, JobStatusFailed)
+	c.Assert(job.Result.Votes, qt.HasLen, 2)
+	c.Assert(job.Result.Votes[0].Status, qt.Equals, JobStatusCompleted)
+	c.Assert(job.Result.Votes[0].Error, qt.Equals, "")
+	c.Assert(job.Result.Votes[1].Status, qt.Equals, JobStatusFailed)
+	c.Assert(job.Result.Votes[1].Error, qt.Contains, "restart")
+
+	// the import job carries no status field and is left alone
+	job, err = testDB.Job("import-job")
+	c.Assert(err, qt.IsNil)
+	c.Assert(job.Status, qt.Equals, JobStatus(""))
+	c.Assert(job.Error, qt.Equals, "")
+	c.Assert(job.CompletedAt.IsZero(), qt.IsTrue)
+}

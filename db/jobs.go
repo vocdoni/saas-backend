@@ -203,6 +203,47 @@ func (ms *MongoStorage) RecordBatchVoteOutcome(jobID string, index int, voteID i
 	return nil
 }
 
+// FailInterruptedTxJobs marks every transaction job still pending as failed. It runs once at
+// startup: the tx queues are in-memory, so a pending job from a previous process has no worker
+// left to finish it and would stay pending forever. The transactions themselves are never
+// replayed — their outcome is unknown (some may have mined), so resubmitting could duplicate
+// them; the status syncer reconciles the stored question status against the chain instead.
+// Import jobs carry no status field and are untouched. It returns how many jobs were closed.
+func (ms *MongoStorage) FailInterruptedTxJobs() (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+
+	// close the still-pending envelopes of batch vote jobs first, so their per-vote entries
+	// explain the failure too rather than staying pending inside a failed job.
+	interrupted := "interrupted by a service restart; the transaction outcome is unknown"
+	_, err := ms.jobs.UpdateMany(ctx,
+		bson.M{"status": JobStatusPending, "type": JobTypeRelayVotes},
+		bson.M{"$set": bson.M{
+			"result.votes.$[v].status": JobStatusFailed,
+			"result.votes.$[v].error":  interrupted,
+		}},
+		options.UpdateMany().SetArrayFilters([]any{bson.M{"v.status": JobStatusPending}}),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("failed to close interrupted batch vote entries: %w", err)
+	}
+	res, err := ms.jobs.UpdateMany(ctx,
+		bson.M{"status": JobStatusPending},
+		bson.M{"$set": bson.M{
+			"status":      JobStatusFailed,
+			"error":       interrupted,
+			"completedAt": time.Now(),
+		}},
+	)
+	if err != nil {
+		return 0, fmt.Errorf("failed to close interrupted tx jobs: %w", err)
+	}
+	return res.ModifiedCount, nil
+}
+
 // SetJobStatus records the terminal outcome of a transaction job. On success pass
 // the result and an empty errMsg; on failure pass a nil result and the error message.
 func (ms *MongoStorage) SetJobStatus(jobID string, status JobStatus, result *JobResult, errMsg string) error {

@@ -59,7 +59,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -167,10 +166,12 @@ type API struct {
 	stripeHandlers  *StripeHandlers
 	// paymentGW is the seam to Stripe's one-time checkout used by pay-per-process
 	// billing; nil when the Stripe service is unavailable. Tests install a fake.
-	paymentGW  paymentGateway
-	txQueue    chan txTask
-	txQueueMu  sync.Mutex
-	orgTxLocks *orgTxMutex
+	paymentGW paymentGateway
+	// orgTxQueue runs organization-initiated txs (publish, status, census resize);
+	// relayTxQueue runs public vote relays. Separate so neither class starves the other.
+	orgTxQueue   *txQueue
+	relayTxQueue *txQueue
+	orgTxLocks   *orgTxMutex
 	// walletLocks serializes charges against one integrator's prepaid wallet
 	walletLocks *orgTxMutex
 	// censusGrowthLocks makes the pay-per-process growth check and the census write it
@@ -286,7 +287,15 @@ func New(ctx context.Context, conf *Config) *API {
 		liveElectionCache:     liveElectionCache,
 		legacyProjectionCache: legacyProjectionCache,
 	}
-	a.startTxQueue()
+	a.startTxQueues()
+	// close tx jobs stranded pending by a previous process: their queue was in-memory, so no
+	// worker will ever finish them, and the transactions are never replayed (their outcome is
+	// unknown — the status syncer reconciles stored statuses against the chain instead).
+	if n, err := a.db.FailInterruptedTxJobs(); err != nil {
+		log.Warnw("could not close interrupted tx jobs", "error", err)
+	} else if n > 0 {
+		log.Infow("closed tx jobs interrupted by a restart", "jobs", n)
+	}
 	// clear any publishing markers stranded by a previous crash/restart so those processes are
 	// publishable again (see reconcileStalePublishing).
 	a.reconcileStalePublishing()

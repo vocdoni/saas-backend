@@ -76,6 +76,9 @@ var (
 	ErrDuplicateConflict           = Error{Code: 40901, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("resource already exists")}
 	ErrUpdateWouldCreateDuplicates = Error{Code: 40902, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("update would create duplicates")}
 	ErrPublishInProgress           = Error{Code: 40903, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("process publish already in progress")}
+	// ErrProcessPartiallyPublished refuses draft edits/deletes of a process some of whose
+	// questions already mined on-chain elections: publish it again to finish, instead.
+	ErrProcessPartiallyPublished = Error{Code: 40904, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("process is partially published: some questions already have on-chain elections")}
 
 	// TODO: most of theses errors should be unauthorized
 	// Subscription errors (400)
@@ -145,4 +148,7 @@ var (
 	// Service unavailable errors (503)
 	ErrTxQueueFull = Error{Code: 50301, HTTPstatus: http.StatusServiceUnavailable, Err: fmt.Errorf("transaction queue is full, retry later"), LogLevel: "warn"}
 	ErrServerBusy  = Error{Code: 50302, HTTPstatus: http.StatusServiceUnavailable, Err: fmt.Errorf("server is busy, retry later"), LogLevel: "warn"}
+	// ErrOrgTxBusy: the organization already has a transaction being built/submitted and the
+	// wait for its turn ran out; nothing was enqueued, retry later.
+	ErrOrgTxBusy = Error{Code: 50303, HTTPstatus: http.StatusServiceUnavailable, Err: fmt.Errorf("another transaction for this organization is in progress, retry later"), LogLevel: "info"}
 )
