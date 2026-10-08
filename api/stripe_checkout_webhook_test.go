@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	qt "github.com/frankban/quicktest"
 	stripeapi "github.com/stripe/stripe-go/v87"
@@ -466,7 +467,7 @@ func TestStripeCheckoutWebhookRetriesTransientPublishFailure(t *testing.T) {
 		"processes", pid, "checkout")
 
 	// another publish holds the claim when the payment lands
-	claimed, err := testDB.ClaimVotingProcessForPublish(oid)
+	_, claimed, err := testDB.ClaimVotingProcessForPublish(oid, time.Time{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(claimed, qt.IsTrue)
 	eventID := "evt_" + util.RandomHex(8)
@@ -483,7 +484,7 @@ func TestStripeCheckoutWebhookRetriesTransientPublishFailure(t *testing.T) {
 	c.Assert(vp.Published, qt.IsFalse)
 
 	// that publish gave up; Stripe redelivers the same event, and this time it publishes
-	c.Assert(testDB.ClearVotingProcessPublishing(oid), qt.IsNil)
+	c.Assert(testDB.ClearVotingProcessPublishing(oid, ""), qt.IsNil)
 	code = postSignedStripeEvent(t, testWebhookSecret, eventID, "checkout.session.completed", paid)
 	c.Assert(code, qt.Equals, http.StatusOK)
 	pollProcessPublished(t, token, pid)

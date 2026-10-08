@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 
@@ -713,7 +714,7 @@ func TestVotingProcessMutationsRefusedWhilePublishing(t *testing.T) {
 	oid := objectID(c, pid)
 
 	// claim it directly: no chain work needed to reproduce the window
-	won, err := testDB.ClaimVotingProcessForPublish(oid)
+	_, won, err := testDB.ClaimVotingProcessForPublish(oid, time.Time{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue)
 
@@ -738,7 +739,7 @@ func TestVotingProcessMutationsRefusedWhilePublishing(t *testing.T) {
 	c.Assert(after.Questions[0].ID, qt.Equals, before.Questions[0].ID)
 
 	// releasing the claim lets the same requests through
-	c.Assert(testDB.ClearVotingProcessPublishing(oid), qt.IsNil)
+	c.Assert(testDB.ClearVotingProcessPublishing(oid, ""), qt.IsNil)
 	_, code = testRequest(t, http.MethodPut, token, edit, "processes", pid)
 	c.Assert(code, qt.Equals, http.StatusOK)
 }

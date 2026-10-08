@@ -817,8 +817,12 @@ type VotingProcess struct {
 	// and the stale sweep on it being old, so a zero date persisted as a value would make every
 	// draft ever created look like a crashed publish.
 	Publishing time.Time `json:"-" bson:"publishing,omitempty"`
-	CreatedAt  time.Time `json:"createdAt" bson:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt" bson:"updatedAt"`
+	// PublishingOwner is the random token held by the publish worker that owns the Publishing
+	// claim; renewal and the owner-conditional clear/publish writes match on it, so a worker
+	// whose stale claim was reclaimed cannot overwrite the new claimant's state.
+	PublishingOwner string    `json:"-" bson:"publishingOwner,omitempty"`
+	CreatedAt       time.Time `json:"createdAt" bson:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt" bson:"updatedAt"`
 }
 
 // PublishInProgress reports whether a publish worker currently holds this process. A marker older
@@ -1126,8 +1130,18 @@ type VoteJobResult struct {
 	Error     string            `json:"error,omitempty" bson:"error,omitempty"`
 }
 
+// QuestionJobResult is the outcome of one question inside a status-change job
+// (JobTypeSetProcessStatus). NoOp marks a question that was already in the requested
+// status, reported as completed without an on-chain transaction.
+type QuestionJobResult struct {
+	QuestionID string    `json:"questionId" bson:"questionId"`
+	Status     JobStatus `json:"status,omitempty" bson:"status,omitempty"`
+	Error      string    `json:"error,omitempty" bson:"error,omitempty"`
+	NoOp       bool      `json:"noOp,omitempty" bson:"noOp,omitempty"`
+}
+
 // JobResult carries the public on-chain outcome of a transaction job. Fields are
-// populated depending on the job type (publish → Address+Status; status → Status;
+// populated depending on the job type (publish → Address+Status; status → Status+Questions;
 // vote → ProcessID+Nullifier+VoteID; batch vote → Votes) and are omitted when empty.
 type JobResult struct {
 	Address   internal.HexBytes `json:"address,omitempty" bson:"address,omitempty" swaggertype:"string" example:"deadbeef"`
@@ -1138,6 +1152,8 @@ type JobResult struct {
 	// Votes carries the per-envelope outcome of a batch vote relay, index-aligned with
 	// the votes of the POST /votes request that created the job.
 	Votes []VoteJobResult `json:"votes,omitempty" bson:"votes,omitempty"`
+	// Questions carries the per-question outcome of a status-change job, in target order.
+	Questions []QuestionJobResult `json:"questions,omitempty" bson:"questions,omitempty"`
 }
 
 // Job represents a persistent import or transaction job with its results and errors.

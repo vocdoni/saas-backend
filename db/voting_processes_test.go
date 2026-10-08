@@ -67,7 +67,7 @@ func TestVotingProcessCRUD(t *testing.T) {
 
 	// publish flips draft count and published flag, and backfills the chain-resolved start date
 	startDate := time.Now().Truncate(time.Millisecond)
-	c.Assert(testDB.SetVotingProcessPublished(id, startDate), qt.IsNil)
+	c.Assert(testDB.SetVotingProcessPublished(id, "", startDate), qt.IsNil)
 	got, err = testDB.VotingProcess(id)
 	c.Assert(err, qt.IsNil)
 	c.Assert(got.Published, qt.IsTrue)
@@ -106,15 +106,15 @@ func TestClaimVotingProcessForPublish(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 
 	// first claim wins, second loses (until cleared)
-	claimed, err := testDB.ClaimVotingProcessForPublish(id)
+	_, claimed, err := testDB.ClaimVotingProcessForPublish(id, time.Time{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(claimed, qt.IsTrue)
-	claimed, err = testDB.ClaimVotingProcessForPublish(id)
+	_, claimed, err = testDB.ClaimVotingProcessForPublish(id, time.Time{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(claimed, qt.IsFalse)
 
-	c.Assert(testDB.ClearVotingProcessPublishing(id), qt.IsNil)
-	claimed, err = testDB.ClaimVotingProcessForPublish(id)
+	c.Assert(testDB.ClearVotingProcessPublishing(id, ""), qt.IsNil)
+	_, claimed, err = testDB.ClaimVotingProcessForPublish(id, time.Time{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(claimed, qt.IsTrue)
 }
@@ -137,7 +137,7 @@ func TestReclaimVotingProcessInSameMillisecond(t *testing.T) {
 	defer func() { PublishStaleAfter = restore }()
 
 	for i := range 200 {
-		claimed, err := testDB.ClaimVotingProcessForPublish(id)
+		_, claimed, err := testDB.ClaimVotingProcessForPublish(id, time.Time{})
 		c.Assert(err, qt.IsNil)
 		c.Assert(claimed, qt.IsTrue, qt.Commentf("reclaim %d of a stale marker must win", i))
 	}
@@ -248,7 +248,7 @@ func TestVotingProcessPublishingMarker(t *testing.T) {
 	c.Assert(vp.PublishInProgress(), qt.IsFalse)
 
 	// claiming sets it, and a read reports the process as held
-	claimed, err := testDB.ClaimVotingProcessForPublish(id)
+	_, claimed, err := testDB.ClaimVotingProcessForPublish(id, time.Time{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(claimed, qt.IsTrue)
 
@@ -347,7 +347,7 @@ func TestSetVotingProcessDraftRefusesPublish(t *testing.T) {
 	c.Assert(read.PublishInProgress(), qt.IsFalse)
 
 	// ...and the claim lands during the census/question work that follows
-	claimed, err := testDB.ClaimVotingProcessForPublish(id)
+	_, claimed, err := testDB.ClaimVotingProcessForPublish(id, time.Time{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(claimed, qt.IsTrue)
 
@@ -441,4 +441,65 @@ func TestServedUpstreamIDs(t *testing.T) {
 	got, err = testDB.ServedUpstreamIDs(nil)
 	c.Assert(err, qt.IsNil)
 	c.Assert(got, qt.HasLen, 0)
+}
+
+// TestClaimVotingProcessPublishOwnerAndRevision pins the two guards added to the publish claim:
+// the revision token, so a claim snapshot taken before a draft edit cannot publish the stale
+// content, and the owner token, so renewal, release and completion only succeed for the worker
+// that actually holds the claim — a stale worker whose claim was reclaimed cannot clobber it.
+func TestClaimVotingProcessPublishOwnerAndRevision(t *testing.T) {
+	c := qt.New(t)
+	org := common.Address{0x14}
+	setupVotingProcessOrg(c, org)
+	id, err := testDB.SetVotingProcess(&VotingProcess{OrgAddress: org, Title: MultiLangString{"default": "v1"}})
+	c.Assert(err, qt.IsNil)
+	vp, err := testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	seen := vp.UpdatedAt
+
+	// the draft is edited after the snapshot was read: the stale-revision claim loses
+	vp.Title = MultiLangString{"default": "v2"}
+	c.Assert(testDB.SetVotingProcessDraft(vp, seen), qt.IsNil)
+	_, claimed, err := testDB.ClaimVotingProcessForPublish(id, seen)
+	c.Assert(err, qt.IsNil)
+	c.Assert(claimed, qt.IsFalse)
+
+	// a claim against the current revision wins and yields an owner token
+	vp, err = testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	owner, claimed, err := testDB.ClaimVotingProcessForPublish(id, vp.UpdatedAt)
+	c.Assert(err, qt.IsNil)
+	c.Assert(claimed, qt.IsTrue)
+	c.Assert(owner, qt.Not(qt.Equals), "")
+
+	// only the owner can renew the claim
+	ok, err := testDB.RenewVotingProcessPublishClaim(id, owner)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	ok, err = testDB.RenewVotingProcessPublishClaim(id, "someone-else")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+
+	// a non-owner release leaves the marker in place; the owner's removes it
+	c.Assert(testDB.ClearVotingProcessPublishing(id, "someone-else"), qt.IsNil)
+	got, err := testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.PublishInProgress(), qt.IsTrue)
+	c.Assert(testDB.ClearVotingProcessPublishing(id, owner), qt.IsNil)
+	got, err = testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.PublishInProgress(), qt.IsFalse)
+
+	// completion is owner-conditional too: a worker that lost its claim gets ErrConflict
+	owner, claimed, err = testDB.ClaimVotingProcessForPublish(id, time.Time{})
+	c.Assert(err, qt.IsNil)
+	c.Assert(claimed, qt.IsTrue)
+	c.Assert(testDB.SetVotingProcessPublished(id, "someone-else", time.Now()), qt.Equals, ErrConflict)
+	got, err = testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.Published, qt.IsFalse)
+	c.Assert(testDB.SetVotingProcessPublished(id, owner, time.Now()), qt.IsNil)
+	got, err = testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.Published, qt.IsTrue)
 }

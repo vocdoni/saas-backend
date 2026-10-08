@@ -1,10 +1,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
@@ -38,7 +40,7 @@ import (
 //	@Success		200			{string}	string			"OK"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		404			{object}	errors.Error	"Process not found"
-//	@Failure		409			{object}	errors.Error	"Process already published, or its payment is in flight"
+//	@Failure		409			{object}	errors.Error	"Process already published, partially published (40904), or its payment is in flight"
 //	@Failure		500			{object}	errors.Error	"Internal server error, or the payment could not be refunded"
 //	@Router			/processes/{processId} [delete]
 func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
@@ -60,7 +62,7 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	// refund it. So delete takes the claim a publish takes, and the two exclude each other:
 	// checking the marker on the read above would let a publish claim the draft right after.
 	// Every refusal below releases it; a deleted draft takes the marker with it.
-	claimed, err := a.db.ClaimVotingProcessForPublish(oid)
+	owner, claimed, err := a.db.ClaimVotingProcessForPublish(oid, time.Time{})
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
@@ -74,10 +76,23 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		if deleted {
 			return
 		}
-		if e := a.db.ClearVotingProcessPublishing(oid); e != nil {
+		if e := a.db.ClearVotingProcessPublishing(oid, owner); e != nil {
 			log.Warnw("could not release the delete's claim on a draft", "processId", oid.Hex(), "error", e)
 		}
 	}()
+	// a partially published draft (an earlier publish mined some elections before failing) is
+	// not deletable: dropping it would erase the on-chain ids and orphan the mined elections.
+	// Publishing again resumes the remaining questions instead. Reloaded under the claim, so
+	// no publish worker can be minting elections concurrently.
+	questions, err := a.db.QuestionsByProcess(oid)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if anyMined(questions) {
+		errors.ErrProcessPartiallyPublished.Write(w)
+		return
+	}
 	// a processing payment refuses deletion: money is in flight and its outcome unknown.
 	// A paid one is refunded below; a pending one is released by expiring its open session
 	// so it can never be paid, and its payment record goes with the draft.
@@ -786,15 +801,24 @@ func (a *API) enqueueSetProcessCensus(orgAddress common.Address, targets []censu
 	if err != nil {
 		return "", fmt.Errorf("could not restore organization signer: %w", err)
 	}
+	// the lock comes before the job is created, with a bounded wait: a busy organization
+	// answers a clear ErrOrgTxBusy (503) and leaves no orphaned pending job behind. The
+	// participant/eligibility write this follows has already committed, so there is no
+	// request body to replay — the caller simply retries the idempotent resize.
+	orgLock, err := a.orgTxLocks.lockCtx(context.Background(), org.Address)
+	if err != nil {
+		return "", err
+	}
 	jobID, err := apicommon.NewJobID()
 	if err != nil {
+		orgLock.Unlock()
 		return "", fmt.Errorf("could not create job id: %w", err)
 	}
 	if err := a.db.CreateTxJob(jobID, db.JobTypeSetProcessCensus, org.Address); err != nil {
+		orgLock.Unlock()
 		return "", fmt.Errorf("could not create tx job: %w", err)
 	}
 
-	orgLock := a.orgTxLocks.lock(org.Address)
 	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
 		defer orgLock.Unlock()
 		for i := range growing {

@@ -1544,6 +1544,12 @@ definitions:
         type: string
       progress:
         type: integer
+      questions:
+        description: Questions is the per-question outcome of a status-change job,
+          in target order
+        items:
+          $ref: '#/definitions/db.QuestionJobResult'
+        type: array
       status:
         type: string
       total:
@@ -2233,6 +2239,17 @@ definitions:
     - ProcessPaymentFailed
     - ProcessPaymentPaid
     - ProcessPaymentRefunded
+  db.QuestionJobResult:
+    properties:
+      error:
+        type: string
+      noOp:
+        type: boolean
+      questionId:
+        type: string
+      status:
+        $ref: '#/definitions/db.JobStatus'
+    type: object
   db.QuestionResults:
     properties:
       finalResults:
@@ -4980,7 +4997,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Process already published, or its payment is in flight
+          description: Process already published, partially published (40904), or
+            its payment is in flight
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -5023,7 +5041,9 @@ paths:
       consumes:
       - application/json
       description: |-
-        Update a voting process while it is still a draft (not published). 409 if already published.
+        Update a voting process while it is still a draft (not published). 409 if already published,
+        and 409 (40904) if partially published — an earlier publish already mined some of its
+        questions on-chain, so the draft can only be published again (resuming the rest), not edited.
         The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
         as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
         `typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
@@ -5990,6 +6010,14 @@ paths:
           description: Accepted
           schema:
             $ref: '#/definitions/apicommon.EnqueuedResponse'
+        "400":
+          description: Invalid status, or a question in a terminal status cannot change
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Organization transaction in progress (50303), or tx queue full
+          schema:
+            $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
       summary: Change status of one question
@@ -6018,6 +6046,14 @@ paths:
           description: Accepted
           schema:
             $ref: '#/definitions/apicommon.EnqueuedResponse'
+        "400":
+          description: Invalid status, or a question in a terminal status cannot change
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Organization transaction in progress (50303), or tx queue full
+          schema:
+            $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
       summary: Change status of many questions

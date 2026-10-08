@@ -362,7 +362,7 @@ func TestDeletePaidDraftKeepsDraftWhenRefundFails(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	var publishClaimedMidRefund bool
 	fake.refundFn = func(processID bson.ObjectID, _ string) (*stripe.RefundInfo, error) {
-		claimed, err := testDB.ClaimVotingProcessForPublish(processID)
+		_, claimed, err := testDB.ClaimVotingProcessForPublish(processID, time.Time{})
 		c.Check(err, qt.IsNil)
 		publishClaimedMidRefund = claimed
 		return nil, fmt.Errorf("refund declined")
@@ -389,7 +389,7 @@ func TestDeletePaidDraftKeepsDraftWhenRefundFails(t *testing.T) {
 	c.Assert(payment.RefundID, qt.Equals, "")
 
 	c.Assert(publishClaimedMidRefund, qt.IsFalse)
-	claimed, err := testDB.ClaimVotingProcessForPublish(oid)
+	_, claimed, err := testDB.ClaimVotingProcessForPublish(oid, time.Time{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(claimed, qt.IsTrue)
 }

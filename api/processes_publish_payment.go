@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -303,7 +304,7 @@ func (a *API) publishPaidProcess(processID bson.ObjectID) error {
 			"processId", processID.Hex(), "problems", strings.Join(problems, "; "))
 		return nil
 	}
-	jobID, err := a.startProcessPublish(target)
+	jobID, err := a.startProcessPublish(context.Background(), target)
 	switch {
 	case errors.Is(err, errProcessAlreadyPublished):
 		return nil

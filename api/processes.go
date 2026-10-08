@@ -358,7 +358,9 @@ func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id bson.ObjectID, u
 // updateVotingProcessHandler godoc
 //
 //	@Summary		Update a voting process draft
-//	@Description	Update a voting process while it is still a draft (not published). 409 if already published.
+//	@Description	Update a voting process while it is still a draft (not published). 409 if already published,
+//	@Description	and 409 (40904) if partially published — an earlier publish already mined some of its
+//	@Description	questions on-chain, so the draft can only be published again (resuming the rest), not edited.
 //	@Description	The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
 //	@Description	as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
 //	@Description	`typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
@@ -411,6 +413,18 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	}
 	if !user.HasRoleFor(vp.OrgAddress, db.ManagerRole) && !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
 		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization").Write(w)
+		return
+	}
+	// a partially published draft (an earlier publish mined some elections before failing) is not
+	// editable: replacing its questions would erase their on-chain ids and orphan the mined
+	// elections. Publishing again resumes the remaining questions instead.
+	storedQuestions, err := a.db.QuestionsByProcess(oid)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if anyMined(storedQuestions) {
+		errors.ErrProcessPartiallyPublished.Write(w)
 		return
 	}
 	// after the role check, so a non-member reads 401 rather than learning from a 409
