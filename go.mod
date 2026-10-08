@@ -18,7 +18,7 @@ require (
 	github.com/twilio/twilio-go v1.31.0
 	github.com/xlzd/gotp v0.1.0
 	go.mongodb.org/mongo-driver v1.17.9 // indirect
-	go.vocdoni.io/dvote v1.10.2-0.20261008143742-667a67b06b33
+	go.vocdoni.io/dvote v1.10.2-0.20261008152856-07a3188e2242
 	go.vocdoni.io/proto v1.18.0
 	golang.org/x/crypto v0.55.0
 	google.golang.org/protobuf v1.36.12
@@ -375,3 +375,5 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	lukechampine.com/blake3 v1.4.1 // indirect
 )
+
+replace go.vocdoni.io/proto => go.vocdoni.io/proto v1.17.1-0.20261008135750-04e7afe6fe2b
