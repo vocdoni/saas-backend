@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -367,4 +368,107 @@ func (ms *MongoStorage) SetVotingProcessPublished(id bson.ObjectID, startDate ti
 		return ErrNotFound
 	}
 	return nil
+}
+
+// ProcessParentPublication is the on-chain outcome of publishing a process's parent election: its
+// election id, the metadata document it points to and the hash committed for it, and the status it
+// was created with.
+type ProcessParentPublication struct {
+	ID           bson.ObjectID
+	UpstreamID   internal.HexBytes
+	MetadataURL  string
+	MetadataHash internal.HexBytes
+	Status       string
+}
+
+// SetVotingProcessParentPublished records the parent election of a process once it is mined, in
+// one targeted update that leaves the rest of the document untouched.
+func (ms *MongoStorage) SetVotingProcessParentPublished(p *ProcessParentPublication) error {
+	if p == nil || p.ID == bson.NilObjectID || len(p.UpstreamID) == 0 {
+		return ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	set := bson.M{
+		"upstreamId":     p.UpstreamID,   //nolint:goconst
+		"metadataURL":    p.MetadataURL,  //nolint:goconst
+		"metadataHash":   p.MetadataHash, //nolint:goconst
+		"upstreamStatus": p.Status,       //nolint:goconst
+	}
+	res, err := ms.votingProcesses.UpdateOne(ctx, bson.M{"_id": p.ID}, bson.M{"$set": set})
+	if err != nil {
+		return fmt.Errorf("failed to set voting process parent election: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetVotingProcessUpstreamStatus sets the stored status of a process's parent election (targeted
+// update), after a status change was submitted for it.
+func (ms *MongoStorage) SetVotingProcessUpstreamStatus(id bson.ObjectID, status string) error {
+	if id == bson.NilObjectID {
+		return ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	update := bson.M{"$set": bson.M{"upstreamStatus": status}} //nolint:goconst
+	res, err := ms.votingProcesses.UpdateOne(ctx, bson.M{"_id": id}, update)
+	if err != nil {
+		return fmt.Errorf("failed to set voting process upstream status: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetVotingProcessUpstreamStatusSynced is SetQuestionStatusSynced for a process's parent election:
+// it reconciles the stored parent status (by on-chain id) to next, stamping upstreamSyncedAt, only
+// while the stored status still equals prev. Used by the status syncer.
+func (ms *MongoStorage) SetVotingProcessUpstreamStatusSynced(upstreamID internal.HexBytes, prev, next string) (bool, error) {
+	if len(upstreamID) == 0 {
+		return false, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	filter := bson.M{"upstreamId": upstreamID, "upstreamStatus": prev}                       //nolint:goconst
+	update := bson.M{"$set": bson.M{"upstreamStatus": next, "upstreamSyncedAt": time.Now()}} //nolint:goconst
+	res, err := ms.votingProcesses.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return false, fmt.Errorf("failed to set synced parent election status: %w", err)
+	}
+	return res.MatchedCount > 0, nil
+}
+
+// SyncableParentElectionsByOrg is SyncableQuestionsByOrg for the parent elections of an
+// organization's processes: the refs of those whose stored status can still change on chain
+// (READY|PAUSED|ENDED), for the managed-org delete guard to read live.
+func (ms *MongoStorage) SyncableParentElectionsByOrg(orgAddress common.Address) ([]QuestionStatusRef, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	filter := bson.M{
+		"orgAddress":     orgAddress,                                                                              //nolint:goconst
+		"upstreamId":     bson.M{"$exists": true},                                                                 //nolint:goconst
+		"upstreamStatus": bson.M{"$in": []string{QuestionStatusReady, QuestionStatusPaused, QuestionStatusEnded}}, //nolint:goconst
+	}
+	proj := options.Find().SetProjection(bson.M{"upstreamId": 1, "orgAddress": 1, "upstreamStatus": 1}) //nolint:goconst
+	cur, err := ms.votingProcesses.Find(ctx, filter, proj)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list syncable parent elections: %w", err)
+	}
+	var docs []struct {
+		UpstreamID     internal.HexBytes `bson:"upstreamId"`
+		OrgAddress     common.Address    `bson:"orgAddress"`
+		UpstreamStatus string            `bson:"upstreamStatus"`
+	}
+	if err := cur.All(ctx, &docs); err != nil {
+		return nil, fmt.Errorf("failed to decode syncable parent elections: %w", err)
+	}
+	refs := make([]QuestionStatusRef, 0, len(docs))
+	for _, d := range docs {
+		refs = append(refs, QuestionStatusRef{UpstreamID: d.UpstreamID, OrgAddress: d.OrgAddress, Status: d.UpstreamStatus})
+	}
+	return refs, nil
 }

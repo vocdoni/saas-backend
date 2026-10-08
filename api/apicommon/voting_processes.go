@@ -156,6 +156,16 @@ type VotingProcessResponse struct {
 	StartDate   string                     `json:"startDate,omitempty"`
 	EndDate     string                     `json:"endDate,omitempty"`
 	Questions   []db.VotingProcessQuestion `json:"questions"`
+	// UpstreamID is the on-chain id of the process's parent election, published after the question
+	// elections. Its metadata document holds the process title, description and media and lists the
+	// question elections in order (meta.questionElections). It is never voted on. Absent until
+	// published, and for processes published without one.
+	UpstreamID internal.HexBytes `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	// MetadataURL serves the ElectionMetadata document the parent election points to on chain.
+	MetadataURL string `json:"metadataURL,omitempty"`
+	// MetadataHash is the SHA-256 of the exact bytes served at MetadataURL, as committed on chain by
+	// the parent election.
+	MetadataHash internal.HexBytes `json:"metadataHash,omitempty" swaggertype:"string" format:"hex" example:"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"` //nolint:lll
 	// InitialStatus echoes the draft's initialStatus: the on-chain status every question's
 	// election was (or will be) published with. Empty/absent means READY (the default);
 	// "PAUSED" means every question was published PAUSED. Publish-time only — it does not
@@ -451,6 +461,9 @@ func VotingProcessResponseFromDB(
 		Header:        vp.Header,
 		StreamURI:     vp.StreamURI,
 		Questions:     questions,
+		UpstreamID:    vp.UpstreamID,
+		MetadataURL:   vp.MetadataURL,
+		MetadataHash:  vp.MetadataHash,
 		InitialStatus: vp.InitialStatus,
 		AddOns:        vp.AddOns,
 		ChainID:       chainID,

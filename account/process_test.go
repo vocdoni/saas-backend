@@ -7,6 +7,7 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/proto/build/go/models"
 )
@@ -190,38 +191,25 @@ func TestNormalizeInitialStatus(t *testing.T) {
 	c.Assert(err, qt.ErrorMatches, `initialStatus must be READY or PAUSED, got .*`)
 }
 
-// TestBuildElectionMetadataProcessText checks that the process title and description land in the
-// document as meta.process, that an empty description is left out, and that no meta block is
-// written without them.
-func TestBuildElectionMetadataProcessText(t *testing.T) {
+// TestBuildElectionMetadataQuestionElections checks that a parent election's document lists its
+// question elections as meta.questionElections, in order and lowercase hex, writes "questions": []
+// rather than dropping the key, and that no meta block is written without them.
+func TestBuildElectionMetadataQuestionElections(t *testing.T) {
 	c := qt.New(t)
-	params := &db.ElectionParams{
-		Title: db.MultiLangString{"default": "q"},
-		Questions: []db.Question{{
-			Title:   db.MultiLangString{"default": "q"},
-			Choices: []db.Choice{{Title: db.MultiLangString{"default": "yes"}}},
-		}},
-	}
-	decodeMeta := func() any {
-		data, err := BuildElectionMetadata(params)
-		c.Assert(err, qt.IsNil)
-		got := &api.ElectionMetadata{}
-		c.Assert(json.Unmarshal(data, got), qt.IsNil)
-		return got.Meta
-	}
+	params := &db.ElectionParams{Title: db.MultiLangString{"default": "Assembly"}}
 
-	c.Assert(decodeMeta(), qt.IsNil)
+	data, err := BuildElectionMetadata(params)
+	c.Assert(err, qt.IsNil)
+	var raw map[string]any
+	c.Assert(json.Unmarshal(data, &raw), qt.IsNil)
+	c.Assert(raw["questions"], qt.DeepEquals, []any{})
+	_, hasMeta := raw["meta"]
+	c.Assert(hasMeta, qt.IsFalse)
 
-	params.ProcessTitle = db.MultiLangString{"default": "Assembly", "es": "Asamblea"}
-	c.Assert(decodeMeta(), qt.DeepEquals, map[string]any{
-		"process": map[string]any{"title": map[string]any{"default": "Assembly", "es": "Asamblea"}},
-	})
-
-	params.ProcessDescription = db.MultiLangString{"default": "Yearly"}
-	c.Assert(decodeMeta(), qt.DeepEquals, map[string]any{
-		"process": map[string]any{
-			"title":       map[string]any{"default": "Assembly", "es": "Asamblea"},
-			"description": map[string]any{"default": "Yearly"},
-		},
-	})
+	params.QuestionElections = []internal.HexBytes{{0xAB, 0x01}, {0x02, 0xCD}}
+	data, err = BuildElectionMetadata(params)
+	c.Assert(err, qt.IsNil)
+	got := &api.ElectionMetadata{}
+	c.Assert(json.Unmarshal(data, got), qt.IsNil)
+	c.Assert(got.Meta, qt.DeepEquals, map[string]any{"questionElections": []any{"ab01", "02cd"}})
 }
