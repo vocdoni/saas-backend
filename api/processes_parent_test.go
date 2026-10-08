@@ -41,7 +41,7 @@ func setupParentProcess(t *testing.T) *parentProcessFixture {
 
 	req := minimalVotingProcessRequest(orgAddress)
 	req.StartDate = ""
-	req.Description = db.MultiLangString{"default": "Yearly assembly", "es": "Asamblea anual"}
+	req.Description = db.MultiLangString{"default": "Yearly assembly", "es": "Asamblea general"}
 	req.StreamURI = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 	req.Census = apicommon.CensusSpec{
 		TwoFaFields: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail},
