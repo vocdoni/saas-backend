@@ -74,8 +74,9 @@ func BuildElectionMetadata(params *db.ElectionParams) ([]byte, error) {
 
 // electionMeta builds the free-form meta block of the document, or nil when there is nothing to
 // put in it (so no meta key is written). meta.process carries the process-level title and
-// description, which voting clients show as the page heading above the question: being part of the
-// document, they are covered by the metadata hash committed on chain. A map marshals with sorted
+// description, which voting clients show as the page heading above the question, and
+// meta.mediaHashes the SHA-256 of the media files (see ElectionParams.MediaHashes): being part of
+// the document, both are covered by the metadata hash committed on chain. Maps marshal with sorted
 // keys, so the same params always produce the same bytes and hash.
 func electionMeta(params *db.ElectionParams) map[string]any {
 	meta := map[string]any{}
@@ -85,6 +86,9 @@ func electionMeta(params *db.ElectionParams) map[string]any {
 			process["description"] = api.LanguageString(params.ProcessDescription)
 		}
 		meta["process"] = process
+	}
+	if len(params.MediaHashes) > 0 {
+		meta["mediaHashes"] = params.MediaHashes
 	}
 	if len(meta) == 0 {
 		return nil

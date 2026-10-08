@@ -225,3 +225,36 @@ func TestBuildElectionMetadataProcessText(t *testing.T) {
 		},
 	})
 }
+
+// TestBuildElectionMetadataMediaHashes checks that MediaHashes lands in the document as
+// meta.mediaHashes, and that no meta block is written when there is nothing to hash.
+func TestBuildElectionMetadataMediaHashes(t *testing.T) {
+	c := qt.New(t)
+	params := &db.ElectionParams{
+		Title:     db.MultiLangString{"default": "t"},
+		Header:    "https://saas.example/storage/abc.png",
+		StreamURI: "https://youtube.example/watch?v=x",
+		Questions: []db.Question{{
+			Title:   db.MultiLangString{"default": "q"},
+			Choices: []db.Choice{{Title: db.MultiLangString{"default": "yes"}}},
+		}},
+	}
+
+	type doc struct {
+		Meta *struct {
+			MediaHashes map[string]string `json:"mediaHashes"`
+		} `json:"meta"`
+	}
+	data, err := BuildElectionMetadata(params)
+	c.Assert(err, qt.IsNil)
+	var got doc
+	c.Assert(json.Unmarshal(data, &got), qt.IsNil)
+	c.Assert(got.Meta, qt.IsNil)
+
+	params.MediaHashes = map[string]string{params.Header: "00ff"}
+	data, err = BuildElectionMetadata(params)
+	c.Assert(err, qt.IsNil)
+	c.Assert(json.Unmarshal(data, &got), qt.IsNil)
+	c.Assert(got.Meta, qt.Not(qt.IsNil))
+	c.Assert(got.Meta.MediaHashes, qt.DeepEquals, map[string]string{params.Header: "00ff"})
+}

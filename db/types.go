@@ -668,6 +668,11 @@ type ElectionParams struct {
 	// persisted.
 	ProcessTitle       MultiLangString `json:"-" bson:"-"`
 	ProcessDescription MultiLangString `json:"-" bson:"-"`
+	// MediaHashes maps media URLs of the document (Header, StreamURI) to the lowercase hex
+	// SHA-256 of the bytes served at them. It is written into the metadata document as
+	// meta.mediaHashes so voters can check the media they were shown; a URL absent from it is
+	// not verifiable. Publish-time only, never persisted.
+	MediaHashes map[string]string `json:"-" bson:"-"`
 	// InitialStatus is the on-chain status the election is published with. Empty (the default)
 	// means READY; "PAUSED" publishes it in the PAUSED state, so voting only opens once an
 	// admin sets it to READY via SET_PROCESS_STATUS. Only "" / "READY" / "PAUSED" are

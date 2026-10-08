@@ -2,7 +2,9 @@ package api
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/objectstorage"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
@@ -57,6 +60,45 @@ func electionParamsForQuestion(
 		ProcessTitle:       vp.Title,
 		ProcessDescription: vp.Description,
 	}, nil
+}
+
+// electionMetadata builds the ElectionMetadata document for ep, committing in meta.mediaHashes the
+// SHA-256 of each of its media files that this backend's object storage serves. The on-chain
+// metadata hash pins only the media URLs; this pins the bytes behind them too.
+func (a *API) electionMetadata(ep *db.ElectionParams) ([]byte, error) {
+	hashes, err := a.localMediaHashes(ep.Header, ep.StreamURI)
+	if err != nil {
+		return nil, err
+	}
+	ep.MediaHashes = hashes
+	return account.BuildElectionMetadata(ep)
+}
+
+// localMediaHashes returns the lowercase hex SHA-256 of the stored bytes behind each url served by
+// this backend's object storage, keyed by url exactly as given. Other urls (external images, video
+// streams) and local ones whose object is gone are left out rather than fetched: hashing only what
+// we store avoids fetching arbitrary URLs server-side. It returns nil when no url is hashable.
+func (a *API) localMediaHashes(urls ...string) (map[string]string, error) {
+	var hashes map[string]string
+	for _, u := range urls {
+		name, ok := a.objectStorage.LocalName(u)
+		if !ok {
+			continue
+		}
+		object, err := a.objectStorage.GetByName(name)
+		if stderrors.Is(err, objectstorage.ErrorObjectNotFound) || stderrors.Is(err, objectstorage.ErrorInvalidObjectID) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("reading media %q: %w", u, err)
+		}
+		if hashes == nil {
+			hashes = make(map[string]string)
+		}
+		sum := sha256.Sum256(object.Data)
+		hashes[u] = hex.EncodeToString(sum[:])
+	}
+	return hashes, nil
 }
 
 // reconcileStalePublishing clears publishing markers left behind by a crash/restart/deploy
@@ -580,7 +622,7 @@ func (pw *publishWorker) buildBatch(
 		if err != nil {
 			return nil, false, err
 		}
-		metaBytes, err := account.BuildElectionMetadata(ep)
+		metaBytes, err := a.electionMetadata(ep)
 		if err != nil {
 			return nil, false, err
 		}
