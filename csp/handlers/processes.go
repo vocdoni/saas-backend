@@ -92,6 +92,9 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 //	@Description	- Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
 //	@Description	If valid the token is marked verified and returned. Auth-only censuses may not require
 //	@Description	a challenge solution.
+//	@Description	Step 0 returns the same error (40802) whether the login data matches no census participant
+//	@Description	or the contact data does not match an existing one, and failed attempts are capped per
+//	@Description	participant and per process per day (40017 once exhausted).
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -99,9 +102,9 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 //	@Param			step		path		string					true	"Authentication step (0 or 1)"
 //	@Param			request		body		handlers.AuthRequest	true	"Step 0 body; step 1 uses AuthChallengeRequest (see description)"
 //	@Success		200			{object}	handlers.AuthResponse
-//	@Failure		400			{object}	errors.Error	"Invalid input data"
-//	@Failure		401			{object}	errors.Error	"Unauthorized, cooldown not reached, or invalid challenge"
-//	@Failure		404			{object}	errors.Error	"Process, census, organization, or participant not found"
+//	@Failure		400			{object}	errors.Error	"Invalid input data or daily failed-attempt limit reached"
+//	@Failure		401			{object}	errors.Error	"Invalid authentication data, cooldown not reached, or invalid challenge"
+//	@Failure		404			{object}	errors.Error	"Process, census, or organization not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/auth/{step} [post]
 func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request) {

@@ -62,3 +62,48 @@ func TestDailyChallengeSendCap(t *testing.T) {
 	_, err = newToken(otherAnchorID)
 	c.Assert(err, qt.IsNil)
 }
+
+func TestAuthFailureLimits(t *testing.T) {
+	c := qt.New(t)
+	testDB, err := db.New(testMongoURI, test.RandomDatabaseName())
+	c.Assert(err, qt.IsNil)
+
+	csp, err := New(context.Background(), &Config{
+		DB:                          testDB,
+		MailService:                 testMailService,
+		SMSService:                  testSMSService,
+		MaxDailyAuthFailuresMember:  2,
+		MaxDailyAuthFailuresProcess: 3,
+		RootKey:                     *testRootKey,
+	})
+	c.Assert(err, qt.IsNil)
+
+	otherUserID := internal.HexBytes("otherUserID")
+	otherAnchorID := internal.HexBytes("otherAnchorID")
+	reached := func(anchorID, uID internal.HexBytes) bool {
+		r, err := csp.AuthFailureLimitReached(anchorID, uID)
+		c.Assert(err, qt.IsNil)
+		return r
+	}
+
+	// nothing recorded yet
+	c.Assert(reached(testAnchorID, nil), qt.IsFalse)
+	c.Assert(reached(testAnchorID, testUserID), qt.IsFalse)
+
+	// two identified failures exhaust the member budget, but not the process one
+	csp.RecordAuthFailure(testAnchorID, testUserID)
+	csp.RecordAuthFailure(testAnchorID, testUserID)
+	c.Assert(reached(testAnchorID, testUserID), qt.IsTrue)
+	c.Assert(reached(testAnchorID, otherUserID), qt.IsFalse)
+	c.Assert(reached(testAnchorID, nil), qt.IsFalse)
+
+	// one more (unidentified) failure exhausts the process budget, which then
+	// applies to every member of the process
+	csp.RecordAuthFailure(testAnchorID, nil)
+	c.Assert(reached(testAnchorID, nil), qt.IsTrue)
+	c.Assert(reached(testAnchorID, otherUserID), qt.IsTrue)
+
+	// the budgets are per process: another process is unaffected
+	c.Assert(reached(otherAnchorID, nil), qt.IsFalse)
+	c.Assert(reached(otherAnchorID, testUserID), qt.IsFalse)
+}

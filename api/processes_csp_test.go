@@ -144,6 +144,12 @@ func TestProcessCSP(t *testing.T) {
 	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "",
 		&handlers.CheckMembershipRequest{AuthToken: step0.AuthToken}, "processes", pid, "check")
 
+	// a resend with a contact that does not match the member fails with the same
+	// indistinguishable error that an unknown participant gets at step 0
+	requestAndAssertError(errors.ErrCSPAuthFailed, t, http.MethodPost, "",
+		&handlers.AuthResendRequest{AuthToken: step0.AuthToken, Email: "wrong-contact@example.com"},
+		"processes", pid, "auth", "resend")
+
 	// resend the OTP challenge for the mid-challenge token
 	resend := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "",
 		&handlers.AuthResendRequest{AuthToken: step0.AuthToken, Email: members[0].Email},

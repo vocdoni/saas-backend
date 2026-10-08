@@ -5109,6 +5109,9 @@ paths:
         - Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
         If valid the token is marked verified and returned. Auth-only censuses may not require
         a challenge solution.
+        Step 0 returns the same error (40802) whether the login data matches no census participant
+        or the contact data does not match an existing one, and failed attempts are capped per
+        participant and per process per day (40017 once exhausted).
       parameters:
       - description: Process ID
         in: path
@@ -5134,15 +5137,16 @@ paths:
           schema:
             $ref: '#/definitions/handlers.AuthResponse'
         "400":
-          description: Invalid input data
+          description: Invalid input data or daily failed-attempt limit reached
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Unauthorized, cooldown not reached, or invalid challenge
+          description: Invalid authentication data, cooldown not reached, or invalid
+            challenge
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
-          description: Process, census, organization, or participant not found
+          description: Process, census, or organization not found
           schema:
             $ref: '#/definitions/errors.Error'
         "500":

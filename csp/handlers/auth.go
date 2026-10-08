@@ -82,26 +82,22 @@ func validateAuthRequest(req *AuthRequest, census *db.Census) error {
 	return validateEmail(req.Email)
 }
 
-// verifyEmail checks if the provided email matches the member's stored email
-func verifyEmail(email string, storedEmail string) error {
-	if !strings.EqualFold(email, storedEmail) {
-		return errors.ErrUnauthorized.Withf("invalid user email")
-	}
-	return nil
-}
-
-// handleEmailContact verifies the email and returns the appropriate contact method
+// handleEmailContact verifies the email and returns the appropriate contact method.
+// A mismatch returns the bare ErrCSPAuthFailed: adding the reason would let a caller
+// distinguish it from an unknown participant.
 func handleEmailContact(
 	email string,
 	storedEmail string,
 ) (string, notifications.ChallengeType, error) {
-	if err := verifyEmail(email, storedEmail); err != nil {
-		return "", "", err
+	if !strings.EqualFold(email, storedEmail) {
+		return "", "", errors.ErrCSPAuthFailed
 	}
 	return email, notifications.EmailChallenge, nil
 }
 
-// handlePhoneContact verifies the phone and returns the appropriate contact method
+// handlePhoneContact verifies the phone and returns the appropriate contact method.
+// An unparsable or mismatched phone returns the bare ErrCSPAuthFailed: adding the
+// reason would let a caller distinguish it from an unknown participant.
 func handlePhoneContact(
 	org *db.Organization,
 	phone string,
@@ -109,16 +105,16 @@ func handlePhoneContact(
 ) (string, notifications.ChallengeType, error) {
 	normalized, err := internal.SanitizeAndVerifyPhoneNumber(phone, org.Country)
 	if err != nil {
-		return "", "", err
+		return "", "", errors.ErrCSPAuthFailed
 	}
 
 	hashedPhone, err := db.NewHashedPhone(normalized, org)
 	if err != nil {
-		return "", "", err
+		return "", "", errors.ErrGenericInternalServerError.WithErr(err)
 	}
 
 	if !memberHashedPhone.Matches(hashedPhone) {
-		return "", "", errors.ErrUnauthorized.Withf("user phone doesn't match")
+		return "", "", errors.ErrCSPAuthFailed
 	}
 	return normalized, notifications.SMSChallenge, nil
 }
@@ -167,13 +163,17 @@ func determineContactMethod(
 //
 // The function first validates the request data against census information,
 // then attempts to find the participant in the census using the login hash
-// generated from the provided fields. If the participant is not found in the
-// census, it returns ErrCensusParticipantNotFound. If found, it determines the
-// appropriate contact method (email, SMS, or none for auth-only censuses) based
-// on the census type and provided contact information. Finally, it generates and
-// returns an authentication token that will be used in the second step. If the
-// cooldown period between authentication attempts has not elapsed, the underlying
-// AuthToken call may return ErrAttemptCoolDownTime.
+// generated from the provided fields. An unknown participant and a found
+// participant whose contact data does not match both return the same
+// ErrCSPAuthFailed, so a caller cannot probe the census contents; every such
+// failure also spends the process's (and, when identified, the participant's)
+// daily failed-attempt budget, and once a budget is exhausted step 0 refuses
+// further attempts for the day with ErrVerificationMaxAttempts. If found, it
+// determines the appropriate contact method (email, SMS, or none for auth-only
+// censuses) based on the census type and provided contact information. Finally,
+// it generates and returns an authentication token that will be used in the
+// second step. If the cooldown period between authentication attempts has not
+// elapsed, the underlying AuthToken call may return ErrAttemptCoolDownTime.
 func (c *CSPHandlers) authFirstStep(
 	r *http.Request,
 	anchorID internal.HexBytes,
@@ -207,6 +207,16 @@ func (c *CSPHandlers) authFirstStep(
 	// Validate request with census information
 	if err := validateAuthRequest(&req, census); err != nil {
 		return nil, err
+	}
+
+	// refuse early once the process has burned its daily failed-attempt budget, before spending
+	// any work on the (deliberately expensive) login hash
+	reached, err := c.csp.AuthFailureLimitReached(anchorID, nil)
+	if err != nil {
+		return nil, errors.ErrInternalStorageError.WithErr(err)
+	}
+	if reached {
+		return nil, errors.ErrVerificationMaxAttempts.Withf("too many failed authentication attempts, try again tomorrow")
 	}
 
 	// the phone only takes part in the login hash as a 2FA field, and hashing it is deliberately
@@ -243,7 +253,8 @@ func (c *CSPHandlers) authFirstStep(
 	censusParticipant, err := c.mainDB.CensusParticipantByLoginHash(*census, *inputMember)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			return nil, errors.ErrCensusParticipantNotFound
+			c.csp.RecordAuthFailure(anchorID, nil)
+			return nil, errors.ErrCSPAuthFailed
 		}
 		return nil, errors.ErrGenericInternalServerError.WithErr(err)
 	}
@@ -251,7 +262,18 @@ func (c *CSPHandlers) authFirstStep(
 	// Fetch the corresponding org member using the participant ID (which is the ObjectID hex string)
 	orgMember, err := c.mainDB.OrgMember(census.OrgAddress, censusParticipant.ParticipantID)
 	if err != nil {
-		return nil, errors.ErrCensusParticipantNotFound.With("failed to get org member")
+		c.csp.RecordAuthFailure(anchorID, nil)
+		return nil, errors.ErrCSPAuthFailed
+	}
+	uID := internal.HexBytesFromString(orgMember.ID.Hex())
+
+	// the participant is identified now, so their own daily failed-attempt budget applies too
+	reached, err = c.csp.AuthFailureLimitReached(anchorID, uID)
+	if err != nil {
+		return nil, errors.ErrInternalStorageError.WithErr(err)
+	}
+	if reached {
+		return nil, errors.ErrVerificationMaxAttempts.Withf("too many failed authentication attempts, try again tomorrow")
 	}
 
 	if census.Weighted && orgMember.Weight == 0 {
@@ -261,6 +283,10 @@ func (c *CSPHandlers) authFirstStep(
 	// Determine contact method based on census type
 	toDestinations, challengeType, err := determineContactMethod(census, org, &req, orgMember)
 	if err != nil {
+		// a contact mismatch spends the participant's and the process's failed-attempt budgets
+		if errors.Is(err, errors.ErrCSPAuthFailed) {
+			c.csp.RecordAuthFailure(anchorID, uID)
+		}
 		return nil, err
 	}
 
@@ -269,7 +295,7 @@ func (c *CSPHandlers) authFirstStep(
 	// Generate the token
 	return c.csp.AuthToken(
 		anchorID,
-		internal.HexBytesFromString(orgMember.ID.Hex()),
+		uID,
 		toDestinations,
 		challengeType,
 		lang,

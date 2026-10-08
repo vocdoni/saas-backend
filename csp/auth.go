@@ -3,6 +3,7 @@ package csp
 
 import (
 	"crypto/subtle"
+	"fmt"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -244,6 +245,51 @@ func dailyCounterKey(uID, anchorID internal.HexBytes) []byte {
 	key = append(key, uID...)
 	key = append(key, anchorID...)
 	return key
+}
+
+// AuthFailureLimitReached reports whether today's failed step-0 authentication budget is already
+// exhausted for the anchor process or, when uID is not empty, for that identified participant on
+// the process. Both counters are Mongo-backed, so they survive service restarts.
+func (c *CSP) AuthFailureLimitReached(anchorID, uID internal.HexBytes) (bool, error) {
+	reached, err := c.Storage.CSPCounterReached(db.CSPCounterAuthFailureProcess, anchorID, c.maxDailyAuthFailuresProcess)
+	if err != nil {
+		return false, fmt.Errorf("checking process auth failures: %w", err)
+	}
+	if reached {
+		return true, nil
+	}
+	if len(uID) == 0 {
+		return false, nil
+	}
+	reached, err = c.Storage.CSPCounterReached(db.CSPCounterAuthFailureMember,
+		dailyCounterKey(uID, anchorID), c.maxDailyAuthFailuresMember)
+	if err != nil {
+		return false, fmt.Errorf("checking member auth failures: %w", err)
+	}
+	return reached, nil
+}
+
+// RecordAuthFailure spends one unit of today's failed step-0 authentication budgets: always the
+// process-wide one and, when the participant was identified (uID not empty), the per-participant
+// one too. Storage errors are logged but not returned: the request is already failing, and the
+// limit check fails closed on the next attempt anyway.
+func (c *CSP) RecordAuthFailure(anchorID, uID internal.HexBytes) {
+	if _, err := c.Storage.ClaimCSPCounter(db.CSPCounterAuthFailureProcess,
+		anchorID, c.maxDailyAuthFailuresProcess); err != nil {
+		log.Warnw("error recording process auth failure",
+			"anchorID", anchorID,
+			"error", err)
+	}
+	if len(uID) == 0 {
+		return
+	}
+	if _, err := c.Storage.ClaimCSPCounter(db.CSPCounterAuthFailureMember,
+		dailyCounterKey(uID, anchorID), c.maxDailyAuthFailuresMember); err != nil {
+		log.Warnw("error recording member auth failure",
+			"userID", uID,
+			"anchorID", anchorID,
+			"error", err)
+	}
 }
 
 // VerifyAuthToken method verifies the authentication token for a user. It gets the user data from the token and checks

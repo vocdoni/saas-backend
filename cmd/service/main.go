@@ -65,6 +65,10 @@ func main() {
 	// CSP daily abuse caps (0 = use built-in defaults, negative = disabled)
 	flag.Int("cspMaxDailySends", 0,
 		"max CSP challenges (new tokens + resends) sent per member and process per day (0 = default 10, negative = unlimited)")
+	flag.Int("cspMaxDailyAuthFailuresMember", 0,
+		"max failed CSP step-0 authentications per identified member and process per day (0 = default 10, negative = unlimited)")
+	flag.Int("cspMaxDailyAuthFailuresProcess", 0,
+		"max failed CSP step-0 authentications per process per day (0 = default 5000, negative = unlimited)")
 	// CSP notification queue tuning (0 = use built-in defaults)
 	flag.Int("notificationWorkers", 0, "number of concurrent CSP notification senders (0 = default)")
 	flag.Duration("notificationQueueTTL", 0, "max age of a queued CSP notification before it is dropped (0 = default)")
@@ -174,6 +178,8 @@ func main() {
 		NotificationTTL:                viper.GetDuration("otpExpiry"),
 		NotificationCoolDownTime:       viper.GetDuration("otpCooldown"),
 		MaxDailyChallengeSends:         viper.GetInt("cspMaxDailySends"),
+		MaxDailyAuthFailuresMember:     viper.GetInt("cspMaxDailyAuthFailuresMember"),
+		MaxDailyAuthFailuresProcess:    viper.GetInt("cspMaxDailyAuthFailuresProcess"),
 		NotificationQueueWorkers:       viper.GetInt("notificationWorkers"),
 		NotificationQueueTTL:           viper.GetDuration("notificationQueueTTL"),
 		NotificationBreakerMaxFailures: viper.GetInt("notificationBreakerMaxFailures"),

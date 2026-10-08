@@ -33,6 +33,18 @@ const MaxChallengeResends = 3
 // platform's expense. Stored in Mongo, so it survives restarts.
 const DefaultMaxDailyChallengeSends = 10
 
+// DefaultMaxDailyAuthFailuresMember is the default cap on failed step-0 authentications for one
+// identified census participant on one voting process per UTC day. Once reached, the participant
+// cannot authenticate on that process until the next day, so it bounds contact-guessing against a
+// single member without letting unidentified attempts lock anyone out.
+const DefaultMaxDailyAuthFailuresMember = 10
+
+// DefaultMaxDailyAuthFailuresProcess is the default cap on failed step-0 authentications across
+// one whole voting process per UTC day. It bounds census enumeration (failed attempts that match
+// no participant cannot be attributed to a member), so it is deliberately generous: legitimate
+// voters mistyping their data all count against it.
+const DefaultMaxDailyAuthFailuresProcess = 5000
+
 // Config struct contains the configuration for the CSP service. It includes
 // the database name, the MongoDB client, the notification cooldown time, the
 // notification queue settings, the SMS service and the mail service.
@@ -48,6 +60,14 @@ type Config struct {
 	// one voting process per UTC day. Zero uses DefaultMaxDailyChallengeSends; a negative value
 	// disables the cap.
 	MaxDailyChallengeSends int
+	// MaxDailyAuthFailuresMember caps the failed step-0 authentications of one identified census
+	// participant on one voting process per UTC day. Zero uses
+	// DefaultMaxDailyAuthFailuresMember; a negative value disables the cap.
+	MaxDailyAuthFailuresMember int
+	// MaxDailyAuthFailuresProcess caps the failed step-0 authentications across one whole voting
+	// process per UTC day. Zero uses DefaultMaxDailyAuthFailuresProcess; a negative value
+	// disables the cap.
+	MaxDailyAuthFailuresProcess int
 	// NotificationTTL is how long a CSP OTP challenge remains valid. After
 	// this window ResendChallenge returns ErrTokenExpired and queued but
 	// undelivered notifications are dropped. Distinct from
@@ -84,10 +104,12 @@ type CSP struct {
 	notifyQueue  *notifications.Queue
 	ctx          context.Context
 
-	notificationCoolDownTime time.Duration
-	notificationTTL          time.Duration
-	maxDailyChallengeSends   int
-	notifySync               bool
+	notificationCoolDownTime    time.Duration
+	notificationTTL             time.Duration
+	maxDailyChallengeSends      int
+	maxDailyAuthFailuresMember  int
+	maxDailyAuthFailuresProcess int
+	notifySync                  bool
 }
 
 // New method creates a new CSP service. It requires a CSPConfig struct with
@@ -148,15 +170,25 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 	if maxDailyChallengeSends == 0 {
 		maxDailyChallengeSends = DefaultMaxDailyChallengeSends
 	}
+	maxDailyAuthFailuresMember := config.MaxDailyAuthFailuresMember
+	if maxDailyAuthFailuresMember == 0 {
+		maxDailyAuthFailuresMember = DefaultMaxDailyAuthFailuresMember
+	}
+	maxDailyAuthFailuresProcess := config.MaxDailyAuthFailuresProcess
+	if maxDailyAuthFailuresProcess == 0 {
+		maxDailyAuthFailuresProcess = DefaultMaxDailyAuthFailuresProcess
+	}
 	return &CSP{
-		Storage:                  config.DB,
-		Signer:                   s,
-		notifyQueue:              queue,
-		ctx:                      ctx,
-		notificationCoolDownTime: notificationCoolDownTime,
-		notificationTTL:          notificationTTL,
-		maxDailyChallengeSends:   maxDailyChallengeSends,
-		notifySync:               config.SyncDelivery,
+		Storage:                     config.DB,
+		Signer:                      s,
+		notifyQueue:                 queue,
+		ctx:                         ctx,
+		notificationCoolDownTime:    notificationCoolDownTime,
+		notificationTTL:             notificationTTL,
+		maxDailyChallengeSends:      maxDailyChallengeSends,
+		maxDailyAuthFailuresMember:  maxDailyAuthFailuresMember,
+		maxDailyAuthFailuresProcess: maxDailyAuthFailuresProcess,
+		notifySync:                  config.SyncDelivery,
 	}, nil
 }
 
