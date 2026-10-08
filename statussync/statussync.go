@@ -3,7 +3,8 @@
 // demand, rather than sweeping every question on a timer. Work is fed by two triggers: a status
 // change made through the API (confirm the tx landed) and a read of a process/question (catch
 // changes made directly on-chain). The one safety-critical reader — the managed-org delete guard —
-// reads the chain synchronously instead of trusting the stored status, so unread transitions never block or allow a deletion wrongly.
+// reads the chain synchronously instead of trusting the stored status, so unread transitions never
+// block or allow a deletion wrongly.
 package statussync
 
 import (
