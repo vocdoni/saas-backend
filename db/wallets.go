@@ -193,8 +193,11 @@ func (ms *MongoStorage) WalletLedger(
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return 0, nil, ErrInvalidData
 	}
+	// _id breaks ties between entries created within the same millisecond, so
+	// the order is deterministic
+	sort := bson.D{{Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}}
 	return paginatedDocuments[WalletLedgerEntry](ms.walletLedger, page, limit,
-		bson.M{"orgAddress": orgAddress}, options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}))
+		bson.M{"orgAddress": orgAddress}, options.Find().SetSort(sort))
 }
 
 // appendWalletLedger inserts one audit row; a replayed key is dropped by the unique index.
