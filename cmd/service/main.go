@@ -58,6 +58,7 @@ func main() {
 	flag.String("stripeApiSecret", "", "Stripe API secret")
 	flag.String("stripeWebhookSecret", "", "Stripe Webhook secret")
 	flag.String("oauthServiceURL", "https://oauth.vocdoni.net", "OAuth service URL")
+	flag.String("originSecret", "", "if set, refuse requests without this value in the X-Origin-Secret header")
 	// OTP / verification code tuning (0 = use built-in defaults, applies to both API and CSP)
 	flag.Duration("otpExpiry", 0, "validity window for one-time codes (0 = default 15m)")
 	flag.Duration("otpCooldown", 0, "min wait between notification requests for the same account (0 = default 60s)")
@@ -159,6 +160,7 @@ func main() {
 		ServerURL:           server,
 		FullTransparentMode: fullTransparentMode,
 		OAuthServiceURL:     oauthServiceURL,
+		OriginSecret:        viper.GetString("originSecret"),
 		OTPExpiry:           viper.GetDuration("otpExpiry"),
 		OTPCooldown:         viper.GetDuration("otpCooldown"),
 	}
