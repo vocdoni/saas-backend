@@ -84,29 +84,21 @@ func metadataDoc(ep *db.ElectionParams, mediaHashes map[string]string) (doc, has
 	return doc, sum[:], nil
 }
 
-// parentElectionMaxCensusSize is the census size the parent election of a process is created
-// with: the smallest the chain accepts, which keeps its price at the minimum. Nobody votes on it.
-const parentElectionMaxCensusSize = 1
-
 // electionParamsForParent builds the params of a process's parent election: a metadata-only
 // election carrying the process-level metadata (title, description, media), so the process is
 // described by one on-chain document and hash. Each question election is linked to it on chain
 // (NewProcessParams.ParentProcessID) and every vote attests its metadata hash. It runs over the
-// process's dates and is never voted on: its document has no questions, its census is the
-// smallest possible, and the CSP signs only for question elections.
+// process's dates and is never voted on: its document has no questions, and it is built
+// metadata-only (no vote options, envelope or census), which the chain refuses votes on.
 func electionParamsForParent(vp *db.VotingProcess) *db.ElectionParams {
 	return &db.ElectionParams{
-		Title:       vp.Title,
-		Description: vp.Description,
-		Header:      vp.Header,
-		StreamURI:   vp.StreamURI,
-		StartDate:   vp.StartDate,
-		EndDate:     vp.EndDate,
-		// TODO(parent-process): no vote options, envelope or census once the parent is built
-		// metadata-only (see account.NewProcessParams.MetadataOnly).
-		VoteType:      db.VoteType{MaxCount: 1, MaxValue: 1},
-		ElectionType:  db.ElectionType{Autostart: true, Interruptible: true},
-		MaxCensusSize: parentElectionMaxCensusSize,
+		Title:        vp.Title,
+		Description:  vp.Description,
+		Header:       vp.Header,
+		StreamURI:    vp.StreamURI,
+		StartDate:    vp.StartDate,
+		EndDate:      vp.EndDate,
+		ElectionType: db.ElectionType{Autostart: true, Interruptible: true},
 	}
 }
 
@@ -767,7 +759,7 @@ func (pw *publishWorker) confirmBatch(pending []*db.VotingProcessQuestion, resul
 // publishParent publishes the process's parent election before any of its question elections,
 // retrying with a fresh nonce up to maxPublishRounds. A parent already on chain (a resumed
 // publish) is left as is. It is not plan-checked or billed: the questions are the billed unit, and
-// the parent's census of one makes it the cheapest election the chain accepts.
+// a metadata-only election has no census, so the chain charges it the minimum.
 func (pw *publishWorker) publishParent() error {
 	a := pw.a
 	if len(pw.vp.UpstreamID) > 0 {
@@ -792,14 +784,9 @@ func (pw *publishWorker) publishParent() error {
 		if err != nil {
 			return fmt.Errorf("could not read account nonce: %w", err)
 		}
-		// same census as the questions: the CSP refuses to sign for an election that is not a
-		// question of the process, so no vote on the parent can carry a valid proof.
 		tx, err := a.account.BuildNewProcessTx(&account.NewProcessParams{
 			OrgAddress:    pw.vp.OrgAddress,
 			Params:        ep,
-			CensusRoot:    pw.cspPubKey,
-			CensusURI:     a.serverURL,
-			Anonymous:     pw.census.Anonymous,
 			MetadataURL:   metadataURL,
 			MetadataHash:  metaHash,
 			Nonce:         &nonce,

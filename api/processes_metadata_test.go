@@ -464,16 +464,21 @@ func TestVotingProcessMetadataLateMined(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(claimed, qt.IsTrue)
 
-	// a vote attesting the pending hash is relayed (the chain commits it, so it is counted); one
-	// attesting neither the stored nor the pending hash is rejected up front
+	// a vote attesting the pending hashes, of the question and of the parent, is relayed (the chain
+	// commits them, so it is counted); one attesting neither the stored nor the pending hash is
+	// rejected up front
 	processID := f.processIDs[0]
-	stx := testSignVoteTxWithMetadataHash(t, f.voter, processID, f.proofFor(t, processID), []byte("[\"1\"]"), nil,
-		edited[0].MetadataHash)
+	stx := testSignVoteTxWithHashes(t, f.voter, processID, f.proofFor(t, processID), []byte("[\"1\"]"), nil,
+		testVoteHashes{metadata: edited[0].MetadataHash, parent: vpEdited.MetadataHash})
 	voteJob := enqueueAndPollJob(t, http.MethodPost, "", &apicommon.RelayVoteRequest{TxPayload: stx}, "vote")
 	c.Assert(voteJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", voteJob.Errors))
 	requestAndAssertError(errors.ErrVoteMetadataChanged, t, http.MethodPost, "",
 		&apicommon.RelayVoteRequest{TxPayload: testSignVoteTxWithMetadataHash(t, f.voter, f.processIDs[1], nil,
 			[]byte("[\"1\"]"), nil, internal.RandomBytes(sha256.Size))}, "vote")
+	requestAndAssertError(errors.ErrVoteMetadataChanged, t, http.MethodPost, "",
+		&apicommon.RelayVoteRequest{TxPayload: testSignVoteTxWithHashes(t, f.voter, f.processIDs[1], nil,
+			[]byte("[\"1\"]"), nil, testVoteHashes{metadata: edited[1].MetadataHash, parent: internal.RandomBytes(sha256.Size)})},
+		"vote")
 	// the relay does not settle anything
 	stillPending, err := testDB.Question(edited[0].ID)
 	c.Assert(err, qt.IsNil)
@@ -634,4 +639,47 @@ func TestVotingProcessMetadataDraft(t *testing.T) {
 
 	// and a stale count is refused
 	requestAndAssertError(errors.ErrMalformedBody, t, http.MethodPut, token, edit, "processes", pid, "metadata")
+}
+
+// TestVotingProcessMetadataParentEdit edits only process-level text, which is exactly one
+// SET_PROCESS_METADATA tx on the parent election: the question elections keep their documents, and
+// votes on them must then attest the parent's new metadata hash, which the relay and the chain both
+// enforce.
+func TestVotingProcessMetadataParentEdit(t *testing.T) {
+	c := qt.New(t)
+	f := setupRelayVoting(t, 1)
+	processID := f.processIDs[0]
+	before := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, f.token, nil, "processes", f.pid)
+	meta := requestAndParse[apicommon.VotingProcessMetadata](t, http.MethodGet, "", nil, "processes", f.pid, "metadata")
+	meta.Title = db.MultiLangString{"default": "Edited process title"}
+
+	job := enqueueAndPollJob(t, http.MethodPut, f.token, meta, "processes", f.pid, "metadata")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job errors: %s", job.Errors))
+	c.Assert(job.Result.Questions, qt.HasLen, 0)
+	c.Assert(job.Result.Parent, qt.Not(qt.IsNil))
+	c.Assert(job.Result.Parent.Status, qt.Equals, db.JobStatusCompleted)
+
+	after := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, f.token, nil, "processes", f.pid)
+	c.Assert(after.MetadataHash, qt.Not(qt.DeepEquals), before.MetadataHash)
+	assertElectionCommits(t, after.UpstreamID, after.MetadataURL, after.MetadataHash)
+	parentHistory, err := f.client.ElectionMetadataHistory(after.UpstreamID.Bytes())
+	c.Assert(err, qt.IsNil)
+	c.Assert(parentHistory.Versions, qt.HasLen, 2)
+	c.Assert(after.Questions[0].MetadataHash, qt.DeepEquals, before.Questions[0].MetadataHash)
+	questionHistory, err := f.client.ElectionMetadataHistory(processID.Bytes())
+	c.Assert(err, qt.IsNil)
+	c.Assert(questionHistory.Versions, qt.HasLen, 1)
+
+	// a vote attesting the previous parent hash is turned away by the relay and by the chain; one
+	// attesting the new hash is cast (both carry the same proof: the rejected ones consumed nothing)
+	proof := f.proofFor(t, processID)
+	stale := testVoteHashes{metadata: after.Questions[0].MetadataHash, parent: before.MetadataHash}
+	requestAndAssertError(errors.ErrVoteMetadataChanged, t, http.MethodPost, "",
+		&apicommon.RelayVoteRequest{
+			TxPayload: testSignVoteTxWithHashes(t, f.voter, processID, proof, []byte("[\"1\"]"), nil, stale),
+		}, "vote")
+	_, _, err = f.client.SendTx(testSignVoteTxWithHashes(t, f.voter, processID, proof, []byte("[\"1\"]"), nil, stale))
+	c.Assert(err, qt.ErrorMatches, `(?s).*parent metadata hash.*`)
+	nullifier := testRelayVoteRequest(t, f.voter, processID, proof, []byte("[\"1\"]"), nil)
+	c.Assert(nullifier, qt.Not(qt.HasLen), 0)
 }

@@ -7177,8 +7177,9 @@ paths:
         checked synchronously — the body must decode to a Vote envelope (else 400) for a
         question election the backend knows (else 404) attesting either the stored metadata
         hash of that question or the hash of its pending metadata edit, whose tx may already
-        have changed what the election commits to (else 409; among those two the chain
-        decides) — then enqueued for submission on a background
+        have changed what the election commits to, and likewise, as parentMetadataHash, the
+        stored or pending metadata hash of its process's parent election (else 409; among
+        those the chain decides) — then enqueued for submission on a background
         worker; the call returns 202 with a job id. The chain's acceptance or rejection of
         the vote (proof, nullifier, election state) is decided when the worker submits it and
         reported on the job: poll GET /jobs/{jobId} for the voteID on success, or a failure.
@@ -7236,8 +7237,10 @@ paths:
         The whole batch is checked synchronously and is accepted or rejected as a unit —
         every payload must decode to a Vote envelope (else 400) for a process the backend
         knows as a question election (else 404), each must attest either the stored metadata
-        hash of its question or the hash of a pending metadata edit of it (else 409: the
-        ballot changed and the voter must reload it; among those two the chain decides), all of them must
+        hash of its question or the hash of a pending metadata edit of it, and likewise, as
+        parentMetadataHash, the stored or pending one of its process's parent election
+        (else 409: the ballot changed and the voter must reload it; among those the chain
+        decides), all of them must
         belong to the same organization (else 400), and the queue must have room for all of
         them (else 503). A rejected batch enqueues nothing. At most 100 votes per call.
         The call returns 202 with a single job id covering the batch. Poll
