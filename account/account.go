@@ -27,9 +27,9 @@ type Account struct {
 	PubKey            internal.HexBytes `swaggertype:"string" format:"hex" example:"deadbeef"`
 	TxCosts           map[models.TxType]uint64
 	ElectionPriceCalc *electionprice.Calculator
-	// TxPollInterval is how often WaitTxMined polls the node for a submitted tx. Zero means
-	// apiclient.PollInterval (half the default block time); a chain with faster blocks can poll
-	// faster.
+	// TxPollInterval is how often WaitTxMined, which confirms the txs of a publish, polls the
+	// node. Zero means apiclient.PollInterval (half the default block time); a chain with faster
+	// blocks can poll faster.
 	TxPollInterval time.Duration
 }
 
