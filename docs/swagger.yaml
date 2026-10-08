@@ -5771,19 +5771,21 @@ paths:
         API key).
 
         On a draft the edit is stored right away (200). On a published process every question whose
-        text changes (or every question, when header or streamUri change) gets a new election
+        text changes (or every question, when the process's title, description, header or
+        streamUri change, since each question's document carries them) gets a new election
         metadata document at a new metadataURL, committed on chain with a SET_PROCESS_METADATA tx:
         the request answers 202 with a jobId to poll at GET /jobs/{jobId} (type
         `set_process_metadata`). The job result lists one entry per question with the
         metadataURL/metadataHash its tx commits and its own status; a question's stored text, URL
         and hash change only once its tx is mined, so what the API serves always matches what its
-        election commits to on chain. The process's own fields are stored only when every question
-        succeeded; if some failed, send the same edit again: the questions already updated are
-        skipped. Previous metadata documents stay served at their URLs. Votes signed against the
-        previous hash are then rejected with 409 (40904) and the voter must reload the ballot.
+        election commits to on chain. A tx that mines after the job stopped waiting for it is picked
+        up later, on the next read of the process or vote attesting the new hash. The process's own
+        fields are stored once every question landed; if some failed, send the same edit again: the
+        questions already updated are skipped. Previous metadata documents stay served at their
+        URLs. Votes signed against the previous hash are then rejected with 409 (40904) and the
+        voter must reload the ballot.
 
-        An edit that changes nothing, or only the process's title and description (which no election
-        metadata carries), is stored without any tx and answers 200.
+        An edit that changes nothing is answered 200 without any tx.
 
         409: a publish is in progress (40903); a previous metadata edit of the process is still
         being put on chain (40905); or an election whose metadata would change is not READY or

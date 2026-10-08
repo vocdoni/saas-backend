@@ -449,14 +449,6 @@ func (a *API) checkVoteMetadataOnChain(question *db.VotingProcessQuestion, attes
 	return nil
 }
 
-// reconcileQuestionMetadata is called when the chain shows that a question's election commits to a
-// metadata hash other than the stored one, i.e. the stored question lags the chain.
-func (a *API) reconcileQuestionMetadata(question *db.VotingProcessQuestion, chainHash []byte) {
-	log.Infow("stored question metadata hash lags the chain",
-		"question", question.ID.Hex(), "election", question.UpstreamID.String(),
-		"stored", question.MetadataHash.String(), "chain", internal.HexBytes(chainHash).String())
-}
-
 // voteNullifier works out the nullifier of an envelope without submitting it, so a vote
 // can be identified while its job is still pending and after it failed. An anonymous vote
 // carries its own; otherwise it is hash(voter address + process id), the same value the

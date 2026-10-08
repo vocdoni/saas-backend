@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"time"
 
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -52,6 +53,8 @@ func (a *API) votingProcessMetadataHandler(w http.ResponseWriter, r *http.Reques
 		errors.ErrProcessNotFound.Write(w)
 		return
 	}
+	// a metadata edit whose tx mined after its job stopped waiting is applied before serving
+	a.reconcilePendingMetadata(vp, questions)
 	apicommon.HTTPWriteJSON(w, apicommon.VotingProcessMetadataFromDB(vp, questions))
 }
 
@@ -67,19 +70,21 @@ func (a *API) votingProcessMetadataHandler(w http.ResponseWriter, r *http.Reques
 //	@Description	API key).
 //	@Description
 //	@Description	On a draft the edit is stored right away (200). On a published process every question whose
-//	@Description	text changes (or every question, when header or streamUri change) gets a new election
+//	@Description	text changes (or every question, when the process's title, description, header or
+//	@Description	streamUri change, since each question's document carries them) gets a new election
 //	@Description	metadata document at a new metadataURL, committed on chain with a SET_PROCESS_METADATA tx:
 //	@Description	the request answers 202 with a jobId to poll at GET /jobs/{jobId} (type
 //	@Description	`set_process_metadata`). The job result lists one entry per question with the
 //	@Description	metadataURL/metadataHash its tx commits and its own status; a question's stored text, URL
 //	@Description	and hash change only once its tx is mined, so what the API serves always matches what its
-//	@Description	election commits to on chain. The process's own fields are stored only when every question
-//	@Description	succeeded; if some failed, send the same edit again: the questions already updated are
-//	@Description	skipped. Previous metadata documents stay served at their URLs. Votes signed against the
-//	@Description	previous hash are then rejected with 409 (40904) and the voter must reload the ballot.
+//	@Description	election commits to on chain. A tx that mines after the job stopped waiting for it is picked
+//	@Description	up later, on the next read of the process or vote attesting the new hash. The process's own
+//	@Description	fields are stored once every question landed; if some failed, send the same edit again: the
+//	@Description	questions already updated are skipped. Previous metadata documents stay served at their
+//	@Description	URLs. Votes signed against the previous hash are then rejected with 409 (40904) and the
+//	@Description	voter must reload the ballot.
 //	@Description
-//	@Description	An edit that changes nothing, or only the process's title and description (which no election
-//	@Description	metadata carries), is stored without any tx and answers 200.
+//	@Description	An edit that changes nothing is answered 200 without any tx.
 //	@Description
 //	@Description	409: a publish is in progress (40903); a previous metadata edit of the process is still
 //	@Description	being put on chain (40905); or an election whose metadata would change is not READY or
@@ -339,7 +344,8 @@ func (a *API) updatePublishedMetadata(
 		return
 	}
 	if len(targets) == 0 {
-		// only the process's title/description changed, which no election metadata carries
+		// every election already commits to this edit (an earlier attempt put all of it on chain
+		// but did not store the process's own text), so only that is left to store
 		if err := a.db.SetVotingProcessText(oid, processTextOf(req)); err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
@@ -394,19 +400,21 @@ func (a *API) updatePublishedMetadata(
 }
 
 // metadataTargets returns the questions whose election metadata an edit changes, each with its new
-// metadata document already stored. A question's document carries its own text plus the process's
-// header and streamUri, so a change to either of those touches every question. A question to change
-// must have an election that is READY or PAUSED, the only states the chain accepts the update in;
-// the stored status is checked here and the chain stays the final arbiter.
+// metadata document already stored. A question's document carries its own text plus all of the
+// process's text (title, description, header and streamUri), so a change to the latter touches
+// every question. A question to change must have an election that is READY or PAUSED, the only
+// states the chain accepts the update in; the stored status is checked here and the chain stays the
+// final arbiter.
 func (a *API) metadataTargets(edit *metadataEdit, owner string) ([]metadataTarget, *errors.Error) {
 	vp, req := edit.vp, edit.req
 	edited := *vp
+	edited.Title, edited.Description = req.Title, req.Description
 	edited.Header, edited.StreamURI = req.Header, req.StreamURI
-	mediaChanged := vp.Header != req.Header || vp.StreamURI != req.StreamURI
+	processChanged := !processTextUnchanged(vp, req)
 	var targets []metadataTarget
 	for i := range edit.questions {
 		q, sent := &edit.questions[i], &req.Questions[i]
-		if !mediaChanged && questionTextUnchanged(q, sent) {
+		if !processChanged && questionTextUnchanged(q, sent) {
 			continue
 		}
 		doc, hash, err := a.questionMetadataDoc(&edited, editedQuestion(q, sent))
@@ -474,13 +482,19 @@ func (mw *metadataUpdateWorker) results(status db.JobStatus, errMsg string) []db
 // run signs one SET_PROCESS_METADATA tx per target with consecutive nonces, submits them as one
 // batch and confirms each. A question's stored text, URL and hash are written only once its tx is
 // mined (or the chain already commits its new hash), so the API never serves a version its election
-// does not commit to. The process's own text is written only when every question succeeded: header
-// and streamUri live in every question's document, so storing them earlier would describe questions
-// still on the previous version. Sending the same edit again retries just the failed questions.
+// does not commit to. The process's own text is written only when every question succeeded: it lives
+// in every question's document, so storing it earlier would describe questions still on the previous
+// version. Sending the same edit again retries just the failed questions.
+//
+// Each question's new version is recorded as pending before anything is submitted, so a tx that
+// mines after this job stopped waiting for it is still applied, by reconcileQuestionMetadata.
 func (mw *metadataUpdateWorker) run() (*db.JobResult, error) {
 	a := mw.a
 	mw.outcome = mw.results(db.JobStatusPending, "")
 	stxs, err := mw.signBatch()
+	if err == nil {
+		err = mw.recordPending()
+	}
 	if err != nil {
 		mw.outcome = mw.results(db.JobStatusFailed, err.Error())
 		return &db.JobResult{Questions: mw.outcome}, err
@@ -492,15 +506,19 @@ func (mw *metadataUpdateWorker) run() (*db.JobResult, error) {
 	failed := 0
 	for i := range mw.targets {
 		t := &mw.targets[i]
-		txErr := submitErr
+		// a failed batch submit leaves unknown which txs reached the mempool
+		mayStillMine, txErr := submitErr != nil, submitErr
 		if txErr == nil {
-			txErr = mw.confirm(submitted[i])
+			mayStillMine, txErr = mw.confirm(submitted[i])
 		}
 		// the tx may have mined after all (a confirmation timeout), or an earlier attempt whose
 		// result was lost already committed this very version: the chain has the final word
 		if txErr != nil && !mw.chainCommits(t) {
 			failed++
 			mw.outcome[i].Status, mw.outcome[i].Error = db.JobStatusFailed, txErr.Error()
+			if !mayStillMine {
+				mw.dropPending(t)
+			}
 			continue
 		}
 		if err := a.db.SetQuestionText(t.update); err != nil {
@@ -519,6 +537,106 @@ func (mw *metadataUpdateWorker) run() (*db.JobResult, error) {
 		return result, fmt.Errorf("questions updated but the process text was not stored, send the edit again: %w", err)
 	}
 	return result, nil
+}
+
+// recordPending stores the edit as pending: the process's new text and each target question's new
+// version, which reconcileQuestionMetadata applies once the chain shows it committed.
+func (mw *metadataUpdateWorker) recordPending() error {
+	if err := mw.a.db.SetVotingProcessPendingText(mw.processID, mw.text); err != nil {
+		return fmt.Errorf("could not record pending process text: %w", err)
+	}
+	for _, t := range mw.targets {
+		if err := mw.a.db.SetQuestionPendingMetadata(t.update.ID, t.update.Pending()); err != nil {
+			return fmt.Errorf("could not record pending metadata of question %s: %w", t.update.ID.Hex(), err)
+		}
+	}
+	return nil
+}
+
+// dropPending discards the pending version of a question whose tx is known not to land.
+func (mw *metadataUpdateWorker) dropPending(t *metadataTarget) {
+	mw.a.dropPendingMetadata(mw.processID, t.update.ID)
+}
+
+// dropPendingMetadata discards a question's pending metadata edit, which will not land. The
+// process's pending text goes first: once no question is pending it would otherwise be applied,
+// describing this question wrongly. It reports whether the question's pending edit was cleared.
+func (a *API) dropPendingMetadata(processID, questionID bson.ObjectID) bool {
+	if err := a.db.ClearVotingProcessPendingText(processID); err != nil {
+		log.Warnw("could not clear pending process text", "processId", processID.Hex(), "error", err)
+		return false
+	}
+	if err := a.db.ClearQuestionPendingMetadata(questionID); err != nil {
+		log.Warnw("could not clear pending question metadata", "questionId", questionID.Hex(), "error", err)
+		return false
+	}
+	return true
+}
+
+// reconcileQuestionMetadata brings a question in line with the metadata hash its election commits
+// to on chain (chainHash) when its stored version lags it: a metadata edit whose tx mined after the
+// edit job stopped waiting for it. When the chain commits the question's pending edit, that edit is
+// applied (text, URL and hash) and cleared, in the store and in q, and the process's pending text
+// follows once no question of it is pending; that text is returned, or nil. A pending edit the chain
+// does not commit is dropped once older than db.MetadataUpdateStaleAfter, by when its tx has long
+// mined or been discarded. Failures are logged and leave the question as stored, to retry later.
+func (a *API) reconcileQuestionMetadata(q *db.VotingProcessQuestion, chainHash []byte) *db.ProcessText {
+	pending := q.PendingMetadata
+	if pending == nil {
+		if !bytes.Equal(chainHash, q.MetadataHash) {
+			log.Warnw("question metadata hash lags the chain with no pending edit",
+				"questionId", q.ID.Hex(), "election", q.UpstreamID.String(),
+				"stored", q.MetadataHash.String(), "chain", internal.HexBytes(chainHash).String())
+		}
+		return nil
+	}
+	if !bytes.Equal(pending.MetadataHash, chainHash) {
+		if time.Since(pending.Since) > db.MetadataUpdateStaleAfter && a.dropPendingMetadata(q.ProcessID, q.ID) {
+			q.PendingMetadata = nil
+		}
+		return nil
+	}
+	update := pending.Update(q.ID)
+	if err := a.db.SetQuestionText(update); err != nil {
+		log.Warnw("could not apply pending question metadata", "questionId", q.ID.Hex(), "error", err)
+		return nil
+	}
+	q.Title, q.Description = update.Title, update.Description
+	for j := range q.Choices {
+		if j < len(update.ChoiceTitles) {
+			q.Choices[j].Title = update.ChoiceTitles[j]
+		}
+	}
+	q.MetadataURL, q.MetadataHash, q.PendingMetadata = update.MetadataURL, update.MetadataHash, nil
+	text, err := a.db.ApplyVotingProcessPendingText(q.ProcessID)
+	if err != nil {
+		log.Warnw("could not apply pending process text", "processId", q.ProcessID.Hex(), "error", err)
+		return nil
+	}
+	return text
+}
+
+// reconcilePendingMetadata runs reconcileQuestionMetadata, against its election as read from the
+// chain, on each question of a process read that has a pending metadata edit, so the read serves
+// (and stores) an edit that landed late. vp, when given, takes the process text that lands with it.
+// Questions without a pending edit, the common case, cost nothing.
+func (a *API) reconcilePendingMetadata(vp *db.VotingProcess, questions []db.VotingProcessQuestion) {
+	for i := range questions {
+		q := &questions[i]
+		if q.PendingMetadata == nil || len(q.UpstreamID) == 0 {
+			continue
+		}
+		election, err := a.account.Election(q.UpstreamID)
+		if err != nil {
+			log.Warnw("could not read election to reconcile pending metadata",
+				"questionId", q.ID.Hex(), "election", q.UpstreamID.String(), "error", err)
+			continue
+		}
+		text := a.reconcileQuestionMetadata(q, election.MetadataHash)
+		if text != nil && vp != nil {
+			vp.Title, vp.Description, vp.Header, vp.StreamURI = text.Title, text.Description, text.Header, text.StreamURI
+		}
+	}
 }
 
 // signBatch builds, funds, permission-checks and signs one SET_PROCESS_METADATA tx per target with
@@ -559,15 +677,17 @@ func (mw *metadataUpdateWorker) signBatch() ([][]byte, error) {
 	return stxs, nil
 }
 
-// confirm waits for one submitted batch item to be mined.
-func (mw *metadataUpdateWorker) confirm(item account.BatchItemResult) error {
+// confirm waits for one submitted batch item to be mined. On error, mayStillMine reports whether
+// the tx reached the chain's mempool and can still be mined later (the wait timed out), as opposed
+// to having been rejected or never sent.
+func (mw *metadataUpdateWorker) confirm(item account.BatchItemResult) (mayStillMine bool, err error) {
 	switch item.Status {
 	case account.BatchSubmitted:
-		return mw.a.account.WaitTxMined(item.Hash)
+		return true, mw.a.account.WaitTxMined(item.Hash)
 	case account.BatchFailed:
-		return fmt.Errorf("tx rejected: %s", item.Err)
+		return false, fmt.Errorf("tx rejected: %s", item.Err)
 	default:
-		return fmt.Errorf("tx not sent after an earlier one in the batch was rejected")
+		return false, fmt.Errorf("tx not sent after an earlier one in the batch was rejected")
 	}
 }
 

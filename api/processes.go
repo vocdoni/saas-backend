@@ -541,6 +541,8 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 	for i := range questions {
 		a.enqueueReconcileIfStale(&questions[i])
 	}
+	// a metadata edit whose tx mined after its job stopped waiting is applied before serving
+	a.reconcilePendingMetadata(vp, questions)
 	// resolve the vote encryption keys of encrypted questions (so clients can seal encrypted ballots)
 	// and the live on-chain tally of each published question (finalResults marks final), concurrently:
 	// each needs a Vochain round-trip, so bounded pools keep this read fast for a many-question process.
@@ -831,6 +833,10 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 	// serve the stored status now; refresh it from the chain in the background so a status change
 	// made directly on-chain (outside this API) is picked up.
 	a.enqueueReconcileIfStale(question)
+	// a metadata edit whose tx mined after its job stopped waiting is applied before serving
+	reconciled := []db.VotingProcessQuestion{*question}
+	a.reconcilePendingMetadata(nil, reconciled)
+	question = &reconciled[0]
 	// resolve the vote encryption keys so voters can seal an encrypted ballot for this question.
 	question.EncryptionKeys = a.resolveQuestionEncryptionKeys(question)
 	// surface the live on-chain tally for a published question; memos (manager-only) are included only

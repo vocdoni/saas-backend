@@ -800,17 +800,58 @@ type VotingProcess struct {
 	// ClaimVotingProcessMetadataUpdate), so a second edit cannot race the first one's on-chain
 	// txs. omitempty for the same reason as Publishing: the claim matches on the field being absent.
 	MetadataUpdating time.Time `json:"-" bson:"metadataUpdating,omitempty"`
-	CreatedAt        time.Time `json:"createdAt" bson:"createdAt"`
-	UpdatedAt        time.Time `json:"updatedAt" bson:"updatedAt"`
+	// PendingText is the process text of a metadata edit whose txs are not all known to be mined.
+	// It is stored as the process's text once no question has a pending edit left.
+	PendingText *ProcessText `json:"-" bson:"pendingText,omitempty"`
+	CreatedAt   time.Time    `json:"createdAt" bson:"createdAt"`
+	UpdatedAt   time.Time    `json:"updatedAt" bson:"updatedAt"`
 }
 
 // ProcessText is the editable text a voting process holds itself, as opposed to the text of its
-// questions. Header and StreamURI also travel in every question's election metadata document.
+// questions. All of it also travels in every question's election metadata document: the title and
+// description as meta.process, header and streamUri as the document's media.
 type ProcessText struct {
-	Title       MultiLangString
-	Description MultiLangString
-	Header      string
-	StreamURI   string
+	Title       MultiLangString `bson:"title"`
+	Description MultiLangString `bson:"description,omitempty"`
+	Header      string          `bson:"header,omitempty"`
+	StreamURI   string          `bson:"streamUri,omitempty"`
+}
+
+// PendingQuestionMetadata is the edit a question's submitted SET_PROCESS_METADATA tx puts on chain:
+// the new text and the metadata document and hash the election will commit to. Since is when it
+// was submitted.
+type PendingQuestionMetadata struct {
+	Title        MultiLangString   `bson:"title"`
+	Description  MultiLangString   `bson:"description,omitempty"`
+	ChoiceTitles []MultiLangString `bson:"choiceTitles"`
+	MetadataURL  string            `bson:"metadataURL"`
+	MetadataHash internal.HexBytes `bson:"metadataHash"`
+	Since        time.Time         `bson:"since"`
+}
+
+// Update returns the question text update that applies this pending edit to question id.
+func (p *PendingQuestionMetadata) Update(id bson.ObjectID) *QuestionTextUpdate {
+	return &QuestionTextUpdate{
+		ID:           id,
+		Title:        p.Title,
+		Description:  p.Description,
+		ChoiceTitles: p.ChoiceTitles,
+		MetadataURL:  p.MetadataURL,
+		MetadataHash: p.MetadataHash,
+	}
+}
+
+// Pending returns the pending edit form of a text update that repoints a question at a new
+// metadata document, stamped as submitted now.
+func (u *QuestionTextUpdate) Pending() *PendingQuestionMetadata {
+	return &PendingQuestionMetadata{
+		Title:        u.Title,
+		Description:  u.Description,
+		ChoiceTitles: u.ChoiceTitles,
+		MetadataURL:  u.MetadataURL,
+		MetadataHash: u.MetadataHash,
+		Since:        time.Now(),
+	}
 }
 
 // QuestionTextUpdate is a text-only edit of one question: its title, description and choice
@@ -986,6 +1027,10 @@ type VotingProcessQuestion struct {
 	// JSON field is absent (not an empty array) until the keykeepers publish the keys, so clients
 	// treat its absence as "not yet published" and poll. Voters seal encrypted vote packages with these.
 	EncryptionKeys []EncryptionKey `json:"encryptionKeys,omitempty" bson:"encryptionKeys,omitempty"`
+	// PendingMetadata is a metadata edit whose SET_PROCESS_METADATA tx was submitted but is not known
+	// to be mined. It is applied to the question (and cleared) once the chain shows the election
+	// committing to its MetadataHash, even if that happens after the edit job gave up waiting.
+	PendingMetadata *PendingQuestionMetadata `json:"-" bson:"pendingMetadata,omitempty"`
 	// Results is this question's live on-chain tally, resolved on read for any published (on-chain)
 	// question; FinalResults marks live vs final. The results object itself is present whenever the
 	// question is published — it's the inner per-choice matrix (QuestionResults.Results) that is omitted
