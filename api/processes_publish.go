@@ -51,7 +51,7 @@ func electionParamsForQuestion(
 			Description: q.Description,
 			Choices:     q.Choices,
 		}},
-		VoteType:      voteType,
+		VoteType:           voteType,
 		ElectionType:       account.ElectionTypeFromQuestion(q),
 		MaxCensusSize:      maxCensusSize,
 		ProcessTitle:       vp.Title,
