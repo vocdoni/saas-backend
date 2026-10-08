@@ -216,10 +216,10 @@ type VotingProcessResponse struct {
 	StartDate   string                     `json:"startDate,omitempty"`
 	EndDate     string                     `json:"endDate,omitempty"`
 	Questions   []db.VotingProcessQuestion `json:"questions"`
-	// UpstreamID is the on-chain id of the process's parent election, published after the question
-	// elections. Its metadata document holds the process title, description and media and lists the
-	// question elections in order (meta.questionElections). It is never voted on. Absent until
-	// published, and for processes published without one.
+	// UpstreamID is the on-chain id of the process's metadata-only parent election, published before
+	// the question elections, which are linked to it. Its metadata document holds the process title,
+	// description and media. It is never voted on, but every vote attests its metadataHash. Absent
+	// until published, and for processes published without one.
 	UpstreamID internal.HexBytes `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	// MetadataURL serves the ElectionMetadata document the parent election points to on chain.
 	MetadataURL string `json:"metadataURL,omitempty"`
@@ -448,7 +448,11 @@ type PublicQuestionResponse struct {
 	// MetadataHash is the SHA-256 of the exact bytes served at MetadataURL, as committed on chain.
 	// A vote must attest it in its envelope (metadataHash) or it is rejected.
 	MetadataHash internal.HexBytes `json:"metadataHash,omitempty" swaggertype:"string" format:"hex" example:"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"` //nolint:lll
-	Census       CensusSpec        `json:"census"`
+	// ParentUpstreamID is the on-chain id of the process's parent election this question's election
+	// is linked to. A vote must also attest the parent's current metadata hash (the process's
+	// metadataHash, from GET /processes/{processId}).
+	ParentUpstreamID internal.HexBytes `json:"parentUpstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Census           CensusSpec        `json:"census"`
 	// EncryptionKeys are the on-chain vote-encryption public keys (only for secretUntilTheEnd
 	// questions). Because of omitempty the field is absent (not an empty array) until the keykeepers
 	// publish the keys, so clients treat its absence as "not yet published" and poll. Voters seal
@@ -490,6 +494,7 @@ func PublicQuestionResponseFromDB(q *db.VotingProcessQuestion, census *db.Census
 		Status:            q.Status,
 		MetadataURL:       q.MetadataURL,
 		MetadataHash:      q.MetadataHash,
+		ParentUpstreamID:  q.ParentUpstreamID,
 		EncryptionKeys:    q.EncryptionKeys,
 		Results:           q.Results,
 	}

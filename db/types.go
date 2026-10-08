@@ -668,15 +668,10 @@ type ElectionParams struct {
 	ElectionType  ElectionType          `json:"electionType" bson:"electionType"`
 	TypeMetadata  *ElectionTypeMetadata `json:"type,omitempty" bson:"type,omitempty"`
 	MaxCensusSize uint64                `json:"maxCensusSize,omitempty" bson:"maxCensusSize,omitempty"`
-	// QuestionElections are the on-chain ids of the question elections of a voting process, in
-	// question order. Only the parent election of a process carries them: they are written into
-	// its metadata document as meta.questionElections, so the document (and the hash committed for
-	// it) ties the process text to the ballots it heads. Publish-time only, never persisted.
-	QuestionElections []internal.HexBytes `json:"-" bson:"-"`
-	// MediaHashes maps the image URLs of the document (today the Header) to the lowercase hex
-	// SHA-256 of the bytes served at them. It is written into the metadata document as
-	// meta.mediaHashes so voters can check the images they were shown. Videos (StreamURI) are never
-	// hashed: only their URL is committed. Publish-time only, never persisted.
+	// MediaHashes maps the image URLs of the document (the parent's Header, a question's choice
+	// images) to the lowercase hex SHA-256 of the bytes stored for them. It is written into the
+	// metadata document as meta.mediaHashes so voters can check the images they were shown. Videos
+	// (StreamURI) are never hashed: only their URL is committed. Publish-time only, never persisted.
 	MediaHashes map[string]string `json:"-" bson:"-"`
 	// InitialStatus is the on-chain status the election is published with. Empty (the default)
 	// means READY; "PAUSED" publishes it in the PAUSED state, so voting only opens once an
@@ -1078,8 +1073,12 @@ type VotingProcessQuestion struct {
 	// MetadataHash is the SHA-256 of the exact bytes served at MetadataURL, committed on chain at
 	// publish. Every vote envelope must attest it (VoteEnvelope.metadataHash) or the chain rejects it.
 	MetadataHash internal.HexBytes `json:"metadataHash,omitempty" bson:"metadataHash,omitempty" swaggertype:"string" format:"hex" example:"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"`
-	Status       string            `json:"status,omitempty" bson:"status,omitempty"`
-	SyncedAt     time.Time         `json:"-" bson:"syncedAt,omitempty"`
+	// ParentUpstreamID is the on-chain id of the process's parent election this question's election
+	// was published under (the process's upstreamId). A vote must also attest the parent's current
+	// metadata hash (the process's metadataHash).
+	ParentUpstreamID internal.HexBytes `json:"parentUpstreamId,omitempty" bson:"parentUpstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"` //nolint:lll
+	Status           string            `json:"status,omitempty" bson:"status,omitempty"`
+	SyncedAt         time.Time         `json:"-" bson:"syncedAt,omitempty"`
 	// EndedAt is the actual on-chain moment this question's election stopped accepting votes,
 	// set only when the vote was ended early (before its scheduled end, i.e. ManuallyEnded on
 	// the chain). Absent while the vote is open or when it ran to its scheduled end. Recorded by

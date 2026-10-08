@@ -558,16 +558,11 @@ func (a *API) metadataTargets(edit *metadataEdit, owner string) ([]metadataTarge
 	text := processTextOf(req)
 	edited := *vp
 	edited.Title, edited.Description, edited.Header, edited.StreamURI = text.Title, text.Description, text.Header, text.StreamURI
-	// the parent keeps listing the same question elections: an edit never changes which they are
-	questionElections, err := parentQuestionElections(edit.questions)
-	if err != nil {
-		return nil, errors.ErrGenericInternalServerError.WithErr(err)
-	}
 	mediaHashes, err := hasher.hashes(edited.Header)
 	if err != nil {
 		return nil, err
 	}
-	doc, hash, err := metadataDoc(electionParamsForParent(&edited, questionElections), mediaHashes)
+	doc, hash, err := metadataDoc(electionParamsForParent(&edited), mediaHashes)
 	if err != nil {
 		return nil, errors.ErrGenericInternalServerError.WithErr(err)
 	}

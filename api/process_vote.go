@@ -413,6 +413,9 @@ func (a *API) parseRelayVote(payload internal.HexBytes) (*parsedVote, *errors.Er
 					"vote attests metadata hash %x, the election commits to %x", vote.MetadataHash, []byte(question.MetadataHash),
 				))
 			}
+			if apiErr := a.checkParentMetadata(question, vote); apiErr != nil {
+				return nil, apiErr
+			}
 		case db.ErrNotFound:
 			return nil, errors.Ptr(errors.ErrProcessNotFound)
 		default:
@@ -439,6 +442,48 @@ func voteMetadataCurrent(q *db.VotingProcessQuestion, attested []byte) bool {
 		return true
 	}
 	return q.PendingMetadata != nil && bytes.Equal(attested, q.PendingMetadata.MetadataHash)
+}
+
+// voteParentMetadataHash returns the metadata hash of the parent election a vote envelope attests.
+//
+// TODO(parent-process): return vote.ParentMetadataHash once dvote-protobuf ships the field (the
+// chain then requires it to equal the parent's current metadata hash); until then envelopes carry
+// none and checkParentMetadata lets every vote through.
+func voteParentMetadataHash(_ *models.VoteEnvelope) []byte {
+	return nil
+}
+
+// checkParentMetadata rejects up front a vote on a question election that does not attest the
+// metadata its parent election commits to, as the chain would. A question published without a
+// parent, or an envelope attesting no parent hash, is not checked.
+//
+// TODO(parent-process): once the chain requires the parent hash, an envelope attesting none on a
+// question with a parent is rejected too.
+func (a *API) checkParentMetadata(q *db.VotingProcessQuestion, vote *models.VoteEnvelope) *errors.Error {
+	attested := voteParentMetadataHash(vote)
+	if len(q.ParentUpstreamID) == 0 || attested == nil {
+		return nil
+	}
+	vp, err := a.db.VotingProcess(q.ProcessID)
+	if err != nil {
+		return errors.Ptr(errors.ErrGenericInternalServerError.WithErr(err))
+	}
+	if !parentMetadataCurrent(vp, attested) {
+		return errors.Ptr(errors.ErrVoteMetadataChanged.Withf(
+			"vote attests parent metadata hash %x, the parent election commits to %x", attested, []byte(vp.MetadataHash),
+		))
+	}
+	return nil
+}
+
+// parentMetadataCurrent reports whether a vote attesting the given parent metadata hash may be
+// relayed: it is the hash the process's parent election commits to, or that of a pending process
+// metadata edit whose tx is not final yet (same rule as voteMetadataCurrent).
+func parentMetadataCurrent(vp *db.VotingProcess, attested []byte) bool {
+	if len(vp.MetadataHash) == 0 || bytes.Equal(attested, vp.MetadataHash) {
+		return true
+	}
+	return vp.PendingMetadata != nil && bytes.Equal(attested, vp.PendingMetadata.MetadataHash)
 }
 
 // voteNullifier works out the nullifier of an envelope without submitting it, so a vote

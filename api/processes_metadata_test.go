@@ -112,11 +112,10 @@ func TestVotingProcessMetadataPublished(t *testing.T) {
 	c.Assert(parentDoc.Title, qt.DeepEquals, dvoteapi.LanguageString(edit.Title))
 	c.Assert(parentDoc.Media, qt.Equals, dvoteapi.ProcessMedia{Header: edit.Header, StreamURI: edit.StreamURI})
 	headerSum := sha256.Sum256(header)
-	// the parent keeps listing the same question elections
 	c.Assert(parentDoc.Meta, qt.DeepEquals, map[string]any{
-		"mediaHashes":       map[string]any{edit.Header: hex.EncodeToString(headerSum[:])},
-		"questionElections": questionElectionsOf(f.processIDs),
+		"mediaHashes": map[string]any{edit.Header: hex.EncodeToString(headerSum[:])},
 	})
+	c.Assert(parentDoc.Questions, qt.HasLen, 0)
 
 	c.Assert(after.Questions, qt.HasLen, 2)
 	for i, q := range after.Questions {
