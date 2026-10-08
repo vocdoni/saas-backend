@@ -5,14 +5,23 @@ package smtp
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"fmt"
+	"mime"
 	"mime/multipart"
+	"net"
 	"net/mail"
 	"net/smtp"
 	"net/textproto"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/vocdoni/saas-backend/notifications"
 )
+
+// defaultSendTimeout bounds an SMTP delivery whose context carries no deadline.
+const defaultSendTimeout = 30 * time.Second
 
 var disableTrackingFilter = []byte(`{"filters":{"clicktrack":{"settings":{"enable":0,"enable_text":false}}}}`)
 
@@ -97,23 +106,73 @@ func (se *Email) SendNotification(ctx context.Context, notification *notificatio
 	if err != nil {
 		return fmt.Errorf("could not compose email body: %v", err)
 	}
-	// send the email
-	server := fmt.Sprintf("%s:%d", se.config.SMTPServer, se.config.SMTPPort)
-	// create a channel to handle errors
-	errCh := make(chan error, 1)
-	go func() {
-		// send the message
-		err := smtp.SendMail(server, se.auth, se.config.FromAddress, []string{notification.ToAddress}, body)
-		errCh <- err
-		close(errCh)
-	}()
-	// wait for the message to be sent or the context to be done
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case err := <-errCh:
-		return err
+	return se.sendMail(ctx, notification.ToAddress, body)
+}
+
+// sendMail delivers msg to the recipient like smtp.SendMail does (STARTTLS when offered, then
+// AUTH), but bounded by ctx: smtp.SendMail dials without a timeout and sets no I/O deadline, so a
+// stalled server would leave the sending goroutine and its connection blocked indefinitely.
+func (se *Email) sendMail(ctx context.Context, to string, msg []byte) error {
+	server := net.JoinHostPort(se.config.SMTPServer, strconv.Itoa(se.config.SMTPPort))
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, "tcp", server)
+	if err != nil {
+		return fmt.Errorf("could not connect to the smtp server: %w", err)
 	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		deadline = time.Now().Add(defaultSendTimeout)
+	}
+	if err := conn.SetDeadline(deadline); err != nil {
+		_ = conn.Close()
+		return fmt.Errorf("could not set the smtp connection deadline: %w", err)
+	}
+	// unblock the exchange as soon as ctx is canceled, not only at its deadline
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+
+	client, err := smtp.NewClient(conn, se.config.SMTPServer)
+	if err != nil {
+		_ = conn.Close()
+		return fmt.Errorf("could not start the smtp session: %w", err)
+	}
+	defer func() { _ = client.Close() }()
+	if ok, _ := client.Extension("STARTTLS"); ok {
+		if err := client.StartTLS(&tls.Config{ServerName: se.config.SMTPServer}); err != nil {
+			return fmt.Errorf("could not start tls: %w", err)
+		}
+	}
+	if se.auth != nil {
+		if ok, _ := client.Extension("AUTH"); ok {
+			if err := client.Auth(se.auth); err != nil {
+				return fmt.Errorf("could not authenticate: %w", err)
+			}
+		}
+	}
+	if err := client.Mail(se.config.FromAddress); err != nil {
+		return fmt.Errorf("could not set the sender: %w", err)
+	}
+	if err := client.Rcpt(to); err != nil {
+		return fmt.Errorf("could not set the recipient: %w", err)
+	}
+	w, err := client.Data()
+	if err != nil {
+		return fmt.Errorf("could not start the message data: %w", err)
+	}
+	if _, err := w.Write(msg); err != nil {
+		return fmt.Errorf("could not write the message: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("could not send the message: %w", err)
+	}
+	return client.Quit()
+}
+
+// encodeHeader makes a value safe for a single header line: CR and LF would end the header and
+// let the value inject more headers (e.g. a Bcc), and non-ASCII text must be MIME-encoded.
+func encodeHeader(value string) string {
+	value = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ").Replace(value)
+	return mime.QEncoding.Encode("utf-8", value)
 }
 
 // composeBody creates the email body with the notification data. It creates a
@@ -145,7 +204,7 @@ func (se *Email) composeBody(notification *notifications.Notification) ([]byte, 
 		}
 		fmt.Fprintf(&headers, "Cc: %s\r\n", cc.String())
 	}
-	fmt.Fprintf(&headers, "Subject: %s\r\n", notification.Subject)
+	fmt.Fprintf(&headers, "Subject: %s\r\n", encodeHeader(notification.Subject))
 	if !notification.EnableTracking {
 		fmt.Fprintf(&headers, "X-SMTPAPI: %s\r\n", disableTrackingFilter)
 	}
