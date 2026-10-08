@@ -115,7 +115,7 @@ func (ms *MongoStorage) deleteAllVerificationCodes(userID uint64) error {
 	defer ms.keysLock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	_, err := ms.verifications.DeleteMany(ctx, bson.M{"_id": userID})
+	_, err := ms.verifications.DeleteMany(ctx, bson.M{"userId": userID})
 	return err
 }
 

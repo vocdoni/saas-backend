@@ -37,12 +37,22 @@ type User struct {
 type CodeType string
 
 type UserVerification struct {
-	ID         uint64    `json:"id" bson:"_id"`
+	UserID     uint64    `json:"userId" bson:"userId"`
 	SealedCode []byte    `json:"sealedCode" bson:"sealedCode"`
 	Type       CodeType  `json:"type" bson:"type"`
 	CreatedAt  time.Time `json:"createdAt" bson:"createdAt"`
 	Expiration time.Time `json:"expiration" bson:"expiration"`
-	Attempts   int       `json:"attempts" bson:"attempts"`
+	// PendingEmail is the address an email-update code (CodeTypeUpdateEmail) was sent to; the
+	// user's email is switched to it only once the code is confirmed.
+	PendingEmail string `json:"pendingEmail,omitempty" bson:"pendingEmail,omitempty"`
+	// Attempts counts failed guesses of the code; it starts at zero and is bounded by
+	// VerificationCodeCheckAndAddAttempt.
+	Attempts int `json:"attempts" bson:"attempts"`
+	// Sends counts deliveries of the code (the initial email plus resends); it starts at one
+	// and is bounded by VerificationCodeTrySend, independently of the guess budget.
+	Sends int `json:"sends" bson:"sends"`
+	// LastSentAt is when the code was last delivered, used to enforce the send cooldown.
+	LastSentAt time.Time `json:"lastSentAt" bson:"lastSentAt"`
 }
 
 // TODO this is the default role function while it should be

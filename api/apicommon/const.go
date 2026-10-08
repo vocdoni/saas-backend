@@ -25,6 +25,11 @@ const DefaultLang = "en"
 // VerificationCodeMaxAttempts is the maximum number of attempts to verify a code
 const VerificationCodeMaxAttempts = 3
 
+// VerificationCodeMaxSends is the maximum number of times a single verification code is
+// delivered (the initial send plus resends). Deliveries are counted separately from
+// verification attempts, so resending a code never spends guess budget.
+const VerificationCodeMaxSends = 3
+
 const (
 	// VerificationCodeLength is the length of the verification code in bytes
 	VerificationCodeLength = 3

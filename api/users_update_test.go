@@ -83,8 +83,8 @@ func TestUpdateUserPassword(t *testing.T) {
 }
 
 // TestUserVerificationCodeInfo covers the userVerificationCodeInfoHandler
-// (GET /users/verify/code) for an unverified user, plus the missing-email and
-// unknown-user error cases.
+// (GET /users/verify/code) for an unverified user, the missing-email error case,
+// and the anti-enumeration behavior for unknown users.
 func TestUserVerificationCodeInfo(t *testing.T) {
 	c := qt.New(t)
 	defer func() {
@@ -109,8 +109,12 @@ func TestUserVerificationCodeInfo(t *testing.T) {
 	requestAndAssertError(errors.ErrInvalidUserData, t, http.MethodGet, "", nil,
 		"users", "verify", "code")
 
-	// An unknown user must yield 404.
+	// An unknown user yields the same 200 shape as a known one (just not valid), so the
+	// public endpoint cannot be used to enumerate registered accounts.
 	unknown := fmt.Sprintf("nobody-%d@nowhere.com", internal.RandomInt(100000000000))
-	requestAndAssertError(errors.ErrUserNotFound, t, http.MethodGet, "", nil,
+	uvUnknown := requestAndParse[apicommon.UserVerification](t, http.MethodGet, "", nil,
 		"users", "verify", "code?email="+unknown)
+	c.Assert(uvUnknown.Email, qt.Equals, unknown)
+	c.Assert(uvUnknown.Valid, qt.IsFalse)
+	c.Assert(uvUnknown.Expiration.IsZero(), qt.IsTrue)
 }

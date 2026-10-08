@@ -6854,18 +6854,6 @@ paths:
           description: Invalid input data
           schema:
             $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: User not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "409":
-          description: User already verified
-          schema:
-            $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
           schema:

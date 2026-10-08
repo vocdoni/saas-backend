@@ -61,7 +61,9 @@ func TestEraseUser(t *testing.T) {
 	}), qt.IsNil)
 
 	// a pending verification code for the target
-	c.Assert(testDB.SetVerificationCode(target, []byte("sealed"), CodeTypePasswordReset, time.Now().Add(time.Hour)), qt.IsNil)
+	c.Assert(testDB.SetVerificationCode(&UserVerification{
+		UserID: target.ID, SealedCode: []byte("sealed"), Type: CodeTypePasswordReset, Expiration: time.Now().Add(time.Hour),
+	}), qt.IsNil)
 
 	report, err := testDB.EraseUser(targetID)
 	c.Assert(err, qt.IsNil)

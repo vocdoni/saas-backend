@@ -148,7 +148,12 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 		}
 		exp := time.Now().Add(a.otpExpiry)
 		// store the verification code in the database
-		if err := a.db.SetVerificationCode(&db.User{ID: user.ID}, sealedCode, codeType, exp); err != nil {
+		if err := a.db.SetVerificationCode(&db.UserVerification{
+			UserID:     user.ID,
+			SealedCode: sealedCode,
+			Type:       codeType,
+			Expiration: exp,
+		}); err != nil {
 			return "", "", err
 		}
 		// set the web app URI and the link parameters
@@ -210,11 +215,14 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 }
 
 // generateVerificationLink method generates a verification link for the user
-// provided using the code provided and the API web app configuration.
-// It returns the generated verification link and an error if the link
-// could not be generated.
-func (a *API) generateVerificationLink(user *db.User, code string) (string, error) {
+// provided using the code provided, the code type and the API web app
+// configuration. It returns the generated verification link and an error if
+// the link could not be generated.
+func (a *API) generateVerificationLink(user *db.User, codeType db.CodeType, code string) (string, error) {
 	webAppURI := mailtemplates.VerifyAccountNotification.WebAppURI
+	if codeType == db.CodeTypePasswordReset {
+		webAppURI = mailtemplates.PasswordResetNotification.WebAppURI
+	}
 	linkParams := map[string]any{
 		"email": user.Email,
 		"code":  code,

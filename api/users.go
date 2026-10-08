@@ -221,9 +221,6 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 //	@Param			email	query		string	true	"User email"
 //	@Success		200		{object}	apicommon.UserVerification
 //	@Failure		400		{object}	errors.Error	"Invalid input data"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"User not found"
-//	@Failure		409		{object}	errors.Error	"User already verified"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/users/verify/code [get]
 func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Request) {
@@ -234,38 +231,32 @@ func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Req
 		errors.ErrInvalidUserData.With("no email provided").Write(w)
 		return
 	}
-	var err error
-	var user *db.User
-	// get the user information from the database by email
-	user, err = a.db.UserByEmail(userEmail)
-	if err != nil {
-		if err == db.ErrNotFound {
-			errors.ErrUserNotFound.Write(w)
-			return
-		}
+	// the endpoint is public and must not reveal whether an account exists or is verified:
+	// every outcome (unknown email, already verified, no pending code) gets the same 200
+	// response shape, with Valid=true and the expiry only when a verification challenge is
+	// actually pending — which the legitimate owner knows, having just requested it
+	response := apicommon.UserVerification{Email: userEmail, Valid: false}
+	user, err := a.db.UserByEmail(userEmail)
+	if err != nil && err != db.ErrNotFound {
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
-	// check if the user is already verified
-	if user.Verified {
-		errors.ErrUserAlreadyVerified.Write(w)
-		return
-	}
-	// get the userVerification from the database
-	userVerification, err := a.db.UserVerificationCode(user, db.CodeTypeVerifyAccount)
-	if err != nil {
-		if err != db.ErrNotFound {
+	if err == nil && !user.Verified {
+		userVerification, err := a.db.UserVerificationCode(user, db.CodeTypeVerifyAccount)
+		switch {
+		case err == nil:
+			response.Expiration = userVerification.Expiration
+			response.Valid = userVerification.Expiration.After(time.Now())
+		case err != db.ErrNotFound:
 			log.Warnw("could not get verification code", "error", err)
+			errors.ErrGenericInternalServerError.Write(w)
+			return
+		default:
+			// no pending challenge: keep the neutral response
 		}
-		errors.ErrUnauthorized.Write(w)
-		return
 	}
 	// return the verification code information
-	apicommon.HTTPWriteJSON(w, apicommon.UserVerification{
-		Email:      user.Email,
-		Expiration: userVerification.Expiration,
-		Valid:      userVerification.Expiration.After(time.Now()),
-	})
+	apicommon.HTTPWriteJSON(w, response)
 }
 
 // resendUserVerificationCodeHandler godoc
@@ -316,10 +307,20 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
-	// if the verification code is not expired
+	// if the verification code is not expired, resend the same code instead of replacing it
 	if userVerification.Expiration.After(time.Now()) {
-		// check if the maximum number of attempts has been reached for resending
-		if userVerification.Attempts >= apicommon.VerificationCodeMaxAttempts {
+		// spend one delivery from the send budget, which is separate from the guess-attempt
+		// counter so resending the code never eats into the brute-force budget. The update is
+		// a single conditional write, so concurrent resends cannot exceed the cap.
+		sent, err := a.db.VerificationCodeTrySend(user, db.CodeTypeVerifyAccount, 0, apicommon.VerificationCodeMaxSends)
+		if err != nil {
+			if err != db.ErrNotFound {
+				log.Warnw("could not record verification code send", "error", err)
+			}
+			errors.ErrUnauthorized.Write(w)
+			return
+		}
+		if !sent {
 			errors.ErrVerificationMaxAttempts.WithData(apicommon.UserVerification{
 				Expiration: userVerification.Expiration,
 			}).Write(w)
@@ -330,7 +331,7 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 			errors.ErrGenericInternalServerError.Write(w)
 			return
 		}
-		link, err := a.generateVerificationLink(user, code)
+		link, err := a.generateVerificationLink(user, db.CodeTypeVerifyAccount, code)
 		if err != nil {
 			log.Warnw("could not generate verification link", "error", err)
 			errors.ErrGenericInternalServerError.Write(w)
@@ -345,11 +346,6 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 			userVerification.Expiration,
 		); err != nil {
 			log.Warnw("could not resend verification code", "error", err)
-			errors.ErrGenericInternalServerError.Write(w)
-			return
-		}
-		if err = a.db.VerificationCodeIncrementAttempts(userVerification.SealedCode, db.CodeTypeVerifyAccount); err != nil {
-			log.Warnw("could not increment verification code attempts", "error", err)
 			errors.ErrGenericInternalServerError.Write(w)
 			return
 		}
@@ -625,62 +621,67 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
+	// pick the challenge the account actually needs: an unverified account gets the account
+	// verification code instead, so it can complete registration and then log in
+	codeType := db.CodeTypePasswordReset
+	template := mailtemplates.PasswordResetNotification
 	if !user.Verified {
-		// user exists but hasn't verified their email yet; send the account
-		// verification email so they can complete registration and then log in
-		code, link, err := a.generateVerificationCodeAndLink(user, db.CodeTypeVerifyAccount)
-		if err != nil {
+		codeType = db.CodeTypeVerifyAccount
+		template = mailtemplates.VerifyAccountNotification
+	}
+	// a single cooldown guards both branches: a code delivered too recently means we silently
+	// skip sending another, preventing email flooding without leaking whether the account exists
+	var code, link string
+	expiration := time.Now().Add(a.otpExpiry)
+	existing, err := a.db.UserVerificationCode(user, codeType)
+	switch {
+	case err == nil && time.Since(existing.LastSentAt) < a.otpCooldown:
+		apicommon.HTTPWriteOK(w)
+		return
+	case err == nil && existing.Expiration.After(time.Now()):
+		// a still-valid code exists: resend it rather than replace it, so repeated recovery
+		// requests cannot invalidate the code the user is about to type. The delivery is spent
+		// atomically against the send budget; when exhausted (or raced), silently skip.
+		sent, err := a.db.VerificationCodeTrySend(user, codeType, a.otpCooldown, apicommon.VerificationCodeMaxSends)
+		if err != nil || !sent {
+			if err != nil && !errors.Is(err, db.ErrNotFound) {
+				log.Warnw("could not record recovery code resend", "error", err)
+			}
+			apicommon.HTTPWriteOK(w)
+			return
+		}
+		if code, err = internal.OpenToken(existing.SealedCode, user.Email, a.secret); err != nil {
+			errors.ErrGenericInternalServerError.Write(w)
+			return
+		}
+		if link, err = a.generateVerificationLink(user, codeType, code); err != nil {
+			errors.ErrGenericInternalServerError.Write(w)
+			return
+		}
+		expiration = existing.Expiration
+	case err == nil || errors.Is(err, db.ErrNotFound):
+		// no pending code, or only an expired one: generate and store a fresh code
+		if code, link, err = a.generateVerificationCodeAndLink(user, codeType); err != nil {
 			log.Warnw("could not generate verification code", "error", err)
 			errors.ErrGenericInternalServerError.Write(w)
 			return
 		}
-		if err := a.sendMail(r.Context(), nil, user.Email, mailtemplates.VerifyAccountNotification,
-			struct {
-				Code string
-				Link string
-			}{code, link},
-			time.Now().Add(a.otpExpiry),
-		); err != nil {
-			log.Warnw("could not send verification code", "error", err)
-			errors.ErrGenericInternalServerError.Write(w)
-			return
-		}
-		apicommon.HTTPWriteOK(w)
-		return
-	}
-
-	// enforce cooldown: if a code was already issued recently, silently skip
-	// sending a new one to prevent email flooding without leaking timing info.
-	if existing, err := a.db.UserVerificationCode(user, db.CodeTypePasswordReset); err == nil {
-		if !existing.CreatedAt.IsZero() && time.Since(existing.CreatedAt) < a.otpCooldown {
-			apicommon.HTTPWriteOK(w)
-			return
-		}
-	} else if !errors.Is(err, db.ErrNotFound) {
-		// Unexpected DB error: treat conservatively as cooldown-active so a
-		// transient storage failure cannot be exploited to bypass rate limiting.
+	default:
+		// unexpected DB error: treat conservatively as cooldown-active so a transient storage
+		// failure cannot be exploited to bypass rate limiting
 		log.Warnw("could not check password recovery cooldown", "error", err)
 		apicommon.HTTPWriteOK(w)
 		return
 	}
-
-	// generate a new verification code
-	code, link, err := a.generateVerificationCodeAndLink(user, db.CodeTypePasswordReset)
-	if err != nil {
-		log.Warnw("could not generate verification code", "error", err)
-		errors.ErrGenericInternalServerError.Write(w)
-		return
-	}
-	// send the password reset mail to the user email with the verification
-	// code and the verification link
-	if err := a.sendMail(r.Context(), nil, user.Email, mailtemplates.PasswordResetNotification,
+	// send the code and the verification link to the user email
+	if err := a.sendMail(r.Context(), nil, user.Email, template,
 		struct {
 			Code string
 			Link string
 		}{code, link},
-		time.Now().Add(a.otpExpiry),
+		expiration,
 	); err != nil {
-		log.Warnw("could not send reset password code", "error", err)
+		log.Warnw("could not send recovery code", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
@@ -774,11 +775,16 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// invalidate the reset code before updating the password so it cannot be
-	// reused. fail closed: if the code cannot be deleted we must not report
-	// success, otherwise the still-valid code could be replayed.
-	if err := a.db.DeleteUserVerificationCode(user, db.CodeTypePasswordReset); err != nil {
-		log.Warnw("could not delete password reset code", "error", err)
+	// consume the exact reset code before updating the password so it is atomically single-use:
+	// of two concurrent requests holding a valid code, exactly one deletion succeeds and only
+	// that request resets the password. fail closed on any other error — reporting success with
+	// the code still stored would leave it replayable.
+	if err := a.db.ConsumeVerificationCode(user, db.CodeTypePasswordReset, userVerification.SealedCode); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			errors.ErrUnauthorized.Write(w)
+			return
+		}
+		log.Warnw("could not consume password reset code", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
