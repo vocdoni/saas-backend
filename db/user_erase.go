@@ -79,11 +79,14 @@ func (ms *MongoStorage) EraseUser(userID uint64) (*UserErasureReport, error) {
 			report.DeletedOrgs = append(report.DeletedOrgs, userOrg.Address)
 			continue
 		}
-		if err := ms.RemoveOrganizationUser(userOrg.Address, user.ID); err != nil {
+		removed, err := ms.RemoveOrganizationUser(userOrg.Address, user.ID)
+		if err != nil {
 			errs = append(errs, fmt.Errorf("removing membership in org %s: %w", userOrg.Address, err))
 		}
-		if err := ms.DecrementOrganizationUsersCounter(userOrg.Address); err != nil {
-			errs = append(errs, fmt.Errorf("decrementing users counter of org %s: %w", userOrg.Address, err))
+		if removed {
+			if err := ms.DecrementOrganizationUsersCounter(userOrg.Address); err != nil {
+				errs = append(errs, fmt.Errorf("decrementing users counter of org %s: %w", userOrg.Address, err))
+			}
 		}
 		report.KeptOrgs = append(report.KeptOrgs, userOrg.Address)
 		if org, err := ms.Organization(userOrg.Address); err == nil && org.Creator == user.Email {

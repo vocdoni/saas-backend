@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -173,7 +174,8 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 	}
 	// send the invitation mail to invited user email with the invite code and
 	// the invite link
-	if err := a.sendMail(r.Context(), org, invite.Email, mailtemplates.InviteNotification,
+	if err := a.sendMail(
+		r.Context(), org, invite.Email, mailtemplates.InviteNotification,
 		struct {
 			Organization string
 			Code         string
@@ -220,6 +222,13 @@ func (a *API) acceptOrganizationUserInvitationHandler(w http.ResponseWriter, r *
 	invitationReq := &apicommon.AcceptOrganizationInvitation{}
 	if err := json.NewDecoder(r.Body).Decode(invitationReq); err != nil {
 		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	// validate the invitation code format: must be exactly 2*InvitationCodeLength hex chars.
+	// This rejects empty codes (which can match stored "" codes when no mail service is
+	// configured) and short codes left over from older deployments.
+	if decoded, err := hex.DecodeString(invitationReq.Code); err != nil || len(decoded) != apicommon.InvitationCodeLength {
+		errors.ErrMalformedBody.With("invalid invitation code").Write(w)
 		return
 	}
 	// get the invitation from the database
@@ -387,7 +396,8 @@ func (a *API) updatePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 
 	// send the invitation mail to invited user email with the invite code and
 	// the invite link
-	if err := a.sendMail(r.Context(), org, orgInvite.NewUserEmail, mailtemplates.InviteNotification,
+	if err := a.sendMail(
+		r.Context(), org, orgInvite.NewUserEmail, mailtemplates.InviteNotification,
 		struct {
 			Organization string
 			Code         string
@@ -686,8 +696,15 @@ func (a *API) removeOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		errors.ErrInvalidUserData.With("user cannot remove itself from the organization").Write(w)
 		return
 	}
-	if err := a.db.RemoveOrganizationUser(org.Address, uint64(userIDInt)); err != nil {
+	removed, err := a.db.RemoveOrganizationUser(org.Address, uint64(userIDInt))
+	if err != nil {
 		errors.ErrInvalidUserData.Withf("user not found: %v", err).Write(w)
+		return
+	}
+	// removing a user who is not a member must not decrement the users counter, or repeating the
+	// request would push it below the real number of users and lift the plan's user limit
+	if !removed {
+		errors.ErrInvalidUserData.With("user is not a member of the organization").Write(w)
 		return
 	}
 
