@@ -63,25 +63,16 @@ func setupParentProcess(t *testing.T) *parentProcessFixture {
 	}
 }
 
-// questionElectionsOf returns the meta.questionElections a parent document must carry for the
-// given question elections, in the shape decoding the document into any yields.
-func questionElectionsOf(elections []internal.HexBytes) []any {
-	ids := make([]any, 0, len(elections))
-	for _, id := range elections {
-		ids = append(ids, id.String())
-	}
-	return ids
-}
-
 // assertParentElection checks the parent election of a published process: its document carries
-// the process text and media with no questions and lists the question elections in order, its
-// hash is the SHA-256 of the served bytes, and the chain commits both with a census of one.
+// the process text and media with no questions, its hash is the SHA-256 of the served bytes, the
+// chain commits both with a census of one, and every question election is linked to it.
 func assertParentElection(t *testing.T, f *parentProcessFixture, got *apicommon.VotingProcessResponse) {
 	t.Helper()
 	c := qt.New(t)
 	c.Assert(got.UpstreamID, qt.Not(qt.HasLen), 0)
 	for i, q := range got.Questions {
 		c.Assert(q.UpstreamID, qt.Not(qt.DeepEquals), got.UpstreamID, qt.Commentf("question %d", i))
+		c.Assert(q.ParentUpstreamID, qt.DeepEquals, got.UpstreamID, qt.Commentf("question %d", i))
 	}
 	c.Assert(got.MetadataURL, qt.Not(qt.Equals), "")
 	served, code := testRequest(t, http.MethodGet, "", nil, "storage", path.Base(got.MetadataURL))
@@ -97,13 +88,15 @@ func assertParentElection(t *testing.T, f *parentProcessFixture, got *apicommon.
 	c.Assert(doc.Title, qt.DeepEquals, dvoteapi.LanguageString(f.req.Title))
 	c.Assert(doc.Description, qt.DeepEquals, dvoteapi.LanguageString(f.req.Description))
 	c.Assert(doc.Media, qt.Equals, dvoteapi.ProcessMedia{StreamURI: f.req.StreamURI})
-	c.Assert(doc.Meta, qt.DeepEquals, map[string]any{"questionElections": questionElectionsOf(f.elections)})
+	c.Assert(doc.Meta, qt.IsNil)
 
 	election, err := testNewVocdoniClient(t).Election(got.UpstreamID.Bytes())
 	c.Assert(err, qt.IsNil)
 	c.Assert(election.MetadataURL, qt.Equals, got.MetadataURL)
 	c.Assert([]byte(election.MetadataHash), qt.DeepEquals, sum[:])
 	c.Assert([]byte(election.OrganizationID), qt.DeepEquals, f.orgAddress.Bytes())
+	// TODO(parent-process): once the parent is metadata-only it has no census, and the chain
+	// reports each question election's parentProcessId.
 	c.Assert(election.Census, qt.Not(qt.IsNil))
 	c.Assert(election.Census.MaxCensusSize, qt.Equals, uint64(parentElectionMaxCensusSize))
 }
@@ -167,22 +160,25 @@ func TestProcessParentElection(t *testing.T) {
 	})
 }
 
-// TestProcessPublishRetriesParentOnly puts a process in the state a publish leaves when every
-// question election was mined but the parent step failed: the process is not published, so it is
-// hidden from the public and the CSP refuses to authenticate voters against it. Publishing again
-// mints only the parent, over the same question elections, and only then marks it published.
-func TestProcessPublishRetriesParentOnly(t *testing.T) {
+// TestProcessPublishResumesAfterParent puts a process in the state a publish leaves when the parent
+// election was mined but the question step failed: the process is not published, so it is hidden
+// from the public and the CSP refuses to authenticate voters against it. Publishing again keeps the
+// parent, mints only the question elections, linked to it, and only then marks it published.
+func TestProcessPublishResumesAfterParent(t *testing.T) {
 	c := qt.New(t)
 	f := setupParentProcess(t)
 	first := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, f.token, nil, "processes", f.pid)
 
 	oid, err := bson.ObjectIDFromHex(f.pid)
 	c.Assert(err, qt.IsNil)
-	_, err = testDB.DBClient.Database(testDBName).Collection("votingProcesses").UpdateOne(context.Background(),
-		bson.M{"_id": oid}, bson.M{
-			"$set":   bson.M{"published": false},
-			"$unset": bson.M{"upstreamId": "", "metadataURL": "", "metadataHash": "", "upstreamStatus": ""},
-		})
+	database := testDB.DBClient.Database(testDBName)
+	_, err = database.Collection("votingProcesses").UpdateOne(context.Background(),
+		bson.M{"_id": oid}, bson.M{"$set": bson.M{"published": false}})
+	c.Assert(err, qt.IsNil)
+	_, err = database.Collection("processesQuestions").UpdateMany(context.Background(),
+		bson.M{"processId": oid}, bson.M{"$unset": bson.M{
+			"upstreamId": "", "parentUpstreamId": "", "metadataURL": "", "metadataHash": "", "status": "",
+		}})
 	c.Assert(err, qt.IsNil)
 
 	requestAndAssertCode(http.StatusNotFound, t, http.MethodGet, "", nil, "processes", f.pid)
@@ -194,10 +190,12 @@ func TestProcessPublishRetriesParentOnly(t *testing.T) {
 
 	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, "", nil, "processes", f.pid)
 	c.Assert(got.Published, qt.IsTrue)
+	c.Assert(got.UpstreamID, qt.DeepEquals, first.UpstreamID)
+	c.Assert(got.MetadataHash, qt.DeepEquals, first.MetadataHash)
 	c.Assert(got.Questions, qt.HasLen, len(f.elections))
 	for i, q := range got.Questions {
-		c.Assert(q.UpstreamID, qt.DeepEquals, f.elections[i], qt.Commentf("question %d", i))
+		c.Assert(q.UpstreamID, qt.Not(qt.HasLen), 0, qt.Commentf("question %d", i))
+		c.Assert(q.UpstreamID, qt.Not(qt.DeepEquals), f.elections[i], qt.Commentf("question %d", i))
 	}
-	c.Assert(got.UpstreamID, qt.Not(qt.DeepEquals), first.UpstreamID)
 	assertParentElection(t, f, &got)
 }

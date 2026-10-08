@@ -64,23 +64,25 @@ func electionParamsForQuestion(
 // with: the smallest the chain accepts, which keeps its price at the minimum. Nobody votes on it.
 const parentElectionMaxCensusSize = 1
 
-// electionParamsForParent builds the params of a process's parent election: an election that
-// carries the process-level metadata (title, description, media) and lists its question elections
-// in order, so the whole process is described by one on-chain document and hash. It runs over the
+// electionParamsForParent builds the params of a process's parent election: a metadata-only
+// election carrying the process-level metadata (title, description, media), so the process is
+// described by one on-chain document and hash. Each question election is linked to it on chain
+// (NewProcessParams.ParentProcessID) and every vote attests its metadata hash. It runs over the
 // process's dates and is never voted on: its document has no questions, its census is the
 // smallest possible, and the CSP signs only for question elections.
-func electionParamsForParent(vp *db.VotingProcess, questionElections []internal.HexBytes) *db.ElectionParams {
+func electionParamsForParent(vp *db.VotingProcess) *db.ElectionParams {
 	return &db.ElectionParams{
-		Title:             vp.Title,
-		Description:       vp.Description,
-		Header:            vp.Header,
-		StreamURI:         vp.StreamURI,
-		StartDate:         vp.StartDate,
-		EndDate:           vp.EndDate,
-		VoteType:          db.VoteType{MaxCount: 1, MaxValue: 1},
-		ElectionType:      db.ElectionType{Autostart: true, Interruptible: true},
-		MaxCensusSize:     parentElectionMaxCensusSize,
-		QuestionElections: questionElections,
+		Title:       vp.Title,
+		Description: vp.Description,
+		Header:      vp.Header,
+		StreamURI:   vp.StreamURI,
+		StartDate:   vp.StartDate,
+		EndDate:     vp.EndDate,
+		// TODO(parent-process): no vote options, envelope or census once the parent is built
+		// metadata-only (see account.NewProcessParams.MetadataOnly).
+		VoteType:      db.VoteType{MaxCount: 1, MaxValue: 1},
+		ElectionType:  db.ElectionType{Autostart: true, Interruptible: true},
+		MaxCensusSize: parentElectionMaxCensusSize,
 	}
 }
 
@@ -215,12 +217,13 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 // publishVotingProcessHandler godoc
 //
 //	@Summary		Publish a voting process
-//	@Description	Publish a voting process: one on-chain election per question, submitted as a batch,
-//	@Description	then the process's parent election. The parent carries the process title,
-//	@Description	description and media, lists the question elections in order
-//	@Description	(meta.questionElections) and commits the hash of that document; it is never voted
-//	@Description	on and is exposed as the process's upstreamId, metadataURL and metadataHash. A
-//	@Description	publish that failed after the questions were mined publishes only the parent when
+//	@Description	Publish a voting process: first the process's parent election, then one on-chain
+//	@Description	election per question, submitted as a batch and each linked to the parent. The
+//	@Description	parent is metadata-only: it carries the process title, description and media and
+//	@Description	commits the hash of that document, is never voted on, and is exposed as the
+//	@Description	process's upstreamId, metadataURL and metadataHash (each question's
+//	@Description	parentUpstreamId names it). The process is published only once every election is
+//	@Description	confirmed; a publish that failed part way resumes with the missing elections when
 //	@Description	retried. Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
 //	@Description	GET /jobs/{jobId}. Idempotent once published.
 //	@Description	409 (40172) means the stored questions do not match the process and the draft has to be
@@ -381,7 +384,7 @@ func (a *API) startProcessPublish(t publishTarget) (string, error) {
 	nonTestSized := uint64(census.Size) > uint64(db.TestMaxCensusSize)
 	var integratorAddr common.Address
 	var managedReserved bool
-	if !anyMined(questions) {
+	if !anyMined(vp, questions) {
 		integratorAddr, managedReserved, err = a.reserveManagedProcessSlot(org, uint64(census.Size))
 		if err != nil {
 			return "", err
@@ -492,11 +495,11 @@ type publishWorker struct {
 	questionMediaHashes map[bson.ObjectID]map[string]string
 }
 
-// run builds and submits one election per question in a single batch, confirms them on
-// chain, and retries the not-yet-confirmed ones with fresh nonces up to maxPublishRounds;
-// then it publishes the process's parent election. On success it marks the process published
-// (one process counter unit); on failure it abandons the attempt (unmined questions reset so a
-// later publish regenerates them, mined ones kept so it resumes).
+// run publishes the process's parent election, then builds and submits one election per question,
+// linked to it, in a single batch, confirms them on chain, and retries the not-yet-confirmed ones
+// with fresh nonces up to maxPublishRounds. Only once every election is confirmed does it mark the
+// process published (one process counter unit); on failure it abandons the attempt (unmined
+// questions reset so a later publish regenerates them, mined elections kept so it resumes).
 func (pw *publishWorker) run() (result *db.JobResult, err error) {
 	a := pw.a
 	// a panic mid-publish must not strand the publishing marker (or crash the process): recover,
@@ -507,6 +510,12 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 			result, err = nil, fmt.Errorf("publish worker panicked: %v", r)
 		}
 	}()
+	// the parent goes first: every question election is created linked to it. A failure further on
+	// keeps it, so the next publish resumes with the questions.
+	if err := pw.publishParent(); err != nil {
+		pw.abandon()
+		return nil, err
+	}
 	confirmed := false
 	for round := 0; round < maxPublishRounds && !confirmed; round++ {
 		pending := make([]*db.VotingProcessQuestion, 0, len(pw.questions))
@@ -542,13 +551,6 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 	if !confirmed {
 		pw.abandon()
 		return nil, fmt.Errorf("publish did not confirm all questions after %d rounds", maxPublishRounds)
-	}
-	// the parent goes last: its document lists the question elections, whose ids are only known
-	// once they are mined. A failure here keeps the mined questions, so the next publish only
-	// publishes the parent.
-	if err := pw.publishParent(); err != nil {
-		pw.abandon()
-		return nil, err
 	}
 	if e := a.db.SetVotingProcessPublished(pw.vp.ID, pw.resolveStartDate()); e != nil {
 		// every election is already on-chain and its question persisted; clear the marker so a
@@ -602,16 +604,20 @@ func (pw *publishWorker) abandon() {
 	if e := a.db.ClearVotingProcessPublishing(pw.vp.ID); e != nil {
 		log.Warnw("could not clear publishing state after failed publish", "error", e)
 	}
-	if pw.reserved && !anyMined(pw.questions) {
+	if pw.reserved && !anyMined(pw.vp, pw.questions) {
 		if e := a.db.AddOrganizationManagedProcesses(pw.integratorAddr, -1); e != nil {
 			log.Warnw("could not roll back managed processes counter", "error", e)
 		}
 	}
 }
 
-// anyMined reports whether any question already has an on-chain election (upstreamId) — i.e. a
-// prior publish attempt mined at least one, so this publish is a resume.
-func anyMined(questions []db.VotingProcessQuestion) bool {
+// anyMined reports whether the process's parent election or any question already has an on-chain
+// election (upstreamId) — i.e. a prior publish attempt mined at least one, so this publish is a
+// resume.
+func anyMined(vp *db.VotingProcess, questions []db.VotingProcessQuestion) bool {
+	if len(vp.UpstreamID) > 0 {
+		return true
+	}
 	for i := range questions {
 		if len(questions[i].UpstreamID) > 0 {
 			return true
@@ -652,15 +658,16 @@ func (pw *publishWorker) buildBatch(
 		q.MetadataHash = metaHash[:]
 		nonce := startNonce + uint32(i)
 		tx, err := a.account.BuildNewProcessTx(&account.NewProcessParams{
-			OrgAddress:    pw.vp.OrgAddress,
-			Params:        ep,
-			CensusRoot:    pw.cspPubKey,
-			CensusURI:     a.serverURL,
-			Anonymous:     pw.census.Anonymous,
-			MetadataURL:   q.MetadataURL,
-			MetadataHash:  q.MetadataHash,
-			Nonce:         &nonce,
-			InitialStatus: initialStatus,
+			OrgAddress:      pw.vp.OrgAddress,
+			Params:          ep,
+			CensusRoot:      pw.cspPubKey,
+			CensusURI:       a.serverURL,
+			Anonymous:       pw.census.Anonymous,
+			MetadataURL:     q.MetadataURL,
+			MetadataHash:    q.MetadataHash,
+			Nonce:           &nonce,
+			InitialStatus:   initialStatus,
+			ParentProcessID: pw.vp.UpstreamID,
 		})
 		if err != nil {
 			return nil, false, err
@@ -718,11 +725,12 @@ func (pw *publishWorker) confirmBatch(pending []*db.VotingProcessQuestion, resul
 			initialStatus = db.QuestionStatusPaused
 		}
 		if err := a.db.SetQuestionPublished(&db.QuestionPublication{
-			ID:           pending[i].ID,
-			UpstreamID:   res.UpstreamID,
-			MetadataURL:  pending[i].MetadataURL,
-			MetadataHash: pending[i].MetadataHash,
-			Status:       initialStatus,
+			ID:               pending[i].ID,
+			UpstreamID:       res.UpstreamID,
+			MetadataURL:      pending[i].MetadataURL,
+			MetadataHash:     pending[i].MetadataHash,
+			Status:           initialStatus,
+			ParentUpstreamID: pw.vp.UpstreamID,
 		}); err != nil {
 			// leave UpstreamID unset so the question stays pending and is retried, rather
 			// than letting the process be marked published with an unpersisted row.
@@ -735,7 +743,7 @@ func (pw *publishWorker) confirmBatch(pending []*db.VotingProcessQuestion, resul
 	return allConfirmed
 }
 
-// publishParent publishes the process's parent election once every question election is mined,
+// publishParent publishes the process's parent election before any of its question elections,
 // retrying with a fresh nonce up to maxPublishRounds. A parent already on chain (a resumed
 // publish) is left as is. It is not plan-checked or billed: the questions are the billed unit, and
 // the parent's census of one makes it the cheapest election the chain accepts.
@@ -744,14 +752,7 @@ func (pw *publishWorker) publishParent() error {
 	if len(pw.vp.UpstreamID) > 0 {
 		return nil
 	}
-	questionElections := make([]internal.HexBytes, 0, len(pw.questions))
-	for i := range pw.questions {
-		if len(pw.questions[i].UpstreamID) == 0 {
-			return fmt.Errorf("question %s has no election to list in the parent", pw.questions[i].ID.Hex())
-		}
-		questionElections = append(questionElections, pw.questions[i].UpstreamID)
-	}
-	ep := electionParamsForParent(pw.vp, questionElections)
+	ep := electionParamsForParent(pw.vp)
 	ep.MediaHashes = pw.mediaHashes
 	metaBytes, err := account.BuildElectionMetadata(ep)
 	if err != nil {
@@ -784,6 +785,7 @@ func (pw *publishWorker) publishParent() error {
 			MetadataHash:  metaHash[:],
 			Nonce:         &nonce,
 			InitialStatus: initialStatus,
+			MetadataOnly:  true,
 		})
 		if err != nil {
 			return err

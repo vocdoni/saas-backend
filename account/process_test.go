@@ -7,7 +7,6 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/db"
-	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/proto/build/go/models"
@@ -192,27 +191,17 @@ func TestNormalizeInitialStatus(t *testing.T) {
 	c.Assert(err, qt.ErrorMatches, `initialStatus must be READY or PAUSED, got .*`)
 }
 
-// TestBuildElectionMetadataQuestionElections checks that a parent election's document lists its
-// question elections as meta.questionElections, in order and lowercase hex, writes "questions": []
-// rather than dropping the key, and that no meta block is written without them.
-func TestBuildElectionMetadataQuestionElections(t *testing.T) {
+// TestBuildElectionMetadataNoQuestions checks that a document without questions (a process's
+// parent election) writes "questions": [] rather than dropping the key, and no meta block.
+func TestBuildElectionMetadataNoQuestions(t *testing.T) {
 	c := qt.New(t)
-	params := &db.ElectionParams{Title: db.MultiLangString{"default": "Assembly"}}
-
-	data, err := BuildElectionMetadata(params)
+	data, err := BuildElectionMetadata(&db.ElectionParams{Title: db.MultiLangString{"default": "Assembly"}})
 	c.Assert(err, qt.IsNil)
 	var raw map[string]any
 	c.Assert(json.Unmarshal(data, &raw), qt.IsNil)
 	c.Assert(raw["questions"], qt.DeepEquals, []any{})
 	_, hasMeta := raw["meta"]
 	c.Assert(hasMeta, qt.IsFalse)
-
-	params.QuestionElections = []internal.HexBytes{{0xAB, 0x01}, {0x02, 0xCD}}
-	data, err = BuildElectionMetadata(params)
-	c.Assert(err, qt.IsNil)
-	got := &api.ElectionMetadata{}
-	c.Assert(json.Unmarshal(data, got), qt.IsNil)
-	c.Assert(got.Meta, qt.DeepEquals, map[string]any{"questionElections": []any{"ab01", "02cd"}})
 }
 
 // TestBuildElectionMetadataMediaHashes checks that MediaHashes lands in the document as

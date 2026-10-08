@@ -89,27 +89,15 @@ func BuildElectionMetadata(params *db.ElectionParams) ([]byte, error) {
 }
 
 // electionMeta builds the free-form meta block of the document, or nil when there is nothing to
-// put in it (so no meta key is written). meta.questionElections lists, in question order, the
-// lowercase hex ids of the question elections a process's parent election heads, and
-// meta.mediaHashes the SHA-256 of its images (see ElectionParams.MediaHashes): being part of the
-// document, both are covered by the metadata hash committed on chain. Maps marshal with sorted
-// keys, so the same params always produce the same bytes and hash.
+// put in it (so no meta key is written). meta.mediaHashes holds the SHA-256 of the document's
+// images (see ElectionParams.MediaHashes): being part of the document, it is covered by the
+// metadata hash committed on chain. Maps marshal with sorted keys, so the same params always
+// produce the same bytes and hash.
 func electionMeta(params *db.ElectionParams) map[string]any {
-	meta := map[string]any{}
-	if len(params.QuestionElections) > 0 {
-		ids := make([]string, 0, len(params.QuestionElections))
-		for _, id := range params.QuestionElections {
-			ids = append(ids, id.String())
-		}
-		meta["questionElections"] = ids
-	}
-	if len(params.MediaHashes) > 0 {
-		meta["mediaHashes"] = params.MediaHashes
-	}
-	if len(meta) == 0 {
+	if len(params.MediaHashes) == 0 {
 		return nil
 	}
-	return meta
+	return map[string]any{"mediaHashes": params.MediaHashes}
 }
 
 // NewProcessParams bundles the inputs required to build a NewProcess transaction.
@@ -136,6 +124,20 @@ type NewProcessParams struct {
 	// whitelist for NewProcess. PAUSED→READY has no interruptible requirement on the
 	// vochain, so a paused election can always be resumed regardless of Mode.Interruptible.
 	InitialStatus models.ProcessStatus
+	// ParentProcessID is the on-chain id of the metadata-only parent election a question election
+	// belongs to, which the chain links it to (Process.parentProcessId) so every vote on it must also
+	// attest the parent's current metadata hash.
+	//
+	// TODO(parent-process): set models.Process.ParentProcessId from it once dvote-protobuf and
+	// vocdoni-node ship the parent-process soft fork; until then the link is only stored here.
+	ParentProcessID []byte
+	// MetadataOnly marks a process's parent election: it carries metadata, dates and status, and
+	// cannot be voted on.
+	//
+	// TODO(parent-process): once the soft fork ships, build it with VoteOptions, EnvelopeType and
+	// the census left nil (a metadata-only process). Until then it is built as a regular election
+	// with a census of one that the CSP never signs for.
+	MetadataOnly bool
 }
 
 // ParseInitialStatus turns a wire-level initialStatus string (as carried by the HTTP API and
@@ -234,6 +236,10 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 	ep := p.Params
 	if ep.MaxCensusSize == 0 {
 		return nil, fmt.Errorf("maxCensusSize must be greater than zero")
+	}
+	// the chain allows a single level: a parent is metadata-only and has no parent itself
+	if p.MetadataOnly && len(p.ParentProcessID) > 0 {
+		return nil, fmt.Errorf("a metadata-only process cannot have a parent")
 	}
 	initialStatus, err := resolveInitialStatus(p.InitialStatus)
 	if err != nil {

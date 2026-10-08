@@ -121,28 +121,21 @@ func isLocalURL(u string) bool {
 }
 
 // assertParentMediaHashes publishes req and checks that the parent election's document commits
-// exactly the given meta.mediaHashes (the stream never among them) next to its question
-// elections, and that the on-chain metadata hash covers the whole document.
+// exactly the given meta.mediaHashes (the stream never among them), and that the on-chain
+// metadata hash covers the whole document.
 func assertParentMediaHashes(t *testing.T, token, pid string, want map[string]any) {
 	t.Helper()
 	c := qt.New(t)
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
 	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
-	elections := make([]internal.HexBytes, 0, len(got.Questions))
-	for _, q := range got.Questions {
-		elections = append(elections, q.UpstreamID)
-	}
 	doc := storedObject(t, got.MetadataURL)
 
 	var metadata dvoteapi.ElectionMetadata
 	c.Assert(json.Unmarshal(doc, &metadata), qt.IsNil)
 	c.Assert(metadata.Media.Header, qt.Equals, got.Header)
 	c.Assert(metadata.Media.StreamURI, qt.Equals, got.StreamURI)
-	c.Assert(metadata.Meta, qt.DeepEquals, map[string]any{
-		"mediaHashes":       want,
-		"questionElections": questionElectionsOf(elections),
-	})
+	c.Assert(metadata.Meta, qt.DeepEquals, map[string]any{"mediaHashes": want})
 
 	docSum := sha256.Sum256(doc)
 	c.Assert([]byte(got.MetadataHash), qt.DeepEquals, docSum[:])
@@ -226,10 +219,8 @@ func TestProcessMetadataMediaHashes(t *testing.T) {
 
 		var parentDoc dvoteapi.ElectionMetadata
 		c.Assert(json.Unmarshal(storedObject(t, got.MetadataURL), &parentDoc), qt.IsNil)
-		parentMeta, ok := parentDoc.Meta.(map[string]any)
-		c.Assert(ok, qt.IsTrue)
-		_, hasHashes := parentMeta["mediaHashes"]
-		c.Assert(hasHashes, qt.IsFalse) // no header; choice images belong to the question document
+		// no header, so no hashes: choice images belong to the question document
+		c.Assert(parentDoc.Meta, qt.IsNil)
 
 		doc := storedObject(t, got.Questions[0].MetadataURL)
 		var metadata dvoteapi.ElectionMetadata
