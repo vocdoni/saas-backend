@@ -466,3 +466,37 @@ func TestProcessMetadataHash(t *testing.T) {
 		c.Assert(count, qt.Equals, uint32(0), qt.Commentf("process %d", i))
 	}
 }
+
+// TestRelayVoteMetadataHashChainArbitrates checks that the relay pre-check defers to the chain when
+// the stored metadata hash lags it: with the stored hash forced stale, a vote attesting the hash
+// the election commits to on chain is relayed and counted, while one attesting neither is rejected.
+func TestRelayVoteMetadataHashChainArbitrates(t *testing.T) {
+	c := qt.New(t)
+	f := setupRelayVoting(t, 1)
+	processID := f.processIDs[0]
+
+	question, err := testDB.QuestionByUpstreamID(processID)
+	c.Assert(err, qt.IsNil)
+	chainHash := testElectionMetadataHash(t, f.client, processID)
+	c.Assert([]byte(question.MetadataHash), qt.DeepEquals, chainHash)
+	c.Assert(testDB.SetQuestionPublished(&db.QuestionPublication{
+		ID:           question.ID,
+		UpstreamID:   question.UpstreamID,
+		MetadataURL:  question.MetadataURL,
+		MetadataHash: internal.RandomBytes(sha256.Size),
+		Status:       question.Status,
+	}), qt.IsNil)
+
+	requestAndAssertError(errors.ErrVoteMetadataChanged, t, http.MethodPost, "",
+		&apicommon.RelayVoteRequest{
+			TxPayload: testSignVoteTxWithMetadataHash(t, f.voter, processID, nil, []byte("[\"1\"]"), nil,
+				internal.RandomBytes(sha256.Size)),
+		}, "vote")
+
+	stx := testSignVoteTxWithMetadataHash(t, f.voter, processID, f.proofFor(t, processID), []byte("[\"1\"]"), nil, chainHash)
+	job := enqueueAndPollJob(t, http.MethodPost, "", &apicommon.RelayVoteRequest{TxPayload: stx}, "vote")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", job.Errors))
+	count, err := f.client.ElectionVoteCount(processID.Bytes())
+	c.Assert(err, qt.IsNil)
+	c.Assert(count, qt.Equals, uint32(1))
+}
