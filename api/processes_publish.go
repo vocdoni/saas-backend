@@ -41,12 +41,23 @@ func electionParamsForQuestion(
 	if maxCensusSize == 0 {
 		return nil, fmt.Errorf("cannot determine census size for question")
 	}
+	ep := questionMetadataParams(q)
+	ep.StartDate = vp.StartDate
+	ep.EndDate = vp.EndDate
+	ep.VoteType = voteType
+	ep.ElectionType = account.ElectionTypeFromQuestion(q)
+	ep.MaxCensusSize = maxCensusSize
+	return ep, nil
+}
+
+// questionMetadataParams returns the part of a question's election params that its
+// ElectionMetadata document is built from: the question's text and display info, without ballot
+// or census settings.
+func questionMetadataParams(q *db.VotingProcessQuestion) *db.ElectionParams {
 	questionMeta, choicesMeta := account.QuestionDisplayMeta(q.Metadata)
 	return &db.ElectionParams{
 		Title:       q.Title,
 		Description: q.Description,
-		StartDate:   vp.StartDate,
-		EndDate:     vp.EndDate,
 		Questions: []db.Question{{
 			Title:       q.Title,
 			Description: q.Description,
@@ -54,10 +65,23 @@ func electionParamsForQuestion(
 			Meta:        questionMeta,
 			ChoicesMeta: choicesMeta,
 		}},
-		VoteType:      voteType,
-		ElectionType:  account.ElectionTypeFromQuestion(q),
-		MaxCensusSize: maxCensusSize,
-	}, nil
+	}
+}
+
+// metadataDoc builds the ElectionMetadata document of ep, committing mediaHashes (the hashes of
+// its images, see imageHasher) as meta.mediaHashes, and its SHA-256: the object is served back
+// byte for byte, so this is the hash of what its URL serves and the election commits on chain.
+// Publish and the metadata edit of a published process both build through here, so an edited
+// election serves a document built exactly like the one it was published with, and unchanged
+// content yields the very same hash.
+func metadataDoc(ep *db.ElectionParams, mediaHashes map[string]string) (doc, hash []byte, err error) {
+	ep.MediaHashes = mediaHashes
+	doc, err = account.BuildElectionMetadata(ep)
+	if err != nil {
+		return nil, nil, err
+	}
+	sum := sha256.Sum256(doc)
+	return doc, sum[:], nil
 }
 
 // electionParamsForParent builds the params of a process's parent election: a metadata-only
@@ -635,8 +659,7 @@ func (pw *publishWorker) buildBatch(
 		if err != nil {
 			return nil, false, err
 		}
-		ep.MediaHashes = pw.questionMediaHashes[q.ID]
-		metaBytes, err := account.BuildElectionMetadata(ep)
+		metaBytes, metaHash, err := metadataDoc(ep, pw.questionMediaHashes[q.ID])
 		if err != nil {
 			return nil, false, err
 		}
@@ -645,9 +668,7 @@ func (pw *publishWorker) buildBatch(
 			return nil, false, err
 		}
 		q.MetadataURL = a.objectStorage.LocalURL(objectName)
-		// the object is served back byte for byte, so this is the hash of what the URL serves
-		metaHash := sha256.Sum256(metaBytes)
-		q.MetadataHash = metaHash[:]
+		q.MetadataHash = metaHash
 		nonce := startNonce + uint32(i)
 		tx, err := a.account.BuildNewProcessTx(&account.NewProcessParams{
 			OrgAddress:      pw.vp.OrgAddress,
@@ -745,8 +766,7 @@ func (pw *publishWorker) publishParent() error {
 		return nil
 	}
 	ep := electionParamsForParent(pw.vp)
-	ep.MediaHashes = pw.mediaHashes
-	metaBytes, err := account.BuildElectionMetadata(ep)
+	metaBytes, metaHash, err := metadataDoc(ep, pw.mediaHashes)
 	if err != nil {
 		return err
 	}
@@ -755,7 +775,6 @@ func (pw *publishWorker) publishParent() error {
 		return err
 	}
 	metadataURL := a.objectStorage.LocalURL(objectName)
-	metaHash := sha256.Sum256(metaBytes)
 	initialStatus, err := account.ParseInitialStatus(pw.vp.InitialStatus)
 	if err != nil {
 		return err
@@ -769,7 +788,7 @@ func (pw *publishWorker) publishParent() error {
 			OrgAddress:    pw.vp.OrgAddress,
 			Params:        ep,
 			MetadataURL:   metadataURL,
-			MetadataHash:  metaHash[:],
+			MetadataHash:  metaHash,
 			Nonce:         &nonce,
 			InitialStatus: initialStatus,
 			MetadataOnly:  true,
@@ -802,7 +821,7 @@ func (pw *publishWorker) publishParent() error {
 			ID:           pw.vp.ID,
 			UpstreamID:   results[0].UpstreamID,
 			MetadataURL:  metadataURL,
-			MetadataHash: metaHash[:],
+			MetadataHash: metaHash,
 			Status:       initialStatus.String(),
 		}
 		if err := a.db.SetVotingProcessParentPublished(publication); err != nil {

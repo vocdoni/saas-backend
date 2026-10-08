@@ -492,3 +492,21 @@ func TestProcessMetadataHash(t *testing.T) {
 		c.Assert(count, qt.Equals, uint32(0), qt.Commentf("process %d", i))
 	}
 }
+
+func TestParentMetadataCurrent(t *testing.T) {
+	c := qt.New(t)
+	stored, pending, other := internal.HexBytes{1}, internal.HexBytes{2}, []byte{3}
+
+	// a process published without a parent hash accepts any
+	c.Assert(parentMetadataCurrent(&db.VotingProcess{}, other), qt.IsTrue)
+
+	vp := &db.VotingProcess{MetadataHash: stored}
+	c.Assert(parentMetadataCurrent(vp, stored), qt.IsTrue)
+	c.Assert(parentMetadataCurrent(vp, pending), qt.IsFalse)
+
+	// a pending parent edit may already be what the chain commits to
+	vp.PendingMetadata = &db.PendingProcessMetadata{MetadataHash: pending}
+	c.Assert(parentMetadataCurrent(vp, stored), qt.IsTrue)
+	c.Assert(parentMetadataCurrent(vp, pending), qt.IsTrue)
+	c.Assert(parentMetadataCurrent(vp, other), qt.IsFalse)
+}

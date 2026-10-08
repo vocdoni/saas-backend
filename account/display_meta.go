@@ -125,7 +125,8 @@ func asSlice(v any) ([]any, bool) {
 	}
 }
 
-// asChoiceValue reads a choice value decoded from JSON (float64) or Mongo (int32/int64/float64).
+// asChoiceValue reads a choice value decoded from JSON (float64) or Mongo (int32/int64/float64), or
+// set in memory as a choice value (uint32).
 func asChoiceValue(v any) (uint32, bool) {
 	var f float64
 	switch n := v.(type) {
@@ -134,6 +135,8 @@ func asChoiceValue(v any) (uint32, bool) {
 	case int64:
 		f = float64(n)
 	case int:
+		f = float64(n)
+	case uint32:
 		f = float64(n)
 	case float64:
 		f = n

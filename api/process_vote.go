@@ -26,9 +26,11 @@ import (
 //	@Description	envelope; the target process is taken from that envelope, so no process id is
 //	@Description	passed in the path. Public endpoint: no authentication is required. The request is
 //	@Description	checked synchronously — the body must decode to a Vote envelope (else 400) for a
-//	@Description	process the backend knows (else 404) attesting the metadata hash the election
-//	@Description	currently commits to and, as parentMetadataHash, the one its process's parent
-//	@Description	election commits to (else 409) — then enqueued for submission on a background
+//	@Description	question election the backend knows (else 404) attesting either the stored metadata
+//	@Description	hash of that question or the hash of its pending metadata edit, whose tx may already
+//	@Description	have changed what the election commits to, and likewise, as parentMetadataHash, the
+//	@Description	stored or pending metadata hash of its process's parent election (else 409; among
+//	@Description	those the chain decides) — then enqueued for submission on a background
 //	@Description	worker; the call returns 202 with a job id. The chain's acceptance or rejection of
 //	@Description	the vote (proof, nullifier, election state) is decided when the worker submits it and
 //	@Description	reported on the job: poll GET /jobs/{jobId} for the voteID on success, or a failure.
@@ -122,9 +124,11 @@ const (
 //	@Description	endpoint closes that window. Public endpoint: no authentication is required.
 //	@Description	The whole batch is checked synchronously and is accepted or rejected as a unit —
 //	@Description	every payload must decode to a Vote envelope (else 400) for a process the backend
-//	@Description	knows (else 404), each must attest the metadata hash its election currently commits
-//	@Description	to and, as parentMetadataHash, the one of its process's parent election (else 409:
-//	@Description	the ballot changed and the voter must reload it), all of them must
+//	@Description	knows as a question election (else 404), each must attest either the stored metadata
+//	@Description	hash of its question or the hash of a pending metadata edit of it, and likewise, as
+//	@Description	parentMetadataHash, the stored or pending one of its process's parent election
+//	@Description	(else 409: the ballot changed and the voter must reload it; among those the chain
+//	@Description	decides), all of them must
 //	@Description	belong to the same organization (else 400), and the queue must have room for all of
 //	@Description	them (else 503). A rejected batch enqueues nothing. At most 100 votes per call.
 //	@Description	The call returns 202 with a single job id covering the batch. Poll
@@ -407,7 +411,7 @@ func (a *API) parseRelayVote(payload internal.HexBytes) (*parsedVote, *errors.Er
 			// the chain rejects a vote that does not attest the metadata the election currently
 			// commits to; catching it here keeps a batch from relaying a prefix and tells the
 			// voter to reload the ballot instead of surfacing a chain error on the job.
-			if len(question.MetadataHash) > 0 && !bytes.Equal(vote.MetadataHash, question.MetadataHash) {
+			if !voteMetadataCurrent(question, vote.MetadataHash) {
 				return nil, errors.Ptr(errors.ErrVoteMetadataChanged.Withf(
 					"vote attests metadata hash %x, the election commits to %x", vote.MetadataHash, []byte(question.MetadataHash),
 				))
@@ -432,6 +436,17 @@ func (a *API) parseRelayVote(payload internal.HexBytes) (*parsedVote, *errors.Er
 	}, nil
 }
 
+// voteMetadataCurrent reports whether a vote attesting the given metadata hash may be relayed to
+// the question's election: the hash is the stored one, or that of a metadata edit whose tx is not
+// final yet, which the election may already commit to (the chain decides). Any other hash is a
+// version the voter must not vote on any more; a question published without a hash accepts any.
+func voteMetadataCurrent(q *db.VotingProcessQuestion, attested []byte) bool {
+	if len(q.MetadataHash) == 0 || bytes.Equal(attested, q.MetadataHash) {
+		return true
+	}
+	return q.PendingMetadata != nil && bytes.Equal(attested, q.PendingMetadata.MetadataHash)
+}
+
 // checkParentMetadata rejects up front a vote on a question election that does not attest the
 // metadata its parent election commits to (VoteEnvelope.parentMetadataHash), as the chain would. A
 // question published without a parent is not checked here: the chain requires its votes to attest
@@ -454,9 +469,13 @@ func (a *API) checkParentMetadata(q *db.VotingProcessQuestion, vote *models.Vote
 }
 
 // parentMetadataCurrent reports whether a vote attesting the given parent metadata hash may be
-// relayed: it is the hash the process's parent election commits to.
+// relayed: it is the hash the process's parent election commits to, or that of a pending process
+// metadata edit whose tx is not final yet (same rule as voteMetadataCurrent).
 func parentMetadataCurrent(vp *db.VotingProcess, attested []byte) bool {
-	return len(vp.MetadataHash) == 0 || bytes.Equal(attested, vp.MetadataHash)
+	if len(vp.MetadataHash) == 0 || bytes.Equal(attested, vp.MetadataHash) {
+		return true
+	}
+	return vp.PendingMetadata != nil && bytes.Equal(attested, vp.PendingMetadata.MetadataHash)
 }
 
 // voteNullifier works out the nullifier of an envelope without submitting it, so a vote

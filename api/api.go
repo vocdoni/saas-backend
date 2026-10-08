@@ -175,7 +175,10 @@ type API struct {
 	otpCooldown       time.Duration
 	notifySync        bool
 	statusSyncer      StatusEnqueuer
-	electionCache     *lru.Cache[string, *dvoteapi.Election]
+	// metadataEditsRunning holds the hex ids of the processes whose metadata edit job is running on
+	// a tx worker, which owns the edit's outcome until it records it (see settleMetadataEdit).
+	metadataEditsRunning sync.Map
+	electionCache        *lru.Cache[string, *dvoteapi.Election]
 	// liveElectionCache holds not-yet-final legacy elections for legacyLiveElectionTTL.
 	liveElectionCache *expirable.LRU[string, *dvoteapi.Election]
 	// legacyProjectionCache holds fully-final legacy records already projected onto /processes.
@@ -434,6 +437,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, processesCreateEndpoint, a.createVotingProcessHandler)
 		handle(r, http.MethodPost, processesCensusValidateEndpoint, a.validateProcessCensusHandler)
 		handle(r, http.MethodPut, processesEndpoint, a.updateVotingProcessHandler)
+		handle(r, http.MethodPut, processesMetadataEndpoint, a.updateVotingProcessMetadataHandler)
 		handle(r, http.MethodGet, processesValidateEndpoint, a.validateVotingProcessHandler)
 		handle(r, http.MethodPost, processesPublishEndpoint, a.publishVotingProcessHandler)
 		handle(r, http.MethodGet, processesPriceEndpoint, a.processPriceHandler)
@@ -490,6 +494,7 @@ func (a *API) initRouter() http.Handler {
 		// a manager/admin (or a voting:write API key) via optionalManager.
 		handle(r, http.MethodGet, processesCreateEndpoint, a.listVotingProcessesHandler)
 		handle(r, http.MethodGet, processesEndpoint, a.votingProcessInfoHandler)
+		handle(r, http.MethodGet, processesMetadataEndpoint, a.votingProcessMetadataHandler)
 		handle(r, http.MethodGet, processesQuestionEndpoint, a.votingProcessQuestionHandler)
 		handle(r, http.MethodGet, processesParticipantEndpoint, a.votingProcessParticipantHandler)
 		handle(r, http.MethodGet, processesResultsEndpoint, a.votingProcessResultsHandler)

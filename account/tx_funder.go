@@ -190,6 +190,10 @@ func (*Account) validateSetProcessTx(txSetProcess *models.SetProcessTx) error {
 		if (txSetProcess.CensusRoot == nil || txSetProcess.CensusURI == nil) && txSetProcess.CensusSize == nil {
 			return errors.ErrInvalidTxFormat.With("missing census fields")
 		}
+	case models.TxType_SET_PROCESS_METADATA:
+		if txSetProcess.GetMetadata() == "" || len(txSetProcess.MetadataHash) == 0 {
+			return errors.ErrInvalidTxFormat.With("missing metadata fields")
+		}
 	default:
 		return errors.ErrInvalidTxFormat.With("unsupported txtype")
 	}

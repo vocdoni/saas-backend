@@ -5,6 +5,7 @@ package apicommon
 import (
 	"time"
 
+	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/pricing"
@@ -92,6 +93,62 @@ type CreateVotingProcessRequest struct {
 	// editing the same draft cannot silently overwrite each other. Optional: omitting it keeps the
 	// unconditional last-writer-wins behaviour. Ignored on POST.
 	UpdatedAt string `json:"updatedAt,omitempty"`
+}
+
+// VotingProcessMetadataChoice is one choice's editable content in a process metadata GET/PUT
+// payload: its title and its display info (the question's metadata.choices entry for the choice,
+// without its value: description, image and any other key).
+type VotingProcessMetadataChoice struct {
+	Title db.MultiLangString `json:"title"`
+	// Meta replaces the choice's display info when sent ({} clears it); absent leaves it as is.
+	// External images in it are imported, as on create.
+	Meta map[string]any `json:"meta,omitempty"`
+}
+
+// VotingProcessMetadataQuestion is one question's editable text in a process metadata GET/PUT
+// payload. Everything else about a question describes its ballot, which the payload cannot carry.
+type VotingProcessMetadataQuestion struct {
+	Title       db.MultiLangString            `json:"title"`
+	Description db.MultiLangString            `json:"description,omitempty"`
+	Choices     []VotingProcessMetadataChoice `json:"choices"`
+}
+
+// VotingProcessMetadata is the body of GET and PUT /processes/{processId}/metadata: the process's
+// editable text plus each question's title/description and choice titles. Questions and choices are
+// matched by position — the payload carries no question or choice identity — so a PUT echoes back
+// the shape a GET returned, in the same order and with the same counts.
+type VotingProcessMetadata struct {
+	Title       db.MultiLangString              `json:"title"`
+	Description db.MultiLangString              `json:"description,omitempty"`
+	Header      string                          `json:"header,omitempty"`
+	StreamURI   string                          `json:"streamUri,omitempty"`
+	Questions   []VotingProcessMetadataQuestion `json:"questions"`
+}
+
+// VotingProcessMetadataFromDB builds the GET /processes/{processId}/metadata response from a
+// process and its questions, in the order they are stored.
+func VotingProcessMetadataFromDB(vp *db.VotingProcess, questions []db.VotingProcessQuestion) *VotingProcessMetadata {
+	meta := &VotingProcessMetadata{
+		Title:       vp.Title,
+		Description: vp.Description,
+		Header:      vp.Header,
+		StreamURI:   vp.StreamURI,
+		Questions:   make([]VotingProcessMetadataQuestion, len(questions)),
+	}
+	for i := range questions {
+		q := &questions[i]
+		_, choicesMeta := account.QuestionDisplayMeta(q.Metadata)
+		choices := make([]VotingProcessMetadataChoice, len(q.Choices))
+		for j := range q.Choices {
+			choices[j] = VotingProcessMetadataChoice{Title: q.Choices[j].Title, Meta: choicesMeta[q.Choices[j].Value]}
+		}
+		meta.Questions[i] = VotingProcessMetadataQuestion{
+			Title:       q.Title,
+			Description: q.Description,
+			Choices:     choices,
+		}
+	}
+	return meta
 }
 
 // ValidateProcessCensusRequest is the body of POST /processes/census/validation: the same

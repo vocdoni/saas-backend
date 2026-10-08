@@ -376,6 +376,8 @@ func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id bson.ObjectID, u
 //	@Description	`typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
 //	@Description	400 — omit `ballotProtocol` to edit a question through its `typeSetup`.
 //	@Description
+//	@Description	A published process cannot be updated here; PUT /processes/{processId}/metadata edits its text.
+//	@Description
 //	@Description	Send the updatedAt read from GET /processes/{processId} to make the update conditional: it is
 //	@Description	rejected with 409 (40171) if anything wrote the process in between, so two editors cannot
 //	@Description	overwrite each other. Omitting updatedAt opts out of that guarantee and keeps last-writer-wins.
@@ -563,6 +565,8 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 	for i := range questions {
 		a.enqueueReconcileIfStale(&questions[i])
 	}
+	// a metadata edit whose tx mined after its job stopped waiting is applied before serving
+	a.reconcilePendingMetadata(vp, questions)
 	a.enqueueParentReconcileIfStale(vp)
 	// resolve the vote encryption keys of encrypted questions (so clients can seal encrypted ballots)
 	// and the live on-chain tally of each published question (finalResults marks final), concurrently:
@@ -854,6 +858,10 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 	// serve the stored status now; refresh it from the chain in the background so a status change
 	// made directly on-chain (outside this API) is picked up.
 	a.enqueueReconcileIfStale(question)
+	// a metadata edit whose tx mined after its job stopped waiting is applied before serving
+	reconciled := []db.VotingProcessQuestion{*question}
+	a.reconcilePendingMetadata(nil, reconciled)
+	question = &reconciled[0]
 	// resolve the vote encryption keys so voters can seal an encrypted ballot for this question.
 	question.EncryptionKeys = a.resolveQuestionEncryptionKeys(question)
 	// surface the live on-chain tally for a published question; memos (manager-only) are included only

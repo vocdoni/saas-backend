@@ -1558,11 +1558,24 @@ definitions:
       nullifier:
         example: deadbeef
         type: string
+      parent:
+        allOf:
+        - $ref: '#/definitions/db.ElectionMetadataJobResult'
+        description: |-
+          Parent is the outcome of a metadata edit (set_process_metadata) for the process's parent
+          election, present when the edit changed the process's title, description, header or streamUri
       processId:
         example: deadbeef
         type: string
       progress:
         type: integer
+      questions:
+        description: |-
+          Questions is the per-question outcome of a metadata edit (set_process_metadata), in process
+          order, one entry per question whose election metadata changed
+        items:
+          $ref: '#/definitions/db.ElectionMetadataJobResult'
+        type: array
       status:
         type: string
       total:
@@ -1874,6 +1887,43 @@ definitions:
           $ref: '#/definitions/apicommon.VotingProcessResponse'
         type: array
     type: object
+  apicommon.VotingProcessMetadata:
+    properties:
+      description:
+        $ref: '#/definitions/db.MultiLangString'
+      header:
+        type: string
+      questions:
+        items:
+          $ref: '#/definitions/apicommon.VotingProcessMetadataQuestion'
+        type: array
+      streamUri:
+        type: string
+      title:
+        $ref: '#/definitions/db.MultiLangString'
+    type: object
+  apicommon.VotingProcessMetadataChoice:
+    properties:
+      meta:
+        additionalProperties: {}
+        description: |-
+          Meta replaces the choice's display info when sent ({} clears it); absent leaves it as is.
+          External images in it are imported, as on create.
+        type: object
+      title:
+        $ref: '#/definitions/db.MultiLangString'
+    type: object
+  apicommon.VotingProcessMetadataQuestion:
+    properties:
+      choices:
+        items:
+          $ref: '#/definitions/apicommon.VotingProcessMetadataChoice'
+        type: array
+      description:
+        $ref: '#/definitions/db.MultiLangString'
+      title:
+        $ref: '#/definitions/db.MultiLangString'
+    type: object
   apicommon.VotingProcessQuestionRequest:
     properties:
       ballotProtocol:
@@ -2102,6 +2152,23 @@ definitions:
       value:
         type: integer
     type: object
+  db.ElectionMetadataJobResult:
+    properties:
+      error:
+        type: string
+      metadataHash:
+        example: deadbeef
+        type: string
+      metadataURL:
+        type: string
+      processId:
+        example: deadbeef
+        type: string
+      questionId:
+        type: string
+      status:
+        $ref: '#/definitions/db.JobStatus'
+    type: object
   db.EncryptionKey:
     properties:
       index:
@@ -2159,6 +2226,7 @@ definitions:
     - relay_vote
     - relay_votes
     - publish_voting_process
+    - set_process_metadata
     type: string
     x-enum-varnames:
     - JobTypeOrgMembers
@@ -2169,6 +2237,7 @@ definitions:
     - JobTypeRelayVote
     - JobTypeRelayVotes
     - JobTypePublishVotingProcess
+    - JobTypeSetProcessMetadata
   db.MultiLangString:
     additionalProperties:
       type: string
@@ -5085,6 +5154,8 @@ paths:
         `typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
         400 — omit `ballotProtocol` to edit a question through its `typeSetup`.
 
+        A published process cannot be updated here; PUT /processes/{processId}/metadata edits its text.
+
         Send the updatedAt read from GET /processes/{processId} to make the update conditional: it is
         rejected with 409 (40171) if anything wrote the process in between, so two editors cannot
         overwrite each other. Omitting updatedAt opts out of that guarantee and keeps last-writer-wins.
@@ -5725,6 +5796,128 @@ paths:
       security:
       - BearerAuth: []
       summary: Start (or resume) the checkout of a voting process
+      tags:
+      - processes
+  /processes/{processId}/metadata:
+    get:
+      description: |-
+        Read the editable content of a voting process: its title, description, header and
+        streamUri, and each question's title, description and choices (title and display info,
+        `meta`), in the order the process stores them. Public for a published process; a draft
+        is visible only to a Manager/Admin of the organization (or a voting:write API key acting
+        as one) and is a 404 otherwise. The same shape is the body PUT
+        /processes/{processId}/metadata takes.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.VotingProcessMetadata'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Get a voting process's editable metadata
+      tags:
+      - processes
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Edit the content voters see of a voting process — its title, description, header and
+        streamUri, and each question's title, description, choice titles and choice display
+        info (`meta`: description, image...) — including after it is published. Nothing
+        structural can change: the body has no field for a question's or choice's type, setup,
+        value or ballot protocol, and questions and choices are matched by position, so their
+        counts must equal the process's exactly (400 otherwise). Send back the shape read from
+        GET /processes/{processId}/metadata; a choice without `meta` keeps its display info.
+        Requires the Manager or Admin role (or a voting:write API key). External images (the
+        header, choice images) are imported as on create; 422 (40179) names the field and URL
+        of one that cannot be, and nothing is changed.
+
+        On a draft the edit is stored right away (200). On a published process each election
+        whose metadata document changes gets a new document at a new metadataURL, committed on
+        chain with a SET_PROCESS_METADATA tx: the process's parent election when its title,
+        description, header or streamUri change, and each question whose title, description or
+        choices change. The request answers 202 with a jobId to poll at GET /jobs/{jobId} (type
+        `set_process_metadata`). The job result has one `questions` entry per changed question
+        and a `parent` entry when the parent changes, each with the metadataURL/metadataHash its
+        tx commits and its own status. Stored content, URL and hash change only once the tx is
+        mined, so what the API serves always matches what its election commits to on chain.
+        Until a question's tx is final its new version is pending: votes attesting either its
+        stored or its pending hash are relayed and the chain decides, any other hash is rejected
+        with 409 (40904). A tx not confirmed within the job's wait leaves its entry, and the job,
+        pending until the chain shows it (completed) or the Vochain mempool TTL has passed
+        without it (failed); reads of the process settle it, and so does a re-check once the TTL
+        has passed. If some failed, send the same edit again: the elections already updated are
+        skipped. Previous metadata documents stay served at their URLs.
+
+        An edit that changes no document is answered 200 without any tx.
+
+        409: a publish is in progress (40903); a previous metadata edit of the process is not final
+        yet (40905); or an election whose metadata would change is not READY or
+        PAUSED (40906) — the chain accepts metadata updates only in those states.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Voting process metadata
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.VotingProcessMetadata'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Stored, no on-chain change needed
+          schema:
+            type: string
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/apicommon.EnqueuedResponse'
+        "400":
+          description: Malformed body, or question/choice counts do not match
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Publish or metadata update in progress, or election not editable
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "422":
+          description: Image could not be imported or read (40179)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Edit a voting process's metadata
       tags:
       - processes
   /processes/{processId}/participants:
@@ -6982,9 +7175,11 @@ paths:
         envelope; the target process is taken from that envelope, so no process id is
         passed in the path. Public endpoint: no authentication is required. The request is
         checked synchronously — the body must decode to a Vote envelope (else 400) for a
-        process the backend knows (else 404) attesting the metadata hash the election
-        currently commits to and, as parentMetadataHash, the one its process's parent
-        election commits to (else 409) — then enqueued for submission on a background
+        question election the backend knows (else 404) attesting either the stored metadata
+        hash of that question or the hash of its pending metadata edit, whose tx may already
+        have changed what the election commits to, and likewise, as parentMetadataHash, the
+        stored or pending metadata hash of its process's parent election (else 409; among
+        those the chain decides) — then enqueued for submission on a background
         worker; the call returns 202 with a job id. The chain's acceptance or rejection of
         the vote (proof, nullifier, election state) is decided when the worker submits it and
         reported on the job: poll GET /jobs/{jobId} for the voteID on success, or a failure.
@@ -7041,9 +7236,11 @@ paths:
         endpoint closes that window. Public endpoint: no authentication is required.
         The whole batch is checked synchronously and is accepted or rejected as a unit —
         every payload must decode to a Vote envelope (else 400) for a process the backend
-        knows (else 404), each must attest the metadata hash its election currently commits
-        to and, as parentMetadataHash, the one of its process's parent election (else 409:
-        the ballot changed and the voter must reload it), all of them must
+        knows as a question election (else 404), each must attest either the stored metadata
+        hash of its question or the hash of a pending metadata edit of it, and likewise, as
+        parentMetadataHash, the stored or pending one of its process's parent election
+        (else 409: the ballot changed and the voter must reload it; among those the chain
+        decides), all of them must
         belong to the same organization (else 400), and the queue must have room for all of
         them (else 503). A rejected batch enqueues nothing. At most 100 votes per call.
         The call returns 202 with a single job id covering the batch. Poll
