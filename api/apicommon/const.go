@@ -28,6 +28,10 @@ const VerificationCodeMaxAttempts = 3
 const (
 	// VerificationCodeLength is the length of the verification code in bytes
 	VerificationCodeLength = 3
+	// InvitationCodeLength is the length of an organization invitation code in bytes. Unlike
+	// verification codes, invitation codes are looked up by value with no attempt limit and stay
+	// valid for days, so they must be unguessable rather than short.
+	InvitationCodeLength = 16
 	// InvitationExpiration is the duration of the invitation code before it is
 	// invalidated
 	InvitationExpiration = 5 * 24 * time.Hour // 5 days

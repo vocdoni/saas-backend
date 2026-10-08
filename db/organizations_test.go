@@ -316,7 +316,9 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(user.Organizations[0].Address, qt.DeepEquals, orgAddress)
 
 		// Remove the user from the organization
-		c.Assert(testDB.RemoveOrganizationUser(orgAddress, userID), qt.IsNil)
+		removed, err := testDB.RemoveOrganizationUser(orgAddress, userID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(removed, qt.IsTrue)
 
 		// Verify the user is not tied to any organization now
 		user, err = testDB.User(userID)
@@ -326,9 +328,10 @@ func TestOrganizations(t *testing.T) {
 
 		// Test removing a non-existent user
 		nonExistentUserID := uint64(9999)
-		err = testDB.RemoveOrganizationUser(orgAddress, nonExistentUserID)
+		removed, err = testDB.RemoveOrganizationUser(orgAddress, nonExistentUserID)
 		// The function doesn't return an error for non-existent users, it just doesn't remove anything
 		c.Assert(err, qt.IsNil)
+		c.Assert(removed, qt.IsFalse)
 
 		// Create another user and add them to multiple organizations
 		secondUserEmail := "seconduser@example.com"
@@ -360,7 +363,9 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(secondUser.Organizations, qt.HasLen, 2)
 
 		// Remove the second user from the first organization
-		c.Assert(testDB.RemoveOrganizationUser(firstOrgAddress, secondUserID), qt.IsNil)
+		removed, err = testDB.RemoveOrganizationUser(firstOrgAddress, secondUserID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(removed, qt.IsTrue)
 
 		// Verify the second user is now only a user of the second organization
 		secondUser, err = testDB.User(secondUserID)
