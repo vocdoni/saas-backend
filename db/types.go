@@ -662,6 +662,12 @@ type ElectionParams struct {
 	ElectionType  ElectionType          `json:"electionType" bson:"electionType"`
 	TypeMetadata  *ElectionTypeMetadata `json:"type,omitempty" bson:"type,omitempty"`
 	MaxCensusSize uint64                `json:"maxCensusSize,omitempty" bson:"maxCensusSize,omitempty"`
+	// ProcessTitle and ProcessDescription are the text of the voting process the election belongs
+	// to (one election per question). They are written into the metadata document as meta.process
+	// so the heading voters see is covered by the on-chain metadata hash. Publish-time only, never
+	// persisted.
+	ProcessTitle       MultiLangString `json:"-" bson:"-"`
+	ProcessDescription MultiLangString `json:"-" bson:"-"`
 	// InitialStatus is the on-chain status the election is published with. Empty (the default)
 	// means READY; "PAUSED" publishes it in the PAUSED state, so voting only opens once an
 	// admin sets it to READY via SET_PROCESS_STATUS. Only "" / "READY" / "PAUSED" are

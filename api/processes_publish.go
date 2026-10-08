@@ -26,8 +26,8 @@ import (
 const maxPublishRounds = 3
 
 // electionParamsForQuestion builds the single-election params for one question by combining
-// the process's shared params with the question's ballot config (translated) and the
-// server-computed maxCensusSize.
+// the process's shared params (including its title and description, written as meta.process)
+// with the question's ballot config (translated) and the server-computed maxCensusSize.
 func electionParamsForQuestion(
 	vp *db.VotingProcess, q *db.VotingProcessQuestion, census *db.Census,
 ) (*db.ElectionParams, error) {
@@ -52,8 +52,10 @@ func electionParamsForQuestion(
 			Choices:     q.Choices,
 		}},
 		VoteType:      voteType,
-		ElectionType:  account.ElectionTypeFromQuestion(q),
-		MaxCensusSize: maxCensusSize,
+		ElectionType:       account.ElectionTypeFromQuestion(q),
+		MaxCensusSize:      maxCensusSize,
+		ProcessTitle:       vp.Title,
+		ProcessDescription: vp.Description,
 	}, nil
 }
 

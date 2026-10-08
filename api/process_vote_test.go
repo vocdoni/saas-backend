@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"path"
@@ -413,6 +414,18 @@ func TestProcessMetadataHash(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, comment)
 		want := sha256.Sum256(served)
 		c.Assert([]byte(q.MetadataHash), qt.DeepEquals, want[:], comment)
+		// the process text voters see as the heading is part of the hashed document
+		var doc struct {
+			Meta struct {
+				Process struct {
+					Title       db.MultiLangString `json:"title"`
+					Description db.MultiLangString `json:"description"`
+				} `json:"process"`
+			} `json:"meta"`
+		}
+		c.Assert(json.Unmarshal(served, &doc), qt.IsNil, comment)
+		c.Assert(doc.Meta.Process.Title, qt.DeepEquals, got.Title, comment)
+		c.Assert(doc.Meta.Process.Description, qt.DeepEquals, got.Description, comment)
 
 		election, err := f.client.Election(q.UpstreamID.Bytes())
 		c.Assert(err, qt.IsNil, comment)

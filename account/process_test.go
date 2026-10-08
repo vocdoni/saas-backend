@@ -1,11 +1,13 @@
 package account
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/db"
+	"go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/proto/build/go/models"
 )
 
@@ -186,4 +188,40 @@ func TestNormalizeInitialStatus(t *testing.T) {
 
 	_, err := NormalizeInitialStatus("ENDED")
 	c.Assert(err, qt.ErrorMatches, `initialStatus must be READY or PAUSED, got .*`)
+}
+
+// TestBuildElectionMetadataProcessText checks that the process title and description land in the
+// document as meta.process, that an empty description is left out, and that no meta block is
+// written without them.
+func TestBuildElectionMetadataProcessText(t *testing.T) {
+	c := qt.New(t)
+	params := &db.ElectionParams{
+		Title: db.MultiLangString{"default": "q"},
+		Questions: []db.Question{{
+			Title:   db.MultiLangString{"default": "q"},
+			Choices: []db.Choice{{Title: db.MultiLangString{"default": "yes"}}},
+		}},
+	}
+	decodeMeta := func() any {
+		data, err := BuildElectionMetadata(params)
+		c.Assert(err, qt.IsNil)
+		got := &api.ElectionMetadata{}
+		c.Assert(json.Unmarshal(data, got), qt.IsNil)
+		return got.Meta
+	}
+
+	c.Assert(decodeMeta(), qt.IsNil)
+
+	params.ProcessTitle = db.MultiLangString{"default": "Assembly", "es": "Asamblea"}
+	c.Assert(decodeMeta(), qt.DeepEquals, map[string]any{
+		"process": map[string]any{"title": map[string]any{"default": "Assembly", "es": "Asamblea"}},
+	})
+
+	params.ProcessDescription = db.MultiLangString{"default": "Yearly"}
+	c.Assert(decodeMeta(), qt.DeepEquals, map[string]any{
+		"process": map[string]any{
+			"title":       map[string]any{"default": "Assembly", "es": "Asamblea"},
+			"description": map[string]any{"default": "Yearly"},
+		},
+	})
 }
