@@ -406,10 +406,11 @@ func TestResendChallenge(t *testing.T) {
 	c.Run("resend limit", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testAnchorID, gotp.RandomSecret(16)), qt.IsNil)
+		// a mailbox of its own, so the codes sent here are not read by other tests
 		resend := func() error {
 			return csp.ResendChallenge(
 				testToken,
-				testUserEmail,
+				"resend-limit@example.com",
 				notifications.EmailChallenge,
 				apicommon.DefaultLang,
 				testOrgName,

@@ -11,6 +11,7 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 )
 
 func TestCreateOrganizationHandler(t *testing.T) {
@@ -70,8 +71,7 @@ func TestCreateSubOrganizationHandler(t *testing.T) {
 			Address: parentOrgAddress,
 		},
 	}
-	_, code := testRequest(t, http.MethodPost, token, subOrgInfo, organizationsEndpoint)
-	c.Assert(code, qt.Equals, http.StatusBadRequest)
+	requestAndAssertError(errors.ErrMaxSubOrgsReached, t, http.MethodPost, token, subOrgInfo, organizationsEndpoint)
 
 	// Test creating suborganization with non-existent parent
 	nonExistentParent := common.HexToAddress("0x0000000000000000000000000000000000000001")
@@ -82,7 +82,7 @@ func TestCreateSubOrganizationHandler(t *testing.T) {
 			Address: nonExistentParent,
 		},
 	}
-	_, code = testRequest(t, http.MethodPost, token, invalidSubOrgInfo, organizationsEndpoint)
+	_, code := testRequest(t, http.MethodPost, token, invalidSubOrgInfo, organizationsEndpoint)
 	c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
 	// Test creating suborganization when user is not admin of parent

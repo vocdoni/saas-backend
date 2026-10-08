@@ -155,9 +155,9 @@ func TestStripeWebhook(t *testing.T) {
 		}
 
 		// Mock a subscription upgrade
+		premium := mockStripeSubscription(orgAddress, mockPremiumPlan.ID)
 		{
-			s := mockStripeSubscription(orgAddress, mockPremiumPlan.ID)
-			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionUpdated, s))
+			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionUpdated, premium))
 			c.Assert(err, qt.IsNil)
 		}
 
@@ -169,9 +169,23 @@ func TestStripeWebhook(t *testing.T) {
 			c.Assert(org.Subscription.PlanID, qt.Equals, mockPremiumPlan.ID)
 		}
 
+		// The cancellation of a subscription the organization is no longer on (e.g. replaced by a
+		// plan change, delivered late) must not downgrade it
+		{
+			s := mockStripeSubscription(orgAddress, mockEssentialPlan.ID)
+			s.Status = stripeapi.SubscriptionStatusCanceled
+			s.CanceledAt = time.Now().Unix()
+			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionDeleted, s))
+			c.Assert(err, qt.IsNil)
+			org, err := testDB.Organization(orgAddress)
+			c.Assert(err, qt.IsNil)
+			c.Assert(org.Subscription.PlanID, qt.Equals, mockPremiumPlan.ID)
+		}
+
 		// Cancel subscription
 		{
 			s := mockStripeSubscription(orgAddress, mockPremiumPlan.ID)
+			s.ID = premium.ID
 			s.Status = stripeapi.SubscriptionStatusCanceled
 			s.CanceledAt = time.Now().Unix()
 			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionDeleted, s))

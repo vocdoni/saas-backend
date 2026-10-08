@@ -142,6 +142,10 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		parentOrg = orgInfo.Parent.Address
 		// update the parent organization counter
 		if err := a.db.IncrementOrganizationSubOrgsCounter(parentOrg); err != nil {
+			if errors.Is(err, db.ErrMaxSubOrgsReached) {
+				errors.ErrMaxSubOrgsReached.Write(w)
+				return
+			}
 			errors.ErrGenericInternalServerError.Withf("increment suborgs: %v", err).Write(w)
 			return
 		}
