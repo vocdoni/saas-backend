@@ -230,6 +230,17 @@ func (ms *MongoStorage) SetJobStatus(jobID string, status JobStatus, result *Job
 	return nil
 }
 
+// SetJobResult records a job's result while leaving it pending, for a tx job whose outcome is not
+// final yet (SetJobStatus records it once it is).
+func (ms *MongoStorage) SetJobResult(jobID string, result *JobResult) error {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	if _, err := ms.jobs.UpdateOne(ctx, bson.M{"jobId": jobID}, bson.M{"$set": bson.M{"result": result}}); err != nil {
+		return fmt.Errorf("failed to set job result: %w", err)
+	}
+	return nil
+}
+
 // CompleteJob updates a job with final results when it completes.
 func (ms *MongoStorage) CompleteJob(jobID string, added int, errors []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)

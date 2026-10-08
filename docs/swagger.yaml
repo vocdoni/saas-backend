@@ -5778,17 +5778,19 @@ paths:
         `set_process_metadata`). The job result lists one entry per question with the
         metadataURL/metadataHash its tx commits and its own status; a question's stored text, URL
         and hash change only once its tx is mined, so what the API serves always matches what its
-        election commits to on chain. A tx that mines after the job stopped waiting for it is picked
-        up later, on the next read of the process or vote attesting the new hash. The process's own
-        fields are stored once every question landed; if some failed, send the same edit again: the
-        questions already updated are skipped. Previous metadata documents stay served at their
-        URLs. Votes signed against the previous hash are then rejected with 409 (40904) and the
-        voter must reload the ballot.
+        election commits to on chain. Until its tx is final the new version is pending: votes
+        attesting either the stored or the pending hash are relayed and the chain decides, any
+        other hash is rejected with 409 (40904). A tx not confirmed within the job's wait leaves its
+        entry, and the job, pending until the chain shows it (completed) or the Vochain mempool TTL
+        has passed without it (failed); reads of the process settle it, and so does a re-check
+        once the TTL has passed. The process's own fields are stored once every question landed; if
+        some failed, send the same edit again: the questions already updated are skipped. Previous
+        metadata documents stay served at their URLs.
 
         An edit that changes nothing is answered 200 without any tx.
 
-        409: a publish is in progress (40903); a previous metadata edit of the process is still
-        being put on chain (40905); or an election whose metadata would change is not READY or
+        409: a publish is in progress (40903); a previous metadata edit of the process is not final
+        yet (40905); or an election whose metadata would change is not READY or
         PAUSED (40906) — the chain accepts metadata updates only in those states.
       parameters:
       - description: Process ID

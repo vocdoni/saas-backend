@@ -819,7 +819,7 @@ type ProcessText struct {
 
 // PendingQuestionMetadata is the edit a question's submitted SET_PROCESS_METADATA tx puts on chain:
 // the new text and the metadata document and hash the election will commit to. Since is when it
-// was submitted.
+// was submitted, JobID the set_process_metadata job that submitted it.
 type PendingQuestionMetadata struct {
 	Title        MultiLangString   `bson:"title"`
 	Description  MultiLangString   `bson:"description,omitempty"`
@@ -827,6 +827,7 @@ type PendingQuestionMetadata struct {
 	MetadataURL  string            `bson:"metadataURL"`
 	MetadataHash internal.HexBytes `bson:"metadataHash"`
 	Since        time.Time         `bson:"since"`
+	JobID        string            `bson:"jobId"`
 }
 
 // Update returns the question text update that applies this pending edit to question id.
@@ -842,8 +843,8 @@ func (p *PendingQuestionMetadata) Update(id bson.ObjectID) *QuestionTextUpdate {
 }
 
 // Pending returns the pending edit form of a text update that repoints a question at a new
-// metadata document, stamped as submitted now.
-func (u *QuestionTextUpdate) Pending() *PendingQuestionMetadata {
+// metadata document, submitted now by job jobID.
+func (u *QuestionTextUpdate) Pending(jobID string) *PendingQuestionMetadata {
 	return &PendingQuestionMetadata{
 		Title:        u.Title,
 		Description:  u.Description,
@@ -851,6 +852,7 @@ func (u *QuestionTextUpdate) Pending() *PendingQuestionMetadata {
 		MetadataURL:  u.MetadataURL,
 		MetadataHash: u.MetadataHash,
 		Since:        time.Now(),
+		JobID:        jobID,
 	}
 }
 

@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"path"
 	"testing"
+	"time"
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	dvoteapi "go.vocdoni.io/dvote/api"
 )
@@ -295,10 +297,26 @@ func storedQuestionText(q *db.VotingProcessQuestion) *db.QuestionTextUpdate {
 	}
 }
 
+// pendingJobResult returns a job's question entries with every status reset to pending, as the job
+// row reads while its txs are unconfirmed.
+func pendingJobResult(t *testing.T, jobID string) *db.JobResult {
+	t.Helper()
+	job, err := testDB.Job(jobID)
+	qt.Assert(t, err, qt.IsNil)
+	qt.Assert(t, job.Result, qt.Not(qt.IsNil))
+	result := &db.JobResult{Questions: make([]db.QuestionMetadataJobResult, len(job.Result.Questions))}
+	for i, entry := range job.Result.Questions {
+		entry.Status, entry.Error = db.JobStatusPending, ""
+		result.Questions[i] = entry
+	}
+	return result
+}
+
 // TestVotingProcessMetadataLateMined covers a metadata edit whose txs mined after the edit job gave
-// up waiting for them: the store still holds the previous version, with the edit pending, while the
-// chain commits the new one. A vote attesting the new hash is accepted and reconciles its question,
-// and a read of the process reconciles the rest, the process text included.
+// up waiting for them: the store still holds the previous version with the edit pending, the job is
+// pending and the claim held, while the chain commits the new version. Votes attesting the pending
+// hash are relayed and counted, other hashes are rejected, and a read of
+// the process settles the edit: questions, process text, job and claim.
 func TestVotingProcessMetadataLateMined(t *testing.T) {
 	c := qt.New(t)
 	f := setupRelayVoting(t, 2)
@@ -310,55 +328,60 @@ func TestVotingProcessMetadataLateMined(t *testing.T) {
 	c.Assert(before, qt.HasLen, 2)
 	meta := requestAndParse[apicommon.VotingProcessMetadata](t, http.MethodGet, "", nil, "processes", f.pid, "metadata")
 	edit := editedMetadata(meta, "Late")
-	job := enqueueAndPollJob(t, http.MethodPut, f.token, edit, "processes", f.pid, "metadata")
+	enq := requestAndParseWithAssertCode[apicommon.EnqueuedResponse](http.StatusAccepted, t, http.MethodPut,
+		f.token, edit, "processes", f.pid, "metadata")
+	job := pollJob(t, enq.JobID)
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job errors: %s", job.Errors))
 	vpEdited, edited, err := testDB.ProcessWithQuestions(oid)
 	c.Assert(err, qt.IsNil)
 
-	// roll the store back to the previous version with the edit pending, as a job that timed out
-	// waiting for its txs leaves it
+	// roll the store back to how a job that timed out waiting for its txs leaves it
 	for i := range before {
 		c.Assert(testDB.SetQuestionText(storedQuestionText(&before[i])), qt.IsNil)
-		c.Assert(testDB.SetQuestionPendingMetadata(edited[i].ID, storedQuestionText(&edited[i]).Pending()), qt.IsNil)
+		c.Assert(testDB.SetQuestionPendingMetadata(edited[i].ID,
+			storedQuestionText(&edited[i]).Pending(enq.JobID)), qt.IsNil)
 	}
 	c.Assert(testDB.SetVotingProcessText(oid, &db.ProcessText{
 		Title: vpBefore.Title, Description: vpBefore.Description, Header: vpBefore.Header, StreamURI: vpBefore.StreamURI,
 	}), qt.IsNil)
-	editedText := &db.ProcessText{
+	c.Assert(testDB.SetVotingProcessPendingText(oid, &db.ProcessText{
 		Title: vpEdited.Title, Description: vpEdited.Description, Header: vpEdited.Header, StreamURI: vpEdited.StreamURI,
-	}
-	c.Assert(testDB.SetVotingProcessPendingText(oid, editedText), qt.IsNil)
+	}), qt.IsNil)
+	c.Assert(testDB.SetJobStatus(enq.JobID, db.JobStatusPending, pendingJobResult(t, enq.JobID), ""), qt.IsNil)
+	claimed, err := testDB.ClaimVotingProcessMetadataUpdate(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(claimed, qt.IsTrue)
 
-	// a vote attesting the hash the chain commits is relayed, and reconciles its question
+	// a vote attesting the pending hash is relayed (the chain commits it, so it is counted); one
+	// attesting neither the stored nor the pending hash is rejected up front
 	processID := f.processIDs[0]
 	stx := testSignVoteTxWithMetadataHash(t, f.voter, processID, f.proofFor(t, processID), []byte("[\"1\"]"), nil,
 		edited[0].MetadataHash)
 	voteJob := enqueueAndPollJob(t, http.MethodPost, "", &apicommon.RelayVoteRequest{TxPayload: stx}, "vote")
 	c.Assert(voteJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", voteJob.Errors))
-
-	vp, questions, err := testDB.ProcessWithQuestions(oid)
+	requestAndAssertError(errors.ErrVoteMetadataChanged, t, http.MethodPost, "",
+		&apicommon.RelayVoteRequest{TxPayload: testSignVoteTxWithMetadataHash(t, f.voter, f.processIDs[1], nil,
+			[]byte("[\"1\"]"), nil, internal.RandomBytes(sha256.Size))}, "vote")
+	// the relay does not settle anything
+	stillPending, err := testDB.Question(edited[0].ID)
 	c.Assert(err, qt.IsNil)
-	c.Assert(questions[0].PendingMetadata, qt.IsNil)
-	c.Assert(questions[0].MetadataHash, qt.DeepEquals, edited[0].MetadataHash)
-	c.Assert(questions[0].MetadataURL, qt.Equals, edited[0].MetadataURL)
-	c.Assert(questions[0].Title, qt.DeepEquals, edit.Questions[0].Title)
-	// the other question is still pending, so the process text waits for it
-	c.Assert(questions[1].PendingMetadata, qt.Not(qt.IsNil))
-	c.Assert(questions[1].MetadataHash, qt.DeepEquals, before[1].MetadataHash)
-	c.Assert(vp.PendingText, qt.Not(qt.IsNil))
-	c.Assert(vp.Title, qt.DeepEquals, vpBefore.Title)
+	c.Assert(stillPending.PendingMetadata, qt.Not(qt.IsNil))
 
-	// a read of the process reconciles the rest and serves it
+	// a read of the process settles the edit and serves it
 	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, "", nil, "processes", f.pid)
 	c.Assert(got.Title, qt.DeepEquals, edit.Title)
 	c.Assert(got.Header, qt.Equals, edit.Header)
 	c.Assert(got.Questions, qt.HasLen, 2)
-	c.Assert(got.Questions[1].Title, qt.DeepEquals, edit.Questions[1].Title)
-	c.Assert(got.Questions[1].MetadataHash, qt.DeepEquals, edited[1].MetadataHash)
+	for i, q := range got.Questions {
+		comment := qt.Commentf("question %d", i)
+		c.Assert(q.Title, qt.DeepEquals, edit.Questions[i].Title, comment)
+		c.Assert(q.MetadataHash, qt.DeepEquals, edited[i].MetadataHash, comment)
+	}
 
-	vp, questions, err = testDB.ProcessWithQuestions(oid)
+	vp, questions, err := testDB.ProcessWithQuestions(oid)
 	c.Assert(err, qt.IsNil)
 	c.Assert(vp.PendingText, qt.IsNil)
+	c.Assert(vp.MetadataUpdating.IsZero(), qt.IsTrue)
 	c.Assert(vp.Title, qt.DeepEquals, edit.Title)
 	c.Assert(vp.Description, qt.DeepEquals, edit.Description)
 	for i, q := range questions {
@@ -370,6 +393,86 @@ func TestVotingProcessMetadataLateMined(t *testing.T) {
 			c.Assert(q.Choices[j].Title, qt.DeepEquals, edit.Questions[i].Choices[j].Title, comment)
 		}
 	}
+	settled, err := testDB.Job(enq.JobID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(settled.Status, qt.Equals, db.JobStatusCompleted)
+	for i, entry := range settled.Result.Questions {
+		c.Assert(entry.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("question %d", i))
+	}
+}
+
+// TestVotingProcessMetadataDeadEdit covers a metadata edit whose tx never lands: while it is not
+// final its hash is relayed (and the chain rejects it) and a second edit is refused; once its
+// mempool TTL has passed a read settles it as failed, the stored version stays the one voted on,
+// and edits are allowed again.
+func TestVotingProcessMetadataDeadEdit(t *testing.T) {
+	c := qt.New(t)
+	f := setupRelayVoting(t, 1)
+	oid, err := bson.ObjectIDFromHex(f.pid)
+	c.Assert(err, qt.IsNil)
+	processID := f.processIDs[0]
+	vpBefore, questions, err := testDB.ProcessWithQuestions(oid)
+	c.Assert(err, qt.IsNil)
+	q := questions[0]
+
+	// an edit whose tx was submitted but will never mine
+	jobID, err := apicommon.NewJobID()
+	c.Assert(err, qt.IsNil)
+	never := storedQuestionText(&q)
+	never.Title = db.MultiLangString{"default": "Never on chain"}
+	never.MetadataURL = "https://example.invalid/never.json"
+	never.MetadataHash = internal.RandomBytes(sha256.Size)
+	c.Assert(testDB.CreateTxJobWithResult(jobID, db.JobTypeSetProcessMetadata, f.orgAddress,
+		&db.JobResult{Questions: []db.QuestionMetadataJobResult{{
+			QuestionID: q.ID.Hex(), ProcessID: q.UpstreamID, MetadataURL: never.MetadataURL,
+			MetadataHash: never.MetadataHash, Status: db.JobStatusPending,
+		}}}), qt.IsNil)
+	claimed, err := testDB.ClaimVotingProcessMetadataUpdate(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(claimed, qt.IsTrue)
+	pending := never.Pending(jobID)
+	c.Assert(testDB.SetQuestionPendingMetadata(q.ID, pending), qt.IsNil)
+	c.Assert(testDB.SetVotingProcessPendingText(oid, &db.ProcessText{Title: db.MultiLangString{"default": "Never"}}),
+		qt.IsNil)
+
+	meta := requestAndParse[apicommon.VotingProcessMetadata](t, http.MethodGet, "", nil, "processes", f.pid, "metadata")
+	requestAndAssertError(errors.ErrMetadataUpdateInProgress, t, http.MethodPut, f.token,
+		editedMetadata(meta, "Blocked"), "processes", f.pid, "metadata")
+
+	// the pending hash passes the relay check; the chain, which never committed it, rejects the vote
+	proof := f.proofFor(t, processID)
+	rejected := enqueueAndPollJob(t, http.MethodPost, "", &apicommon.RelayVoteRequest{
+		TxPayload: testSignVoteTxWithMetadataHash(t, f.voter, processID, proof, []byte("[\"1\"]"), nil, never.MetadataHash),
+	}, "vote")
+	c.Assert(rejected.Status, qt.Equals, db.JobStatusFailed)
+
+	// past the mempool TTL the edit is final: a read settles it as failed
+	pending.Since = time.Now().Add(-db.PendingMetadataFinalAfter - time.Minute)
+	c.Assert(testDB.SetQuestionPendingMetadata(q.ID, pending), qt.IsNil)
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, "", nil, "processes", f.pid)
+	c.Assert(got.Title, qt.DeepEquals, vpBefore.Title)
+	c.Assert(got.Questions[0].Title, qt.DeepEquals, q.Title)
+	c.Assert(got.Questions[0].MetadataHash, qt.DeepEquals, q.MetadataHash)
+
+	vp, questions, err := testDB.ProcessWithQuestions(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(questions[0].PendingMetadata, qt.IsNil)
+	c.Assert(questions[0].MetadataHash, qt.DeepEquals, q.MetadataHash)
+	c.Assert(vp.PendingText, qt.IsNil)
+	c.Assert(vp.MetadataUpdating.IsZero(), qt.IsTrue)
+	settled, err := testDB.Job(jobID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(settled.Status, qt.Equals, db.JobStatusFailed)
+	c.Assert(settled.Result.Questions, qt.HasLen, 1)
+	c.Assert(settled.Result.Questions[0].Status, qt.Equals, db.JobStatusFailed)
+
+	// the stored version is still the one voted on
+	nullifier := testRelayVoteRequest(t, f.voter, processID, proof, []byte("[\"1\"]"), nil)
+	c.Assert(nullifier, qt.Not(qt.HasLen), 0)
+
+	// and edits are allowed again
+	job := enqueueAndPollJob(t, http.MethodPut, f.token, editedMetadata(meta, "After"), "processes", f.pid, "metadata")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job errors: %s", job.Errors))
 }
 
 // TestVotingProcessMetadataDraft edits the text of a draft, which is stored right away with no tx,

@@ -175,7 +175,10 @@ type API struct {
 	otpCooldown       time.Duration
 	notifySync        bool
 	statusSyncer      StatusEnqueuer
-	electionCache     *lru.Cache[string, *dvoteapi.Election]
+	// metadataEditsRunning holds the hex ids of the processes whose metadata edit job is running on
+	// a tx worker, which owns the edit's outcome until it records it (see settleMetadataEdit).
+	metadataEditsRunning sync.Map
+	electionCache        *lru.Cache[string, *dvoteapi.Election]
 	// liveElectionCache holds not-yet-final legacy elections for legacyLiveElectionTTL.
 	liveElectionCache *expirable.LRU[string, *dvoteapi.Election]
 	// legacyProjectionCache holds fully-final legacy records already projected onto /processes.

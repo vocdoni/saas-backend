@@ -405,7 +405,7 @@ func (a *API) parseRelayVote(payload internal.HexBytes) (*parsedVote, *errors.Er
 			// the chain rejects a vote that does not attest the metadata the election currently
 			// commits to; catching it here keeps a batch from relaying a prefix and tells the
 			// voter to reload the ballot instead of surfacing a chain error on the job.
-			if len(question.MetadataHash) > 0 && !bytes.Equal(vote.MetadataHash, question.MetadataHash) {
+			if !voteMetadataCurrent(question, vote.MetadataHash) {
 				return nil, errors.Ptr(errors.ErrVoteMetadataChanged.Withf(
 					"vote attests metadata hash %x, the election commits to %x", vote.MetadataHash, []byte(question.MetadataHash),
 				))
@@ -425,6 +425,17 @@ func (a *API) parseRelayVote(payload internal.HexBytes) (*parsedVote, *errors.Er
 		org:       orgAddress,
 		nullifier: voteNullifier(signedTx, vote, pid, a.account.ChainID()),
 	}, nil
+}
+
+// voteMetadataCurrent reports whether a vote attesting the given metadata hash may be relayed to
+// the question's election: the hash is the stored one, or that of a metadata edit whose tx is not
+// final yet, which the election may already commit to (the chain decides). Any other hash is a
+// version the voter must not vote on any more; a question published without a hash accepts any.
+func voteMetadataCurrent(q *db.VotingProcessQuestion, attested []byte) bool {
+	if len(q.MetadataHash) == 0 || bytes.Equal(attested, q.MetadataHash) {
+		return true
+	}
+	return q.PendingMetadata != nil && bytes.Equal(attested, q.PendingMetadata.MetadataHash)
 }
 
 // voteNullifier works out the nullifier of an envelope without submitting it, so a vote

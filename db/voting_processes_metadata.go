@@ -9,14 +9,24 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
+// MempoolTxTTL is how long the Vochain may keep a submitted tx in its mempool before evicting it:
+// transactionBlocksTTL (60 blocks) in vocdoni-node's vochain/app.go, at its ~10s block time. A tx
+// that is not mined by then never will be.
+const MempoolTxTTL = 60 * 10 * time.Second
+
+// PendingMetadataFinalAfter is how long after its tx was submitted a pending metadata edit is
+// final: its tx mined, or it never will. It adds a margin to MempoolTxTTL for slow blocks.
+var PendingMetadataFinalAfter = MempoolTxTTL + 5*time.Minute
+
 // MetadataUpdateStaleAfter bounds how long a metadata update claim may stay on a process before it
-// is considered left behind by a crashed or restarted worker and becomes reclaimable. A job submits
-// its txs in one batch and waits at most a few blocks per question, far below this.
-var MetadataUpdateStaleAfter = 15 * time.Minute
+// is considered left behind by a crashed or restarted backend and becomes reclaimable. The claim is
+// held until every pending edit it put on chain is final, so this lies just past
+// PendingMetadataFinalAfter: by then whatever the claim covered is final and can be settled.
+var MetadataUpdateStaleAfter = PendingMetadataFinalAfter + time.Minute
 
 // ClaimVotingProcessMetadataUpdate atomically marks a published process as having a metadata
-// update in flight, so a second update cannot be enqueued until the first one finishes and clears
-// it. It returns true when this call won the claim. A claim older than MetadataUpdateStaleAfter is
+// update in flight, so a second update cannot be enqueued until every tx of the first one is final
+// and the claim is cleared, which keeps at most one pending version per question. It returns true when this call won the claim. A claim older than MetadataUpdateStaleAfter is
 // reclaimable, so a crash mid-job cannot block edits forever.
 func (ms *MongoStorage) ClaimVotingProcessMetadataUpdate(id bson.ObjectID) (bool, error) {
 	if id == bson.NilObjectID {
