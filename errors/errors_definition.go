@@ -94,6 +94,7 @@ var (
 	ErrAutoGroupCannotBeDeleted               = Error{Code: 40150, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("the \"All members\" group is auto-generated and cannot be deleted")}
 	ErrAutoGroupMembersCannotBeModified       = Error{Code: 40151, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("membership of the auto-generated \"All members\" group cannot be manually modified")}
 	ErrNotAnIntegrator                        = Error{Code: 40153, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("organization is not an integrator")}
+	ErrOriginNotAllowed                       = Error{Code: 40199, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("requests must go through the public endpoint")}
 	ErrMaxManagedOrgsReached                  = Error{Code: 40154, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("max managed organizations reached")}
 	ErrIntegratorQuotaExceeded                = Error{Code: 40155, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("integrator quota exceeded")}
 	ErrInvalidAPIKey                          = Error{Code: 40156, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("invalid, revoked or expired API key"), LogLevel: "info"}
