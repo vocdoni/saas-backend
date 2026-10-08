@@ -201,8 +201,8 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
-	// generate a new token with the user name as the subject
-	res, err := a.buildLoginResponse(user.Email)
+	// generate a new token bound to the user's ID and current session version
+	res, err := a.buildLoginResponse(user)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Write(w)
 		return
@@ -524,8 +524,8 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	// generate a new token with the new user email as the subject
-	res, err := a.buildLoginResponse(user.Email)
+	// generate a new token bound to the user's ID and current session version
+	res, err := a.buildLoginResponse(user)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Write(w)
 		return
@@ -536,17 +536,18 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 // updateUserPasswordHandler godoc
 //
 //	@Summary		Update user password
-//	@Description	Update the password for the authenticated user
+//	@Description	Update the password for the authenticated user. Every existing session is revoked;
+//	@Description	a fresh token for the current client is returned in the response.
 //	@Tags			users
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			request	body		apicommon.UserPasswordUpdate	true	"Password update information"
-//	@Success		200		{string}	string							"OK"
-//	@Failure		400		{object}	errors.Error					"Invalid input data"
-//	@Failure		401		{object}	errors.Error					"Unauthorized or old password does not match"
-//	@Failure		500		{object}	errors.Error					"Internal server error"
-//	@Failure		503		{object}	errors.Error					"Server busy, retry after the Retry-After delay"
+//	@Success		200		{object}	apicommon.LoginResponse
+//	@Failure		400		{object}	errors.Error	"Invalid input data"
+//	@Failure		401		{object}	errors.Error	"Unauthorized or old password does not match"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Failure		503		{object}	errors.Error	"Server busy, retry after the Retry-After delay"
 //	@Router			/users/password [put]
 func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -578,16 +579,31 @@ func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) 
 		errors.ErrUnauthorized.Withf("old password does not match").Write(w)
 		return
 	}
-	// hash and update the new password
-	if user.Password, ok = hashPassword(w, r, userPasswords.NewPassword); !ok {
+	// hash the new password
+	newPassword, ok := hashPassword(w, r, userPasswords.NewPassword)
+	if !ok {
 		return
 	}
-	if _, err := a.db.SetUser(user); err != nil {
+	// field-specific write: only the password is updated, and the same atomic update bumps the
+	// session version, revoking every outstanding session (including the one making this request)
+	if err := a.db.UpdateUserPassword(user.ID, newPassword); err != nil {
 		log.Warnw("could not update user password", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
-	apicommon.HTTPWriteOK(w)
+	// reload the user to mint a token for the new session version, so the client changing the
+	// password stays logged in while every other session is revoked
+	updated, err := a.db.User(user.ID)
+	if err != nil {
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+	res, err := a.buildLoginResponse(updated)
+	if err != nil {
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+	apicommon.HTTPWriteJSON(w, res)
 }
 
 // recoverUserPasswordHandler godoc
@@ -789,9 +805,9 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// update the new password
-	user.Password = newPassword
-	if _, err := a.db.SetUser(user); err != nil {
+	// field-specific password write; the same atomic update bumps the session version, revoking
+	// every session minted with the old credentials
+	if err := a.db.UpdateUserPassword(user.ID, newPassword); err != nil {
 		log.Warnw("could not update user password", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)
 		return

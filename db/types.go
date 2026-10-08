@@ -32,6 +32,12 @@ type User struct {
 	OAuth         map[string]OAuthProvider `json:"oauth,omitempty" bson:"oauth,omitempty"` // OAuth providers by name
 	Organizations []OrganizationUser       `json:"organizations" bson:"organizations"`
 	Verified      bool                     `json:"verified" bson:"verified"`
+	// SessionVersion is the version every JWT session of the user is bound to. It is bumped
+	// (atomically, by the credential-update methods) whenever all existing sessions must be
+	// revoked: password change, password reset or email change. Tokens minted with an older
+	// version are rejected by the authenticator. It is never written by SetUser, so a stale
+	// snapshot cannot roll a revocation back.
+	SessionVersion uint64 `json:"-" bson:"sessionVersion"`
 }
 
 type CodeType string

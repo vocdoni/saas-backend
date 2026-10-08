@@ -169,6 +169,10 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	}
 	resp, code = testRequest(t, http.MethodPost, "", verification, verifyUserEndpoint)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	// keep the session token issued on verification: the reset must revoke it
+	var preResetSession apicommon.LoginResponse
+	c.Assert(json.Unmarshal(resp, &preResetSession), qt.IsNil)
+	requestAndAssertCode(http.StatusOK, t, http.MethodGet, preResetSession.Token, nil, usersMeEndpoint)
 
 	// Request password recovery
 	recoverInfo := &apicommon.UserInfo{
@@ -191,6 +195,9 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	}
 	resp, code = testRequest(t, http.MethodPost, "", resetPass, usersResetPasswordEndpoint)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	// The reset revoked every session minted before it
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodGet, preResetSession.Token, nil, usersMeEndpoint)
 
 	// Try to login with the old password (should fail)
 	loginInfo := &apicommon.UserInfo{

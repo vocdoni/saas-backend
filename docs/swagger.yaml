@@ -6678,7 +6678,9 @@ paths:
     put:
       consumes:
       - application/json
-      description: Update the password for the authenticated user
+      description: |-
+        Update the password for the authenticated user. Every existing session is revoked;
+        a fresh token for the current client is returned in the response.
       parameters:
       - description: Password update information
         in: body
@@ -6692,7 +6694,7 @@ paths:
         "200":
           description: OK
           schema:
-            type: string
+            $ref: '#/definitions/apicommon.LoginResponse'
         "400":
           description: Invalid input data
           schema:

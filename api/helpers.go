@@ -72,10 +72,13 @@ func (a *API) organizationFromRequest(r *http.Request) (org *db.Organization, pa
 	return nil, nil, false
 }
 
-// buildLoginResponse creates a JWT token for the given user identifier.
-// The token is signed with the API secret, following the JWT specification.
-// The token is valid for the period specified on jwtExpiration constant.
-func (a *API) buildLoginResponse(id string) (*apicommon.LoginResponse, error) {
+// buildLoginResponse creates a JWT token for the given user. The token is signed
+// with the API secret, following the JWT specification, and is valid for the
+// period specified on the jwtExpiration constant. The userId claim carries the
+// user's immutable numeric ID (never the email, which can be freed and re-registered
+// by someone else), and the sessionVersion claim binds the token to the user's
+// current session version so a credential change revokes it.
+func (a *API) buildLoginResponse(user *db.User) (*apicommon.LoginResponse, error) {
 	// pass a time.Time so jwx encodes a proper NumericDate (seconds). An int64 here would be
 	// read as Unix *seconds*, so a nanosecond value would push expiry ~55 billion years out
 	// and jwt.Validate would never reject the token on expiry.
@@ -83,7 +86,11 @@ func (a *API) buildLoginResponse(id string) (*apicommon.LoginResponse, error) {
 	lr := apicommon.LoginResponse{}
 	lr.Expirity = expiry
 	var err error
-	if _, lr.Token, err = a.auth.Encode(map[string]any{"userId": id, jwt.ExpirationKey: expiry}); err != nil {
+	if _, lr.Token, err = a.auth.Encode(map[string]any{
+		"userId":          strconv.FormatUint(user.ID, 10),
+		"sessionVersion":  strconv.FormatUint(user.SessionVersion, 10),
+		jwt.ExpirationKey: expiry,
+	}); err != nil {
 		return nil, err
 	}
 	return &lr, nil

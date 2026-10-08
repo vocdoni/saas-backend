@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,27 +35,47 @@ func bearerToken(r *http.Request) string {
 var (
 	errInvalidUserClaim = fmt.Errorf("invalid or missing userId claim")
 	errUserNotVerified  = fmt.Errorf("user account not verified")
+	errSessionRevoked   = fmt.Errorf("session is no longer valid")
 )
 
 // userFromToken resolves and validates the user referenced by an already signature/temporal-verified
-// JWT (the userId claim carries the user's email). It is shared by authenticator (required auth) and
-// optionalUser (optional auth): the callers verify the token first (via the Verifier middleware or
-// jwtauth.VerifyToken), and this does the claim → user → verified checks in one place so the two
-// paths cannot drift. Returns a nil user with a typed error the caller maps to a response.
+// JWT (the userId claim carries the user's immutable numeric ID). It is shared by authenticator
+// (required auth) and optionalUser (optional auth): the callers verify the token first (via the
+// Verifier middleware or jwtauth.VerifyToken), and this does the claim → user → verified → session
+// version checks in one place so the two paths cannot drift. Returns a nil user with a typed error
+// the caller maps to a response.
+//
+// Tokens minted before the ID-subject change carried the user's email in userId; they are rejected
+// (the claim does not parse as an ID), because an email can be freed by its owner and re-registered
+// by someone else, which would hand the old session to the new account — and they carry no session
+// version to check revocation against.
 func (a *API) userFromToken(token jwt.Token) (*db.User, error) {
 	if token == nil || jwt.Validate(token, jwt.WithRequiredClaim("userId")) != nil {
 		return nil, errInvalidUserClaim
 	}
-	var email string
-	if err := token.Get("userId", &email); err != nil {
+	var subject string
+	if err := token.Get("userId", &subject); err != nil {
 		return nil, errInvalidUserClaim
 	}
-	user, err := a.db.UserByEmail(email)
+	userID, err := strconv.ParseUint(subject, 10, 64)
+	if err != nil {
+		return nil, errInvalidUserClaim
+	}
+	user, err := a.db.User(userID)
 	if err != nil {
 		return nil, err // db.ErrNotFound or an unexpected DB error
 	}
 	if !user.Verified {
 		return nil, errUserNotVerified
+	}
+	// reject tokens minted before the last credential change (password/email update or reset):
+	// the session version is bumped on those events to revoke every outstanding session
+	var version string
+	if err := token.Get("sessionVersion", &version); err != nil {
+		return nil, errSessionRevoked
+	}
+	if version != strconv.FormatUint(user.SessionVersion, 10) {
+		return nil, errSessionRevoked
 	}
 	return user, nil
 }
@@ -155,6 +176,8 @@ func (a *API) authenticator(next http.Handler) http.Handler {
 				errors.ErrUnauthorized.Withf("user not found").Write(w)
 			case errInvalidUserClaim:
 				errors.ErrUnauthorized.Withf("invalid or missing userId claim").Write(w)
+			case errSessionRevoked:
+				errors.ErrUnauthorized.Withf("session is no longer valid").Write(w)
 			default:
 				errors.ErrGenericInternalServerError.Withf("could not retrieve user from database: %v", err).Write(w)
 			}

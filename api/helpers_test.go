@@ -5,6 +5,7 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/db"
 )
 
 // TestBuildLoginResponseExpiry guards the JWT expiry regression: the exp claim must be encoded
@@ -14,7 +15,7 @@ import (
 func TestBuildLoginResponseExpiry(t *testing.T) {
 	c := qt.New(t)
 
-	res, err := testAPI.buildLoginResponse("expiry@test.com")
+	res, err := testAPI.buildLoginResponse(&db.User{ID: 12345, Email: "expiry@test.com"})
 	c.Assert(err, qt.IsNil)
 
 	token, err := testAPI.auth.Decode(res.Token)

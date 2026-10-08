@@ -161,6 +161,11 @@ func (ms *MongoStorage) SetUser(user *User) (uint64, error) {
 		if err != nil {
 			return 0, err
 		}
+		// never write the session version from a snapshot: it is bumped atomically by the
+		// credential-update methods, and a stale copy here could roll a revocation back
+		if set, ok := updateDoc["$set"].(bson.M); ok {
+			delete(set, "sessionVersion")
+		}
 		result, err := ms.users.UpdateOne(ctx, bson.M{"_id": user.ID}, updateDoc)
 		if err != nil {
 			return 0, err
@@ -185,6 +190,95 @@ func (ms *MongoStorage) SetUser(user *User) (uint64, error) {
 		}
 	}
 	return user.ID, nil
+}
+
+// updateUserFields private method applies the given update document to the user
+// with the given ID, returning ErrNotFound when the user does not exist. It must
+// be called with the keysLock held.
+func (ms *MongoStorage) updateUserFields(ctx context.Context, userID uint64, update bson.M) error {
+	res, err := ms.users.UpdateOne(ctx, bson.M{"_id": userID}, update)
+	if err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return ErrAlreadyExists
+		}
+		return err
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdateUserProfile method updates only the profile fields of the user with the
+// given ID: non-empty first and last names are written with a field-specific
+// $set, so a stale user snapshot can never overwrite anything else (memberships,
+// password, email). If both names are empty it does nothing.
+func (ms *MongoStorage) UpdateUserProfile(userID uint64, firstName, lastName string) error {
+	set := bson.M{}
+	if firstName != "" {
+		set["firstName"] = firstName
+	}
+	if lastName != "" {
+		set["lastName"] = lastName
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	return ms.updateUserFields(ctx, userID, bson.M{"$set": set})
+}
+
+// UpdateUserPassword method sets the password of the user with the given ID and,
+// in the same atomic update, bumps the session version so every existing JWT
+// session is revoked. Nothing else on the user document is touched.
+func (ms *MongoStorage) UpdateUserPassword(userID uint64, hashedPassword string) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	return ms.updateUserFields(ctx, userID, bson.M{
+		"$set": bson.M{"password": hashedPassword},
+		"$inc": bson.M{"sessionVersion": 1},
+	})
+}
+
+// UpdateUserEmail method sets the email of the user with the given ID and, in the
+// same atomic update, bumps the session version so every existing JWT session is
+// revoked. It returns ErrAlreadyExists when the email is already taken (unique
+// index) and ErrNotFound when the user does not exist.
+func (ms *MongoStorage) UpdateUserEmail(userID uint64, email string) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	return ms.updateUserFields(ctx, userID, bson.M{
+		"$set": bson.M{"email": email},
+		"$inc": bson.M{"sessionVersion": 1},
+	})
+}
+
+// SetUserOAuthProvider method sets (links or refreshes) a single OAuth provider
+// entry of the user with the given ID, without writing any other field, so a
+// stale user snapshot can never overwrite concurrent changes.
+func (ms *MongoStorage) SetUserOAuthProvider(userID uint64, provider string, p OAuthProvider) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	return ms.updateUserFields(ctx, userID, bson.M{"$set": bson.M{"oauth." + provider: p}})
+}
+
+// DeleteUserOAuthProvider method unlinks a single OAuth provider from the user
+// with the given ID, without writing any other field.
+func (ms *MongoStorage) DeleteUserOAuthProvider(userID uint64, provider string) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	return ms.updateUserFields(ctx, userID, bson.M{"$unset": bson.M{"oauth." + provider: ""}})
 }
 
 // DelUser method deletes the user from the database. If an error occurs, it

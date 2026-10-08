@@ -7,9 +7,58 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/go-chi/jwtauth/v5"
+	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/internal"
 )
+
+// TestLegacyAndTamperedTokensRejected guards the JWT identity binding: tokens must carry the
+// user's immutable numeric ID plus the current session version. Tokens minted before that change
+// (email subject, no session version) and tokens with a stale session version are all rejected,
+// because an email can be freed and re-registered by someone else, and a credential change must
+// revoke outstanding sessions.
+func TestLegacyAndTamperedTokensRejected(t *testing.T) {
+	c := qt.New(t)
+	defer func() {
+		if err := testDB.DeleteAllDocuments(); err != nil {
+			c.Logf("cleanup: %v", err)
+		}
+	}()
+
+	token := testCreateUser(t, testPass)
+	me := requestAndParse[apicommon.UserInfo](t, http.MethodGet, token, nil, usersMeEndpoint)
+
+	// read the current (valid) claims off the real token
+	valid, err := jwtauth.VerifyToken(testAPI.auth, token)
+	c.Assert(err, qt.IsNil)
+	var subject, sessionVersion string
+	c.Assert(valid.Get("userId", &subject), qt.IsNil)
+	c.Assert(valid.Get("sessionVersion", &sessionVersion), qt.IsNil)
+
+	mint := func(claims map[string]any) string {
+		claims[string(jwt.ExpirationKey)] = time.Now().Add(time.Hour)
+		_, minted, err := testAPI.auth.Encode(claims)
+		c.Assert(err, qt.IsNil)
+		return minted
+	}
+
+	// a legacy token carrying the email as subject is rejected
+	legacy := mint(map[string]any{"userId": me.Email, "sessionVersion": sessionVersion})
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodGet, legacy, nil, usersMeEndpoint)
+
+	// a token without a session version is rejected
+	noVersion := mint(map[string]any{"userId": subject})
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodGet, noVersion, nil, usersMeEndpoint)
+
+	// a token with a stale session version is rejected
+	staleVersion := mint(map[string]any{"userId": subject, "sessionVersion": sessionVersion + "1"})
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodGet, staleVersion, nil, usersMeEndpoint)
+
+	// sanity: a re-minted token with the correct claims is accepted
+	good := mint(map[string]any{"userId": subject, "sessionVersion": sessionVersion})
+	requestAndAssertCode(http.StatusOK, t, http.MethodGet, good, nil, usersMeEndpoint)
+}
 
 // TestRecoveryCooldownKeepsCode guards the recovery anti-flood behavior: once a code has been
 // delivered, an immediate second recovery request is silently accepted without replacing the

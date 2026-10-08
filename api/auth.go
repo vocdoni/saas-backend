@@ -59,8 +59,8 @@ func (a *API) refreshTokenHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
-	// generate a new token with the user name as the subject
-	res, err := a.buildLoginResponse(user.Email)
+	// generate a new token bound to the user's ID and current session version
+	res, err := a.buildLoginResponse(user)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Write(w)
 		return
@@ -111,8 +111,8 @@ func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrUserNoVerified.Write(w)
 		return
 	}
-	// generate a new token with the user name as the subject
-	res, err := a.buildLoginResponse(loginInfo.Email)
+	// generate a new token bound to the user's ID and current session version
+	res, err := a.buildLoginResponse(user)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Write(w)
 		return
@@ -260,16 +260,17 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 			errors.ErrUnauthorized.Write(w)
 			return
 		}
-		// update last authenticated timestamp
+		// update last authenticated timestamp with a field-specific write: the user snapshot
+		// was loaded before authentication, and writing it back whole could restore state an
+		// admin changed meanwhile
 		oauthProvider.LastAuthenticated = now
-		user.OAuth[loginInfo.Provider] = oauthProvider
-		if _, err := a.db.SetUser(user); err != nil {
+		if err := a.db.SetUserOAuthProvider(user.ID, loginInfo.Provider, oauthProvider); err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
 	}
-	// generate a new token with the user name as the subject
-	login, err := a.buildLoginResponse(loginInfo.Email)
+	// generate a new token bound to the user's ID and current session version
+	login, err := a.buildLoginResponse(user)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
@@ -353,15 +354,15 @@ func (a *API) oauthLinkHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// link the provider with a field-specific write, so the user snapshot loaded at
+	// authentication time cannot overwrite anything changed since (memberships, password)
 	now := time.Now()
-	user.OAuth[linkInfo.Provider] = db.OAuthProvider{
+	if err := a.db.SetUserOAuthProvider(user.ID, linkInfo.Provider, db.OAuthProvider{
 		ExternalID:        linkInfo.Address,
 		SignatureHash:     signatureHash,
 		LinkedAt:          now,
 		LastAuthenticated: now,
-	}
-	// save the updated user
-	if _, err := a.db.SetUser(user); err != nil {
+	}); err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
@@ -416,10 +417,9 @@ func (a *API) oauthUnlinkHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrCannotUnlinkLastAuthMethod.Write(w)
 		return
 	}
-	// all checks passed, unlink the provider
-	delete(user.OAuth, provider)
-	// save the updated user
-	if _, err := a.db.SetUser(user); err != nil {
+	// all checks passed, unlink the provider with a field-specific write, so the user
+	// snapshot loaded at authentication time cannot overwrite anything changed since
+	if err := a.db.DeleteUserOAuthProvider(user.ID, provider); err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
