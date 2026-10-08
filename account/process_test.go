@@ -248,3 +248,75 @@ func TestQuestionDisplayMeta(t *testing.T) {
 	})
 	c.Assert(got.Questions[0].Choices[2].Meta, qt.IsNil)
 }
+
+// TestBuildNewProcessTxParent covers the two halves of a process's on-chain link: a parent built
+// metadata-only (no vote options, envelope or census, so the chain refuses votes on it) and a
+// question election pointing at it through parentProcessId.
+func TestBuildNewProcessTxParent(t *testing.T) {
+	a := &Account{} // client is not touched when Nonce is set
+	nonce := uint32(0)
+	parentID := make([]byte, 32)
+	parentID[0] = 0x0a
+	newParams := func() *NewProcessParams {
+		return &NewProcessParams{
+			Params: &db.ElectionParams{
+				EndDate:       time.Now().Add(time.Hour),
+				MaxCensusSize: 10,
+				VoteType:      db.VoteType{MaxCount: 1, MaxValue: 1},
+				ElectionType:  db.ElectionType{Autostart: true, Interruptible: true},
+			},
+			CensusRoot:   []byte{0x01},
+			CensusURI:    "https://example.invalid",
+			MetadataURL:  "https://example.invalid/meta.json",
+			MetadataHash: []byte{0x02},
+			Nonce:        &nonce,
+		}
+	}
+
+	t.Run("metadata-only parent", func(t *testing.T) {
+		c := qt.New(t)
+		p := newParams()
+		p.MetadataOnly = true
+		p.Params.MaxCensusSize = 0
+		tx, err := a.BuildNewProcessTx(p)
+		c.Assert(err, qt.IsNil)
+		proc := tx.GetNewProcess().GetProcess()
+		c.Assert(proc.GetVoteOptions(), qt.IsNil)
+		c.Assert(proc.GetEnvelopeType(), qt.IsNil)
+		c.Assert(proc.GetCensusOrigin(), qt.Equals, models.CensusOrigin(0))
+		c.Assert(proc.GetCensusRoot(), qt.HasLen, 0)
+		c.Assert(proc.GetCensusURI(), qt.Equals, "")
+		c.Assert(proc.GetMaxCensusSize(), qt.Equals, uint64(0))
+		c.Assert(proc.GetParentProcessId(), qt.HasLen, 0)
+		c.Assert(proc.GetMode().GetAutoStart(), qt.IsTrue)
+		c.Assert(proc.GetMetadata(), qt.Equals, p.MetadataURL)
+		c.Assert(proc.GetMetadataHash(), qt.DeepEquals, p.MetadataHash)
+		c.Assert(proc.GetStatus(), qt.Equals, models.ProcessStatus_READY)
+	})
+
+	t.Run("metadata-only parent needs metadata and no parent", func(t *testing.T) {
+		c := qt.New(t)
+		p := newParams()
+		p.MetadataOnly, p.MetadataHash = true, nil
+		_, err := a.BuildNewProcessTx(p)
+		c.Assert(err, qt.ErrorMatches, `.*requires a metadata URL and hash`)
+		p = newParams()
+		p.MetadataOnly, p.ParentProcessID = true, parentID
+		_, err = a.BuildNewProcessTx(p)
+		c.Assert(err, qt.ErrorMatches, `.*cannot have a parent`)
+	})
+
+	t.Run("question election links its parent", func(t *testing.T) {
+		c := qt.New(t)
+		p := newParams()
+		p.ParentProcessID = parentID
+		tx, err := a.BuildNewProcessTx(p)
+		c.Assert(err, qt.IsNil)
+		proc := tx.GetNewProcess().GetProcess()
+		c.Assert(proc.GetParentProcessId(), qt.DeepEquals, parentID)
+		c.Assert(proc.GetVoteOptions(), qt.Not(qt.IsNil))
+		c.Assert(proc.GetEnvelopeType(), qt.Not(qt.IsNil))
+		c.Assert(proc.GetMaxCensusSize(), qt.Equals, uint64(10))
+		c.Assert(proc.GetCensusOrigin(), qt.Equals, models.CensusOrigin_OFF_CHAIN_CA)
+	})
+}

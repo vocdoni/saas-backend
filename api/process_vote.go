@@ -27,7 +27,8 @@ import (
 //	@Description	passed in the path. Public endpoint: no authentication is required. The request is
 //	@Description	checked synchronously — the body must decode to a Vote envelope (else 400) for a
 //	@Description	process the backend knows (else 404) attesting the metadata hash the election
-//	@Description	currently commits to (else 409) — then enqueued for submission on a background
+//	@Description	currently commits to and, as parentMetadataHash, the one its process's parent
+//	@Description	election commits to (else 409) — then enqueued for submission on a background
 //	@Description	worker; the call returns 202 with a job id. The chain's acceptance or rejection of
 //	@Description	the vote (proof, nullifier, election state) is decided when the worker submits it and
 //	@Description	reported on the job: poll GET /jobs/{jobId} for the voteID on success, or a failure.
@@ -122,7 +123,8 @@ const (
 //	@Description	The whole batch is checked synchronously and is accepted or rejected as a unit —
 //	@Description	every payload must decode to a Vote envelope (else 400) for a process the backend
 //	@Description	knows (else 404), each must attest the metadata hash its election currently commits
-//	@Description	to (else 409: the ballot changed and the voter must reload it), all of them must
+//	@Description	to and, as parentMetadataHash, the one of its process's parent election (else 409:
+//	@Description	the ballot changed and the voter must reload it), all of them must
 //	@Description	belong to the same organization (else 400), and the queue must have room for all of
 //	@Description	them (else 503). A rejected batch enqueues nothing. At most 100 votes per call.
 //	@Description	The call returns 202 with a single job id covering the batch. Poll
@@ -430,33 +432,22 @@ func (a *API) parseRelayVote(payload internal.HexBytes) (*parsedVote, *errors.Er
 	}, nil
 }
 
-// voteParentMetadataHash returns the metadata hash of the parent election a vote envelope attests.
-//
-// TODO(parent-process): return vote.ParentMetadataHash once dvote-protobuf ships the field (the
-// chain then requires it to equal the parent's current metadata hash); until then envelopes carry
-// none and checkParentMetadata lets every vote through.
-func voteParentMetadataHash(_ *models.VoteEnvelope) []byte {
-	return nil
-}
-
 // checkParentMetadata rejects up front a vote on a question election that does not attest the
-// metadata its parent election commits to, as the chain would. A question published without a
-// parent, or an envelope attesting no parent hash, is not checked.
-//
-// TODO(parent-process): once the chain requires the parent hash, an envelope attesting none on a
-// question with a parent is rejected too.
+// metadata its parent election commits to (VoteEnvelope.parentMetadataHash), as the chain would. A
+// question published without a parent is not checked here: the chain requires its votes to attest
+// no parent hash.
 func (a *API) checkParentMetadata(q *db.VotingProcessQuestion, vote *models.VoteEnvelope) *errors.Error {
-	attested := voteParentMetadataHash(vote)
-	if len(q.ParentUpstreamID) == 0 || attested == nil {
+	if len(q.ParentUpstreamID) == 0 {
 		return nil
 	}
 	vp, err := a.db.VotingProcess(q.ProcessID)
 	if err != nil {
 		return errors.Ptr(errors.ErrGenericInternalServerError.WithErr(err))
 	}
-	if !parentMetadataCurrent(vp, attested) {
+	if !parentMetadataCurrent(vp, vote.ParentMetadataHash) {
 		return errors.Ptr(errors.ErrVoteMetadataChanged.Withf(
-			"vote attests parent metadata hash %x, the parent election commits to %x", attested, []byte(vp.MetadataHash),
+			"vote attests parent metadata hash %x, the parent election commits to %x",
+			vote.ParentMetadataHash, []byte(vp.MetadataHash),
 		))
 	}
 	return nil
