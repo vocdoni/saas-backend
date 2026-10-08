@@ -406,9 +406,9 @@ func (a *API) parseRelayVote(payload internal.HexBytes) (*parsedVote, *errors.Er
 			// commits to; catching it here keeps a batch from relaying a prefix and tells the
 			// voter to reload the ballot instead of surfacing a chain error on the job.
 			if len(question.MetadataHash) > 0 && !bytes.Equal(vote.MetadataHash, question.MetadataHash) {
-				if apiErr := a.checkVoteMetadataOnChain(question, vote.MetadataHash); apiErr != nil {
-					return nil, apiErr
-				}
+				return nil, errors.Ptr(errors.ErrVoteMetadataChanged.Withf(
+					"vote attests metadata hash %x, the election commits to %x", vote.MetadataHash, []byte(question.MetadataHash),
+				))
 			}
 		case db.ErrNotFound:
 			return nil, errors.Ptr(errors.ErrProcessNotFound)
@@ -425,28 +425,6 @@ func (a *API) parseRelayVote(payload internal.HexBytes) (*parsedVote, *errors.Er
 		org:       orgAddress,
 		nullifier: voteNullifier(signedTx, vote, pid, a.account.ChainID()),
 	}, nil
-}
-
-// checkVoteMetadataOnChain decides a vote whose envelope attests a metadata hash other than the one
-// stored for its question. The stored hash can lag the chain (a metadata edit mined after the
-// backend stopped waiting for it), so the chain arbitrates: the vote is rejected only when it also
-// differs from the hash the election commits to on chain. When it matches the chain, the stored
-// question is stale and is handed to reconcileQuestionMetadata. If the chain cannot be read, the
-// vote is relayed and the chain decides, rather than rejecting it on possibly stale data.
-func (a *API) checkVoteMetadataOnChain(question *db.VotingProcessQuestion, attested []byte) *errors.Error {
-	election, err := a.account.Election(question.UpstreamID)
-	if err != nil {
-		log.Warnw("could not read election metadata hash, relaying vote for the chain to decide",
-			"election", question.UpstreamID.String(), "error", err)
-		return nil
-	}
-	if !bytes.Equal(attested, election.MetadataHash) {
-		return errors.Ptr(errors.ErrVoteMetadataChanged.Withf(
-			"vote attests metadata hash %x, the election commits to %x", attested, []byte(election.MetadataHash),
-		))
-	}
-	a.reconcileQuestionMetadata(question, election.MetadataHash)
-	return nil
 }
 
 // voteNullifier works out the nullifier of an envelope without submitting it, so a vote
