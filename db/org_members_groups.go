@@ -123,7 +123,9 @@ func (ms *MongoStorage) CreateOrganizationMemberGroup(group *OrganizationMemberG
 }
 
 // UpdateOrganizationMemberGroup updates an organization members group by adding
-// and/or removing members. If a member exists in both lists, it will be removed.
+// and/or removing members. A member present in both lists is rejected with ErrInvalidData:
+// honouring one list would contradict the other, and the removal's census revocation has
+// side effects an immediate re-add would not undo.
 // For the auto-generated group, only title and description can be updated;
 // manual membership changes are not allowed and return ErrAutoGroupMembersCannotBeModified.
 func (ms *MongoStorage) UpdateOrganizationMemberGroup(
@@ -143,6 +145,13 @@ func (ms *MongoStorage) UpdateOrganizationMemberGroup(
 	// Auto groups do not allow manual member manipulation.
 	if group.IsAutoGroup && (len(addedMembers) > 0 || len(removedMembers) > 0) {
 		return nil, ErrAutoGroupMembersCannotBeModified
+	}
+	// A member in both lists would be revoked from the group censuses and then kept in the
+	// group anyway, leaving it a member that can no longer vote. Refuse the ambiguity instead.
+	for _, id := range addedMembers {
+		if contains(removedMembers, id) {
+			return nil, fmt.Errorf("member %s is in both the added and removed lists: %w", id, ErrInvalidData)
+		}
 	}
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)

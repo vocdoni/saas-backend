@@ -513,7 +513,15 @@ func (ms *MongoStorage) updateCensusParticipantsForMember(ctx context.Context, m
 		return fmt.Errorf("failed to decode census participants: %w", err)
 	}
 
-	// Process each census participant
+	// Two phases: validate every census first, collecting the planned writes, and only then
+	// apply them. Writing as we validate would leave the participants of the already-processed
+	// censuses changed when a later census reports a duplicate conflict, so the member's hashes
+	// would no longer match its stored data in some censuses but not others.
+	type plannedWrite struct {
+		filter bson.M
+		update bson.M
+	}
+	writes := make([]plannedWrite, 0, len(participants))
 	for _, participant := range participants {
 		// Get the census to find AuthFields and TwoFaFields
 		census, err := ms.Census(participant.CensusID)
@@ -528,14 +536,13 @@ func (ms *MongoStorage) updateCensusParticipantsForMember(ctx context.Context, m
 		// the edit left the member without the data to log in: drop its login hashes rather than
 		// re-hash it, so it can neither log in nor clash with another participant
 		if member.MissingLoginData(census.AuthFields, census.TwoFaFields) {
-			unset := bson.M{
-				"$unset": bson.M{"loginHash": "", "loginHashEmail": "", "loginHashPhone": ""},
-				"$set":   bson.M{"updatedAt": time.Now()},
-			}
-			if _, err := ms.censusParticipants.UpdateOne(ctx, participantFilter, unset); err != nil {
-				return fmt.Errorf("failed to update census participant %s in census %s: %w",
-					participant.ParticipantID, participant.CensusID, err)
-			}
+			writes = append(writes, plannedWrite{
+				filter: participantFilter,
+				update: bson.M{
+					"$unset": bson.M{"loginHash": "", "loginHashEmail": "", "loginHashPhone": ""},
+					"$set":   bson.M{"updatedAt": time.Now()},
+				},
+			})
 			continue
 		}
 
@@ -564,16 +571,16 @@ func (ms *MongoStorage) updateCensusParticipantsForMember(ctx context.Context, m
 				participant.ParticipantID, participant.CensusID, ErrUpdateWouldCreateDuplicates)
 		}
 
-		// Update the census participant
 		// Prepare update document for census participant
 		set := maps.Clone(hashes)
 		set["updatedAt"] = time.Now()
-		participantUpdate := bson.M{"$set": set}
+		writes = append(writes, plannedWrite{filter: participantFilter, update: bson.M{"$set": set}})
+	}
 
-		_, err = ms.censusParticipants.UpdateOne(ctx, participantFilter, participantUpdate)
-		if err != nil {
-			return fmt.Errorf("failed to update census participant %s in census %s: %w",
-				participant.ParticipantID, participant.CensusID, err)
+	// every census validated: apply the writes
+	for _, w := range writes {
+		if _, err := ms.censusParticipants.UpdateOne(ctx, w.filter, w.update); err != nil {
+			return fmt.Errorf("failed to update census participant %v: %w", w.filter["participantID"], err)
 		}
 	}
 

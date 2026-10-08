@@ -835,15 +835,16 @@ func TestUpsertMemberEditAtCensusQuota(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(stored.Name, qt.Equals, "Renamed")
 
-	// creating one is still refused, and creates nothing
+	// creating one is still refused, and creates nothing. The member-base quota — checked first,
+	// as in the bulk POST — trips before the census preflight: the org is at its member limit too
 	apiErr := putOrgMemberAndExpectError(t, token, orgAddress, newOrgMember())
-	c.Assert(apiErr.Code, qt.Equals, errors.ErrProcessCensusSizeExceedsPlanLimit.Code)
+	c.Assert(apiErr.Code, qt.Equals, errors.ErrExceedsOrganizationMembersLimit.Code)
 
 	// an id that names no member of this organization is a creation too, refused the same way
 	unknown := newOrgMember()
 	unknown.ID = bson.NewObjectID().Hex()
 	apiErr = putOrgMemberAndExpectError(t, token, orgAddress, unknown)
-	c.Assert(apiErr.Code, qt.Equals, errors.ErrProcessCensusSizeExceedsPlanLimit.Code)
+	c.Assert(apiErr.Code, qt.Equals, errors.ErrExceedsOrganizationMembersLimit.Code)
 
 	count, err := testDB.CountOrgMembers(orgAddress)
 	c.Assert(err, qt.IsNil)
