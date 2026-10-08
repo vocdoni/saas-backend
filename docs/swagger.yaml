@@ -1280,6 +1280,14 @@ definitions:
         type: string
       parentProcessId:
         type: string
+      parentUpstreamId:
+        description: |-
+          ParentUpstreamID is the on-chain id of the process's parent election this question's election
+          is linked to. A vote must also attest the parent's current metadata hash (the process's
+          metadataHash, from GET /processes/{processId}).
+        example: deadbeef
+        format: hex
+        type: string
       results:
         allOf:
         - $ref: '#/definitions/db.QuestionResults'
@@ -2005,10 +2013,10 @@ definitions:
         type: string
       upstreamId:
         description: |-
-          UpstreamID is the on-chain id of the process's parent election, published after the question
-          elections. Its metadata document holds the process title, description and media and lists the
-          question elections in order (meta.questionElections). It is never voted on. Absent until
-          published, and for processes published without one.
+          UpstreamID is the on-chain id of the process's metadata-only parent election, published before
+          the question elections, which are linked to it. Its metadata document holds the process title,
+          description and media. It is never voted on, but every vote attests its metadataHash. Absent
+          until published, and for processes published without one.
         example: deadbeef
         format: hex
         type: string
@@ -2384,6 +2392,14 @@ definitions:
           election points to on chain.
         type: string
       parentProcessId:
+        type: string
+      parentUpstreamId:
+        description: |-
+          ParentUpstreamID is the on-chain id of the process's parent election this question's election
+          was published under (the process's upstreamId). A vote must also attest the parent's current
+          metadata hash (the process's metadataHash).
+        example: deadbeef
+        format: hex
         type: string
       results:
         allOf:
@@ -5820,12 +5836,13 @@ paths:
       consumes:
       - application/json
       description: |-
-        Publish a voting process: one on-chain election per question, submitted as a batch,
-        then the process's parent election. The parent carries the process title,
-        description and media, lists the question elections in order
-        (meta.questionElections) and commits the hash of that document; it is never voted
-        on and is exposed as the process's upstreamId, metadataURL and metadataHash. A
-        publish that failed after the questions were mined publishes only the parent when
+        Publish a voting process: first the process's parent election, then one on-chain
+        election per question, submitted as a batch and each linked to the parent. The
+        parent is metadata-only: it carries the process title, description and media and
+        commits the hash of that document, is never voted on, and is exposed as the
+        process's upstreamId, metadataURL and metadataHash (each question's
+        parentUpstreamId names it). The process is published only once every election is
+        confirmed; a publish that failed part way resumes with the missing elections when
         retried. Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
         GET /jobs/{jobId}. Idempotent once published.
         409 (40172) means the stored questions do not match the process and the draft has to be

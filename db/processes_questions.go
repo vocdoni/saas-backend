@@ -224,6 +224,8 @@ type QuestionPublication struct {
 	MetadataURL  string
 	MetadataHash internal.HexBytes
 	Status       string
+	// ParentUpstreamID is the parent election the question election was published under, if any.
+	ParentUpstreamID internal.HexBytes
 }
 
 // SetQuestionPublished records the on-chain outcome of a single question in one targeted
@@ -237,6 +239,9 @@ func (ms *MongoStorage) SetQuestionPublished(p *QuestionPublication) error {
 	set := bson.M{"upstreamId": p.UpstreamID, "metadataURL": p.MetadataURL, "status": p.Status} //nolint:goconst
 	if len(p.MetadataHash) > 0 {
 		set["metadataHash"] = p.MetadataHash
+	}
+	if len(p.ParentUpstreamID) > 0 {
+		set["parentUpstreamId"] = p.ParentUpstreamID
 	}
 	res, err := ms.processesQuestions.UpdateOne(ctx, bson.M{"_id": p.ID}, bson.M{"$set": set})
 	if err != nil {
