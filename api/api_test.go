@@ -365,8 +365,9 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	// the test chain targets one block per second (test.StartVoconedContainer), so confirming a
-	// tx need not wait for the default poll interval, sized for the 10s production block time
+	// the test chain targets one block per second, so confirming the txs of a publish (the parent
+	// election, then the question batch) need not wait for the default poll interval, sized for
+	// the 10s production block time
 	testAccount.TxPollInterval = 250 * time.Millisecond
 	// create test mail service
 	if err := testMailService.New(&testutil.SMTPConfig{
