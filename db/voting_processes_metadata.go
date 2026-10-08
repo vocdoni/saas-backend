@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 // MempoolTxTTL is how long the Vochain may keep a submitted tx in its mempool before evicting it:
@@ -67,22 +66,38 @@ func (ms *MongoStorage) ClearVotingProcessMetadataUpdate(id bson.ObjectID) error
 }
 
 // SetVotingProcessText writes the process's own editable text in one targeted update, leaving
-// every other field — the publish and metadata claims included — untouched, and drops any pending
-// text (this one supersedes it). updatedAt only moves forward ($max), keeping the
-// conditional-update token of SetVotingProcessDraft monotonic.
+// every other field — the publish and metadata claims included — untouched. updatedAt only moves
+// forward ($max), keeping the conditional-update token of SetVotingProcessDraft monotonic.
 func (ms *MongoStorage) SetVotingProcessText(id bson.ObjectID, text *ProcessText) error {
-	if id == bson.NilObjectID || text == nil {
+	if text == nil {
+		return ErrInvalidData
+	}
+	return ms.SetVotingProcessMetadata(id, &ProcessMetadataUpdate{Text: *text})
+}
+
+// SetVotingProcessMetadata writes an edit of the process's own text in one targeted update, as
+// SetVotingProcessText. An update that repoints the parent election at a new metadata hash also
+// stores its URL and hash and drops the parent's pending edit, which that version resolves.
+func (ms *MongoStorage) SetVotingProcessMetadata(id bson.ObjectID, u *ProcessMetadataUpdate) error {
+	if id == bson.NilObjectID || u == nil {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	set := bson.M{"title": text.Title}
+	set := bson.M{"title": u.Text.Title}
 	unset := bson.M{}
-	setOrUnset(set, unset, "description", text.Description)
-	setOrUnset(set, unset, "header", text.Header)
-	setOrUnset(set, unset, "streamUri", text.StreamURI)
-	unset["pendingText"] = ""
-	update := bson.M{"$set": set, "$unset": unset, "$max": bson.M{"updatedAt": time.Now()}}
+	setOrUnset(set, unset, "description", u.Text.Description)
+	setOrUnset(set, unset, "header", u.Text.Header)
+	setOrUnset(set, unset, "streamUri", u.Text.StreamURI)
+	if len(u.MetadataHash) > 0 {
+		set["metadataURL"] = u.MetadataURL
+		set["metadataHash"] = u.MetadataHash
+		unset["pendingMetadata"] = ""
+	}
+	update := bson.M{"$set": set, "$max": bson.M{"updatedAt": time.Now()}}
+	if len(unset) > 0 {
+		update["$unset"] = unset
+	}
 	res, err := ms.votingProcesses.UpdateOne(ctx, bson.M{"_id": id}, update)
 	if err != nil {
 		return fmt.Errorf("failed to set voting process text: %w", err)
@@ -93,11 +108,11 @@ func (ms *MongoStorage) SetVotingProcessText(id bson.ObjectID, text *ProcessText
 	return nil
 }
 
-// SetQuestionText writes a text-only edit of one question in one targeted update. It only applies
-// while the stored question still has exactly len(ChoiceTitles) choices, since the titles are
-// matched by position; ErrNotFound means the question is gone or its choices changed. An update
-// that repoints the question at a new metadata hash also drops its pending edit, which that
-// version resolves.
+// SetQuestionText writes an edit of one question's display content in one targeted update. It
+// only applies while the stored question still has exactly len(ChoiceTitles) choices, since the
+// titles are matched by position; ErrNotFound means the question is gone or its choices changed.
+// An update that repoints the question at a new metadata hash also drops its pending edit, which
+// that version resolves.
 func (ms *MongoStorage) SetQuestionText(u *QuestionTextUpdate) error {
 	if u == nil || u.ID == bson.NilObjectID {
 		return ErrInvalidData
@@ -109,6 +124,9 @@ func (ms *MongoStorage) SetQuestionText(u *QuestionTextUpdate) error {
 	setOrUnset(set, unset, "description", u.Description)
 	for i, title := range u.ChoiceTitles {
 		set[fmt.Sprintf("choices.%d.title", i)] = title
+	}
+	if u.Metadata != nil {
+		set["metadata"] = u.Metadata
 	}
 	if u.MetadataURL != "" {
 		set["metadataURL"] = u.MetadataURL
@@ -165,17 +183,18 @@ func (ms *MongoStorage) ClearQuestionPendingMetadata(id bson.ObjectID) error {
 	return nil
 }
 
-// SetVotingProcessPendingText records the process text of a metadata edit whose txs are being put
-// on chain, to be stored by ApplyVotingProcessPendingText once all of them landed.
-func (ms *MongoStorage) SetVotingProcessPendingText(id bson.ObjectID, text *ProcessText) error {
-	if id == bson.NilObjectID || text == nil {
+// SetVotingProcessPendingMetadata records the edit the parent election's SET_PROCESS_METADATA tx is
+// about to put on chain, replacing any earlier pending edit.
+func (ms *MongoStorage) SetVotingProcessPendingMetadata(id bson.ObjectID, pending *PendingProcessMetadata) error {
+	if id == bson.NilObjectID || pending == nil {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	res, err := ms.votingProcesses.UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": bson.M{"pendingText": text}})
+	res, err := ms.votingProcesses.UpdateOne(ctx, bson.M{"_id": id},
+		bson.M{"$set": bson.M{"pendingMetadata": pending}})
 	if err != nil {
-		return fmt.Errorf("failed to set voting process pending text: %w", err)
+		return fmt.Errorf("failed to set voting process pending metadata: %w", err)
 	}
 	if res.MatchedCount == 0 {
 		return ErrNotFound
@@ -183,52 +202,19 @@ func (ms *MongoStorage) SetVotingProcessPendingText(id bson.ObjectID, text *Proc
 	return nil
 }
 
-// ClearVotingProcessPendingText drops a process's pending text, once some question of its edit is
-// known not to land (storing the text would then describe that question wrongly).
-func (ms *MongoStorage) ClearVotingProcessPendingText(id bson.ObjectID) error {
+// ClearVotingProcessPendingMetadata drops the parent election's pending edit, once its tx is known
+// not to land.
+func (ms *MongoStorage) ClearVotingProcessPendingMetadata(id bson.ObjectID) error {
 	if id == bson.NilObjectID {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	if _, err := ms.votingProcesses.UpdateOne(ctx, bson.M{"_id": id},
-		bson.M{"$unset": bson.M{"pendingText": ""}}); err != nil {
-		return fmt.Errorf("failed to clear voting process pending text: %w", err)
+		bson.M{"$unset": bson.M{"pendingMetadata": ""}}); err != nil {
+		return fmt.Errorf("failed to clear voting process pending metadata: %w", err)
 	}
 	return nil
-}
-
-// ApplyVotingProcessPendingText stores a process's pending text as its text once none of its
-// questions has a pending edit left, i.e. every question of the edit landed on chain. It returns
-// the text it stored, or nil when there was nothing to apply yet.
-func (ms *MongoStorage) ApplyVotingProcessPendingText(id bson.ObjectID) (*ProcessText, error) {
-	if id == bson.NilObjectID {
-		return nil, ErrInvalidData
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-	pendingQuestions, err := ms.processesQuestions.CountDocuments(ctx,
-		bson.M{"processId": id, "pendingMetadata": bson.M{"$exists": true}})
-	if err != nil {
-		return nil, fmt.Errorf("failed to count questions with pending metadata: %w", err)
-	}
-	if pendingQuestions > 0 {
-		return nil, nil
-	}
-	var vp VotingProcess
-	if err := ms.votingProcesses.FindOne(ctx, bson.M{"_id": id}).Decode(&vp); err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, ErrNotFound
-		}
-		return nil, fmt.Errorf("failed to read voting process: %w", err)
-	}
-	if vp.PendingText == nil {
-		return nil, nil
-	}
-	if err := ms.SetVotingProcessText(id, vp.PendingText); err != nil {
-		return nil, err
-	}
-	return vp.PendingText, nil
 }
 
 // setOrUnset adds key to set with value, or to unset when value is an empty string or text,

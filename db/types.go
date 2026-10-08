@@ -609,6 +609,12 @@ type Question struct {
 	Title       MultiLangString `json:"title" bson:"title"`
 	Description MultiLangString `json:"description,omitempty" bson:"description,omitempty"`
 	Choices     []Choice        `json:"choices" bson:"choices"`
+	// Meta is the question's display info beyond its text, written into the metadata document as
+	// questions[i].meta. Publish-time only, never persisted.
+	Meta map[string]any `json:"-" bson:"-"`
+	// ChoicesMeta is each choice's display info (description, image...) keyed by choice value,
+	// written into the metadata document as that choice's meta. Publish-time only, never persisted.
+	ChoicesMeta map[uint32]map[string]any `json:"-" bson:"-"`
 }
 
 // VoteType describes how votes are counted and validated.
@@ -662,16 +668,15 @@ type ElectionParams struct {
 	ElectionType  ElectionType          `json:"electionType" bson:"electionType"`
 	TypeMetadata  *ElectionTypeMetadata `json:"type,omitempty" bson:"type,omitempty"`
 	MaxCensusSize uint64                `json:"maxCensusSize,omitempty" bson:"maxCensusSize,omitempty"`
-	// ProcessTitle and ProcessDescription are the text of the voting process the election belongs
-	// to (one election per question). They are written into the metadata document as meta.process
-	// so the heading voters see is covered by the on-chain metadata hash. Publish-time only, never
-	// persisted.
-	ProcessTitle       MultiLangString `json:"-" bson:"-"`
-	ProcessDescription MultiLangString `json:"-" bson:"-"`
-	// MediaHashes maps media URLs of the document (Header, StreamURI) to the lowercase hex
+	// QuestionElections are the on-chain ids of the question elections of a voting process, in
+	// question order. Only the parent election of a process carries them: they are written into
+	// its metadata document as meta.questionElections, so the document (and the hash committed for
+	// it) ties the process text to the ballots it heads. Publish-time only, never persisted.
+	QuestionElections []internal.HexBytes `json:"-" bson:"-"`
+	// MediaHashes maps the image URLs of the document (today the Header) to the lowercase hex
 	// SHA-256 of the bytes served at them. It is written into the metadata document as
-	// meta.mediaHashes so voters can check the media they were shown; a URL absent from it is
-	// not verifiable. Publish-time only, never persisted.
+	// meta.mediaHashes so voters can check the images they were shown. Videos (StreamURI) are never
+	// hashed: only their URL is committed. Publish-time only, never persisted.
 	MediaHashes map[string]string `json:"-" bson:"-"`
 	// InitialStatus is the on-chain status the election is published with. Empty (the default)
 	// means READY; "PAUSED" publishes it in the PAUSED state, so voting only opens once an
@@ -776,8 +781,8 @@ type VotingProcess struct {
 	StreamURI   string          `json:"streamUri,omitempty" bson:"streamUri,omitempty"`
 	StartDate   time.Time       `json:"startDate,omitempty" bson:"startDate,omitempty"`
 	EndDate     time.Time       `json:"endDate,omitempty" bson:"endDate,omitempty"`
-	// InitialStatus is the on-chain status every question's election is published with.
-	// Empty (default) means READY; "PAUSED" publishes every question's election in the
+	// InitialStatus is the on-chain status every election of the process (each question's and
+	// the parent) is published with. Empty (default) means READY; "PAUSED" publishes them in the
 	// PAUSED state, so voting only opens after an admin sets each question to READY via
 	// SET_PROCESS_STATUS. Only "" / "READY" / "PAUSED" are accepted. Publish-time only:
 	// after publish, each question's status evolves independently and this field is not
@@ -796,20 +801,36 @@ type VotingProcess struct {
 	// and the stale sweep on it being old, so a zero date persisted as a value would make every
 	// draft ever created look like a crashed publish.
 	Publishing time.Time `json:"-" bson:"publishing,omitempty"`
+	// UpstreamID is the on-chain id of the process's parent election, published after every
+	// question election is confirmed. It carries the process-level metadata (title, description,
+	// media and the list of question elections) and is never voted on: the CSP signs only for
+	// question elections and the relay resolves votes by question. Absent until published.
+	UpstreamID internal.HexBytes `json:"upstreamId,omitempty" bson:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"` //nolint:lll
+	// MetadataURL serves the ElectionMetadata document the parent election points to on chain.
+	MetadataURL string `json:"metadataURL,omitempty" bson:"metadataURL,omitempty"`
+	// MetadataHash is the SHA-256 of the exact bytes served at MetadataURL, committed on chain by
+	// the parent election.
+	MetadataHash internal.HexBytes `json:"metadataHash,omitempty" bson:"metadataHash,omitempty" swaggertype:"string" format:"hex" example:"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"` //nolint:lll
+	// UpstreamStatus is the stored on-chain status of the parent election, which follows the
+	// process: it moves once every question election has reached the same status.
+	UpstreamStatus string `json:"-" bson:"upstreamStatus,omitempty"`
+	// UpstreamSyncedAt is when the status syncer last reconciled UpstreamStatus with the chain.
+	UpstreamSyncedAt time.Time `json:"-" bson:"upstreamSyncedAt,omitempty"`
 	// MetadataUpdating is the claim a metadata update job holds on a published process (see
 	// ClaimVotingProcessMetadataUpdate), so a second edit cannot race the first one's on-chain
 	// txs. omitempty for the same reason as Publishing: the claim matches on the field being absent.
 	MetadataUpdating time.Time `json:"-" bson:"metadataUpdating,omitempty"`
-	// PendingText is the process text of a metadata edit whose txs are not all known to be mined.
-	// It is stored as the process's text once no question has a pending edit left.
-	PendingText *ProcessText `json:"-" bson:"pendingText,omitempty"`
-	CreatedAt   time.Time    `json:"createdAt" bson:"createdAt"`
-	UpdatedAt   time.Time    `json:"updatedAt" bson:"updatedAt"`
+	// PendingMetadata is a metadata edit of the parent election whose SET_PROCESS_METADATA tx was
+	// submitted but is not known to be mined. It is applied to the process (and cleared) once the
+	// chain shows the parent committing to its MetadataHash, even after the edit job stopped waiting.
+	PendingMetadata *PendingProcessMetadata `json:"-" bson:"pendingMetadata,omitempty"`
+	CreatedAt       time.Time               `json:"createdAt" bson:"createdAt"`
+	UpdatedAt       time.Time               `json:"updatedAt" bson:"updatedAt"`
 }
 
 // ProcessText is the editable text a voting process holds itself, as opposed to the text of its
-// questions. All of it also travels in every question's election metadata document: the title and
-// description as meta.process, header and streamUri as the document's media.
+// questions. It is what the process's parent election document carries: the title and
+// description as the document's own, header and streamUri as its media.
 type ProcessText struct {
 	Title       MultiLangString `bson:"title"`
 	Description MultiLangString `bson:"description,omitempty"`
@@ -817,13 +838,50 @@ type ProcessText struct {
 	StreamURI   string          `bson:"streamUri,omitempty"`
 }
 
+// ProcessMetadataUpdate is an edit of a process's own text. MetadataURL and MetadataHash, when
+// set, repoint the process's parent election at the metadata document it now commits to.
+type ProcessMetadataUpdate struct {
+	Text         ProcessText
+	MetadataURL  string
+	MetadataHash internal.HexBytes
+}
+
+// PendingProcessMetadata is the edit a parent election's submitted SET_PROCESS_METADATA tx puts
+// on chain: the new process text and the metadata document and hash the election will commit to.
+// Since is when it was submitted, JobID the set_process_metadata job that submitted it.
+type PendingProcessMetadata struct {
+	Text         ProcessText       `bson:"text"`
+	MetadataURL  string            `bson:"metadataURL"`
+	MetadataHash internal.HexBytes `bson:"metadataHash"`
+	Since        time.Time         `bson:"since"`
+	JobID        string            `bson:"jobId"`
+}
+
+// Update returns the process update that applies this pending edit.
+func (p *PendingProcessMetadata) Update() *ProcessMetadataUpdate {
+	return &ProcessMetadataUpdate{Text: p.Text, MetadataURL: p.MetadataURL, MetadataHash: p.MetadataHash}
+}
+
+// Pending returns the pending edit form of a process update that repoints the parent election at
+// a new metadata document, submitted now by job jobID.
+func (u *ProcessMetadataUpdate) Pending(jobID string) *PendingProcessMetadata {
+	return &PendingProcessMetadata{
+		Text:         u.Text,
+		MetadataURL:  u.MetadataURL,
+		MetadataHash: u.MetadataHash,
+		Since:        time.Now(),
+		JobID:        jobID,
+	}
+}
+
 // PendingQuestionMetadata is the edit a question's submitted SET_PROCESS_METADATA tx puts on chain:
-// the new text and the metadata document and hash the election will commit to. Since is when it
-// was submitted, JobID the set_process_metadata job that submitted it.
+// the new text and display info and the metadata document and hash the election will commit to.
+// Since is when it was submitted, JobID the set_process_metadata job that submitted it.
 type PendingQuestionMetadata struct {
 	Title        MultiLangString   `bson:"title"`
 	Description  MultiLangString   `bson:"description,omitempty"`
 	ChoiceTitles []MultiLangString `bson:"choiceTitles"`
+	Metadata     map[string]any    `bson:"metadata,omitempty"`
 	MetadataURL  string            `bson:"metadataURL"`
 	MetadataHash internal.HexBytes `bson:"metadataHash"`
 	Since        time.Time         `bson:"since"`
@@ -837,6 +895,7 @@ func (p *PendingQuestionMetadata) Update(id bson.ObjectID) *QuestionTextUpdate {
 		Title:        p.Title,
 		Description:  p.Description,
 		ChoiceTitles: p.ChoiceTitles,
+		Metadata:     p.Metadata,
 		MetadataURL:  p.MetadataURL,
 		MetadataHash: p.MetadataHash,
 	}
@@ -849,6 +908,7 @@ func (u *QuestionTextUpdate) Pending(jobID string) *PendingQuestionMetadata {
 		Title:        u.Title,
 		Description:  u.Description,
 		ChoiceTitles: u.ChoiceTitles,
+		Metadata:     u.Metadata,
 		MetadataURL:  u.MetadataURL,
 		MetadataHash: u.MetadataHash,
 		Since:        time.Now(),
@@ -856,14 +916,16 @@ func (u *QuestionTextUpdate) Pending(jobID string) *PendingQuestionMetadata {
 	}
 }
 
-// QuestionTextUpdate is a text-only edit of one question: its title, description and choice
-// titles, the latter by position. MetadataURL and MetadataHash, when set, repoint a published
-// question at the metadata document its election now commits to on chain.
+// QuestionTextUpdate is an edit of one question's display content: its title, description, choice
+// titles (by position) and, when not nil, its free-form metadata (which carries the choices'
+// display info). MetadataURL and MetadataHash, when set, repoint a published question at the
+// metadata document its election now commits to on chain.
 type QuestionTextUpdate struct {
 	ID           bson.ObjectID
 	Title        MultiLangString
 	Description  MultiLangString
 	ChoiceTitles []MultiLangString
+	Metadata     map[string]any
 	MetadataURL  string
 	MetadataHash internal.HexBytes
 }
@@ -1144,8 +1206,8 @@ const (
 	// (batch of NEW_PROCESS txs) tx job
 	JobTypePublishVotingProcess JobType = "publish_voting_process"
 	// JobTypeSetProcessMetadata represents a metadata edit of a published voting process: one
-	// SET_PROCESS_METADATA tx per question whose election metadata changed, one
-	// JobResult.Questions entry each
+	// SET_PROCESS_METADATA tx per election whose metadata changed, reported as one JobResult.Questions
+	// entry per question and JobResult.Parent for the parent election
 	JobTypeSetProcessMetadata JobType = "set_process_metadata"
 )
 
@@ -1200,15 +1262,19 @@ type JobResult struct {
 	Votes []VoteJobResult `json:"votes,omitempty" bson:"votes,omitempty"`
 	// Questions carries the per-question outcome of a metadata edit (JobTypeSetProcessMetadata),
 	// one entry per question whose election metadata changed, in process order.
-	Questions []QuestionMetadataJobResult `json:"questions,omitempty" bson:"questions,omitempty"`
+	Questions []ElectionMetadataJobResult `json:"questions,omitempty" bson:"questions,omitempty"`
+	// Parent carries the outcome of a metadata edit for the process's parent election, present
+	// when the edit changed the process's own text or header.
+	Parent *ElectionMetadataJobResult `json:"parent,omitempty" bson:"parent,omitempty"`
 }
 
-// QuestionMetadataJobResult is the outcome of one question's SET_PROCESS_METADATA tx inside a
-// metadata edit job. MetadataURL and MetadataHash are the version the tx commits; on completed
-// they are what the question now serves and every vote must attest, on failed the question kept
-// its previous version.
-type QuestionMetadataJobResult struct {
-	QuestionID   string            `json:"questionId" bson:"questionId"`
+// ElectionMetadataJobResult is the outcome of one election's SET_PROCESS_METADATA tx inside a
+// metadata edit job: a question's (QuestionID set) or the process's parent election's (no
+// QuestionID). ProcessID is the on-chain election id. MetadataURL and MetadataHash are the version
+// the tx commits; on completed they are what the question or process now serves (and, for a
+// question, what every vote must attest), on failed it kept its previous version.
+type ElectionMetadataJobResult struct {
+	QuestionID   string            `json:"questionId,omitempty" bson:"questionId,omitempty"`
 	ProcessID    internal.HexBytes `json:"processId" bson:"processId" swaggertype:"string" example:"deadbeef"`
 	MetadataURL  string            `json:"metadataURL" bson:"metadataURL"`
 	MetadataHash internal.HexBytes `json:"metadataHash" bson:"metadataHash" swaggertype:"string" example:"deadbeef"`

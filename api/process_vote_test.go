@@ -399,23 +399,6 @@ func TestRelayVotesRejectsBatch(t *testing.T) {
 	}
 }
 
-// metaProcessOf returns the meta.process block a metadata document carries for a process's title
-// and description, in the shape decoding the document into any yields.
-func metaProcessOf(title, description db.MultiLangString) map[string]any {
-	toAny := func(text db.MultiLangString) map[string]any {
-		m := make(map[string]any, len(text))
-		for lang, value := range text {
-			m[lang] = value
-		}
-		return m
-	}
-	process := map[string]any{"title": toAny(title)}
-	if len(description) > 0 {
-		process["description"] = toAny(description)
-	}
-	return process
-}
-
 // TestProcessMetadataHash checks the metadata hash contract of a published process: each question's
 // election commits on chain the SHA-256 of the exact bytes its metadataURL serves, the question reads
 // expose that hash, and the relay rejects up front a vote that attests any other hash.
@@ -432,12 +415,13 @@ func TestProcessMetadataHash(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, comment)
 		want := sha256.Sum256(served)
 		c.Assert([]byte(q.MetadataHash), qt.DeepEquals, want[:], comment)
-		// the process text voters see as the heading is part of the hashed document
+		// a question's document carries only the question: the process text and media are the
+		// parent election's
 		var doc dvoteapi.ElectionMetadata
 		c.Assert(json.Unmarshal(served, &doc), qt.IsNil, comment)
-		meta, ok := doc.Meta.(map[string]any)
-		c.Assert(ok, qt.IsTrue, comment)
-		c.Assert(meta["process"], qt.DeepEquals, metaProcessOf(got.Title, got.Description), comment)
+		c.Assert(doc.Meta, qt.IsNil, comment)
+		c.Assert(doc.Media, qt.Equals, dvoteapi.ProcessMedia{}, comment)
+		c.Assert(doc.Questions, qt.HasLen, 1, comment)
 
 		election, err := f.client.Election(q.UpstreamID.Bytes())
 		c.Assert(err, qt.IsNil, comment)

@@ -459,6 +459,13 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+	// the parent election of each process counts too: it follows the process's status.
+	parentRefs, err := a.db.SyncableParentElectionsByOrg(managedAddr)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	questionRefs = append(questionRefs, parentRefs...)
 	for _, ref := range questionRefs {
 		election, err := a.account.Election(ref.UpstreamID)
 		if err != nil {

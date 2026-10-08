@@ -26,8 +26,10 @@ import (
 //	@Description	envelope; the target process is taken from that envelope, so no process id is
 //	@Description	passed in the path. Public endpoint: no authentication is required. The request is
 //	@Description	checked synchronously — the body must decode to a Vote envelope (else 400) for a
-//	@Description	process the backend knows (else 404) attesting the metadata hash the election
-//	@Description	currently commits to (else 409) — then enqueued for submission on a background
+//	@Description	question election the backend knows (else 404) attesting either the stored metadata
+//	@Description	hash of that question or the hash of its pending metadata edit, whose tx may already
+//	@Description	have changed what the election commits to (else 409; among those two the chain
+//	@Description	decides) — then enqueued for submission on a background
 //	@Description	worker; the call returns 202 with a job id. The chain's acceptance or rejection of
 //	@Description	the vote (proof, nullifier, election state) is decided when the worker submits it and
 //	@Description	reported on the job: poll GET /jobs/{jobId} for the voteID on success, or a failure.
@@ -121,8 +123,9 @@ const (
 //	@Description	endpoint closes that window. Public endpoint: no authentication is required.
 //	@Description	The whole batch is checked synchronously and is accepted or rejected as a unit —
 //	@Description	every payload must decode to a Vote envelope (else 400) for a process the backend
-//	@Description	knows (else 404), each must attest the metadata hash its election currently commits
-//	@Description	to (else 409: the ballot changed and the voter must reload it), all of them must
+//	@Description	knows as a question election (else 404), each must attest either the stored metadata
+//	@Description	hash of its question or the hash of a pending metadata edit of it (else 409: the
+//	@Description	ballot changed and the voter must reload it; among those two the chain decides), all of them must
 //	@Description	belong to the same organization (else 400), and the queue must have room for all of
 //	@Description	them (else 503). A rejected batch enqueues nothing. At most 100 votes per call.
 //	@Description	The call returns 202 with a single job id covering the batch. Poll

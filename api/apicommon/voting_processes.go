@@ -5,6 +5,7 @@ package apicommon
 import (
 	"time"
 
+	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/pricing"
@@ -59,7 +60,10 @@ type VotingProcessQuestionRequest struct {
 	BallotProtocol    *db.BallotProtocol   `json:"ballotProtocol,omitempty"`
 	SecretUntilTheEnd bool                 `json:"secretUntilTheEnd"`
 	Eligibility       *EligibilitySpec     `json:"census,omitempty"`
-	Metadata          map[string]any       `json:"metadata,omitempty"`
+	// Metadata is the question's free-form display info, published in its election document:
+	// each entry of metadata.choices ({value, description, image, ...}) becomes the meta of the
+	// choice with that value (without the value), and every other key the question's meta.
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // CreateVotingProcessRequest is the body of POST /processes (also used by PUT to update a
@@ -91,9 +95,14 @@ type CreateVotingProcessRequest struct {
 	UpdatedAt string `json:"updatedAt,omitempty"`
 }
 
-// VotingProcessMetadataChoice is one choice's editable text in a process metadata GET/PUT payload.
+// VotingProcessMetadataChoice is one choice's editable content in a process metadata GET/PUT
+// payload: its title and its display info (the question's metadata.choices entry for the choice,
+// without its value: description, image and any other key).
 type VotingProcessMetadataChoice struct {
 	Title db.MultiLangString `json:"title"`
+	// Meta replaces the choice's display info when sent ({} clears it); absent leaves it as is.
+	// External images in it are imported, as on create.
+	Meta map[string]any `json:"meta,omitempty"`
 }
 
 // VotingProcessMetadataQuestion is one question's editable text in a process metadata GET/PUT
@@ -128,9 +137,10 @@ func VotingProcessMetadataFromDB(vp *db.VotingProcess, questions []db.VotingProc
 	}
 	for i := range questions {
 		q := &questions[i]
+		_, choicesMeta := account.QuestionDisplayMeta(q.Metadata)
 		choices := make([]VotingProcessMetadataChoice, len(q.Choices))
 		for j := range q.Choices {
-			choices[j] = VotingProcessMetadataChoice{Title: q.Choices[j].Title}
+			choices[j] = VotingProcessMetadataChoice{Title: q.Choices[j].Title, Meta: choicesMeta[q.Choices[j].Value]}
 		}
 		meta.Questions[i] = VotingProcessMetadataQuestion{
 			Title:       q.Title,
@@ -206,6 +216,16 @@ type VotingProcessResponse struct {
 	StartDate   string                     `json:"startDate,omitempty"`
 	EndDate     string                     `json:"endDate,omitempty"`
 	Questions   []db.VotingProcessQuestion `json:"questions"`
+	// UpstreamID is the on-chain id of the process's parent election, published after the question
+	// elections. Its metadata document holds the process title, description and media and lists the
+	// question elections in order (meta.questionElections). It is never voted on. Absent until
+	// published, and for processes published without one.
+	UpstreamID internal.HexBytes `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	// MetadataURL serves the ElectionMetadata document the parent election points to on chain.
+	MetadataURL string `json:"metadataURL,omitempty"`
+	// MetadataHash is the SHA-256 of the exact bytes served at MetadataURL, as committed on chain by
+	// the parent election.
+	MetadataHash internal.HexBytes `json:"metadataHash,omitempty" swaggertype:"string" format:"hex" example:"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"` //nolint:lll
 	// InitialStatus echoes the draft's initialStatus: the on-chain status every question's
 	// election was (or will be) published with. Empty/absent means READY (the default);
 	// "PAUSED" means every question was published PAUSED. Publish-time only — it does not
@@ -501,6 +521,9 @@ func VotingProcessResponseFromDB(
 		Header:        vp.Header,
 		StreamURI:     vp.StreamURI,
 		Questions:     questions,
+		UpstreamID:    vp.UpstreamID,
+		MetadataURL:   vp.MetadataURL,
+		MetadataHash:  vp.MetadataHash,
 		InitialStatus: vp.InitialStatus,
 		AddOns:        vp.AddOns,
 		ChainID:       chainID,

@@ -2,9 +2,7 @@ package api
 
 import (
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	stderrors "errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -16,7 +14,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
-	"github.com/vocdoni/saas-backend/objectstorage"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
@@ -29,8 +27,9 @@ import (
 const maxPublishRounds = 3
 
 // electionParamsForQuestion builds the single-election params for one question by combining
-// the process's shared params (including its title and description, written as meta.process)
-// with the question's ballot config (translated) and the server-computed maxCensusSize.
+// the process's dates with the question's ballot config (translated) and the server-computed
+// maxCensusSize. The document carries only the question: the process text and media belong to
+// the parent election (electionParamsForParent).
 func electionParamsForQuestion(
 	vp *db.VotingProcess, q *db.VotingProcessQuestion, census *db.Census,
 ) (*db.ElectionParams, error) {
@@ -42,7 +41,7 @@ func electionParamsForQuestion(
 	if maxCensusSize == 0 {
 		return nil, fmt.Errorf("cannot determine census size for question")
 	}
-	ep := questionMetadataParams(vp, q)
+	ep := questionMetadataParams(q)
 	ep.StartDate = vp.StartDate
 	ep.EndDate = vp.EndDate
 	ep.VoteType = voteType
@@ -52,74 +51,74 @@ func electionParamsForQuestion(
 }
 
 // questionMetadataParams returns the part of a question's election params that its
-// ElectionMetadata document is built from: the text and media, without ballot or census settings.
-func questionMetadataParams(vp *db.VotingProcess, q *db.VotingProcessQuestion) *db.ElectionParams {
+// ElectionMetadata document is built from: the question's text and display info, without ballot
+// or census settings.
+func questionMetadataParams(q *db.VotingProcessQuestion) *db.ElectionParams {
+	questionMeta, choicesMeta := account.QuestionDisplayMeta(q.Metadata)
 	return &db.ElectionParams{
 		Title:       q.Title,
 		Description: q.Description,
-		Header:      vp.Header,
-		StreamURI:   vp.StreamURI,
 		Questions: []db.Question{{
 			Title:       q.Title,
 			Description: q.Description,
 			Choices:     q.Choices,
+			Meta:        questionMeta,
+			ChoicesMeta: choicesMeta,
 		}},
-		ProcessTitle:       vp.Title,
-		ProcessDescription: vp.Description,
 	}
 }
 
-// questionMetadataDoc builds the ElectionMetadata document of one question's election and its
-// SHA-256, the hash the election commits on chain. Publish and the metadata edit of a published
-// process both build through here, so an edited election serves a document built exactly like the
-// one it was published with, and an unchanged text yields the very same hash.
-func (a *API) questionMetadataDoc(vp *db.VotingProcess, q *db.VotingProcessQuestion) (doc, hash []byte, err error) {
-	doc, err = a.electionMetadata(questionMetadataParams(vp, q))
+// metadataDoc builds the ElectionMetadata document of ep, committing mediaHashes (the hashes of
+// its images, see imageHasher) as meta.mediaHashes, and its SHA-256: the object is served back
+// byte for byte, so this is the hash of what its URL serves and the election commits on chain.
+// Publish and the metadata edit of a published process both build through here, so an edited
+// election serves a document built exactly like the one it was published with, and unchanged
+// content yields the very same hash.
+func metadataDoc(ep *db.ElectionParams, mediaHashes map[string]string) (doc, hash []byte, err error) {
+	ep.MediaHashes = mediaHashes
+	doc, err = account.BuildElectionMetadata(ep)
 	if err != nil {
 		return nil, nil, err
 	}
-	// the object is served back byte for byte, so this is the hash of what its URL serves
 	sum := sha256.Sum256(doc)
 	return doc, sum[:], nil
 }
 
-// electionMetadata builds the ElectionMetadata document for ep, committing in meta.mediaHashes the
-// SHA-256 of each of its media files that this backend's object storage serves. The on-chain
-// metadata hash pins only the media URLs; this pins the bytes behind them too.
-func (a *API) electionMetadata(ep *db.ElectionParams) ([]byte, error) {
-	hashes, err := a.localMediaHashes(ep.Header, ep.StreamURI)
-	if err != nil {
-		return nil, err
+// parentQuestionElections returns the on-chain ids of a process's question elections in question
+// order, as its parent election lists them, or an error when a question has none.
+func parentQuestionElections(questions []db.VotingProcessQuestion) ([]internal.HexBytes, error) {
+	ids := make([]internal.HexBytes, 0, len(questions))
+	for i := range questions {
+		if len(questions[i].UpstreamID) == 0 {
+			return nil, fmt.Errorf("question %s has no election to list in the parent", questions[i].ID.Hex())
+		}
+		ids = append(ids, questions[i].UpstreamID)
 	}
-	ep.MediaHashes = hashes
-	return account.BuildElectionMetadata(ep)
+	return ids, nil
 }
 
-// localMediaHashes returns the lowercase hex SHA-256 of the stored bytes behind each url served by
-// this backend's object storage, keyed by url exactly as given. Other urls (external images, video
-// streams) and local ones whose object is gone are left out rather than fetched: hashing only what
-// we store avoids fetching arbitrary URLs server-side. It returns nil when no url is hashable.
-func (a *API) localMediaHashes(urls ...string) (map[string]string, error) {
-	var hashes map[string]string
-	for _, u := range urls {
-		name, ok := a.objectStorage.LocalName(u)
-		if !ok {
-			continue
-		}
-		object, err := a.objectStorage.GetByName(name)
-		if stderrors.Is(err, objectstorage.ErrorObjectNotFound) || stderrors.Is(err, objectstorage.ErrorInvalidObjectID) {
-			continue
-		}
-		if err != nil {
-			return nil, fmt.Errorf("reading media %q: %w", u, err)
-		}
-		if hashes == nil {
-			hashes = make(map[string]string)
-		}
-		sum := sha256.Sum256(object.Data)
-		hashes[u] = hex.EncodeToString(sum[:])
+// parentElectionMaxCensusSize is the census size the parent election of a process is created
+// with: the smallest the chain accepts, which keeps its price at the minimum. Nobody votes on it.
+const parentElectionMaxCensusSize = 1
+
+// electionParamsForParent builds the params of a process's parent election: an election that
+// carries the process-level metadata (title, description, media) and lists its question elections
+// in order, so the whole process is described by one on-chain document and hash. It runs over the
+// process's dates and is never voted on: its document has no questions, its census is the
+// smallest possible, and the CSP signs only for question elections.
+func electionParamsForParent(vp *db.VotingProcess, questionElections []internal.HexBytes) *db.ElectionParams {
+	return &db.ElectionParams{
+		Title:             vp.Title,
+		Description:       vp.Description,
+		Header:            vp.Header,
+		StreamURI:         vp.StreamURI,
+		StartDate:         vp.StartDate,
+		EndDate:           vp.EndDate,
+		VoteType:          db.VoteType{MaxCount: 1, MaxValue: 1},
+		ElectionType:      db.ElectionType{Autostart: true, Interruptible: true},
+		MaxCensusSize:     parentElectionMaxCensusSize,
+		QuestionElections: questionElections,
 	}
-	return hashes, nil
 }
 
 // reconcileStalePublishing clears publishing markers left behind by a crash/restart/deploy
@@ -253,11 +252,22 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 // publishVotingProcessHandler godoc
 //
 //	@Summary		Publish a voting process
-//	@Description	Publish a voting process: one on-chain election per question, submitted as a batch.
-//	@Description	Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
+//	@Description	Publish a voting process: one on-chain election per question, submitted as a batch,
+//	@Description	then the process's parent election. The parent carries the process title,
+//	@Description	description and media, lists the question elections in order
+//	@Description	(meta.questionElections) and commits the hash of that document; it is never voted
+//	@Description	on and is exposed as the process's upstreamId, metadataURL and metadataHash. A
+//	@Description	publish that failed after the questions were mined publishes only the parent when
+//	@Description	retried. Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
 //	@Description	GET /jobs/{jobId}. Idempotent once published.
 //	@Description	409 (40172) means the stored questions do not match the process and the draft has to be
 //	@Description	saved again before it can be published.
+//	@Description	Every document also commits, in meta.mediaHashes, the SHA-256 of its images by content
+//	@Description	(the parent's header; each question's choice images, from metadata.choices[].image),
+//	@Description	read from this backend's storage (images are imported when the process is saved, so
+//	@Description	publishing fetches nothing); the video stream is never hashed, only its URL is
+//	@Description	committed. 422 (40179) means an image is not a readable stored object; the message
+//	@Description	names its URL.
 //	@Description	402 (40178) means the process is priced and unpaid — the current quote travels in the
 //	@Description	error data; start checkout via POST /processes/{processId}/checkout. For a managed
 //	@Description	organization, 402 (40175) means its integrator's wallet does not cover the price.
@@ -273,7 +283,7 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 //	@Failure		402			{object}	errors.Error	"Payment required (quote in data), or insufficient integrator wallet balance"
 //	@Failure		404			{object}	errors.Error
 //	@Failure		409			{object}	errors.Error	"Publish in progress, questions out of sync, or payment still processing"
-//	@Failure		422			{object}	errors.Error	"Managed organization: census size requires a custom quote"
+//	@Failure		422			{object}	errors.Error	"Image not stored (40179), or managed org census needs a custom quote"
 //	@Failure		503			{object}	errors.Error
 //	@Router			/processes/{processId}/publish [post]
 func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
@@ -365,6 +375,13 @@ var errProcessAlreadyPublished = fmt.Errorf("process already published")
 func (a *API) startProcessPublish(t publishTarget) (string, error) {
 	vp, questions, census, user := t.vp, t.questions, t.census, t.user
 	oid := vp.ID
+	// every election document commits the hash of the images it shows: the parent's the header,
+	// each question's its choice images. One that cannot be hashed refuses the publish here, before
+	// anything is claimed or charged. Elections already on chain (a resume) have nothing to hash.
+	mediaHashes, questionMediaHashes, err := a.publishMediaHashes(vp, questions)
+	if err != nil {
+		return "", err
+	}
 	// atomically claim the process for publishing (duplicate-publish guard)
 	claimed, err := a.db.ClaimVotingProcessForPublish(oid)
 	if err != nil {
@@ -469,7 +486,8 @@ func (a *API) startProcessPublish(t publishTarget) (string, error) {
 	worker := &publishWorker{
 		a: a, vp: vp, questions: questions, census: census, org: org, user: user,
 		orgSigner: orgSigner, cspPubKey: cspPubKey, integratorAddr: integratorAddr,
-		reserved: reserved, nonTestSized: nonTestSized,
+		reserved: reserved, nonTestSized: nonTestSized, mediaHashes: mediaHashes,
+		questionMediaHashes: questionMediaHashes,
 	}
 	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
 		defer orgLock.Unlock()
@@ -504,12 +522,18 @@ type publishWorker struct {
 	integratorAddr common.Address
 	reserved       bool
 	nonTestSized   bool
+	// mediaHashes are the image hashes the parent election's document commits (meta.mediaHashes),
+	// computed before the publish was enqueued.
+	mediaHashes map[string]string
+	// questionMediaHashes are the choice image hashes of each question's document, by question id.
+	questionMediaHashes map[bson.ObjectID]map[string]string
 }
 
 // run builds and submits one election per question in a single batch, confirms them on
-// chain, and retries the not-yet-confirmed ones with fresh nonces up to maxPublishRounds.
-// On success it marks the process published (one process counter unit); on failure it
-// abandons the attempt (questions reset so a later publish regenerates them).
+// chain, and retries the not-yet-confirmed ones with fresh nonces up to maxPublishRounds;
+// then it publishes the process's parent election. On success it marks the process published
+// (one process counter unit); on failure it abandons the attempt (unmined questions reset so a
+// later publish regenerates them, mined ones kept so it resumes).
 func (pw *publishWorker) run() (result *db.JobResult, err error) {
 	a := pw.a
 	// a panic mid-publish must not strand the publishing marker (or crash the process): recover,
@@ -555,6 +579,13 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 	if !confirmed {
 		pw.abandon()
 		return nil, fmt.Errorf("publish did not confirm all questions after %d rounds", maxPublishRounds)
+	}
+	// the parent goes last: its document lists the question elections, whose ids are only known
+	// once they are mined. A failure here keeps the mined questions, so the next publish only
+	// publishes the parent.
+	if err := pw.publishParent(); err != nil {
+		pw.abandon()
+		return nil, err
 	}
 	if e := a.db.SetVotingProcessPublished(pw.vp.ID, pw.resolveStartDate()); e != nil {
 		// every election is already on-chain and its question persisted; clear the marker so a
@@ -643,7 +674,7 @@ func (pw *publishWorker) buildBatch(
 		if err != nil {
 			return nil, false, err
 		}
-		metaBytes, metaHash, err := a.questionMetadataDoc(pw.vp, q)
+		metaBytes, metaHash, err := metadataDoc(ep, pw.questionMediaHashes[q.ID])
 		if err != nil {
 			return nil, false, err
 		}
@@ -738,17 +769,107 @@ func (pw *publishWorker) confirmBatch(pending []*db.VotingProcessQuestion, resul
 	return allConfirmed
 }
 
+// publishParent publishes the process's parent election once every question election is mined,
+// retrying with a fresh nonce up to maxPublishRounds. A parent already on chain (a resumed
+// publish) is left as is. It is not plan-checked or billed: the questions are the billed unit, and
+// the parent's census of one makes it the cheapest election the chain accepts.
+func (pw *publishWorker) publishParent() error {
+	a := pw.a
+	if len(pw.vp.UpstreamID) > 0 {
+		return nil
+	}
+	questionElections, err := parentQuestionElections(pw.questions)
+	if err != nil {
+		return err
+	}
+	metaBytes, metaHash, err := metadataDoc(electionParamsForParent(pw.vp, questionElections), pw.mediaHashes)
+	if err != nil {
+		return err
+	}
+	objectName, err := a.objectStorage.PutJSON(metaBytes, pw.user.Email)
+	if err != nil {
+		return err
+	}
+	metadataURL := a.objectStorage.LocalURL(objectName)
+	initialStatus, err := account.ParseInitialStatus(pw.vp.InitialStatus)
+	if err != nil {
+		return err
+	}
+	for round := 0; round < maxPublishRounds; round++ {
+		nonce, err := a.account.AccountNonce(pw.vp.OrgAddress)
+		if err != nil {
+			return fmt.Errorf("could not read account nonce: %w", err)
+		}
+		// same census as the questions: the CSP refuses to sign for an election that is not a
+		// question of the process, so no vote on the parent can carry a valid proof.
+		tx, err := a.account.BuildNewProcessTx(&account.NewProcessParams{
+			OrgAddress:    pw.vp.OrgAddress,
+			Params:        ep,
+			CensusRoot:    pw.cspPubKey,
+			CensusURI:     a.serverURL,
+			Anonymous:     pw.census.Anonymous,
+			MetadataURL:   metadataURL,
+			MetadataHash:  metaHash,
+			Nonce:         &nonce,
+			InitialStatus: initialStatus,
+		})
+		if err != nil {
+			return err
+		}
+		fundedTx, _, err := a.account.FundTransaction(tx, pw.orgSigner.Address())
+		if err != nil {
+			return err
+		}
+		stx, err := a.account.SignTransaction(fundedTx, pw.orgSigner)
+		if err != nil {
+			return err
+		}
+		results, err := a.account.SubmitSignedTxBatch([][]byte{stx})
+		if err != nil {
+			log.Warnw("parent election submit failed, will retry", "processId", pw.vp.ID.Hex(), "error", err)
+			continue
+		}
+		if len(results) != 1 || results[0].Status != account.BatchSubmitted {
+			log.Warnw("parent election not accepted, will retry", "processId", pw.vp.ID.Hex(), "results", results)
+			continue
+		}
+		if err := a.account.WaitTxMined(results[0].Hash); err != nil {
+			log.Warnw("parent election not confirmed, will retry", "processId", pw.vp.ID.Hex(), "error", err)
+			continue
+		}
+		publication := &db.ProcessParentPublication{
+			ID:           pw.vp.ID,
+			UpstreamID:   results[0].UpstreamID,
+			MetadataURL:  metadataURL,
+			MetadataHash: metaHash,
+			Status:       initialStatus.String(),
+		}
+		if err := a.db.SetVotingProcessParentPublished(publication); err != nil {
+			return fmt.Errorf("could not persist parent election: %w", err)
+		}
+		pw.vp.UpstreamID = publication.UpstreamID
+		pw.vp.MetadataURL = publication.MetadataURL
+		pw.vp.MetadataHash = publication.MetadataHash
+		pw.vp.UpstreamStatus = publication.Status
+		return nil
+	}
+	return fmt.Errorf("parent election not confirmed after %d rounds", maxPublishRounds)
+}
+
 // setVotingProcessQuestionsStatusHandler changes the on-chain status of many questions.
 //
-//	@Summary	Change status of many questions
-//	@Tags		processes
-//	@Accept		json
-//	@Produce	json
-//	@Security	BearerAuth
-//	@Param		processId	path		string								true	"Process ID"
-//	@Param		request		body		apicommon.SetQuestionsStatusRequest	true	"Target status + questions"
-//	@Success	202			{object}	apicommon.EnqueuedResponse
-//	@Router		/processes/{processId}/questions/status [put]
+//	@Summary		Change status of many questions
+//	@Description	An empty question list targets every published question. The process's parent
+//	@Description	election follows the process: once every question is at the target status, the
+//	@Description	same job changes the parent too.
+//	@Tags			processes
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			processId	path		string								true	"Process ID"
+//	@Param			request		body		apicommon.SetQuestionsStatusRequest	true	"Target status + questions"
+//	@Success		202			{object}	apicommon.EnqueuedResponse
+//	@Router			/processes/{processId}/questions/status [put]
 func (a *API) setVotingProcessQuestionsStatusHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)
 	if !ok {
@@ -769,21 +890,23 @@ func (a *API) setVotingProcessQuestionsStatusHandler(w http.ResponseWriter, r *h
 		return
 	}
 	targets := selectStatusTargets(questions, req.Questions)
-	a.enqueueStatusChange(w, vp, targets, status)
+	a.enqueueStatusChange(w, &statusChange{vp: vp, questions: questions, targets: targets, status: status})
 }
 
 // setVotingProcessQuestionStatusHandler changes the on-chain status of one question.
 //
-//	@Summary	Change status of one question
-//	@Tags		processes
-//	@Accept		json
-//	@Produce	json
-//	@Security	BearerAuth
-//	@Param		processId	path		string								true	"Process ID"
-//	@Param		questionId	path		string								true	"Question ID"
-//	@Param		request		body		apicommon.SetProcessStatusRequest	true	"Target status"
-//	@Success	202			{object}	apicommon.EnqueuedResponse
-//	@Router		/processes/{processId}/questions/{questionId}/status [put]
+//	@Summary		Change status of one question
+//	@Description	The process's parent election follows the process: once every question is at the
+//	@Description	target status, the same job changes the parent too.
+//	@Tags			processes
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			processId	path		string								true	"Process ID"
+//	@Param			questionId	path		string								true	"Question ID"
+//	@Param			request		body		apicommon.SetProcessStatusRequest	true	"Target status"
+//	@Success		202			{object}	apicommon.EnqueuedResponse
+//	@Router			/processes/{processId}/questions/{questionId}/status [put]
 func (a *API) setVotingProcessQuestionStatusHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)
 	if !ok {
@@ -818,7 +941,7 @@ func (a *API) setVotingProcessQuestionStatusHandler(w http.ResponseWriter, r *ht
 		errors.ErrProcessNotFound.Withf("question not found").Write(w)
 		return
 	}
-	a.enqueueStatusChange(w, vp, targets, status)
+	a.enqueueStatusChange(w, &statusChange{vp: vp, questions: questions, targets: targets, status: status})
 }
 
 // authorizeStatusChange loads the process + questions and checks the caller's role.
@@ -867,11 +990,63 @@ func selectStatusTargets(
 	return targets
 }
 
+// statusChange is a requested on-chain status change of a process: the process, all its
+// questions, the questions the request targets and the target status.
+type statusChange struct {
+	vp        *db.VotingProcess
+	questions []db.VotingProcessQuestion
+	targets   []db.VotingProcessQuestion
+	status    models.ProcessStatus
+}
+
+// parentFollows reports whether the change moves the process's parent election too: the parent
+// follows the process, so it moves once every published question is at the target status, either
+// because the change targets it or because it already was.
+func (sc *statusChange) parentFollows(published []db.VotingProcessQuestion) bool {
+	statusStr := sc.status.String()
+	if len(sc.vp.UpstreamID) == 0 || sc.vp.UpstreamStatus == statusStr {
+		return false
+	}
+	targeted := make(map[bson.ObjectID]bool, len(published))
+	for i := range published {
+		targeted[published[i].ID] = true
+	}
+	for i := range sc.questions {
+		q := &sc.questions[i]
+		if len(q.UpstreamID) > 0 && !targeted[q.ID] && q.Status != statusStr {
+			return false
+		}
+	}
+	return true
+}
+
+// submitStatusTx builds, funds, signs and submits one SET_PROCESS_STATUS tx for an election,
+// waiting for it to be mined.
+func (a *API) submitStatusTx(orgSigner *ethereum.SignKeys, electionID internal.HexBytes, status models.ProcessStatus) error {
+	tx, err := a.account.BuildSetProcessStatusTx(orgSigner.Address(), electionID, status)
+	if err != nil {
+		return err
+	}
+	fundedTx, _, err := a.account.FundTransaction(tx, orgSigner.Address())
+	if err != nil {
+		return err
+	}
+	stx, err := a.account.SignTransaction(fundedTx, orgSigner)
+	if err != nil {
+		return err
+	}
+	if _, err := a.account.SubmitSignedTx(stx); err != nil {
+		return err
+	}
+	return nil
+}
+
 // enqueueStatusChange builds+submits a SET_PROCESS_STATUS tx per published target question
-// on the tx worker pool, serialized under the org lock, and updates the stored status.
-func (a *API) enqueueStatusChange(
-	w http.ResponseWriter, vp *db.VotingProcess, targets []db.VotingProcessQuestion, status models.ProcessStatus,
-) {
+// on the tx worker pool, serialized under the org lock, and updates the stored status. When
+// that leaves every question at the target status, the process's parent election gets the
+// same change last.
+func (a *API) enqueueStatusChange(w http.ResponseWriter, sc *statusChange) {
+	vp, targets, status := sc.vp, sc.targets, sc.status
 	published := make([]db.VotingProcessQuestion, 0, len(targets))
 	for i := range targets {
 		if len(targets[i].UpstreamID) > 0 {
@@ -882,6 +1057,7 @@ func (a *API) enqueueStatusChange(
 		errors.ErrMalformedBody.Withf("no published questions to update").Write(w)
 		return
 	}
+	moveParent := sc.parentFollows(published)
 	org, err := a.db.Organization(vp.OrgAddress)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -907,19 +1083,7 @@ func (a *API) enqueueStatusChange(
 	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
 		defer orgLock.Unlock()
 		for i := range published {
-			tx, err := a.account.BuildSetProcessStatusTx(orgSigner.Address(), published[i].UpstreamID, status)
-			if err != nil {
-				return nil, err
-			}
-			fundedTx, _, err := a.account.FundTransaction(tx, orgSigner.Address())
-			if err != nil {
-				return nil, err
-			}
-			stx, err := a.account.SignTransaction(fundedTx, orgSigner)
-			if err != nil {
-				return nil, err
-			}
-			if _, err := a.account.SubmitSignedTx(stx); err != nil {
+			if err := a.submitStatusTx(orgSigner, published[i].UpstreamID, status); err != nil {
 				return nil, err
 			}
 			if err := a.db.SetQuestionStatus(published[i].ID, statusStr); err != nil {
@@ -928,6 +1092,15 @@ func (a *API) enqueueStatusChange(
 			// confirm the change landed on-chain in the background, correcting the optimistic
 			// write above if the tx never reaches the requested status.
 			a.enqueueConfirm(published[i].UpstreamID, statusStr)
+		}
+		if moveParent {
+			if err := a.submitStatusTx(orgSigner, vp.UpstreamID, status); err != nil {
+				return nil, fmt.Errorf("could not change parent election status: %w", err)
+			}
+			if err := a.db.SetVotingProcessUpstreamStatus(vp.ID, statusStr); err != nil {
+				log.Warnw("could not persist parent election status", "error", err)
+			}
+			a.enqueueConfirm(vp.UpstreamID, statusStr)
 		}
 		return &db.JobResult{Status: statusStr}, nil
 	}}) {

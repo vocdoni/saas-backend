@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -19,11 +20,10 @@ import (
 )
 
 // editedMetadata rewrites every text of a metadata payload with values tagged by label, keeping its
-// shape, so a PUT of the result changes every question's election metadata.
+// shape and its header, so a PUT of the result changes every election's metadata.
 func editedMetadata(meta apicommon.VotingProcessMetadata, label string) apicommon.VotingProcessMetadata {
 	meta.Title = db.MultiLangString{"default": label + " title"}
 	meta.Description = db.MultiLangString{"default": label + " description"}
-	meta.Header = "https://example.com/" + label + "/header.png"
 	meta.StreamURI = "https://example.com/" + label + "/stream"
 	questions := make([]apicommon.VotingProcessMetadataQuestion, len(meta.Questions))
 	for i, q := range meta.Questions {
@@ -49,32 +49,75 @@ func servedMetadata(t *testing.T, metadataURL string) []byte {
 	return served
 }
 
+// assertElectionCommits checks that an election commits on chain to the document metadataURL
+// serves, whose SHA-256 is metadataHash, and returns the decoded document.
+func assertElectionCommits(t *testing.T, electionID internal.HexBytes, metadataURL string, metadataHash []byte,
+) *dvoteapi.ElectionMetadata {
+	t.Helper()
+	c := qt.New(t)
+	served := servedMetadata(t, metadataURL)
+	sum := sha256.Sum256(served)
+	c.Assert(metadataHash, qt.DeepEquals, sum[:])
+	election, err := testNewVocdoniClient(t).Election(electionID.Bytes())
+	c.Assert(err, qt.IsNil)
+	c.Assert(election.MetadataURL, qt.Equals, metadataURL)
+	c.Assert([]byte(election.MetadataHash), qt.DeepEquals, sum[:])
+	doc := &dvoteapi.ElectionMetadata{}
+	c.Assert(json.Unmarshal(served, doc), qt.IsNil)
+	return doc
+}
+
 // TestVotingProcessMetadataPublished edits the text of a published two-question process and checks
-// that each election commits on chain to the new document, that the previous one stays served and
-// in the election's metadata history, and that votes must attest the new hash from then on.
+// that each election, the parent's included, commits on chain to its new document, that the
+// previous one stays served and in the election's metadata history, and that votes must attest the
+// new hash from then on.
 func TestVotingProcessMetadataPublished(t *testing.T) {
 	c := qt.New(t)
 	f := setupRelayVoting(t, 2)
 
 	before := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, f.token, nil, "processes", f.pid)
 	c.Assert(before.Questions, qt.HasLen, 2)
+	c.Assert(before.UpstreamID, qt.Not(qt.HasLen), 0)
 
 	meta := requestAndParse[apicommon.VotingProcessMetadata](t, http.MethodGet, "", nil, "processes", f.pid, "metadata")
 	c.Assert(meta.Questions, qt.HasLen, 2)
 	c.Assert(meta.Title, qt.DeepEquals, before.Title)
 	edit := editedMetadata(meta, "Edited")
+	header := testPNG(t)
+	edit.Header = testUploadImage(t, f.token, header)
 
 	job := enqueueAndPollJob(t, http.MethodPut, f.token, edit, "processes", f.pid, "metadata")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job errors: %s", job.Errors))
 	c.Assert(job.Type, qt.Equals, db.JobTypeSetProcessMetadata)
 	c.Assert(job.Result, qt.Not(qt.IsNil))
 	c.Assert(job.Result.Questions, qt.HasLen, 2)
+	c.Assert(job.Result.Parent, qt.Not(qt.IsNil))
 
 	after := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, f.token, nil, "processes", f.pid)
 	c.Assert(after.Title, qt.DeepEquals, edit.Title)
 	c.Assert(after.Description, qt.DeepEquals, edit.Description)
 	c.Assert(after.Header, qt.Equals, edit.Header)
 	c.Assert(after.StreamURI, qt.Equals, edit.StreamURI)
+
+	// the parent election commits to a new document with the new process text and header
+	parent := job.Result.Parent
+	c.Assert(parent.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("parent: %s", parent.Error))
+	c.Assert(parent.QuestionID, qt.Equals, "")
+	c.Assert(parent.ProcessID, qt.DeepEquals, before.UpstreamID)
+	c.Assert(after.UpstreamID, qt.DeepEquals, before.UpstreamID)
+	c.Assert(after.MetadataURL, qt.Equals, parent.MetadataURL)
+	c.Assert(after.MetadataHash, qt.DeepEquals, parent.MetadataHash)
+	c.Assert(after.MetadataURL, qt.Not(qt.Equals), before.MetadataURL)
+	parentDoc := assertElectionCommits(t, after.UpstreamID, after.MetadataURL, after.MetadataHash)
+	c.Assert(parentDoc.Title, qt.DeepEquals, dvoteapi.LanguageString(edit.Title))
+	c.Assert(parentDoc.Media, qt.Equals, dvoteapi.ProcessMedia{Header: edit.Header, StreamURI: edit.StreamURI})
+	headerSum := sha256.Sum256(header)
+	// the parent keeps listing the same question elections
+	c.Assert(parentDoc.Meta, qt.DeepEquals, map[string]any{
+		"mediaHashes":       map[string]any{edit.Header: hex.EncodeToString(headerSum[:])},
+		"questionElections": questionElectionsOf(f.processIDs),
+	})
+
 	c.Assert(after.Questions, qt.HasLen, 2)
 	for i, q := range after.Questions {
 		comment := qt.Commentf("question %d", i)
@@ -95,25 +138,15 @@ func TestVotingProcessMetadataPublished(t *testing.T) {
 		c.Assert(entry.MetadataURL, qt.Equals, q.MetadataURL, comment)
 		c.Assert(entry.MetadataHash, qt.DeepEquals, q.MetadataHash, comment)
 
-		// a new document at a new URL, hashed byte for byte, carrying the new text
+		// a new document at a new URL, hashed byte for byte, carrying only the new question text
 		c.Assert(q.MetadataURL, qt.Not(qt.Equals), old.MetadataURL, comment)
-		served := servedMetadata(t, q.MetadataURL)
-		want := sha256.Sum256(served)
-		c.Assert([]byte(q.MetadataHash), qt.DeepEquals, want[:], comment)
-		var doc dvoteapi.ElectionMetadata
-		c.Assert(json.Unmarshal(served, &doc), qt.IsNil, comment)
+		doc := assertElectionCommits(t, q.UpstreamID, q.MetadataURL, q.MetadataHash)
 		c.Assert(doc.Title["default"], qt.Equals, edit.Questions[i].Title["default"], comment)
-		c.Assert(doc.Media.Header, qt.Equals, edit.Header, comment)
+		c.Assert(doc.Media, qt.Equals, dvoteapi.ProcessMedia{}, comment)
 		c.Assert(doc.Questions, qt.HasLen, 1, comment)
 		c.Assert(doc.Questions[0].Choices, qt.HasLen, len(old.Choices), comment)
 		c.Assert(doc.Questions[0].Choices[0].Title["default"], qt.Equals,
 			edit.Questions[i].Choices[0].Title["default"], comment)
-
-		// the election commits on chain to exactly that document
-		election, err := f.client.Election(q.UpstreamID.Bytes())
-		c.Assert(err, qt.IsNil, comment)
-		c.Assert(election.MetadataURL, qt.Equals, q.MetadataURL, comment)
-		c.Assert([]byte(election.MetadataHash), qt.DeepEquals, want[:], comment)
 
 		// the previous version stays served, unchanged, at its own URL
 		oldServed := servedMetadata(t, old.MetadataURL)
@@ -149,6 +182,7 @@ func TestVotingProcessMetadataPublished(t *testing.T) {
 	// sending the same edit again changes nothing and needs no tx
 	requestAndAssertCode(http.StatusOK, t, http.MethodPut, f.token, edit, "processes", f.pid, "metadata")
 	again := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, f.token, nil, "processes", f.pid)
+	c.Assert(again.MetadataHash, qt.DeepEquals, after.MetadataHash)
 	for i, q := range again.Questions {
 		c.Assert(q.MetadataHash, qt.DeepEquals, after.Questions[i].MetadataHash, qt.Commentf("question %d", i))
 	}
@@ -170,7 +204,8 @@ func publishMetadataTestProcess(t *testing.T) (token, pid string) {
 }
 
 // TestVotingProcessMetadataPublishedRejects covers the edits of a published process that are
-// refused before anything reaches the chain, and the ones answered without a tx.
+// refused before anything reaches the chain, the ones answered without a tx, and which elections
+// an edit sends a tx to.
 func TestVotingProcessMetadataPublishedRejects(t *testing.T) {
 	c := qt.New(t)
 	token, pid := publishMetadataTestProcess(t)
@@ -220,39 +255,111 @@ func TestVotingProcessMetadataPublishedRejects(t *testing.T) {
 			editedMetadata(meta, "Ended"), "processes", pid, "metadata")
 	})
 
+	t.Run("unimportable image", func(t *testing.T) {
+		srv, _ := testImageServer(t, testPNG(t))
+		edit := meta
+		edit.Header = srv.URL + "/missing.png"
+		apiErr := requestAndParseWithAssertCode[errors.Error](http.StatusUnprocessableEntity, t,
+			http.MethodPut, token, edit, "processes", pid, "metadata")
+		c.Assert(apiErr.Code, qt.Equals, errors.ErrMediaUnavailable.Code)
+		c.Assert(apiErr.Error(), qt.Contains, "header: "+edit.Header)
+	})
+
 	t.Run("no-op needs no tx", func(t *testing.T) {
 		requestAndAssertCode(http.StatusOK, t, http.MethodPut, token, meta, "processes", pid, "metadata")
 	})
 
 	// none of the edits above touched the elections
-	after := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
-	for i, q := range after.Questions {
+	unchanged := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(unchanged.MetadataHash, qt.DeepEquals, published.MetadataHash)
+	for i, q := range unchanged.Questions {
 		c.Assert(q.Title, qt.DeepEquals, published.Questions[i].Title, qt.Commentf("question %d", i))
 		c.Assert(q.MetadataHash, qt.DeepEquals, published.Questions[i].MetadataHash, qt.Commentf("question %d", i))
 	}
 
-	t.Run("process-only edit updates every election", func(t *testing.T) {
-		// every question's document carries the process title and description as meta.process
+	t.Run("process-only edit sends one tx, to the parent", func(t *testing.T) {
 		titleOnly := meta
 		titleOnly.Title = db.MultiLangString{"default": "Only the process title"}
 		titleOnly.Description = db.MultiLangString{"default": "Only the process description"}
 		job := enqueueAndPollJob(t, http.MethodPut, token, titleOnly, "processes", pid, "metadata")
 		c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job errors: %s", job.Errors))
-		c.Assert(job.Result.Questions, qt.HasLen, len(published.Questions))
+		c.Assert(job.Result.Questions, qt.HasLen, 0)
+		c.Assert(job.Result.Parent, qt.Not(qt.IsNil))
+		c.Assert(job.Result.Parent.Status, qt.Equals, db.JobStatusCompleted)
 		got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
 		c.Assert(got.Title, qt.DeepEquals, titleOnly.Title)
 		c.Assert(got.Description, qt.DeepEquals, titleOnly.Description)
+		doc := assertElectionCommits(t, got.UpstreamID, got.MetadataURL, got.MetadataHash)
+		c.Assert(doc.Title, qt.DeepEquals, dvoteapi.LanguageString(titleOnly.Title))
 		for i, q := range got.Questions {
 			comment := qt.Commentf("question %d", i)
-			c.Assert(q.Title, qt.DeepEquals, published.Questions[i].Title, comment)
-			c.Assert(q.MetadataURL, qt.Not(qt.Equals), published.Questions[i].MetadataURL, comment)
-			var doc dvoteapi.ElectionMetadata
-			c.Assert(json.Unmarshal(servedMetadata(t, q.MetadataURL), &doc), qt.IsNil, comment)
-			docMeta, ok := doc.Meta.(map[string]any)
-			c.Assert(ok, qt.IsTrue, comment)
-			c.Assert(docMeta["process"], qt.DeepEquals, metaProcessOf(titleOnly.Title, titleOnly.Description), comment)
+			c.Assert(q.MetadataURL, qt.Equals, published.Questions[i].MetadataURL, comment)
+			c.Assert(q.MetadataHash, qt.DeepEquals, published.Questions[i].MetadataHash, comment)
 		}
 		meta = titleOnly
+	})
+
+	t.Run("mixed edit sends a tx to the parent and to each changed question", func(t *testing.T) {
+		mixed := meta
+		mixed.Title = db.MultiLangString{"default": "Mixed process title"}
+		mixed.Questions = append([]apicommon.VotingProcessMetadataQuestion(nil), meta.Questions...)
+		mixed.Questions[1].Title = db.MultiLangString{"default": "Mixed second question"}
+		job := enqueueAndPollJob(t, http.MethodPut, token, mixed, "processes", pid, "metadata")
+		c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job errors: %s", job.Errors))
+		c.Assert(job.Result.Parent, qt.Not(qt.IsNil))
+		c.Assert(job.Result.Questions, qt.HasLen, 1)
+		c.Assert(job.Result.Questions[0].QuestionID, qt.Equals, published.Questions[1].ID.Hex())
+		got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+		c.Assert(got.Questions[0].MetadataHash, qt.DeepEquals, published.Questions[0].MetadataHash)
+		c.Assert(got.Questions[1].Title, qt.DeepEquals, mixed.Questions[1].Title)
+		assertElectionCommits(t, got.Questions[1].UpstreamID, got.Questions[1].MetadataURL, got.Questions[1].MetadataHash)
+		meta = mixed
+	})
+
+	t.Run("choice display info edit sends a tx only for its question", func(t *testing.T) {
+		image := testPNG(t)
+		srv, _ := testImageServer(t, image)
+		before := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+		withMeta := meta
+		withMeta.Questions = append([]apicommon.VotingProcessMetadataQuestion(nil), meta.Questions...)
+		choices := append([]apicommon.VotingProcessMetadataChoice(nil), meta.Questions[0].Choices...)
+		choices[1].Meta = map[string]any{
+			"description": map[string]any{"default": "The no option"},
+			"image":       srv.URL + "/image.png",
+		}
+		withMeta.Questions[0].Choices = choices
+		job := enqueueAndPollJob(t, http.MethodPut, token, withMeta, "processes", pid, "metadata")
+		c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job errors: %s", job.Errors))
+		c.Assert(job.Result.Parent, qt.IsNil)
+		c.Assert(job.Result.Questions, qt.HasLen, 1)
+		c.Assert(job.Result.Questions[0].QuestionID, qt.Equals, published.Questions[0].ID.Hex())
+
+		got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+		c.Assert(got.MetadataHash, qt.DeepEquals, before.MetadataHash)
+		c.Assert(got.Questions[1].MetadataHash, qt.DeepEquals, before.Questions[1].MetadataHash)
+		q := got.Questions[0]
+		doc := assertElectionCommits(t, q.UpstreamID, q.MetadataURL, q.MetadataHash)
+		// the external image was imported: the document points at the local copy and hashes it
+		choiceMeta, ok := doc.Questions[0].Choices[1].Meta.(map[string]any)
+		c.Assert(ok, qt.IsTrue)
+		importedURL, ok := choiceMeta["image"].(string)
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(isLocalURL(importedURL), qt.IsTrue, qt.Commentf("image %s", importedURL))
+		c.Assert(storedObject(t, importedURL), qt.DeepEquals, image)
+		c.Assert(choiceMeta["description"], qt.DeepEquals, map[string]any{"default": "The no option"})
+		imageSum := sha256.Sum256(image)
+		c.Assert(doc.Meta, qt.DeepEquals, map[string]any{"mediaHashes": map[string]any{
+			importedURL: hex.EncodeToString(imageSum[:]),
+		}})
+
+		// the metadata read returns the display info, pointing at the copy
+		read := requestAndParse[apicommon.VotingProcessMetadata](t, http.MethodGet, token, nil, "processes", pid, "metadata")
+		c.Assert(read.Questions[0].Choices[1].Meta, qt.DeepEquals, map[string]any{
+			"description": map[string]any{"default": "The no option"},
+			"image":       importedURL,
+		})
+		c.Assert(read.Questions[0].Choices[0].Meta, qt.IsNil)
+		meta = read
 	})
 
 	t.Run("second edit while the first is pending", func(t *testing.T) {
@@ -291,17 +398,33 @@ func storedQuestionText(q *db.VotingProcessQuestion) *db.QuestionTextUpdate {
 	}
 }
 
-// pendingJobResult returns a job's question entries with every status reset to pending, as the job
-// row reads while its txs are unconfirmed.
+// storedProcessMetadata returns the process update that writes vp's stored version back.
+func storedProcessMetadata(vp *db.VotingProcess) *db.ProcessMetadataUpdate {
+	return &db.ProcessMetadataUpdate{
+		Text: db.ProcessText{
+			Title: vp.Title, Description: vp.Description, Header: vp.Header, StreamURI: vp.StreamURI,
+		},
+		MetadataURL:  vp.MetadataURL,
+		MetadataHash: vp.MetadataHash,
+	}
+}
+
+// pendingJobResult returns a job's entries with every status reset to pending, as the job row reads
+// while its txs are unconfirmed.
 func pendingJobResult(t *testing.T, jobID string) *db.JobResult {
 	t.Helper()
 	job, err := testDB.Job(jobID)
 	qt.Assert(t, err, qt.IsNil)
 	qt.Assert(t, job.Result, qt.Not(qt.IsNil))
-	result := &db.JobResult{Questions: make([]db.QuestionMetadataJobResult, len(job.Result.Questions))}
+	result := &db.JobResult{Questions: make([]db.ElectionMetadataJobResult, len(job.Result.Questions))}
 	for i, entry := range job.Result.Questions {
 		entry.Status, entry.Error = db.JobStatusPending, ""
 		result.Questions[i] = entry
+	}
+	if job.Result.Parent != nil {
+		parent := *job.Result.Parent
+		parent.Status, parent.Error = db.JobStatusPending, ""
+		result.Parent = &parent
 	}
 	return result
 }
@@ -309,8 +432,8 @@ func pendingJobResult(t *testing.T, jobID string) *db.JobResult {
 // TestVotingProcessMetadataLateMined covers a metadata edit whose txs mined after the edit job gave
 // up waiting for them: the store still holds the previous version with the edit pending, the job is
 // pending and the claim held, while the chain commits the new version. Votes attesting the pending
-// hash are relayed and counted, other hashes are rejected, and a read of
-// the process settles the edit: questions, process text, job and claim.
+// hash are relayed and counted, other hashes are rejected, and a read of the process settles the
+// edit: questions, parent, job and claim.
 func TestVotingProcessMetadataLateMined(t *testing.T) {
 	c := qt.New(t)
 	f := setupRelayVoting(t, 2)
@@ -335,12 +458,8 @@ func TestVotingProcessMetadataLateMined(t *testing.T) {
 		c.Assert(testDB.SetQuestionPendingMetadata(edited[i].ID,
 			storedQuestionText(&edited[i]).Pending(enq.JobID)), qt.IsNil)
 	}
-	c.Assert(testDB.SetVotingProcessText(oid, &db.ProcessText{
-		Title: vpBefore.Title, Description: vpBefore.Description, Header: vpBefore.Header, StreamURI: vpBefore.StreamURI,
-	}), qt.IsNil)
-	c.Assert(testDB.SetVotingProcessPendingText(oid, &db.ProcessText{
-		Title: vpEdited.Title, Description: vpEdited.Description, Header: vpEdited.Header, StreamURI: vpEdited.StreamURI,
-	}), qt.IsNil)
+	c.Assert(testDB.SetVotingProcessMetadata(oid, storedProcessMetadata(vpBefore)), qt.IsNil)
+	c.Assert(testDB.SetVotingProcessPendingMetadata(oid, storedProcessMetadata(vpEdited).Pending(enq.JobID)), qt.IsNil)
 	c.Assert(testDB.SetJobStatus(enq.JobID, db.JobStatusPending, pendingJobResult(t, enq.JobID), ""), qt.IsNil)
 	claimed, err := testDB.ClaimVotingProcessMetadataUpdate(oid)
 	c.Assert(err, qt.IsNil)
@@ -364,7 +483,8 @@ func TestVotingProcessMetadataLateMined(t *testing.T) {
 	// a read of the process settles the edit and serves it
 	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, "", nil, "processes", f.pid)
 	c.Assert(got.Title, qt.DeepEquals, edit.Title)
-	c.Assert(got.Header, qt.Equals, edit.Header)
+	c.Assert(got.StreamURI, qt.Equals, edit.StreamURI)
+	c.Assert(got.MetadataHash, qt.DeepEquals, vpEdited.MetadataHash)
 	c.Assert(got.Questions, qt.HasLen, 2)
 	for i, q := range got.Questions {
 		comment := qt.Commentf("question %d", i)
@@ -374,10 +494,11 @@ func TestVotingProcessMetadataLateMined(t *testing.T) {
 
 	vp, questions, err := testDB.ProcessWithQuestions(oid)
 	c.Assert(err, qt.IsNil)
-	c.Assert(vp.PendingText, qt.IsNil)
+	c.Assert(vp.PendingMetadata, qt.IsNil)
 	c.Assert(vp.MetadataUpdating.IsZero(), qt.IsTrue)
 	c.Assert(vp.Title, qt.DeepEquals, edit.Title)
 	c.Assert(vp.Description, qt.DeepEquals, edit.Description)
+	c.Assert(vp.MetadataURL, qt.Equals, vpEdited.MetadataURL)
 	for i, q := range questions {
 		comment := qt.Commentf("question %d", i)
 		c.Assert(q.PendingMetadata, qt.IsNil, comment)
@@ -393,6 +514,8 @@ func TestVotingProcessMetadataLateMined(t *testing.T) {
 	for i, entry := range settled.Result.Questions {
 		c.Assert(entry.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("question %d", i))
 	}
+	c.Assert(settled.Result.Parent, qt.Not(qt.IsNil))
+	c.Assert(settled.Result.Parent.Status, qt.Equals, db.JobStatusCompleted)
 }
 
 // TestVotingProcessMetadataDeadEdit covers a metadata edit whose tx never lands: while it is not
@@ -405,7 +528,7 @@ func TestVotingProcessMetadataDeadEdit(t *testing.T) {
 	oid, err := bson.ObjectIDFromHex(f.pid)
 	c.Assert(err, qt.IsNil)
 	processID := f.processIDs[0]
-	vpBefore, questions, err := testDB.ProcessWithQuestions(oid)
+	_, questions, err := testDB.ProcessWithQuestions(oid)
 	c.Assert(err, qt.IsNil)
 	q := questions[0]
 
@@ -417,7 +540,7 @@ func TestVotingProcessMetadataDeadEdit(t *testing.T) {
 	never.MetadataURL = "https://example.invalid/never.json"
 	never.MetadataHash = internal.RandomBytes(sha256.Size)
 	c.Assert(testDB.CreateTxJobWithResult(jobID, db.JobTypeSetProcessMetadata, f.orgAddress,
-		&db.JobResult{Questions: []db.QuestionMetadataJobResult{{
+		&db.JobResult{Questions: []db.ElectionMetadataJobResult{{
 			QuestionID: q.ID.Hex(), ProcessID: q.UpstreamID, MetadataURL: never.MetadataURL,
 			MetadataHash: never.MetadataHash, Status: db.JobStatusPending,
 		}}}), qt.IsNil)
@@ -426,8 +549,6 @@ func TestVotingProcessMetadataDeadEdit(t *testing.T) {
 	c.Assert(claimed, qt.IsTrue)
 	pending := never.Pending(jobID)
 	c.Assert(testDB.SetQuestionPendingMetadata(q.ID, pending), qt.IsNil)
-	c.Assert(testDB.SetVotingProcessPendingText(oid, &db.ProcessText{Title: db.MultiLangString{"default": "Never"}}),
-		qt.IsNil)
 
 	meta := requestAndParse[apicommon.VotingProcessMetadata](t, http.MethodGet, "", nil, "processes", f.pid, "metadata")
 	requestAndAssertError(errors.ErrMetadataUpdateInProgress, t, http.MethodPut, f.token,
@@ -444,7 +565,6 @@ func TestVotingProcessMetadataDeadEdit(t *testing.T) {
 	pending.Since = time.Now().Add(-db.PendingMetadataFinalAfter - time.Minute)
 	c.Assert(testDB.SetQuestionPendingMetadata(q.ID, pending), qt.IsNil)
 	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, "", nil, "processes", f.pid)
-	c.Assert(got.Title, qt.DeepEquals, vpBefore.Title)
 	c.Assert(got.Questions[0].Title, qt.DeepEquals, q.Title)
 	c.Assert(got.Questions[0].MetadataHash, qt.DeepEquals, q.MetadataHash)
 
@@ -452,7 +572,7 @@ func TestVotingProcessMetadataDeadEdit(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(questions[0].PendingMetadata, qt.IsNil)
 	c.Assert(questions[0].MetadataHash, qt.DeepEquals, q.MetadataHash)
-	c.Assert(vp.PendingText, qt.IsNil)
+	c.Assert(vp.PendingMetadata, qt.IsNil)
 	c.Assert(vp.MetadataUpdating.IsZero(), qt.IsTrue)
 	settled, err := testDB.Job(jobID)
 	c.Assert(err, qt.IsNil)
@@ -480,19 +600,21 @@ func TestVotingProcessMetadataDraft(t *testing.T) {
 
 	req := newVotingProcessRequest(orgAddress, memberIDs(members))
 	pid := requestAndParse[apicommon.CreateVotingProcessResponse](
-		t, http.MethodPost, token, req, processesCreateEndpoint).ProcessID
+		t, http.MethodPost, token, req, processesCreateEndpoint,
+	).ProcessID
 
 	requestAndAssertError(errors.ErrProcessNotFound, t, http.MethodGet, "", nil, "processes", pid, "metadata")
 	meta := requestAndParse[apicommon.VotingProcessMetadata](t, http.MethodGet, token, nil, "processes", pid, "metadata")
 	c.Assert(meta.Questions, qt.HasLen, len(req.Questions))
 
 	edit := editedMetadata(meta, "Draft")
+	edit.Questions[0].Choices[0].Meta = map[string]any{"description": map[string]any{"default": "Draft yes"}}
 	requestAndAssertCode(http.StatusOK, t, http.MethodPut, token, edit, "processes", pid, "metadata")
 
 	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
 	c.Assert(got.Published, qt.IsFalse)
 	c.Assert(got.Title, qt.DeepEquals, edit.Title)
-	c.Assert(got.Header, qt.Equals, edit.Header)
+	c.Assert(got.StreamURI, qt.Equals, edit.StreamURI)
 	c.Assert(got.Questions, qt.HasLen, len(req.Questions))
 	for i, q := range got.Questions {
 		c.Assert(q.Title, qt.DeepEquals, edit.Questions[i].Title, qt.Commentf("question %d", i))
@@ -503,7 +625,8 @@ func TestVotingProcessMetadataDraft(t *testing.T) {
 		}
 	}
 	c.Assert(requestAndParse[apicommon.VotingProcessMetadata](
-		t, http.MethodGet, token, nil, "processes", pid, "metadata"), qt.DeepEquals, edit)
+		t, http.MethodGet, token, nil, "processes", pid, "metadata",
+	), qt.DeepEquals, edit)
 
 	// the edit released the draft: it can still be fully edited (here, reshaped)
 	upd := newVotingProcessRequest(orgAddress, memberIDs(members))

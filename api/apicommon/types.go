@@ -1395,16 +1395,19 @@ type UnifiedJobResult struct {
 	Votes []db.VoteJobResult `json:"votes,omitempty"`
 	// Questions is the per-question outcome of a metadata edit (set_process_metadata), in process
 	// order, one entry per question whose election metadata changed
-	Questions []db.QuestionMetadataJobResult `json:"questions,omitempty"`
-	Added     int                            `json:"added,omitempty"`
-	Progress  int                            `json:"progress,omitempty"`
-	Total     int                            `json:"total,omitempty"`
+	Questions []db.ElectionMetadataJobResult `json:"questions,omitempty"`
+	// Parent is the outcome of a metadata edit (set_process_metadata) for the process's parent
+	// election, present when the edit changed the process's title, description, header or streamUri
+	Parent   *db.ElectionMetadataJobResult `json:"parent,omitempty"`
+	Added    int                           `json:"added,omitempty"`
+	Progress int                           `json:"progress,omitempty"`
+	Total    int                           `json:"total,omitempty"`
 }
 
 func (r *UnifiedJobResult) isEmpty() bool {
 	return len(r.Address) == 0 && r.Status == "" && len(r.ProcessID) == 0 && len(r.Nullifier) == 0 &&
-		len(r.VoteID) == 0 && len(r.Votes) == 0 && len(r.Questions) == 0 && r.Added == 0 && r.Progress == 0 &&
-		r.Total == 0
+		len(r.VoteID) == 0 && len(r.Votes) == 0 && len(r.Questions) == 0 && r.Parent == nil && r.Added == 0 &&
+		r.Progress == 0 && r.Total == 0
 }
 
 // JobResponse is one job in the GET /jobs list: the unified shape across import and tx jobs.
@@ -1458,6 +1461,7 @@ func JobResponseFromDB(job *db.Job) JobResponse {
 		res.VoteID = job.Result.VoteID
 		res.Votes = job.Result.Votes
 		res.Questions = job.Result.Questions
+		res.Parent = job.Result.Parent
 	}
 	if job.Total > 0 {
 		res.Progress = job.Added * 100 / job.Total
