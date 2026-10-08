@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	stderrors "errors"
 	"net/http"
 
@@ -25,7 +26,9 @@ import (
 //	@Description	envelope; the target process is taken from that envelope, so no process id is
 //	@Description	passed in the path. Public endpoint: no authentication is required. The request is
 //	@Description	checked synchronously — the body must decode to a Vote envelope (else 400) for a
-//	@Description	process the backend knows (else 404) — then enqueued for submission on a background
+//	@Description	process the backend knows (else 404) attesting the metadata hash the election
+//	@Description	currently commits to and, as parentMetadataHash, the one its process's parent
+//	@Description	election commits to (else 409) — then enqueued for submission on a background
 //	@Description	worker; the call returns 202 with a job id. The chain's acceptance or rejection of
 //	@Description	the vote (proof, nullifier, election state) is decided when the worker submits it and
 //	@Description	reported on the job: poll GET /jobs/{jobId} for the voteID on success, or a failure.
@@ -36,6 +39,7 @@ import (
 //	@Success		202		{object}	apicommon.EnqueuedResponse	"Job accepted; poll GET /jobs/{jobId}"
 //	@Failure		400		{object}	errors.Error				"Invalid input data"
 //	@Failure		404		{object}	errors.Error				"Process not found"
+//	@Failure		409		{object}	errors.Error				"Ballot metadata changed: reload the process and vote again"
 //	@Failure		413		{object}	errors.Error				"Request body too large"
 //	@Failure		500		{object}	errors.Error				"Internal server error"
 //	@Failure		503		{object}	errors.Error				"Transaction queue is full"
@@ -118,9 +122,11 @@ const (
 //	@Description	endpoint closes that window. Public endpoint: no authentication is required.
 //	@Description	The whole batch is checked synchronously and is accepted or rejected as a unit —
 //	@Description	every payload must decode to a Vote envelope (else 400) for a process the backend
-//	@Description	knows (else 404), all of them must belong to the same organization (else 400), and
-//	@Description	the queue must have room for all of them (else 503). A rejected batch enqueues
-//	@Description	nothing. At most 100 votes per call.
+//	@Description	knows (else 404), each must attest the metadata hash its election currently commits
+//	@Description	to and, as parentMetadataHash, the one of its process's parent election (else 409:
+//	@Description	the ballot changed and the voter must reload it), all of them must
+//	@Description	belong to the same organization (else 400), and the queue must have room for all of
+//	@Description	them (else 503). A rejected batch enqueues nothing. At most 100 votes per call.
 //	@Description	The call returns 202 with a single job id covering the batch. Poll
 //	@Description	GET /jobs/{jobId}: its result carries one entry per vote, index-aligned with the
 //	@Description	request, each with the process id and the nullifier — both known before submission,
@@ -133,6 +139,7 @@ const (
 //	@Success		202		{object}	apicommon.EnqueuedResponse	"Job accepted; poll GET /jobs/{jobId}"
 //	@Failure		400		{object}	errors.Error				"Invalid input data"
 //	@Failure		404		{object}	errors.Error				"Process not found"
+//	@Failure		409		{object}	errors.Error				"Ballot metadata changed: reload the process and vote again"
 //	@Failure		413		{object}	errors.Error				"Request body too large"
 //	@Failure		500		{object}	errors.Error				"Internal server error"
 //	@Failure		503		{object}	errors.Error				"Transaction queue is full"
@@ -397,6 +404,17 @@ func (a *API) parseRelayVote(payload internal.HexBytes) (*parsedVote, *errors.Er
 		switch qErr {
 		case nil:
 			orgAddress = question.OrgAddress
+			// the chain rejects a vote that does not attest the metadata the election currently
+			// commits to; catching it here keeps a batch from relaying a prefix and tells the
+			// voter to reload the ballot instead of surfacing a chain error on the job.
+			if len(question.MetadataHash) > 0 && !bytes.Equal(vote.MetadataHash, question.MetadataHash) {
+				return nil, errors.Ptr(errors.ErrVoteMetadataChanged.Withf(
+					"vote attests metadata hash %x, the election commits to %x", vote.MetadataHash, []byte(question.MetadataHash),
+				))
+			}
+			if apiErr := a.checkParentMetadata(question, vote); apiErr != nil {
+				return nil, apiErr
+			}
 		case db.ErrNotFound:
 			return nil, errors.Ptr(errors.ErrProcessNotFound)
 		default:
@@ -412,6 +430,33 @@ func (a *API) parseRelayVote(payload internal.HexBytes) (*parsedVote, *errors.Er
 		org:       orgAddress,
 		nullifier: voteNullifier(signedTx, vote, pid, a.account.ChainID()),
 	}, nil
+}
+
+// checkParentMetadata rejects up front a vote on a question election that does not attest the
+// metadata its parent election commits to (VoteEnvelope.parentMetadataHash), as the chain would. A
+// question published without a parent is not checked here: the chain requires its votes to attest
+// no parent hash.
+func (a *API) checkParentMetadata(q *db.VotingProcessQuestion, vote *models.VoteEnvelope) *errors.Error {
+	if len(q.ParentUpstreamID) == 0 {
+		return nil
+	}
+	vp, err := a.db.VotingProcess(q.ProcessID)
+	if err != nil {
+		return errors.Ptr(errors.ErrGenericInternalServerError.WithErr(err))
+	}
+	if !parentMetadataCurrent(vp, vote.ParentMetadataHash) {
+		return errors.Ptr(errors.ErrVoteMetadataChanged.Withf(
+			"vote attests parent metadata hash %x, the parent election commits to %x",
+			vote.ParentMetadataHash, []byte(vp.MetadataHash),
+		))
+	}
+	return nil
+}
+
+// parentMetadataCurrent reports whether a vote attesting the given parent metadata hash may be
+// relayed: it is the hash the process's parent election commits to.
+func parentMetadataCurrent(vp *db.VotingProcess, attested []byte) bool {
+	return len(vp.MetadataHash) == 0 || bytes.Equal(attested, vp.MetadataHash)
 }
 
 // voteNullifier works out the nullifier of an envelope without submitting it, so a vote

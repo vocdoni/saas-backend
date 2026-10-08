@@ -1,9 +1,10 @@
-// Package statussync provides an enqueue-driven worker that reconciles a published voting-process
-// question's stored on-chain status with the Vochain on demand, rather than sweeping every question
-// on a timer. Work is fed by two triggers: a status change made through the API (confirm the tx
-// landed) and a read of a process/question (catch changes made directly on-chain). The one
-// safety-critical reader — the managed-org delete guard — reads the chain synchronously instead of
-// trusting the stored status, so unread transitions never block or allow a deletion wrongly.
+// Package statussync provides an enqueue-driven worker that reconciles the stored on-chain status
+// of a published voting-process question (or of a process's parent election) with the Vochain on
+// demand, rather than sweeping every question on a timer. Work is fed by two triggers: a status
+// change made through the API (confirm the tx landed) and a read of a process/question (catch
+// changes made directly on-chain). The one safety-critical reader — the managed-org delete guard —
+// reads the chain synchronously instead of trusting the stored status, so unread transitions never
+// block or allow a deletion wrongly.
 package statussync
 
 import (
@@ -219,7 +220,7 @@ func (s *Syncer) process(t *task) {
 
 	// read path: converge stored status to the chain (also refreshes syncedAt), then drop.
 	if t.expected == "" {
-		if _, err := s.db.SetQuestionStatusSynced(t.upstreamID, t.known, chainStatus); err != nil {
+		if err := s.setStatusSynced(t.upstreamID, t.known, chainStatus); err != nil {
 			log.Warnw("status sync: reconcile write failed", "upstreamId", hexID, "error", err.Error())
 		}
 		s.maybeRecordEndedAt(t.upstreamID, hexID, election)
@@ -228,7 +229,7 @@ func (s *Syncer) process(t *task) {
 
 	// status-change path: confirmed once the chain reaches expected — just refresh syncedAt.
 	if chainStatus == t.expected {
-		if _, err := s.db.SetQuestionStatusSynced(t.upstreamID, t.expected, t.expected); err != nil {
+		if err := s.setStatusSynced(t.upstreamID, t.expected, t.expected); err != nil {
 			log.Warnw("status sync: confirm stamp failed", "upstreamId", hexID, "error", err.Error())
 		}
 		s.maybeRecordEndedAt(t.upstreamID, hexID, election)
@@ -242,10 +243,21 @@ func (s *Syncer) process(t *task) {
 		return
 	}
 	// gave up: reconcile the optimistic value to whatever the chain actually holds.
-	if _, err := s.db.SetQuestionStatusSynced(t.upstreamID, t.expected, chainStatus); err != nil {
+	if err := s.setStatusSynced(t.upstreamID, t.expected, chainStatus); err != nil {
 		log.Warnw("status sync: give-up reconcile failed", "upstreamId", hexID, "error", err.Error())
 	}
 	s.maybeRecordEndedAt(t.upstreamID, hexID, election)
+}
+
+// setStatusSynced applies a conditional status reconcile to whichever stored record the election
+// id names: a question's election, or else a process's parent election.
+func (s *Syncer) setStatusSynced(upstreamID internal.HexBytes, prev, next string) error {
+	matched, err := s.db.SetQuestionStatusSynced(upstreamID, prev, next)
+	if err != nil || matched {
+		return err
+	}
+	_, err = s.db.SetVotingProcessUpstreamStatusSynced(upstreamID, prev, next)
+	return err
 }
 
 // maybeRecordEndedAt persists the actual on-chain end time for a manually ended question's

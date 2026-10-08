@@ -215,6 +215,17 @@ func (a *API) enqueueReconcileIfStale(q *db.VotingProcessQuestion) {
 	a.enqueueReconcile(q.UpstreamID, q.Status)
 }
 
+// enqueueParentReconcileIfStale is enqueueReconcileIfStale for a process's parent election.
+func (a *API) enqueueParentReconcileIfStale(vp *db.VotingProcess) {
+	if a.statusSyncer == nil || len(vp.UpstreamID) == 0 {
+		return
+	}
+	if !vp.UpstreamSyncedAt.IsZero() && time.Since(vp.UpstreamSyncedAt) < statusReconcileMinAge {
+		return
+	}
+	a.enqueueReconcile(vp.UpstreamID, vp.UpstreamStatus)
+}
+
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
 func New(ctx context.Context, conf *Config) *API {
 	if conf == nil {

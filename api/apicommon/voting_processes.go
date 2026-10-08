@@ -59,7 +59,10 @@ type VotingProcessQuestionRequest struct {
 	BallotProtocol    *db.BallotProtocol   `json:"ballotProtocol,omitempty"`
 	SecretUntilTheEnd bool                 `json:"secretUntilTheEnd"`
 	Eligibility       *EligibilitySpec     `json:"census,omitempty"`
-	Metadata          map[string]any       `json:"metadata,omitempty"`
+	// Metadata is the question's free-form display info, published in its election document:
+	// each entry of metadata.choices ({value, description, image, ...}) becomes the meta of the
+	// choice with that value (without the value), and every other key the question's meta.
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // CreateVotingProcessRequest is the body of POST /processes (also used by PUT to update a
@@ -156,6 +159,16 @@ type VotingProcessResponse struct {
 	StartDate   string                     `json:"startDate,omitempty"`
 	EndDate     string                     `json:"endDate,omitempty"`
 	Questions   []db.VotingProcessQuestion `json:"questions"`
+	// UpstreamID is the on-chain id of the process's metadata-only parent election, published before
+	// the question elections, which are linked to it. Its metadata document holds the process title,
+	// description and media. It is never voted on, but every vote attests its metadataHash. Absent
+	// until published, and for processes published without one.
+	UpstreamID internal.HexBytes `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	// MetadataURL serves the ElectionMetadata document the parent election points to on chain.
+	MetadataURL string `json:"metadataURL,omitempty"`
+	// MetadataHash is the SHA-256 of the exact bytes served at MetadataURL, as committed on chain by
+	// the parent election.
+	MetadataHash internal.HexBytes `json:"metadataHash,omitempty" swaggertype:"string" format:"hex" example:"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"` //nolint:lll
 	// InitialStatus echoes the draft's initialStatus: the on-chain status every question's
 	// election was (or will be) published with. Empty/absent means READY (the default);
 	// "PAUSED" means every question was published PAUSED. Publish-time only — it does not
@@ -373,7 +386,16 @@ type PublicQuestionResponse struct {
 	Metadata          map[string]any       `json:"metadata,omitempty"`
 	UpstreamID        internal.HexBytes    `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	Status            string               `json:"status,omitempty"`
-	Census            CensusSpec           `json:"census"`
+	// MetadataURL serves the ElectionMetadata document the question's election points to on chain.
+	MetadataURL string `json:"metadataURL,omitempty"`
+	// MetadataHash is the SHA-256 of the exact bytes served at MetadataURL, as committed on chain.
+	// A vote must attest it in its envelope (metadataHash) or it is rejected.
+	MetadataHash internal.HexBytes `json:"metadataHash,omitempty" swaggertype:"string" format:"hex" example:"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"` //nolint:lll
+	// ParentUpstreamID is the on-chain id of the process's parent election this question's election
+	// is linked to. A vote must also attest the parent's current metadata hash (the process's
+	// metadataHash, from GET /processes/{processId}).
+	ParentUpstreamID internal.HexBytes `json:"parentUpstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Census           CensusSpec        `json:"census"`
 	// EncryptionKeys are the on-chain vote-encryption public keys (only for secretUntilTheEnd
 	// questions). Because of omitempty the field is absent (not an empty array) until the keykeepers
 	// publish the keys, so clients treat its absence as "not yet published" and poll. Voters seal
@@ -413,6 +435,9 @@ func PublicQuestionResponseFromDB(q *db.VotingProcessQuestion, census *db.Census
 		Metadata:          q.Metadata,
 		UpstreamID:        q.UpstreamID,
 		Status:            q.Status,
+		MetadataURL:       q.MetadataURL,
+		MetadataHash:      q.MetadataHash,
+		ParentUpstreamID:  q.ParentUpstreamID,
 		EncryptionKeys:    q.EncryptionKeys,
 		Results:           q.Results,
 	}
@@ -444,6 +469,9 @@ func VotingProcessResponseFromDB(
 		Header:        vp.Header,
 		StreamURI:     vp.StreamURI,
 		Questions:     questions,
+		UpstreamID:    vp.UpstreamID,
+		MetadataURL:   vp.MetadataURL,
+		MetadataHash:  vp.MetadataHash,
 		InitialStatus: vp.InitialStatus,
 		AddOns:        vp.AddOns,
 		ChainID:       chainID,

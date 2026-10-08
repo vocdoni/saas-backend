@@ -609,6 +609,12 @@ type Question struct {
 	Title       MultiLangString `json:"title" bson:"title"`
 	Description MultiLangString `json:"description,omitempty" bson:"description,omitempty"`
 	Choices     []Choice        `json:"choices" bson:"choices"`
+	// Meta is the question's display info beyond its text, written into the metadata document as
+	// questions[i].meta. Publish-time only, never persisted.
+	Meta map[string]any `json:"-" bson:"-"`
+	// ChoicesMeta is each choice's display info (description, image...) keyed by choice value,
+	// written into the metadata document as that choice's meta. Publish-time only, never persisted.
+	ChoicesMeta map[uint32]map[string]any `json:"-" bson:"-"`
 }
 
 // VoteType describes how votes are counted and validated.
@@ -765,8 +771,8 @@ type VotingProcess struct {
 	StreamURI   string          `json:"streamUri,omitempty" bson:"streamUri,omitempty"`
 	StartDate   time.Time       `json:"startDate,omitempty" bson:"startDate,omitempty"`
 	EndDate     time.Time       `json:"endDate,omitempty" bson:"endDate,omitempty"`
-	// InitialStatus is the on-chain status every question's election is published with.
-	// Empty (default) means READY; "PAUSED" publishes every question's election in the
+	// InitialStatus is the on-chain status every election of the process (each question's and
+	// the parent) is published with. Empty (default) means READY; "PAUSED" publishes them in the
 	// PAUSED state, so voting only opens after an admin sets each question to READY via
 	// SET_PROCESS_STATUS. Only "" / "READY" / "PAUSED" are accepted. Publish-time only:
 	// after publish, each question's status evolves independently and this field is not
@@ -785,8 +791,23 @@ type VotingProcess struct {
 	// and the stale sweep on it being old, so a zero date persisted as a value would make every
 	// draft ever created look like a crashed publish.
 	Publishing time.Time `json:"-" bson:"publishing,omitempty"`
-	CreatedAt  time.Time `json:"createdAt" bson:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt" bson:"updatedAt"`
+	// UpstreamID is the on-chain id of the process's parent election, published after every
+	// question election is confirmed. It carries the process-level metadata (title, description,
+	// media and the list of question elections) and is never voted on: the CSP signs only for
+	// question elections and the relay resolves votes by question. Absent until published.
+	UpstreamID internal.HexBytes `json:"upstreamId,omitempty" bson:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"` //nolint:lll
+	// MetadataURL serves the ElectionMetadata document the parent election points to on chain.
+	MetadataURL string `json:"metadataURL,omitempty" bson:"metadataURL,omitempty"`
+	// MetadataHash is the SHA-256 of the exact bytes served at MetadataURL, committed on chain by
+	// the parent election.
+	MetadataHash internal.HexBytes `json:"metadataHash,omitempty" bson:"metadataHash,omitempty" swaggertype:"string" format:"hex" example:"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"` //nolint:lll
+	// UpstreamStatus is the stored on-chain status of the parent election, which follows the
+	// process: it moves once every question election has reached the same status.
+	UpstreamStatus string `json:"-" bson:"upstreamStatus,omitempty"`
+	// UpstreamSyncedAt is when the status syncer last reconciled UpstreamStatus with the chain.
+	UpstreamSyncedAt time.Time `json:"-" bson:"upstreamSyncedAt,omitempty"`
+	CreatedAt        time.Time `json:"createdAt" bson:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt" bson:"updatedAt"`
 }
 
 // PublishInProgress reports whether a publish worker currently holds this process. A marker older
@@ -932,9 +953,17 @@ type VotingProcessQuestion struct {
 	EligibleMemberIDs []string          `json:"eligibleMemberIds,omitempty" bson:"eligibleMemberIds"`
 	Metadata          map[string]any    `json:"metadata,omitempty" bson:"metadata,omitempty"`
 	UpstreamID        internal.HexBytes `json:"upstreamId,omitempty" bson:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
-	MetadataURL       string            `json:"-" bson:"metadataURL,omitempty"`
-	Status            string            `json:"status,omitempty" bson:"status,omitempty"`
-	SyncedAt          time.Time         `json:"-" bson:"syncedAt,omitempty"`
+	// MetadataURL serves the ElectionMetadata document this question's election points to on chain.
+	MetadataURL string `json:"metadataURL,omitempty" bson:"metadataURL,omitempty"`
+	// MetadataHash is the SHA-256 of the exact bytes served at MetadataURL, committed on chain at
+	// publish. Every vote envelope must attest it (VoteEnvelope.metadataHash) or the chain rejects it.
+	MetadataHash internal.HexBytes `json:"metadataHash,omitempty" bson:"metadataHash,omitempty" swaggertype:"string" format:"hex" example:"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"`
+	// ParentUpstreamID is the on-chain id of the process's parent election this question's election
+	// was published under (the process's upstreamId). A vote must also attest the parent's current
+	// metadata hash (the process's metadataHash).
+	ParentUpstreamID internal.HexBytes `json:"parentUpstreamId,omitempty" bson:"parentUpstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"` //nolint:lll
+	Status           string            `json:"status,omitempty" bson:"status,omitempty"`
+	SyncedAt         time.Time         `json:"-" bson:"syncedAt,omitempty"`
 	// EndedAt is the actual on-chain moment this question's election stopped accepting votes,
 	// set only when the vote was ended early (before its scheduled end, i.e. ManuallyEnded on
 	// the chain). Absent while the vote is open or when it ran to its scheduled end. Recorded by

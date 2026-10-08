@@ -216,18 +216,34 @@ func (ms *MongoStorage) ServedUpstreamIDs(upstreamIDs []internal.HexBytes) (map[
 	return served, nil
 }
 
+// QuestionPublication is the on-chain outcome of publishing one question: its election id, the
+// metadata document the election points to and the hash committed for it, and the initial status.
+type QuestionPublication struct {
+	ID           bson.ObjectID
+	UpstreamID   internal.HexBytes
+	MetadataURL  string
+	MetadataHash internal.HexBytes
+	Status       string
+	// ParentUpstreamID is the parent election the question election was published under, if any.
+	ParentUpstreamID internal.HexBytes
+}
+
 // SetQuestionPublished records the on-chain outcome of a single question in one targeted
 // update, leaving sibling questions untouched.
-func (ms *MongoStorage) SetQuestionPublished(
-	id bson.ObjectID, upstreamID internal.HexBytes, metadataURL, status string,
-) error {
-	if id == bson.NilObjectID || len(upstreamID) == 0 {
+func (ms *MongoStorage) SetQuestionPublished(p *QuestionPublication) error {
+	if p == nil || p.ID == bson.NilObjectID || len(p.UpstreamID) == 0 {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	update := bson.M{"$set": bson.M{"upstreamId": upstreamID, "metadataURL": metadataURL, "status": status}} //nolint:goconst
-	res, err := ms.processesQuestions.UpdateOne(ctx, bson.M{"_id": id}, update)
+	set := bson.M{"upstreamId": p.UpstreamID, "metadataURL": p.MetadataURL, "status": p.Status} //nolint:goconst
+	if len(p.MetadataHash) > 0 {
+		set["metadataHash"] = p.MetadataHash
+	}
+	if len(p.ParentUpstreamID) > 0 {
+		set["parentUpstreamId"] = p.ParentUpstreamID
+	}
+	res, err := ms.processesQuestions.UpdateOne(ctx, bson.M{"_id": p.ID}, bson.M{"$set": set})
 	if err != nil {
 		return fmt.Errorf("failed to set question published: %w", err)
 	}
@@ -291,7 +307,7 @@ func (ms *MongoStorage) DeleteQuestion(id bson.ObjectID) error {
 	return nil
 }
 
-// ResetQuestionsPublish clears the publish state (status, metadataURL) of the not-yet-mined
+// ResetQuestionsPublish clears the publish state (status, metadataURL, metadataHash) of the not-yet-mined
 // questions of a process (those without an upstreamId). Used to abandon a failed publish while
 // keeping any elections already on-chain, so a subsequent publish resumes the remaining ones.
 func (ms *MongoStorage) ResetQuestionsPublish(processID bson.ObjectID) error {
@@ -303,8 +319,8 @@ func (ms *MongoStorage) ResetQuestionsPublish(processID bson.ObjectID) error {
 	// only reset questions that were NOT mined (no upstreamId): a failed publish must keep the
 	// elections already on-chain so a re-publish resumes the remaining ones instead of
 	// regenerating (and orphaning) the mined ones.
-	filter := bson.M{"processId": processID, "upstreamId": bson.M{"$exists": false}} //nolint:goconst
-	update := bson.M{"$unset": bson.M{"status": "", "metadataURL": ""}}              //nolint:goconst
+	filter := bson.M{"processId": processID, "upstreamId": bson.M{"$exists": false}}        //nolint:goconst
+	update := bson.M{"$unset": bson.M{"status": "", "metadataURL": "", "metadataHash": ""}} //nolint:goconst
 	if _, err := ms.processesQuestions.UpdateMany(ctx, filter, update); err != nil {
 		return fmt.Errorf("failed to reset questions publish state: %w", err)
 	}

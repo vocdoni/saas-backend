@@ -52,9 +52,14 @@ func TestVotingProcessCRUD(t *testing.T) {
 
 	// publish one question, reverse lookup, then reset
 	upstream := internal.HexBytes("election-1")
-	c.Assert(testDB.SetQuestionPublished(q1ID, upstream, "url", QuestionStatusReady), qt.IsNil)
+	metadataHash := internal.HexBytes{0xAA, 0xBB, 0xCC}
+	c.Assert(testDB.SetQuestionPublished(&QuestionPublication{
+		ID: q1ID, UpstreamID: upstream, MetadataURL: "url", MetadataHash: metadataHash, Status: QuestionStatusReady,
+	}), qt.IsNil)
 	byUp, err := testDB.QuestionByUpstreamID(upstream)
 	c.Assert(err, qt.IsNil)
+	c.Assert(byUp.MetadataURL, qt.Equals, "url")
+	c.Assert(byUp.MetadataHash, qt.DeepEquals, metadataHash)
 	c.Assert(byUp.ID, qt.Equals, q1ID)
 	c.Assert(byUp.Status, qt.Equals, QuestionStatusReady)
 
@@ -432,7 +437,9 @@ func TestServedUpstreamIDs(t *testing.T) {
 	_, err = testDB.SetQuestion(&VotingProcessQuestion{ProcessID: id, OrgAddress: org, Order: 1, Type: VotingTypeSingleChoice})
 	c.Assert(err, qt.IsNil)
 	served := internal.HexBytes("served-election")
-	c.Assert(testDB.SetQuestionPublished(qID, served, "url", QuestionStatusReady), qt.IsNil)
+	c.Assert(testDB.SetQuestionPublished(&QuestionPublication{
+		ID: qID, UpstreamID: served, MetadataURL: "url", Status: QuestionStatusReady,
+	}), qt.IsNil)
 
 	got, err := testDB.ServedUpstreamIDs([]internal.HexBytes{served, internal.HexBytes("orphan-election")})
 	c.Assert(err, qt.IsNil)

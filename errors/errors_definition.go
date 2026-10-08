@@ -76,6 +76,10 @@ var (
 	ErrDuplicateConflict           = Error{Code: 40901, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("resource already exists")}
 	ErrUpdateWouldCreateDuplicates = Error{Code: 40902, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("update would create duplicates")}
 	ErrPublishInProgress           = Error{Code: 40903, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("process publish already in progress")}
+	// ErrVoteMetadataChanged: a relayed vote attests a metadata hash other than the one the election
+	// currently commits to, so the voter was shown a different ballot than the one on chain (which
+	// would reject the vote). The client must reload the process and cast the vote again.
+	ErrVoteMetadataChanged = Error{Code: 40904, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("ballot metadata changed, reload the process and vote again"), LogLevel: "info"}
 
 	// TODO: most of theses errors should be unauthorized
 	// Subscription errors (400)

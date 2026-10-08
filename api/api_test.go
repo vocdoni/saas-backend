@@ -361,6 +361,10 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+	// the test chain targets one block per second, so confirming the txs of a publish (the parent
+	// election, then the question batch) need not wait for the default poll interval, sized for
+	// the 10s production block time
+	testAccount.TxPollInterval = 250 * time.Millisecond
 	// create test mail service
 	if err := testMailService.New(&testutil.SMTPConfig{
 		Config: smtp.Config{
@@ -843,8 +847,30 @@ func testGenerateVoteProof(processID, voterAddr, signature internal.HexBytes, we
 	}
 }
 
-// testCastVote casts a vote with the given proof and process ID.
-// It returns the nullifier.
+// testElectionMetadataHash reads the metadata hash an election currently commits to on chain,
+// which every vote envelope cast on it must attest.
+func testElectionMetadataHash(t *testing.T, vocdoniClient *apiclient.HTTPclient, processID internal.HexBytes) []byte {
+	t.Helper()
+	election, err := vocdoniClient.Election(processID.Bytes())
+	qt.Assert(t, err, qt.IsNil)
+	return election.MetadataHash
+}
+
+// testElectionParentMetadataHash reads the metadata hash the parent election of an election
+// currently commits to on chain, which every vote envelope cast on it must attest as
+// parentMetadataHash; nil for an election without a parent.
+func testElectionParentMetadataHash(t *testing.T, vocdoniClient *apiclient.HTTPclient, processID internal.HexBytes) []byte {
+	t.Helper()
+	election, err := vocdoniClient.Election(processID.Bytes())
+	qt.Assert(t, err, qt.IsNil)
+	if len(election.ParentElectionID) == 0 {
+		return nil
+	}
+	return testElectionMetadataHash(t, vocdoniClient, internal.HexBytes(election.ParentElectionID))
+}
+
+// testCastVote casts a vote with the given proof and process ID, attesting the election's
+// current metadata hash and its parent's. It returns the nullifier.
 func testCastVote(t *testing.T, vocdoniClient *apiclient.HTTPclient, signer *ethereum.SignKeys,
 	processID internal.HexBytes, proof *models.Proof, votePackage []byte,
 ) []byte {
@@ -853,10 +879,12 @@ func testCastVote(t *testing.T, vocdoniClient *apiclient.HTTPclient, signer *eth
 	tx := models.Tx{
 		Payload: &models.Tx_Vote{
 			Vote: &models.VoteEnvelope{
-				ProcessId:   processID,
-				Nonce:       internal.RandomBytes(16),
-				Proof:       proof,
-				VotePackage: votePackage,
+				ProcessId:          processID,
+				Nonce:              internal.RandomBytes(16),
+				Proof:              proof,
+				VotePackage:        votePackage,
+				MetadataHash:       testElectionMetadataHash(t, vocdoniClient, processID),
+				ParentMetadataHash: testElectionParentMetadataHash(t, vocdoniClient, processID),
 			},
 		},
 	}
