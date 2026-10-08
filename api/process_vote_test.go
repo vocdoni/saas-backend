@@ -17,6 +17,7 @@ import (
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/types"
@@ -398,6 +399,23 @@ func TestRelayVotesRejectsBatch(t *testing.T) {
 	}
 }
 
+// metaProcessOf returns the meta.process block a metadata document carries for a process's title
+// and description, in the shape decoding the document into any yields.
+func metaProcessOf(title, description db.MultiLangString) map[string]any {
+	toAny := func(text db.MultiLangString) map[string]any {
+		m := make(map[string]any, len(text))
+		for lang, value := range text {
+			m[lang] = value
+		}
+		return m
+	}
+	process := map[string]any{"title": toAny(title)}
+	if len(description) > 0 {
+		process["description"] = toAny(description)
+	}
+	return process
+}
+
 // TestProcessMetadataHash checks the metadata hash contract of a published process: each question's
 // election commits on chain the SHA-256 of the exact bytes its metadataURL serves, the question reads
 // expose that hash, and the relay rejects up front a vote that attests any other hash.
@@ -415,17 +433,11 @@ func TestProcessMetadataHash(t *testing.T) {
 		want := sha256.Sum256(served)
 		c.Assert([]byte(q.MetadataHash), qt.DeepEquals, want[:], comment)
 		// the process text voters see as the heading is part of the hashed document
-		var doc struct {
-			Meta struct {
-				Process struct {
-					Title       db.MultiLangString `json:"title"`
-					Description db.MultiLangString `json:"description"`
-				} `json:"process"`
-			} `json:"meta"`
-		}
+		var doc dvoteapi.ElectionMetadata
 		c.Assert(json.Unmarshal(served, &doc), qt.IsNil, comment)
-		c.Assert(doc.Meta.Process.Title, qt.DeepEquals, got.Title, comment)
-		c.Assert(doc.Meta.Process.Description, qt.DeepEquals, got.Description, comment)
+		meta, ok := doc.Meta.(map[string]any)
+		c.Assert(ok, qt.IsTrue, comment)
+		c.Assert(meta["process"], qt.DeepEquals, metaProcessOf(got.Title, got.Description), comment)
 
 		election, err := f.client.Election(q.UpstreamID.Bytes())
 		c.Assert(err, qt.IsNil, comment)
