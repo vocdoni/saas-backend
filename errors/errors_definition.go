@@ -125,6 +125,9 @@ var (
 	// ErrPaymentSessionConflict: the process's payment is in a state the request cannot act on
 	// (processing, completed, or changed while being read); retry once it settles.
 	ErrPaymentSessionConflict = Error{Code: 40177, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("a payment for this process is already processing or completed")}
+	// ErrCheckoutSessionNotFound is the only answer for a checkout session the caller may not
+	// read, whatever the reason (missing, not theirs), so session existence is never revealed.
+	ErrCheckoutSessionNotFound = Error{Code: 40179, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("checkout session not found"), LogLevel: "info"}
 
 	// CSP errors (408)
 	ErrZeroWeightVoter = Error{Code: 40801, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("voter weight cannot be zero")}

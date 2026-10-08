@@ -6510,7 +6510,10 @@ paths:
     get:
       consumes:
       - application/json
-      description: Retrieve the status of a Stripe checkout session
+      description: |-
+        Retrieve the status of a Stripe checkout session. Only an admin of the organization
+        the session was created for may read it; any other session id answers 404, so the
+        existence of a session is never revealed.
       parameters:
       - description: Checkout session ID
         in: path
@@ -6528,10 +6531,16 @@ paths:
           description: Invalid session ID
           schema:
             $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
+        "401":
+          description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
+        "404":
+          description: Checkout session not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
       summary: Get checkout session status
       tags:
       - plans

@@ -205,7 +205,12 @@ func (c *Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeap
 		AutomaticTax: &stripeapi.CheckoutSessionAutomaticTaxParams{
 			Enabled: new(true),
 		},
-		// We store in the metadata the address of the organization
+		// We store in the metadata the address of the organization, both on the session
+		// itself (so reading the session back can authorize the caller against the
+		// organization before the subscription exists) and on the subscription it creates
+		Metadata: map[string]string{
+			"address": params.OrgAddress,
+		},
 		SubscriptionData: &stripeapi.CheckoutSessionSubscriptionDataParams{
 			Metadata: map[string]string{
 				"address": params.OrgAddress,
@@ -277,6 +282,12 @@ func checkoutSessionStatus(session *stripeapi.CheckoutSession) *CheckoutSessionS
 	if session.Subscription != nil {
 		status.SubscriptionStatus = string(session.Subscription.Status)
 	}
+	// the organization address stamped at creation; sessions created before it was stamped
+	// on the session itself carry it on the subscription (once the checkout completed)
+	status.OrgAddress = session.Metadata["address"]
+	if status.OrgAddress == "" && session.Subscription != nil {
+		status.OrgAddress = session.Subscription.Metadata["address"]
+	}
 	return status
 }
 
@@ -313,4 +324,7 @@ type CheckoutSessionStatus struct {
 	// PaymentStatus is the payment outcome of the session, in every mode: "paid",
 	// "unpaid" or "no_payment_required" (e.g. a subscription that starts with a trial).
 	PaymentStatus string `json:"payment_status,omitempty"`
+	// OrgAddress is the organization the session was created for, used to authorize who
+	// may read the session; it never reaches the wire.
+	OrgAddress string `json:"-"`
 }

@@ -145,18 +145,28 @@ func (h *StripeHandlers) CreateSubscriptionCheckout(w http.ResponseWriter, r *ht
 // checkoutSessionHandler godoc
 //
 //	@Summary		Get checkout session status
-//	@Description	Retrieve the status of a Stripe checkout session
+//	@Description	Retrieve the status of a Stripe checkout session. Only an admin of the organization
+//	@Description	the session was created for may read it; any other session id answers 404, so the
+//	@Description	existence of a session is never revealed.
 //	@Tags			plans
 //	@Accept			json
 //	@Produce		json
+//	@Security		BearerAuth
 //	@Param			sessionId	path		string	true	"Checkout session ID"
 //	@Success		200			{object}	stripe.CheckoutSessionStatus
 //	@Failure		400			{object}	errors.Error	"Invalid session ID"
-//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		404			{object}	errors.Error	"Checkout session not found"
 //	@Router			/subscriptions/checkout/{sessionId} [get]
 func (h *StripeHandlers) GetCheckoutSession(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.service == nil {
 		errors.ErrStripeError.Withf("stripe service not available").Write(w)
+		return
+	}
+
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 
@@ -168,7 +178,17 @@ func (h *StripeHandlers) GetCheckoutSession(w http.ResponseWriter, r *http.Reque
 
 	status, err := h.service.GetCheckoutSession(sessionID)
 	if err != nil {
-		errors.ErrStripeError.Withf("cannot get checkout session").WithErr(err).Write(w)
+		// a session that cannot be fetched answers like one the caller may not read
+		errors.ErrCheckoutSessionNotFound.WithErr(err).Write(w)
+		return
+	}
+
+	// only an admin of the organization the session was created for may read it; anything
+	// else — no recorded organization included — is answered as if the session did not exist
+	orgAddress := common.HexToAddress(status.OrgAddress)
+	if status.OrgAddress == "" || orgAddress.Cmp(common.Address{}) == 0 ||
+		!user.HasRoleFor(orgAddress, db.AdminRole) {
+		errors.ErrCheckoutSessionNotFound.Write(w)
 		return
 	}
 
