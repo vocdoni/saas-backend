@@ -19,6 +19,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
+	dvoteapi "go.vocdoni.io/dvote/api"
 )
 
 // testUploadImage uploads data through the object storage upload handler and returns the URL
@@ -100,20 +101,13 @@ func TestProcessMetadataMediaHashes(t *testing.T) {
 	doc, code := testRequest(t, http.MethodGet, "", nil, "storage", path.Base(q.MetadataURL))
 	c.Assert(code, qt.Equals, http.StatusOK)
 
-	var metadata struct {
-		Media struct {
-			Header    string `json:"header"`
-			StreamURI string `json:"streamUri"`
-		} `json:"media"`
-		Meta struct {
-			MediaHashes map[string]string `json:"mediaHashes"`
-		} `json:"meta"`
-	}
+	var metadata dvoteapi.ElectionMetadata
 	c.Assert(json.Unmarshal(doc, &metadata), qt.IsNil)
 	c.Assert(metadata.Media.Header, qt.Equals, headerURL)
 	c.Assert(metadata.Media.StreamURI, qt.Equals, streamURI)
-	c.Assert(metadata.Meta.MediaHashes, qt.DeepEquals, map[string]string{
-		headerURL: hex.EncodeToString(headerSum[:]),
+	c.Assert(metadata.Meta, qt.DeepEquals, map[string]any{
+		"mediaHashes": map[string]any{headerURL: hex.EncodeToString(headerSum[:])},
+		"process":     map[string]any{"title": map[string]any{"default": req.Title["default"]}},
 	})
 
 	docSum := sha256.Sum256(doc)
