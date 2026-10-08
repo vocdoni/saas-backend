@@ -364,6 +364,8 @@ func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id bson.ObjectID, u
 //	@Description	`typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
 //	@Description	400 — omit `ballotProtocol` to edit a question through its `typeSetup`.
 //	@Description
+//	@Description	A published process cannot be updated here; PUT /processes/{processId}/metadata edits its text.
+//	@Description
 //	@Description	Send the updatedAt read from GET /processes/{processId} to make the update conditional: it is
 //	@Description	rejected with 409 (40171) if anything wrote the process in between, so two editors cannot
 //	@Description	overwrite each other. Omitting updatedAt opts out of that guarantee and keeps last-writer-wins.

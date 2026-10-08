@@ -347,6 +347,44 @@ func (a *Account) BuildSetProcessCensusTx(
 	}, nil
 }
 
+// SetProcessMetadataParams bundles the inputs of a SET_PROCESS_METADATA transaction.
+type SetProcessMetadataParams struct {
+	ProcessID []byte // on-chain election id
+	// MetadataURL is the public URL of the new ElectionMetadata document; the chain accepts 1 to
+	// 2083 bytes.
+	MetadataURL string
+	// MetadataHash is the SHA-256 of the exact bytes served at MetadataURL; every vote cast after
+	// the update must attest it.
+	MetadataHash []byte
+	// Nonce is the organization account nonce the tx is signed with. Several updates are signed
+	// up front with consecutive nonces and submitted as one batch.
+	Nonce uint32
+}
+
+// BuildSetProcessMetadataTx builds an unsigned SET_PROCESS_METADATA transaction that repoints a
+// published election at a new metadata document and hash. The chain accepts it only while the
+// election is READY or PAUSED, and rejects one carrying the URL and hash it already has.
+func (*Account) BuildSetProcessMetadataTx(p *SetProcessMetadataParams) (*models.Tx, error) {
+	if p == nil || len(p.ProcessID) == 0 {
+		return nil, fmt.Errorf("empty process id")
+	}
+	if p.MetadataURL == "" || len(p.MetadataHash) == 0 {
+		return nil, fmt.Errorf("metadata url and hash are required")
+	}
+	metadataURL := p.MetadataURL
+	return &models.Tx{
+		Payload: &models.Tx_SetProcess{
+			SetProcess: &models.SetProcessTx{
+				Txtype:       models.TxType_SET_PROCESS_METADATA,
+				Nonce:        p.Nonce,
+				ProcessId:    p.ProcessID,
+				Metadata:     &metadataURL,
+				MetadataHash: p.MetadataHash,
+			},
+		},
+	}, nil
+}
+
 // SubmitSignedTx submits an already-signed transaction to the chain and waits
 // (up to 40s) until it is mined. It returns the transaction response data — for a
 // NewProcess transaction this is the on-chain process id.

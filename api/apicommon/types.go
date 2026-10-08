@@ -1392,15 +1392,19 @@ type UnifiedJobResult struct {
 	Nullifier internal.HexBytes `json:"nullifier,omitempty" swaggertype:"string" example:"deadbeef"`
 	VoteID    internal.HexBytes `json:"voteID,omitempty" swaggertype:"string" example:"deadbeef"`
 	// Votes is the per-envelope outcome of a batch vote relay, in request order
-	Votes    []db.VoteJobResult `json:"votes,omitempty"`
-	Added    int                `json:"added,omitempty"`
-	Progress int                `json:"progress,omitempty"`
-	Total    int                `json:"total,omitempty"`
+	Votes []db.VoteJobResult `json:"votes,omitempty"`
+	// Questions is the per-question outcome of a metadata edit (set_process_metadata), in process
+	// order, one entry per question whose election metadata changed
+	Questions []db.QuestionMetadataJobResult `json:"questions,omitempty"`
+	Added     int                            `json:"added,omitempty"`
+	Progress  int                            `json:"progress,omitempty"`
+	Total     int                            `json:"total,omitempty"`
 }
 
 func (r *UnifiedJobResult) isEmpty() bool {
 	return len(r.Address) == 0 && r.Status == "" && len(r.ProcessID) == 0 && len(r.Nullifier) == 0 &&
-		len(r.VoteID) == 0 && len(r.Votes) == 0 && r.Added == 0 && r.Progress == 0 && r.Total == 0
+		len(r.VoteID) == 0 && len(r.Votes) == 0 && len(r.Questions) == 0 && r.Added == 0 && r.Progress == 0 &&
+		r.Total == 0
 }
 
 // JobResponse is one job in the GET /jobs list: the unified shape across import and tx jobs.
@@ -1453,6 +1457,7 @@ func JobResponseFromDB(job *db.Job) JobResponse {
 		res.Nullifier = job.Result.Nullifier
 		res.VoteID = job.Result.VoteID
 		res.Votes = job.Result.Votes
+		res.Questions = job.Result.Questions
 	}
 	if job.Total > 0 {
 		res.Progress = job.Added * 100 / job.Total

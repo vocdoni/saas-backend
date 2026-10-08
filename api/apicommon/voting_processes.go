@@ -91,6 +91,56 @@ type CreateVotingProcessRequest struct {
 	UpdatedAt string `json:"updatedAt,omitempty"`
 }
 
+// VotingProcessMetadataChoice is one choice's editable text in a process metadata GET/PUT payload.
+type VotingProcessMetadataChoice struct {
+	Title db.MultiLangString `json:"title"`
+}
+
+// VotingProcessMetadataQuestion is one question's editable text in a process metadata GET/PUT
+// payload. Everything else about a question describes its ballot, which the payload cannot carry.
+type VotingProcessMetadataQuestion struct {
+	Title       db.MultiLangString            `json:"title"`
+	Description db.MultiLangString            `json:"description,omitempty"`
+	Choices     []VotingProcessMetadataChoice `json:"choices"`
+}
+
+// VotingProcessMetadata is the body of GET and PUT /processes/{processId}/metadata: the process's
+// editable text plus each question's title/description and choice titles. Questions and choices are
+// matched by position — the payload carries no question or choice identity — so a PUT echoes back
+// the shape a GET returned, in the same order and with the same counts.
+type VotingProcessMetadata struct {
+	Title       db.MultiLangString              `json:"title"`
+	Description db.MultiLangString              `json:"description,omitempty"`
+	Header      string                          `json:"header,omitempty"`
+	StreamURI   string                          `json:"streamUri,omitempty"`
+	Questions   []VotingProcessMetadataQuestion `json:"questions"`
+}
+
+// VotingProcessMetadataFromDB builds the GET /processes/{processId}/metadata response from a
+// process and its questions, in the order they are stored.
+func VotingProcessMetadataFromDB(vp *db.VotingProcess, questions []db.VotingProcessQuestion) *VotingProcessMetadata {
+	meta := &VotingProcessMetadata{
+		Title:       vp.Title,
+		Description: vp.Description,
+		Header:      vp.Header,
+		StreamURI:   vp.StreamURI,
+		Questions:   make([]VotingProcessMetadataQuestion, len(questions)),
+	}
+	for i := range questions {
+		q := &questions[i]
+		choices := make([]VotingProcessMetadataChoice, len(q.Choices))
+		for j := range q.Choices {
+			choices[j] = VotingProcessMetadataChoice{Title: q.Choices[j].Title}
+		}
+		meta.Questions[i] = VotingProcessMetadataQuestion{
+			Title:       q.Title,
+			Description: q.Description,
+			Choices:     choices,
+		}
+	}
+	return meta
+}
+
 // ValidateProcessCensusRequest is the body of POST /processes/census/validation: the same
 // orgAddress + census block as a create request, checked for member-field duplicates / missing data
 // before the process is created.

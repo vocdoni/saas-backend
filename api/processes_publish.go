@@ -42,24 +42,45 @@ func electionParamsForQuestion(
 	if maxCensusSize == 0 {
 		return nil, fmt.Errorf("cannot determine census size for question")
 	}
+	ep := questionMetadataParams(vp, q)
+	ep.StartDate = vp.StartDate
+	ep.EndDate = vp.EndDate
+	ep.VoteType = voteType
+	ep.ElectionType = account.ElectionTypeFromQuestion(q)
+	ep.MaxCensusSize = maxCensusSize
+	return ep, nil
+}
+
+// questionMetadataParams returns the part of a question's election params that its
+// ElectionMetadata document is built from: the text and media, without ballot or census settings.
+func questionMetadataParams(vp *db.VotingProcess, q *db.VotingProcessQuestion) *db.ElectionParams {
 	return &db.ElectionParams{
 		Title:       q.Title,
 		Description: q.Description,
 		Header:      vp.Header,
 		StreamURI:   vp.StreamURI,
-		StartDate:   vp.StartDate,
-		EndDate:     vp.EndDate,
 		Questions: []db.Question{{
 			Title:       q.Title,
 			Description: q.Description,
 			Choices:     q.Choices,
 		}},
-		VoteType:           voteType,
-		ElectionType:       account.ElectionTypeFromQuestion(q),
-		MaxCensusSize:      maxCensusSize,
 		ProcessTitle:       vp.Title,
 		ProcessDescription: vp.Description,
-	}, nil
+	}
+}
+
+// questionMetadataDoc builds the ElectionMetadata document of one question's election and its
+// SHA-256, the hash the election commits on chain. Publish and the metadata edit of a published
+// process both build through here, so an edited election serves a document built exactly like the
+// one it was published with, and an unchanged text yields the very same hash.
+func (a *API) questionMetadataDoc(vp *db.VotingProcess, q *db.VotingProcessQuestion) (doc, hash []byte, err error) {
+	doc, err = a.electionMetadata(questionMetadataParams(vp, q))
+	if err != nil {
+		return nil, nil, err
+	}
+	// the object is served back byte for byte, so this is the hash of what its URL serves
+	sum := sha256.Sum256(doc)
+	return doc, sum[:], nil
 }
 
 // electionMetadata builds the ElectionMetadata document for ep, committing in meta.mediaHashes the
@@ -622,7 +643,7 @@ func (pw *publishWorker) buildBatch(
 		if err != nil {
 			return nil, false, err
 		}
-		metaBytes, err := a.electionMetadata(ep)
+		metaBytes, metaHash, err := a.questionMetadataDoc(pw.vp, q)
 		if err != nil {
 			return nil, false, err
 		}
@@ -631,9 +652,7 @@ func (pw *publishWorker) buildBatch(
 			return nil, false, err
 		}
 		q.MetadataURL = a.objectStorage.LocalURL(objectName)
-		// the object is served back byte for byte, so this is the hash of what the URL serves
-		metaHash := sha256.Sum256(metaBytes)
-		q.MetadataHash = metaHash[:]
+		q.MetadataHash = metaHash
 		nonce := startNonce + uint32(i)
 		tx, err := a.account.BuildNewProcessTx(&account.NewProcessParams{
 			OrgAddress:    pw.vp.OrgAddress,

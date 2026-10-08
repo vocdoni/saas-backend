@@ -796,8 +796,33 @@ type VotingProcess struct {
 	// and the stale sweep on it being old, so a zero date persisted as a value would make every
 	// draft ever created look like a crashed publish.
 	Publishing time.Time `json:"-" bson:"publishing,omitempty"`
-	CreatedAt  time.Time `json:"createdAt" bson:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt" bson:"updatedAt"`
+	// MetadataUpdating is the claim a metadata update job holds on a published process (see
+	// ClaimVotingProcessMetadataUpdate), so a second edit cannot race the first one's on-chain
+	// txs. omitempty for the same reason as Publishing: the claim matches on the field being absent.
+	MetadataUpdating time.Time `json:"-" bson:"metadataUpdating,omitempty"`
+	CreatedAt        time.Time `json:"createdAt" bson:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt" bson:"updatedAt"`
+}
+
+// ProcessText is the editable text a voting process holds itself, as opposed to the text of its
+// questions. Header and StreamURI also travel in every question's election metadata document.
+type ProcessText struct {
+	Title       MultiLangString
+	Description MultiLangString
+	Header      string
+	StreamURI   string
+}
+
+// QuestionTextUpdate is a text-only edit of one question: its title, description and choice
+// titles, the latter by position. MetadataURL and MetadataHash, when set, repoint a published
+// question at the metadata document its election now commits to on chain.
+type QuestionTextUpdate struct {
+	ID           bson.ObjectID
+	Title        MultiLangString
+	Description  MultiLangString
+	ChoiceTitles []MultiLangString
+	MetadataURL  string
+	MetadataHash internal.HexBytes
 }
 
 // PublishInProgress reports whether a publish worker currently holds this process. A marker older
@@ -1071,13 +1096,18 @@ const (
 	// JobTypePublishVotingProcess represents a multi-question voting-process publish
 	// (batch of NEW_PROCESS txs) tx job
 	JobTypePublishVotingProcess JobType = "publish_voting_process"
+	// JobTypeSetProcessMetadata represents a metadata edit of a published voting process: one
+	// SET_PROCESS_METADATA tx per question whose election metadata changed, one
+	// JobResult.Questions entry each
+	JobTypeSetProcessMetadata JobType = "set_process_metadata"
 )
 
 // IsValid reports whether t is one of the known job types.
 func (t JobType) IsValid() bool {
 	switch t {
 	case JobTypeOrgMembers, JobTypeCensusParticipants, JobTypePublishProcess, JobTypeSetProcessStatus,
-		JobTypeSetProcessCensus, JobTypeRelayVote, JobTypeRelayVotes, JobTypePublishVotingProcess:
+		JobTypeSetProcessCensus, JobTypeRelayVote, JobTypeRelayVotes, JobTypePublishVotingProcess,
+		JobTypeSetProcessMetadata:
 		return true
 	default:
 		return false
@@ -1121,6 +1151,22 @@ type JobResult struct {
 	// Votes carries the per-envelope outcome of a batch vote relay, index-aligned with
 	// the votes of the POST /votes request that created the job.
 	Votes []VoteJobResult `json:"votes,omitempty" bson:"votes,omitempty"`
+	// Questions carries the per-question outcome of a metadata edit (JobTypeSetProcessMetadata),
+	// one entry per question whose election metadata changed, in process order.
+	Questions []QuestionMetadataJobResult `json:"questions,omitempty" bson:"questions,omitempty"`
+}
+
+// QuestionMetadataJobResult is the outcome of one question's SET_PROCESS_METADATA tx inside a
+// metadata edit job. MetadataURL and MetadataHash are the version the tx commits; on completed
+// they are what the question now serves and every vote must attest, on failed the question kept
+// its previous version.
+type QuestionMetadataJobResult struct {
+	QuestionID   string            `json:"questionId" bson:"questionId"`
+	ProcessID    internal.HexBytes `json:"processId" bson:"processId" swaggertype:"string" example:"deadbeef"`
+	MetadataURL  string            `json:"metadataURL" bson:"metadataURL"`
+	MetadataHash internal.HexBytes `json:"metadataHash" bson:"metadataHash" swaggertype:"string" example:"deadbeef"`
+	Status       JobStatus         `json:"status" bson:"status"`
+	Error        string            `json:"error,omitempty" bson:"error,omitempty"`
 }
 
 // Job represents a persistent import or transaction job with its results and errors.

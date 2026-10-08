@@ -147,16 +147,22 @@ func (p *Subscriptions) HasTxPermission(
 		return false, errors.ErrInvalidData.With("organization is nil")
 	}
 
+	// NEW_PROCESS (built by the /processes publish) and SET_PROCESS_METADATA (built by the
+	// metadata edit of a published process) are the txs the service checks.
+	switch txType {
+	case models.TxType_NEW_PROCESS:
+		// checked below against the governing plan
+	case models.TxType_SET_PROCESS_METADATA:
+		return hasSetProcessMetadataPermission(tx, org, user)
+	default:
+		return false, fmt.Errorf("unsupported txtype")
+	}
+
 	// Resolve the plan that governs this org's limits: the integrator's plan for a
 	// managed org, otherwise the org's own plan.
 	_, plan, err := p.limitsOwner(org)
 	if err != nil {
 		return false, err
-	}
-
-	// NEW_PROCESS, built by the /processes publish, is the only tx the service checks.
-	if txType != models.TxType_NEW_PROCESS {
-		return false, fmt.Errorf("unsupported txtype")
 	}
 	// check if the user has the admin role for the organization
 	if !user.HasRoleFor(org.Address, db.AdminRole) {
@@ -183,6 +189,23 @@ func (p *Subscriptions) HasTxPermission(
 		}
 	}
 	return hasElectionMetadataPermissions(newProcess, plan)
+}
+
+// hasSetProcessMetadataPermission checks a SET_PROCESS_METADATA tx: a Manager or Admin of the org
+// may correct the text of its published elections. It is not gated on the plan: the election was
+// already paid for and published, and only its text changes, never its ballot or census.
+func hasSetProcessMetadataPermission(tx *models.Tx, org *db.Organization, user *db.User) (bool, error) {
+	if user == nil || (!user.HasRoleFor(org.Address, db.ManagerRole) && !user.HasRoleFor(org.Address, db.AdminRole)) {
+		return false, errors.ErrUnauthorized.With("user is not admin or manager of the organization")
+	}
+	setProcess := tx.GetSetProcess()
+	if setProcess == nil || setProcess.Txtype != models.TxType_SET_PROCESS_METADATA {
+		return false, errors.ErrInvalidData.With("missing set-process-metadata payload")
+	}
+	if setProcess.GetMetadata() == "" || len(setProcess.MetadataHash) == 0 {
+		return false, errors.ErrInvalidData.With("missing metadata url or hash")
+	}
+	return true, nil
 }
 
 // HasDBPermission checks if the user has permission to perform the given action in the organization stored in the DB

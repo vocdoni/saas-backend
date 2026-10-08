@@ -154,6 +154,9 @@ const (
 	processesCensusEndpoint = "/processes/{processId}/census"
 	// GET /processes/{processId}/validation publish-readiness dry-run (protected)
 	processesValidateEndpoint = "/processes/{processId}/validation"
+	// GET /processes/{processId}/metadata reads the process's editable text (public for a published
+	// process, manager/admin-only for a draft); PUT edits it, on chain for a published process
+	processesMetadataEndpoint = "/processes/{processId}/metadata"
 
 	// GET routes to get the server-side price of a voting process
 	processesPriceEndpoint = "/processes/{processId}/price"

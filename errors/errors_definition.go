@@ -80,6 +80,12 @@ var (
 	// currently commits to, so the voter was shown a different ballot than the one on chain (which
 	// would reject the vote). The client must reload the process and cast the vote again.
 	ErrVoteMetadataChanged = Error{Code: 40904, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("ballot metadata changed, reload the process and vote again"), LogLevel: "info"}
+	// ErrMetadataUpdateInProgress: a metadata edit of the process is still being put on chain; poll
+	// its job and edit again once it finishes.
+	ErrMetadataUpdateInProgress = Error{Code: 40905, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("process metadata update already in progress"), LogLevel: "info"}
+	// ErrMetadataNotEditable: an election whose metadata the edit would change is no longer READY or
+	// PAUSED, the only states in which the chain accepts a metadata update.
+	ErrMetadataNotEditable = Error{Code: 40906, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("election metadata can only change while the election is ready or paused"), LogLevel: "info"}
 
 	// TODO: most of theses errors should be unauthorized
 	// Subscription errors (400)
