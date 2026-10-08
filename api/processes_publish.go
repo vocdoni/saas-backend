@@ -227,9 +227,10 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 //	@Description	saved again before it can be published.
 //	@Description	Every document also commits, in meta.mediaHashes, the SHA-256 of its images by content
 //	@Description	(the parent's header; each question's choice images, from metadata.choices[].image),
-//	@Description	read from this backend's storage or fetched from their external URL; the video
-//	@Description	stream is never hashed, only its URL is committed. 422 (40179) means an image
-//	@Description	could not be fetched or hashed; the message names its URL.
+//	@Description	read from this backend's storage (images are imported when the process is saved, so
+//	@Description	publishing fetches nothing); the video stream is never hashed, only its URL is
+//	@Description	committed. 422 (40179) means an image is not a readable stored object; the message
+//	@Description	names its URL.
 //	@Description	402 (40178) means the process is priced and unpaid — the current quote travels in the
 //	@Description	error data; start checkout via POST /processes/{processId}/checkout. For a managed
 //	@Description	organization, 402 (40175) means its integrator's wallet does not cover the price.
@@ -245,7 +246,7 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 //	@Failure		402			{object}	errors.Error	"Payment required (quote in data), or insufficient integrator wallet balance"
 //	@Failure		404			{object}	errors.Error
 //	@Failure		409			{object}	errors.Error	"Publish in progress, questions out of sync, or payment still processing"
-//	@Failure		422			{object}	errors.Error	"Image not fetchable (40179), or managed org census needs a custom quote"
+//	@Failure		422			{object}	errors.Error	"Image not stored (40179), or managed org census needs a custom quote"
 //	@Failure		503			{object}	errors.Error
 //	@Router			/processes/{processId}/publish [post]
 func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request) {

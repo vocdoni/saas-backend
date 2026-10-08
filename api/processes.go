@@ -69,6 +69,12 @@ func parseProcessDates(req *apicommon.CreateVotingProcessRequest) (start, end ti
 //	@Description	yes/no field, so a unique-values ballot admits no vote and the election would tally
 //	@Description	every vote to zero. A `ballotProtocol` whose `uniqueValues` cannot be satisfied
 //	@Description	(fewer legal values than fields) is rejected for the same reason.
+//	@Description
+//	@Description	Images (the `header` and each question's `metadata.choices[].image`, a URL or a
+//	@Description	`{default, thumbnail}` object) are imported: one not served by this backend's storage is
+//	@Description	fetched (http/https, public addresses only, at most 10s and 32 MiB), stored, and the
+//	@Description	saved process points at the local copy. 422 (40179) when one cannot be imported; the
+//	@Description	message names the field and the URL, and nothing is saved. `streamUri` is kept as sent.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -78,6 +84,7 @@ func parseProcessDates(req *apicommon.CreateVotingProcessRequest) (start, end ti
 //	@Failure		400		{object}	errors.Error
 //	@Failure		401		{object}	errors.Error
 //	@Failure		403		{object}	errors.Error
+//	@Failure		422		{object}	errors.Error	"Image could not be imported (40179)"
 //	@Router			/processes [post]
 func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
 	req := &apicommon.CreateVotingProcessRequest{}
@@ -118,6 +125,11 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	initialStatus, err := account.NormalizeInitialStatus(req.InitialStatus)
 	if err != nil {
 		errors.ErrMalformedBody.WithErr(err).Write(w)
+		return
+	}
+	// external images are copied into the object storage and the draft points at the copies
+	if err := a.importImages(processImageRefs(&req.Header, req.Questions), user.Email); err != nil {
+		writeSubscriptionError(w, err)
 		return
 	}
 	census, missing, err := a.resolveOrCreateDefaultCensus(req.Census, orgAddr)
@@ -371,6 +383,12 @@ func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id bson.ObjectID, u
 //	@Description	Census members are handled as on create: those missing required auth data are left out
 //	@Description	and listed in `missingData`, and those the census cannot tell apart are a 400 (40037)
 //	@Description	whose `data.duplicates` lists them.
+//	@Description
+//	@Description	Images (the `header` and each question's `metadata.choices[].image`, a URL or a
+//	@Description	`{default, thumbnail}` object) are imported: one not served by this backend's storage is
+//	@Description	fetched (http/https, public addresses only, at most 10s and 32 MiB), stored, and the
+//	@Description	saved process points at the local copy. 422 (40179) when one cannot be imported; the
+//	@Description	message names the field and the URL, and nothing is saved. `streamUri` is kept as sent.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -382,6 +400,7 @@ func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id bson.ObjectID, u
 //	@Failure		401			{object}	errors.Error
 //	@Failure		404			{object}	errors.Error
 //	@Failure		409			{object}	errors.Error
+//	@Failure		422			{object}	errors.Error	"Image could not be imported (40179)"
 //	@Router			/processes/{processId} [put]
 func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)
@@ -427,6 +446,11 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	start, end, err := parseProcessDates(req)
 	if err != nil {
 		errors.ErrMalformedBody.WithErr(err).Write(w)
+		return
+	}
+	// external images are copied into the object storage and the draft points at the copies
+	if err := a.importImages(processImageRefs(&req.Header, req.Questions), user.Email); err != nil {
+		writeSubscriptionError(w, err)
 		return
 	}
 	// a draft update re-resolves the census into a fresh unpublished db.Census; the previous
