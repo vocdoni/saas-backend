@@ -423,6 +423,12 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if !isUpdate {
+		// the same member-base quota the bulk POST enforces: a creation grows the member base by
+		// one, while an edit of an existing member at the limit must stay allowed
+		if err := a.subscriptions.OrgCanAddNMembers(org.Address, 1); err != nil {
+			writeSubscriptionError(w, err)
+			return
+		}
 		if err := a.preflightCensusGrowth(org, autoCensuses, 1); err != nil {
 			writeSubscriptionError(w, err)
 			return

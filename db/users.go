@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -79,6 +80,38 @@ func (ms *MongoStorage) addOrganizationToUser(ctx context.Context,
 	if _, err := ms.users.UpdateOne(ctx, filter, updateDoc); err != nil {
 		log.Warnw("error adding organization to user", "error", err)
 		return err
+	}
+	return nil
+}
+
+// AddUserToOrganization atomically grants the given role in the organization to the user with
+// the given email, unless the user already holds any role there. The membership check and the
+// write are one filtered update, so two concurrent grants (or a grant racing another membership
+// write) cannot drop or duplicate an entry. It returns ErrAlreadyExists when the user already
+// belongs to the organization with any role, and ErrNotFound when the user does not exist.
+func (ms *MongoStorage) AddUserToOrganization(userEmail string, address common.Address, role UserRole) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	// match only when no entry for the organization exists yet, whatever its role, so a user
+	// invited with a different role cannot end up with two entries for the same organization
+	filter := bson.M{"email": userEmail, "organizations._id": bson.M{"$ne": address}}
+	updateDoc := bson.M{"$push": bson.M{"organizations": OrganizationUser{Address: address, Role: role}}}
+	res, err := ms.users.UpdateOne(ctx, filter, updateDoc)
+	if err != nil {
+		return fmt.Errorf("could not add organization to user: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		// either the user does not exist or it already belongs to the organization
+		if err := ms.users.FindOne(ctx, bson.M{"email": userEmail},
+			options.FindOne().SetProjection(bson.M{"_id": 1})).Err(); err != nil {
+			if err == mongo.ErrNoDocuments {
+				return ErrNotFound
+			}
+			return err
+		}
+		return ErrAlreadyExists
 	}
 	return nil
 }

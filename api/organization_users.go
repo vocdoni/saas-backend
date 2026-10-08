@@ -277,27 +277,36 @@ func (a *API) acceptOrganizationUserInvitationHandler(w http.ResponseWriter, r *
 			LastName:  invitationReq.User.LastName,
 			Verified:  true,
 		}
+		// create the user first and grant the membership below through the same atomic path as
+		// an existing user; a concurrent registration losing this race simply falls through to it
+		if _, err := a.db.SetUser(dbUser); err != nil && err != db.ErrAlreadyExists {
+			errors.ErrGenericInternalServerError.Withf("could not set user: %v", err).Write(w)
+			return
+		}
 	} else {
 		// if it does, check if the user is already verified
 		if !dbUser.Verified {
 			errors.ErrUserNoVerified.With("user already exists but is not verified").Write(w)
 			return
 		}
-		// check if the user already has the role in the organization
-		if _, err := a.db.UserHasRoleInOrg(invitation.NewUserEmail, org.Address, invitation.Role); err == nil {
+		// check if the user already has any role in the organization: granting the invited role
+		// on top of a different existing one would leave the user with two entries for the org
+		if hasAnyRole, err := a.db.UserHasAnyRoleInOrg(invitation.NewUserEmail, org.Address); err == nil && hasAnyRole {
 			go removeInvitation()
-			errors.ErrDuplicateConflict.With("user already has the role in the organization").Write(w)
+			errors.ErrDuplicateConflict.With("user already has a role in the organization").Write(w)
 			return
 		}
 	}
-	// include the new organization in the user
-	dbUser.Organizations = append(dbUser.Organizations, db.OrganizationUser{
-		Address: org.Address,
-		Role:    invitation.Role,
-	})
-	// set the user in the database
-	if _, err := a.db.SetUser(dbUser); err != nil {
-		errors.ErrGenericInternalServerError.Withf("could not set user: %v", err).Write(w)
+	// grant the membership atomically, keyed on the organization address, so two concurrent
+	// acceptances (or any concurrent membership write) cannot lose or duplicate an entry the way
+	// the previous read-append-write of the whole organizations array could
+	if err := a.db.AddUserToOrganization(invitation.NewUserEmail, org.Address, invitation.Role); err != nil {
+		if err == db.ErrAlreadyExists {
+			go removeInvitation()
+			errors.ErrDuplicateConflict.With("user already has a role in the organization").Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.Withf("could not add user to organization: %v", err).Write(w)
 		return
 	}
 	// delete the invitation
