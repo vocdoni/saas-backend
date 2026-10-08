@@ -186,6 +186,8 @@ type API struct {
 	liveElectionCache *expirable.LRU[string, *dvoteapi.Election]
 	// legacyProjectionCache holds fully-final legacy records already projected onto /processes.
 	legacyProjectionCache *lru.Cache[string, *apicommon.VotingProcessResponse]
+	// electionReads coalesces, caches and bounds the public read paths' election fetches.
+	electionReads *electionReads
 }
 
 // enqueueConfirm asks the status syncer to confirm a status change landed on-chain; a no-op when
@@ -287,6 +289,9 @@ func New(ctx context.Context, conf *Config) *API {
 		liveElectionCache:     liveElectionCache,
 		legacyProjectionCache: legacyProjectionCache,
 	}
+	a.electionReads = newElectionReads(func(id internal.HexBytes) (*dvoteapi.Election, error) {
+		return a.account.Election(id)
+	})
 	a.startTxQueues()
 	// close tx jobs stranded pending by a previous process: their queue was in-memory, so no
 	// worker will ever finish them, and the transactions are never replayed (their outcome is
