@@ -243,7 +243,7 @@ func (ms *MongoStorage) DeleteCensusParticipantsByCensus(censusID string) (int64
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 	res, err := ms.censusParticipants.DeleteMany(ctx, bson.M{"censusId": censusID})
 	if err != nil {
@@ -526,7 +526,7 @@ func (ms *MongoStorage) AddCensusParticipantsByMemberIDs(censusID string, member
 		return 0, nil, fmt.Errorf("failed to get census: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	added := 0
@@ -645,8 +645,10 @@ func (ms *MongoStorage) updateCensusSize(censusID string) error {
 }
 
 // setBulkCensusParticipant upserts the given members as participants of the census, under the login
-// hashes classifyCensusMembers computed for them.
-func (ms *MongoStorage) setBulkCensusParticipant(ctx context.Context, census *Census, members []censusMember) (int64, error) {
+// hashes classifyCensusMembers computed for them. The writes go out in batches of
+// censusParticipantBatchSize documents, each batch under its own keysLock acquisition and timeout
+// (like processBatches), so a large census build never holds the global lock for the whole write.
+func (ms *MongoStorage) setBulkCensusParticipant(census *Census, members []censusMember) (int64, error) {
 	if len(members) == 0 {
 		return 0, nil // nothing to do
 	}
@@ -701,10 +703,32 @@ func (ms *MongoStorage) setBulkCensusParticipant(ctx context.Context, census *Ce
 			SetUpsert(true)
 		docs = append(docs, upsertCensusParticipantsModel)
 	}
+	const censusParticipantBatchSize = 200
+	var upserted int64
+	for start := 0; start < len(docs); start += censusParticipantBatchSize {
+		end := min(start+censusParticipantBatchSize, len(docs))
+		n, err := ms.writeCensusParticipantBatch(docs[start:end])
+		upserted += n
+		if err != nil {
+			return upserted, err
+		}
+	}
+	return upserted, nil
+}
+
+// writeCensusParticipantBatch bulk-writes one batch of census participant upserts under keysLock,
+// with a per-batch timeout, mirroring processBatch.
+func (ms *MongoStorage) writeCensusParticipantBatch(docs []mongo.WriteModel) (int64, error) {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), batchTimeout)
+	defer cancel()
 	// Unordered makes it continue on errors (e.g., one dup)
 	bulkOpts := options.BulkWrite().SetOrdered(false)
-
 	results, err := ms.censusParticipants.BulkWrite(ctx, docs, bulkOpts)
+	if results == nil {
+		return 0, err
+	}
 	return results.UpsertedCount, err
 }
 
@@ -736,7 +760,7 @@ func (ms *MongoStorage) CensusTotalWeight(censusID string) (int64, error) {
 	if len(censusID) == 0 {
 		return 0, ErrInvalidData
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 	pipeline := mongo.Pipeline{
 		{{Key: "$match", Value: bson.M{"censusId": censusID}}},
@@ -773,7 +797,7 @@ func (ms *MongoStorage) CensusTotalWeight(censusID string) (int64, error) {
 // CensusParticipants retrieves all the census participants for a given census.
 func (ms *MongoStorage) CensusParticipants(censusID string) ([]CensusParticipant, error) {
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	// validate input
@@ -818,7 +842,7 @@ func (ms *MongoStorage) CensusParticipantsByMemberIDs(
 		return nil, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	filter := bson.M{
@@ -897,7 +921,7 @@ func (ms *MongoStorage) CountNewCensusParticipants(census *Census, memberIDs []s
 		return 0, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 	cursor, err := ms.orgMembers.Find(ctx, bson.M{"_id": bson.M{"$in": oids}, "orgAddress": census.OrgAddress},
 		options.Find().SetProjection(bson.M{"_id": 1}))
