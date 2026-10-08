@@ -782,7 +782,8 @@ func (pw *publishWorker) publishParent() error {
 	if err != nil {
 		return err
 	}
-	metaBytes, metaHash, err := metadataDoc(electionParamsForParent(pw.vp, questionElections), pw.mediaHashes)
+	ep := electionParamsForParent(pw.vp, questionElections)
+	metaBytes, metaHash, err := metadataDoc(ep, pw.mediaHashes)
 	if err != nil {
 		return err
 	}
