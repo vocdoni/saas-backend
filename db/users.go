@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 
 	"github.com/ethereum/go-ethereum/common"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -10,19 +11,42 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-// nextUserID internal method returns the next available user ID. If an error
-// occurs, it returns the error. This method must be called with the keysLock
-// held.
+// nextUserID internal method returns the next available user ID by atomically
+// incrementing a counter document, so concurrent inserts — including inserts
+// from different service replicas — can never be handed the same ID. The
+// counter is lazily seeded from the current highest user ID the first time it
+// is needed (fresh database, or a wiped counters collection).
 func (ms *MongoStorage) nextUserID(ctx context.Context) (uint64, error) {
-	var user User
-	opts := options.FindOne().SetSort(bson.D{{Key: "_id", Value: -1}})
-	if err := ms.users.FindOne(ctx, bson.M{}, opts).Decode(&user); err != nil {
-		if err == mongo.ErrNoDocuments {
-			return 1, nil
+	update := bson.M{"$inc": bson.M{"seq": int64(1)}}
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
+	for {
+		counter := struct {
+			Seq int64 `bson:"seq"`
+		}{}
+		err := ms.counters.FindOneAndUpdate(ctx, bson.M{"_id": "users"}, update, opts).Decode(&counter)
+		if err == nil {
+			return uint64(counter.Seq), nil
 		}
-		return 0, err
+		if !errors.Is(err, mongo.ErrNoDocuments) {
+			return 0, err
+		}
+		// no counter yet: seed it from the current highest user ID. A duplicate-key
+		// error means another instance seeded it concurrently; retry the increment.
+		var lastUser User
+		findOpts := options.FindOne().SetSort(bson.D{{Key: "_id", Value: -1}})
+		err = ms.users.FindOne(ctx, bson.M{}, findOpts).Decode(&lastUser)
+		if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
+			return 0, err
+		}
+		next := lastUser.ID + 1
+		if _, err := ms.counters.InsertOne(ctx, bson.M{"_id": "users", "seq": next}); err != nil {
+			if mongo.IsDuplicateKeyError(err) {
+				continue
+			}
+			return 0, err
+		}
+		return next, nil
 	}
-	return user.ID + 1, nil
 }
 
 // addOrganizationToUser internal method adds the organization to the user with
@@ -126,31 +150,32 @@ func (ms *MongoStorage) SetUser(user *User) (uint64, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	// get the next available user ID
-	nextID, err := ms.nextUserID(ctx)
-	if err != nil {
-		return 0, err
-	}
 	// if the user provided doesn't have organizations, create an empty slice
 	if user.Organizations == nil {
 		user.Organizations = []OrganizationUser{}
 	}
 	// check if the user exists or needs to be created
 	if user.ID > 0 {
-		if user.ID >= nextID {
-			return 0, ErrInvalidData
-		}
 		// if the user exists, update it with the new data
 		updateDoc, err := dynamicUpdateDocument(user, nil)
 		if err != nil {
 			return 0, err
 		}
-		_, err = ms.users.UpdateOne(ctx, bson.M{"_id": user.ID}, updateDoc)
+		result, err := ms.users.UpdateOne(ctx, bson.M{"_id": user.ID}, updateDoc)
 		if err != nil {
 			return 0, err
 		}
+		if result.MatchedCount == 0 {
+			// updating a user that does not exist
+			return 0, ErrInvalidData
+		}
 	} else {
-		// if the user doesn't exist, create it setting the ID first
+		// if the user doesn't exist, create it consuming the next ID from the
+		// atomic counter first
+		nextID, err := ms.nextUserID(ctx)
+		if err != nil {
+			return 0, err
+		}
 		user.ID = nextID
 		if _, err := ms.users.InsertOne(ctx, user); err != nil {
 			if mongo.IsDuplicateKeyError(err) {

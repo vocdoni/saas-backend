@@ -576,23 +576,33 @@ func (ms *MongoStorage) DecrementOrganizationManagedOrgsCounter(address common.A
 	return ms.addToOrganizationCounter(address, "managedOrgs", -1)
 }
 
-// ReserveManagedPublish atomically reserves one managed process slot for the integrator,
-// re-reading the counter under keysLock so concurrent publishes cannot each pass a stale
-// check and exceed the integrator's aggregate process quota. Returns ErrManagedQuotaReached
-// if the limit would be exceeded. Roll back with AddOrganizationManagedProcesses(-1) if the
-// publish later fails.
+// ReserveManagedPublish atomically reserves one managed process slot for the integrator:
+// the quota check is part of the increment's filter, so concurrent publishes — also from
+// different service replicas — cannot each pass a stale check and exceed the integrator's
+// aggregate process quota. Returns ErrManagedQuotaReached if the limit would be exceeded.
+// Roll back with AddOrganizationManagedProcesses(-1) if the publish later fails.
 func (ms *MongoStorage) ReserveManagedPublish(address common.Address, processLimit int) error {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
 
-	org, err := ms.Organization(address)
-	if err != nil {
-		return fmt.Errorf("could not get organization: %w", err)
+	filter := bson.M{
+		"_id": address,
+		// $not also matches a missing counter, unlike $lt
+		"counters.managedProcesses": bson.M{"$not": bson.M{"$gte": processLimit}},
 	}
-	if org.Counters.ManagedProcesses >= processLimit {
+	update := bson.M{"$inc": bson.M{"counters.managedProcesses": 1}}
+	result, err := ms.organizations.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("could not reserve managed publish slot: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		// either the organization does not exist or its quota is already full
+		if _, err := ms.Organization(address); err != nil {
+			return fmt.Errorf("could not get organization: %w", err)
+		}
 		return ErrManagedQuotaReached
 	}
-	return ms.addToOrganizationCounter(address, "managedProcesses", 1)
+	return nil
 }
 
 // AddOrganizationManagedProcesses atomically adds delta to the managed processes counter.

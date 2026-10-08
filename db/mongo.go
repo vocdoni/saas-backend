@@ -57,6 +57,7 @@ type MongoStorage struct {
 	jobs                *mongo.Collection
 	apiKeys             *mongo.Collection
 	migrations          *mongo.Collection
+	counters            *mongo.Collection
 }
 
 type Options struct {
