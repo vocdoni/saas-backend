@@ -123,7 +123,8 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 			errors.ErrGenericInternalServerError.Withf("could not get parent organization: %v", err).Write(w)
 			return
 		}
-		if len(dbParentOrg.Parent) > 0 {
+		// Parent is a fixed-size address, so its length is always 20: test for the zero address
+		if dbParentOrg.Parent != (common.Address{}) {
 			errors.ErrMalformedBody.Withf("parent organization is already a suborganization").Write(w)
 			return
 		}
@@ -224,8 +225,18 @@ func (a *API) organizationInfoHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrNoOrganizationProvided.Write(w)
 		return
 	}
+	info := apicommon.OrganizationFromDB(org, parent)
+	// the endpoint is public, but the billing email is only for the organization's admins, as on
+	// the dedicated subscription endpoint
+	if user := a.optionalCallerUser(r); user == nil || !user.HasRoleFor(org.Address, db.AdminRole) {
+		for o := info; o != nil; o = o.Parent {
+			if o.Subscription != nil {
+				o.Subscription.Email = ""
+			}
+		}
+	}
 	// send the organization back to the user
-	apicommon.HTTPWriteJSON(w, apicommon.OrganizationFromDB(org, parent))
+	apicommon.HTTPWriteJSON(w, info)
 }
 
 // updateOrganizationHandler godoc

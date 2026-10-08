@@ -686,8 +686,15 @@ func (a *API) removeOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		errors.ErrInvalidUserData.With("user cannot remove itself from the organization").Write(w)
 		return
 	}
-	if err := a.db.RemoveOrganizationUser(org.Address, uint64(userIDInt)); err != nil {
+	removed, err := a.db.RemoveOrganizationUser(org.Address, uint64(userIDInt))
+	if err != nil {
 		errors.ErrInvalidUserData.Withf("user not found: %v", err).Write(w)
+		return
+	}
+	// removing a user who is not a member must not decrement the users counter, or repeating the
+	// request would push it below the real number of users and lift the plan's user limit
+	if !removed {
+		errors.ErrInvalidUserData.With("user is not a member of the organization").Write(w)
 		return
 	}
 

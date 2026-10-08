@@ -223,9 +223,9 @@ func (ms *MongoStorage) UpdateOrganizationUserRole(address common.Address, userI
 	return nil
 }
 
-// RemoveOrganizationUser method removes the user from the organization
-// with the given address.
-func (ms *MongoStorage) RemoveOrganizationUser(address common.Address, userID uint64) error {
+// RemoveOrganizationUser removes the organization from the user's organizations. It reports
+// whether the user was a member, so callers only update membership counters for real removals.
+func (ms *MongoStorage) RemoveOrganizationUser(address common.Address, userID uint64) (bool, error) {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
@@ -242,11 +242,11 @@ func (ms *MongoStorage) RemoveOrganizationUser(address common.Address, userID ui
 			},
 		},
 	}
-	_, err := ms.users.UpdateOne(ctx, filter, update)
+	res, err := ms.users.UpdateOne(ctx, filter, update)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return nil
+	return res.ModifiedCount == 1, nil
 }
 
 // RemoveOrganizationFromAllUsers unlinks the given organization from every user that is a

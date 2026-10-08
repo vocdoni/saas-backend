@@ -126,7 +126,11 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 	// the verification code will not be sent but stored in the database
 	// generated with just the user email to mock the verification process
 	if a.mail != nil {
-		verificationCode = util.RandomHex(apicommon.VerificationCodeLength)
+		codeLength := apicommon.VerificationCodeLength
+		if codeType == db.CodeTypeOrgInvite || codeType == db.CodeTypeOrgInviteUpdate {
+			codeLength = apicommon.InvitationCodeLength
+		}
+		verificationCode = util.RandomHex(codeLength)
 	}
 	var webAppURI string
 	var linkParams map[string]any
