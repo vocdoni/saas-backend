@@ -18,7 +18,7 @@ firewall rule.
 
   A legacy Personal Access Token with `Write` checked works too. Create at
   <https://cloud.digitalocean.com/account/api/tokens>, then `doctl auth init`.
-- `mongosh`, `curl`, `awk` on `PATH`.
+- `mongosh`, `curl`, `awk`, `jq` on `PATH`.
 
 ## Usage
 
