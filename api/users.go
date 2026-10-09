@@ -414,9 +414,13 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		// flag integrator status per organization so multi-org users can tell
 		// which of their organizations is the integrator one
+		info := apicommon.OrganizationFromDB(org, parent)
+		// members other than admins (and admins of a suborganization, for its parent) do not get
+		// the billing email
+		redactBillingEmails(info, user)
 		userOrgs = append(userOrgs, &apicommon.UserOrganization{
 			Role:         string(orgInfo.Role),
-			Organization: apicommon.OrganizationFromDB(org, parent),
+			Organization: info,
 			IsIntegrator: a.subscriptions.IsIntegrator(org),
 		})
 	}

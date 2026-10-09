@@ -234,15 +234,21 @@ func (a *API) organizationInfoHandler(w http.ResponseWriter, r *http.Request) {
 	info := apicommon.OrganizationFromDB(org, parent)
 	// the endpoint is public, but the billing email is only for the organization's admins, as on
 	// the dedicated subscription endpoint
-	if user := a.optionalCallerUser(r); user == nil || !user.HasRoleFor(org.Address, db.AdminRole) {
-		for o := info; o != nil; o = o.Parent {
-			if o.Subscription != nil {
-				o.Subscription.Email = ""
-			}
-		}
-	}
+	redactBillingEmails(info, a.optionalCallerUser(r))
 	// send the organization back to the user
 	apicommon.HTTPWriteJSON(w, info)
+}
+
+// redactBillingEmails clears the subscription billing email of every organization in info's
+// parent chain that user is not an admin of (all of them when user is nil). The billing email is
+// admin-only data, as on the dedicated subscription endpoint, and each level is checked against
+// its own organization: an admin of a suborganization is not an admin of its parent.
+func redactBillingEmails(info *apicommon.OrganizationInfo, user *db.User) {
+	for o := info; o != nil; o = o.Parent {
+		if o.Subscription != nil && (user == nil || !user.HasRoleFor(o.Address, db.AdminRole)) {
+			o.Subscription.Email = ""
+		}
+	}
 }
 
 // updateOrganizationHandler godoc
