@@ -16,7 +16,7 @@
 set -euo pipefail
 
 need() { command -v "$1" >/dev/null || { echo "missing: $1" >&2; exit 1; }; }
-need doctl; need mongosh; need curl
+need doctl; need mongosh; need curl; need jq
 
 prompt() {  # prompt VAR "label" ["default"]
   local var=$1 label=$2 default=${3:-} val
@@ -37,8 +37,8 @@ prompt DB_USER    "mongo user"
 DB_NAME=${DB_NAME:-${1:-}}
 prompt DB_NAME    "mongo database"
 
-# doctl's tabular --format output is safe here: UUIDs, IPs, hostnames, cluster
-# names, and rule types (ip_addr/app/tag/…) cannot contain whitespace.
+# doctl's tabular --format output is safe here: UUIDs, hostnames and cluster
+# names cannot contain whitespace.
 DB=$(doctl databases list --format ID,Name --no-header |
      awk -v n="$DB_CLUSTER" '$2==n {print $1; found=1; exit} END {exit !found}') ||
   { echo "no such cluster: $DB_CLUSTER" >&2; exit 1; }
@@ -54,9 +54,10 @@ URI=${URI//\{DB\}/$DB_NAME}
 
 # uuids (one per line) of ip_addr rules matching $1. The type filter is
 # load-bearing: without it a cleanup could match and delete an `app` rule.
+# `firewalls list` has no --format flag, so the rules are read as JSON.
 rule_uuids() {
-  doctl databases firewalls list "$DB" --format UUID,Type,Value --no-header |
-    awk -v ip="$1" '$2=="ip_addr" && $3==ip {print $1}'
+  doctl databases firewalls list "$DB" -o json |
+    jq -r --arg ip "$1" '.[] | select(.type == "ip_addr" and .value == $ip) | .uuid'
 }
 
 IP=$(curl -fsS https://ipv4.icanhazip.com | tr -d '[:space:]')
