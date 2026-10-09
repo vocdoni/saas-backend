@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 )
 
 func TestOrganizationMeta(t *testing.T) {
@@ -394,6 +396,23 @@ func TestOrganizationMetaIdentityKeysAdminOnly(t *testing.T) {
 			_, hasDescription := meta["description"]
 			c.Assert(hasDescription, qt.IsFalse, qt.Commentf(tc.name))
 		}
+	})
+
+	t.Run("post rejects dotted keys for any role", func(t *testing.T) {
+		c := qt.New(t)
+		before := getMeta()
+		// a planted literal "description.default" would later be picked up by an admin PUT path
+		planted := maps.Clone(before)
+		planted["description.default"] = "Evil"
+		requestAndAssertError(errors.ErrInvalidUserData, t, http.MethodPost, managerToken,
+			&apicommon.OrganizationAddMetaRequest{Meta: planted}, metaPath...)
+		c.Assert(getMeta(), qt.DeepEquals, before)
+
+		dotted := maps.Clone(before)
+		dotted["contact.email"] = "info@example.com"
+		requestAndAssertError(errors.ErrInvalidUserData, t, http.MethodPost, adminToken,
+			&apicommon.OrganizationAddMetaRequest{Meta: dotted}, metaPath...)
+		c.Assert(getMeta(), qt.DeepEquals, before)
 	})
 
 	t.Run("admin can change identity keys", func(t *testing.T) {

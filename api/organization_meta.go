@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"reflect"
 	"slices"
@@ -85,6 +86,7 @@ func writeIdentityMetaAdminOnly(w http.ResponseWriter) {
 //	@Description	Overwrite the meta information of an organization. Requires Manager/Admin role.
 //	@Description	Only admins may change the organization identity keys (name, logo, description): a manager's
 //	@Description	request must carry them exactly as they are stored, or it is rejected with 401.
+//	@Description	Top-level keys cannot contain dots (400), for any role.
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -92,6 +94,7 @@ func writeIdentityMetaAdminOnly(w http.ResponseWriter) {
 //	@Param			orgAddress	path		string									true	"Organization address"
 //	@Param			request		body		apicommon.OrganizationAddMetaRequest	true	"Meta information to add to the organization"
 //	@Success		200			{string}	string									"OK"
+//	@Failure		400			{object}	errors.Error							"Invalid meta information (e.g. a key containing a dot)"
 //	@Failure		401			{object}	errors.Error							"Unauthorized"
 //	@Failure		403			{object}	errors.Error							"Forbidden - User is not a manager or admin of the organization"
 //	@Failure		404			{object}	errors.Error							"Organization not found"
@@ -121,6 +124,13 @@ func (a *API) addOrganizationMetaHandler(w http.ResponseWriter, r *http.Request)
 	var meta apicommon.OrganizationAddMetaRequest
 	if err := json.NewDecoder(r.Body).Decode(&meta); err != nil {
 		errors.ErrInvalidUserData.WithErr(err).Withf("invalid meta information").Write(w)
+		return
+	}
+	// the whole map is stored as-is, so a dotted key would become a literal "a.b" field; later PUTs
+	// treat dots as paths, which would either write into it (e.g. a planted "name.default" becoming
+	// the org name) or fail with a path conflict, and DELETE could never remove it
+	if slices.ContainsFunc(slices.Collect(maps.Keys(meta.Meta)), func(k string) bool { return strings.Contains(k, ".") }) {
+		errors.ErrInvalidUserData.Withf("meta keys cannot contain dots").Write(w)
 		return
 	}
 	if !user.HasRoleFor(org.Address, db.AdminRole) && identityMetaReplaced(org.Meta, meta.Meta) {
