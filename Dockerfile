@@ -25,8 +25,24 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+# Run as a dedicated unprivileged user with a fixed UID/GID so mounted volumes and
+# security policies can rely on stable ids. The service listens on 8080 by default,
+# so no extra capabilities are needed to bind it.
+ARG APP_UID=10001
+ARG APP_GID=10001
+RUN groupadd --system --gid ${APP_GID} vocdoni && \
+    useradd --system --uid ${APP_UID} --gid ${APP_GID} --home-dir /home/vocdoni \
+        --create-home --shell /usr/sbin/nologin vocdoni
+# The zk circuit cache path derives from $HOME (~/.cache/vocdoni/zkCircuits); pin it so
+# the prefetched artifacts are found even if the runtime overrides the user.
+ENV HOME=/home/vocdoni
+
 WORKDIR /app
+# The binary stays root-owned (read-only for the service user). Only the circuit cache is
+# owned by the service user, since it is downloaded there at runtime if a version is missing.
 COPY --from=builder /src/backend ./
-COPY --from=builder /root/.cache/vocdoni/zkCircuits /root/.cache/vocdoni/zkCircuits
+COPY --from=builder --chown=${APP_UID}:${APP_GID} /root/.cache/vocdoni/zkCircuits /home/vocdoni/.cache/vocdoni/zkCircuits
+
+USER ${APP_UID}:${APP_GID}
 
 ENTRYPOINT ["/app/backend"]
