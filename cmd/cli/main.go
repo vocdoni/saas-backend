@@ -55,19 +55,10 @@ func setIntegrator(database *db.MongoStorage, orgAddress string, maxOrgs int) er
 	if err != nil {
 		return err
 	}
-	org, err := database.Organization(addr)
-	if err != nil {
-		return fmt.Errorf("could not get organization: %w", err)
-	}
 	// Setting a per-organization limits override both enables integrator status and
 	// caps how many organizations it may manage (see Subscriptions.IsIntegrator).
-	// TODO: this is a read-then-write of the whole document, so it can write back stale
-	// counters/subscription fields; switch to a targeted $set once db has an
-	// IntegratorLimits setter.
-	org.IntegratorLimits = &db.IntegratorLimits{
-		MaxManagedOrgs: maxOrgs,
-	}
-	if err := database.SetOrganization(org); err != nil {
+	limits := &db.IntegratorLimits{MaxManagedOrgs: maxOrgs}
+	if err := database.SetOrganizationIntegratorLimits(addr, limits); err != nil {
 		return fmt.Errorf("could not update organization: %w", err)
 	}
 	log.Infow("organization is now an integrator",
