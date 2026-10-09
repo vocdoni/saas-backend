@@ -1,7 +1,6 @@
 package db
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -45,9 +44,7 @@ func TestDeleteOrgMembersSweepsParticipantsWrittenBack(t *testing.T) {
 		return stored
 	}
 	writeParticipant := func(c *qt.C, m *OrgMember) {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_, err := testDB.setBulkCensusParticipant(ctx, census,
+		_, err := testDB.setBulkCensusParticipant(census,
 			[]censusMember{{id: m.ID, hashes: calculateParticipantHashes(*census, *m)}})
 		c.Assert(err, qt.IsNil)
 	}
