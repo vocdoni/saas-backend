@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -47,6 +48,18 @@ type RepairOptions struct {
 	// OrgAddress restricts the run to a single organization. Nil scans every
 	// organization.
 	OrgAddress *common.Address
+	// UnsetUnresolved removes the stale login hashes of participants skipped
+	// because of a collision, instead of leaving them in place. A stale hash is
+	// one that differs from what the service computes today; for a row written
+	// by the old code it is the old format, which embeds the lowercased login
+	// field values in near-plaintext. No login can match a stale hash, so
+	// unsetting it does not lock out anyone who could log in before; the voter
+	// stays unable to log in until an admin resolves the duplicate (edits or
+	// removes one of the colliding members) and the repair is re-run or the
+	// member is edited again. It is the same state the service leaves a
+	// participant in when an edit drops the data it needs to log in. Only takes
+	// effect with Apply; a dry run counts what it would unset.
+	UnsetUnresolved bool
 }
 
 // SkippedMember identifies a census participant left untouched because its
@@ -56,6 +69,24 @@ type RepairOptions struct {
 type SkippedMember struct {
 	MemberID string
 	CensusID string
+	// StaleFields names the stored hash fields ("loginHash", "loginHashEmail",
+	// "loginHashPhone") whose value differs from what the service computes today,
+	// i.e. the ones UnsetUnresolved removes. Empty when the row already holds
+	// current hashes and only other rows of its group are stale.
+	StaleFields []string
+}
+
+// CollisionGroup is a set of participants of one census whose recomputed login
+// hashes collide with each other, directly or through a chain of shared values.
+// All of them are skipped together. Like SkippedMember it carries identifiers
+// only, so it can be shared to have an admin resolve the duplicates.
+type CollisionGroup struct {
+	CensusID string
+	// MemberIDs are the colliding members, sorted.
+	MemberIDs []string
+	// OrphanMemberIDs are participant rows of the group whose member document no
+	// longer exists; the others collide with their stored hash. Sorted.
+	OrphanMemberIDs []string
 }
 
 // RepairReport summarizes a RepairLoginHashes run.
@@ -81,6 +112,12 @@ type RepairReport struct {
 	CensusesAffected int
 	// SkippedMembers lists the collisions behind ParticipantsSkipped.
 	SkippedMembers []SkippedMember
+	// CollisionGroups lists the skipped members grouped with the rows they
+	// collide with, per census, so an admin can tell which members are duplicates.
+	CollisionGroups []CollisionGroup
+	// ParticipantsUnset counts skipped rows whose stale hashes were (or, on a dry
+	// run, would be) unset because of RepairOptions.UnsetUnresolved.
+	ParticipantsUnset int
 }
 
 // RepairLoginHashes brings stored CSP login data in line with how the service
@@ -101,7 +138,9 @@ type RepairReport struct {
 // resolves their members in batches, computes the new hashes in memory and
 // groups them. Any group of two or more rows sharing a recomputed hash is
 // skipped whole and reported, because the unique index from migration 8 would
-// reject the second write.
+// reject the second write. The report groups the skipped rows (CollisionGroups)
+// so the duplicates can be resolved by hand; with UnsetUnresolved their stale
+// hashes are removed rather than kept.
 //
 // That grouping is also what makes rewriting in place safe. Writes are not
 // transactional (multi-document transactions need a replica set, which is not
@@ -134,7 +173,10 @@ func RepairLoginHashes(ctx context.Context, database *mongo.Database, opts Repai
 		"participantsRehashed", report.ParticipantsRehashed,
 		"participantsSkipped", report.ParticipantsSkipped,
 		"orphanParticipants", report.OrphanParticipants,
-		"censusesAffected", report.CensusesAffected)
+		"censusesAffected", report.CensusesAffected,
+		"collisionGroups", len(report.CollisionGroups),
+		"unsetUnresolved", opts.UnsetUnresolved,
+		"participantsUnset", report.ParticipantsUnset)
 	return report, nil
 }
 
@@ -266,22 +308,24 @@ func rehashCensus(
 	type pending struct {
 		participantID string
 		hashes        participantHashSet
+		stale         []string
 		changed       bool
 	}
 	var pendings []pending
 	// occupied maps a hash field to the set of values already claimed within this
 	// census, either by another recomputed row or by a row that cannot be
 	// recomputed because its member is gone.
-	occupied := map[string]map[string][]string{}
-	claim := func(field string, value []byte, participantID string) {
+	occupied := map[string]map[string][]hashClaimant{}
+	claim := func(field string, value []byte, participantID string, orphan bool) {
 		if len(value) == 0 {
 			return
 		}
 		if occupied[field] == nil {
-			occupied[field] = map[string][]string{}
+			occupied[field] = map[string][]hashClaimant{}
 		}
 		key := hex.EncodeToString(value)
-		occupied[field][key] = append(occupied[field][key], participantID)
+		occupied[field][key] = append(occupied[field][key],
+			hashClaimant{participantID: participantID, orphan: orphan})
 	}
 
 	for _, row := range rows {
@@ -290,9 +334,9 @@ func rehashCensus(
 			// The member is gone, so the hash cannot be recomputed. The row keeps
 			// its stored hashes, which stay reserved so nothing else claims them.
 			report.OrphanParticipants++
-			claim("loginHash", row.LoginHash, "")
-			claim("loginHashEmail", row.LoginHashEmail, "")
-			claim("loginHashPhone", row.LoginHashPhone, "")
+			claim("loginHash", row.LoginHash, row.ParticipantID, true)
+			claim("loginHashEmail", row.LoginHashEmail, row.ParticipantID, true)
+			claim("loginHashPhone", row.LoginHashPhone, row.ParticipantID, true)
 			continue
 		}
 		// Compute from the trimmed member so a dry run matches an --apply run,
@@ -301,23 +345,37 @@ func rehashCensus(
 		pendings = append(pendings, pending{
 			participantID: row.ParticipantID,
 			hashes:        hashes,
+			stale:         hashes.staleFields(row),
 			changed:       hashes.differsFrom(row),
 		})
-		claim("loginHash", hashes.LoginHash, row.ParticipantID)
-		claim("loginHashEmail", hashes.LoginHashEmail, row.ParticipantID)
-		claim("loginHashPhone", hashes.LoginHashPhone, row.ParticipantID)
+		claim("loginHash", hashes.LoginHash, row.ParticipantID, false)
+		claim("loginHashEmail", hashes.LoginHashEmail, row.ParticipantID, false)
+		claim("loginHashPhone", hashes.LoginHashPhone, row.ParticipantID, false)
 	}
 
-	skipped := collisionSkips(occupied)
+	skipped, groups := collisionSkips(occupied)
+	for _, g := range groups {
+		g.CensusID = censusID
+		report.CollisionGroups = append(report.CollisionGroups, g)
+		log.Warnw("skipping participants: recomputed login hashes collide within the census",
+			"censusID", censusID, "memberIDs", g.MemberIDs, "orphanMemberIDs", g.OrphanMemberIDs)
+	}
 	var models []mongo.WriteModel
 	censusCounted := false
 	for _, p := range pendings {
 		if _, bad := skipped[p.participantID]; bad {
 			report.ParticipantsSkipped++
 			report.SkippedMembers = append(report.SkippedMembers,
-				SkippedMember{MemberID: p.participantID, CensusID: censusID})
-			log.Warnw("skipping participant: recomputed login hash collides within the census",
-				"memberID", p.participantID, "censusID", censusID)
+				SkippedMember{MemberID: p.participantID, CensusID: censusID, StaleFields: p.stale})
+			if !opts.UnsetUnresolved || len(p.stale) == 0 {
+				continue
+			}
+			report.ParticipantsUnset++
+			log.Warnw("unsetting stale login hashes of a colliding participant",
+				"memberID", p.participantID, "censusID", censusID, "fields", p.stale, "apply", opts.Apply)
+			if opts.Apply {
+				models = append(models, unsetStaleModel(p.participantID, censusID, p.stale))
+			}
 			continue
 		}
 		if !p.changed {
@@ -372,23 +430,96 @@ func loadMembersFor(
 	return members, nil
 }
 
+// hashClaimant is a participant row claiming a hash value within a census.
+// Orphan rows claim their stored value; every other row its recomputed one.
+type hashClaimant struct {
+	participantID string
+	orphan        bool
+}
+
 // collisionSkips returns the participants that must be left alone because two or
-// more rows in the census claim the same value for a hash field.
-func collisionSkips(occupied map[string]map[string][]string) map[string]struct{} {
+// more rows in the census claim the same value for a hash field, together with
+// those rows grouped into connected components: two rows share a group when they
+// claim the same value on any field, directly or through other rows. Orphan rows
+// are never skipped (they are not rewritten anyway) but are listed in the group
+// they collide with. The groups carry no CensusID; the caller sets it.
+func collisionSkips(occupied map[string]map[string][]hashClaimant) (map[string]struct{}, []CollisionGroup) {
+	parent := map[string]string{}
+	var find func(string) string
+	find = func(id string) string {
+		if parent[id] != id {
+			parent[id] = find(parent[id])
+		}
+		return parent[id]
+	}
+	orphans := map[string]bool{}
 	skipped := map[string]struct{}{}
 	for _, byValue := range occupied {
 		for _, claimants := range byValue {
 			if len(claimants) < 2 {
 				continue
 			}
-			for _, participantID := range claimants {
-				if participantID != "" { // "" marks an unrecomputable orphan row
-					skipped[participantID] = struct{}{}
+			for _, cl := range claimants {
+				if _, ok := parent[cl.participantID]; !ok {
+					parent[cl.participantID] = cl.participantID
+				}
+				if cl.orphan {
+					orphans[cl.participantID] = true
+				} else {
+					skipped[cl.participantID] = struct{}{}
+				}
+			}
+			root := find(claimants[0].participantID)
+			for _, cl := range claimants[1:] {
+				if r := find(cl.participantID); r != root {
+					parent[r] = root
 				}
 			}
 		}
 	}
-	return skipped
+
+	byRoot := map[string]*CollisionGroup{}
+	for id := range parent {
+		root := find(id)
+		g := byRoot[root]
+		if g == nil {
+			g = &CollisionGroup{}
+			byRoot[root] = g
+		}
+		if orphans[id] {
+			g.OrphanMemberIDs = append(g.OrphanMemberIDs, id)
+		} else {
+			g.MemberIDs = append(g.MemberIDs, id)
+		}
+	}
+	groups := make([]CollisionGroup, 0, len(byRoot))
+	for _, g := range byRoot {
+		if len(g.MemberIDs) == 0 {
+			continue // only orphans: nothing is skipped, nothing to resolve
+		}
+		slices.Sort(g.MemberIDs)
+		slices.Sort(g.OrphanMemberIDs)
+		groups = append(groups, *g)
+	}
+	slices.SortFunc(groups, func(a, b CollisionGroup) int {
+		return strings.Compare(a.MemberIDs[0], b.MemberIDs[0])
+	})
+	return skipped, groups
+}
+
+// unsetStaleModel builds the update removing a skipped participant's stale hash
+// fields, as db.updateCensusParticipantsForMember drops the hashes of a member
+// left without login data. The login hash unique indexes are partial (they only
+// cover binData values, see migration 8), so any number of rows in a census can
+// lack a field without clashing.
+func unsetStaleModel(participantID, censusID string, fields []string) mongo.WriteModel {
+	unset := bson.M{}
+	for _, f := range fields {
+		unset[f] = ""
+	}
+	return mongo.NewUpdateOneModel().
+		SetFilter(bson.M{"participantID": participantID, "censusId": censusID}).
+		SetUpdate(bson.M{"$unset": unset, "$set": bson.M{"updatedAt": time.Now()}}) //nolint:goconst
 }
 
 // flushBulk writes the pending updates in bounded batches.
@@ -432,6 +563,23 @@ func (s participantHashSet) differsFrom(row participantHashRow) bool {
 	return !bytesEqual(s.LoginHash, row.LoginHash) ||
 		!bytesEqual(s.LoginHashEmail, row.LoginHashEmail) ||
 		!bytesEqual(s.LoginHashPhone, row.LoginHashPhone)
+}
+
+// staleFields names the stored hash fields holding a value other than the one
+// recomputed for them. Fields stored empty are not stale: there is nothing to
+// remove.
+func (s participantHashSet) staleFields(row participantHashRow) []string {
+	var stale []string
+	if len(row.LoginHash) > 0 && !bytesEqual(s.LoginHash, row.LoginHash) {
+		stale = append(stale, "loginHash")
+	}
+	if len(row.LoginHashEmail) > 0 && !bytesEqual(s.LoginHashEmail, row.LoginHashEmail) {
+		stale = append(stale, "loginHashEmail")
+	}
+	if len(row.LoginHashPhone) > 0 && !bytesEqual(s.LoginHashPhone, row.LoginHashPhone) {
+		stale = append(stale, "loginHashPhone")
+	}
+	return stale
 }
 
 // bson renders the set as an update document, omitting the variants a census
