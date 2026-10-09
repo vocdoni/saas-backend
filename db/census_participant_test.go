@@ -1,7 +1,6 @@
 package db
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -626,16 +625,13 @@ func TestCensusParticipant(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Test setBulkCensusParticipant
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
 		_, groupMembers, err := testDB.ListOrganizationMemberGroup(groupID, testOrgAddress, 0, 0)
 		c.Assert(err, qt.IsNil)
 		toStore := make([]censusMember, 0, len(groupMembers))
 		for _, m := range groupMembers {
 			toStore = append(toStore, censusMember{id: m.ID, hashes: calculateParticipantHashes(*census, *m)})
 		}
-		upsertCount, err := testDB.setBulkCensusParticipant(ctx, census, toStore)
+		upsertCount, err := testDB.setBulkCensusParticipant(census, toStore)
 		c.Assert(err, qt.IsNil)
 		c.Assert(upsertCount, qt.Equals, int64(3))
 

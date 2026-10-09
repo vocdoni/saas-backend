@@ -35,6 +35,7 @@ func (ms *MongoStorage) collectionsMap() map[string]**mongo.Collection {
 		"jobs":                &ms.jobs,
 		"apiKeys":             &ms.apiKeys,
 		"migrations":          &ms.migrations,
+		"counters":            &ms.counters,
 	}
 }
 

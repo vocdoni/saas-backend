@@ -20,8 +20,13 @@ import (
 const (
 	// connectTimeout is used for connection timeout
 	connectTimeout = 10 * time.Second
-	// defaultTimeout is used for simple operations (FindOne, UpdateOne, DeleteOne)
-	defaultTimeout = 100 * time.Second
+	// defaultTimeout is used for point operations (FindOne, UpdateOne, DeleteOne). It is short on
+	// purpose: many of these run under keysLock, so a stuck operation must not hold the lock for
+	// minutes.
+	defaultTimeout = 10 * time.Second
+	// bulkTimeout is used for genuinely bulk operations (collection scans, DeleteMany sweeps,
+	// aggregations and census builds) that may legitimately outlive defaultTimeout.
+	bulkTimeout = 100 * time.Second
 	// batchTimeout is used for batch operations (BulkWrite)
 	batchTimeout = 20 * time.Second
 	// exportTimeout is used for export/import operations (String, Import)
@@ -53,6 +58,7 @@ type MongoStorage struct {
 	jobs                *mongo.Collection
 	apiKeys             *mongo.Collection
 	migrations          *mongo.Collection
+	counters            *mongo.Collection
 }
 
 type Options struct {
@@ -146,7 +152,7 @@ func (ms *MongoStorage) Close() {
 // dropAllCollections drops all collections from database.
 func (ms *MongoStorage) dropAllCollections() error {
 	log.Infow("dropping all collections from database", "db", ms.database)
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	// Drop all collections
@@ -165,7 +171,7 @@ func (ms *MongoStorage) dropAllCollections() error {
 // so it preserves all collection structures, indexes, and migration state.
 func (ms *MongoStorage) DeleteAllDocuments() error {
 	log.Infow("deleting all documents from database", "db", ms.database)
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	var errs []error
@@ -414,6 +420,10 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 		if err != nil {
 			log.Warnw("error upserting user", "error", err, "user", user.ID)
 		}
+	}
+	// the imported users carry their own IDs: keep the ID counter ahead of them
+	if err := ms.resyncUserIDCounter(ctx); err != nil {
+		log.Warnw("error resyncing the user id counter", "error", err)
 	}
 	// upsert organizations collection
 	log.Infow("importing organizations", "count", len(collection.Organizations))
