@@ -1,6 +1,7 @@
 package stripe
 
 import (
+	stderrors "errors"
 	"fmt"
 
 	stripeapi "github.com/stripe/stripe-go/v82"
@@ -9,6 +10,7 @@ import (
 	stripecustomer "github.com/stripe/stripe-go/v82/customer"
 	stripeprice "github.com/stripe/stripe-go/v82/price"
 	stripeproduct "github.com/stripe/stripe-go/v82/product"
+	stripesubscription "github.com/stripe/stripe-go/v82/subscription"
 	stripewebhook "github.com/stripe/stripe-go/v82/webhook"
 	"github.com/vocdoni/saas-backend/errors"
 )
@@ -87,6 +89,27 @@ func (*Client) GetCustomerByAddress(address string) (*stripeapi.Customer, error)
 
 	return customers.Customer(), nil
 }
+
+// GetSubscription retrieves a subscription by ID straight from the Stripe API, with its
+// customer expanded. Webhook handling uses it to act on the subscription's live state
+// instead of a possibly stale or out-of-order event payload (Stripe's recommended pattern).
+func (*Client) GetSubscription(subscriptionID string) (*stripeapi.Subscription, error) {
+	params := &stripeapi.SubscriptionParams{}
+	params.AddExpand("customer")
+	subscription, err := stripesubscription.Get(subscriptionID, params)
+	if err != nil {
+		var stripeErr *stripeapi.Error
+		if stderrors.As(err, &stripeErr) && stripeErr.Code == stripeapi.ErrorCodeResourceMissing {
+			return nil, fmt.Errorf("subscription %s: %w", subscriptionID, errSubscriptionNotFound)
+		}
+		return nil, errors.ErrStripeError.Withf("failed to get subscription: %v", err)
+	}
+	return subscription, nil
+}
+
+// errSubscriptionNotFound is Stripe answering that a subscription does not exist: unlike a
+// network or rate-limit failure, asking again will not change the answer.
+var errSubscriptionNotFound = fmt.Errorf("subscription not found")
 
 // GetProduct retrieves a product by ID with expanded default price
 func (*Client) GetProduct(productID string) (*stripeapi.Product, error) {
