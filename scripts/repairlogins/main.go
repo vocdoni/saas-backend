@@ -19,6 +19,22 @@
 //	repairlogins --mongoURL "$VOCDONI_MONGOURL" --apply   # repair
 //	repairlogins ... --org 0xabc… --apply                 # one organization
 //
+// Participants whose recomputed hash collides with another participant of the
+// same census are skipped and listed at the end, grouped per census by member
+// ID (never field values), so an admin can find and resolve the duplicates.
+// Skipped rows keep their stale hashes, which for rows written by old code
+// embed the lowercased login values in near-plaintext. --unsetUnresolved
+// removes those stale hashes (only the fields that differ from the current
+// computation) instead:
+//
+//	repairlogins ... --unsetUnresolved           # report what would be unset
+//	repairlogins ... --unsetUnresolved --apply   # unset them
+//
+// No login can match a stale hash, so this locks out no one who could log in
+// before; those voters still cannot log in until an admin resolves the
+// duplicate (edits or removes one of the colliding members) and this command
+// is re-run, or the member is edited, which rehashes it.
+//
 // The database is taken from the mongoURL path, exactly as db.New resolves it;
 // pass --mongoDB (or VOCDONI_MONGODB) only when the URL carries no database or
 // you want to override it.
@@ -62,6 +78,8 @@ func main() {
 	flag.StringP("mongoDB", "d", "", "MongoDB database name (defaults to the one in mongoURL)")
 	flag.Bool("apply", false, "write the changes; without it the run only reports what it would do")
 	flag.String("org", "", "restrict the run to a single organization address (hex)")
+	flag.Bool("unsetUnresolved", false, "unset the stale login hashes of participants skipped because of a "+
+		"collision, so no old-format hash stays stored; they cannot log in until the duplicate is resolved")
 	flag.Parse()
 
 	viper.SetEnvPrefix("VOCDONI")
@@ -90,7 +108,7 @@ func main() {
 	}
 	apply := viper.GetBool("apply")
 
-	opts := migrations.RepairOptions{Apply: apply}
+	opts := migrations.RepairOptions{Apply: apply, UnsetUnresolved: viper.GetBool("unsetUnresolved")}
 	if rawOrg := viper.GetString("org"); rawOrg != "" {
 		if !common.IsHexAddress(rawOrg) {
 			log.Fatalf("invalid org address: %s", rawOrg)
@@ -187,21 +205,53 @@ func printReport(report migrations.RepairReport, opts migrations.RepairOptions) 
 	log.Infow("participant login hashes "+verb,
 		"count", report.ParticipantsRehashed, "censuses", report.CensusesAffected)
 
-	if report.ParticipantsSkipped > 0 {
-		log.Warnw("some participants were skipped: their recomputed login hash collides with "+
-			"another participant of the same census, so they need manual review",
-			"count", report.ParticipantsSkipped)
-		for _, s := range report.SkippedMembers {
-			log.Warnw("skipped participant", "memberID", s.MemberID, "censusID", s.CensusID)
-		}
-	}
 	if report.OrphanParticipants > 0 {
 		log.Warnw("some participants reference a member document that no longer exists; their "+
 			"hashes cannot be recomputed and were left untouched. Those voters cannot "+
 			"authenticate today either, because the CSP loads the member after matching the hash",
 			"count", report.OrphanParticipants)
 	}
+	printCollisions(report, opts)
 	if !apply {
 		log.Info("dry run complete: re-run with --apply to write these changes")
+	}
+}
+
+// printCollisions lists the skipped participants grouped by census and by the
+// members they collide with, last, so the groups an admin has to resolve close
+// the output. Only member and census IDs are printed.
+func printCollisions(report migrations.RepairReport, opts migrations.RepairOptions) {
+	if report.ParticipantsSkipped == 0 {
+		return
+	}
+	log.Warnw("some participants were skipped: their recomputed login hash collides with "+
+		"another participant of the same census. Resolve each group below by editing or removing "+
+		"the duplicate members, then re-run this command",
+		"participants", report.ParticipantsSkipped, "groups", len(report.CollisionGroups))
+	for i, g := range report.CollisionGroups {
+		log.Warnw("collision group", "group", i+1, "censusID", g.CensusID,
+			"memberIDs", strings.Join(g.MemberIDs, ","),
+			"orphanMemberIDs", strings.Join(g.OrphanMemberIDs, ","))
+	}
+
+	stale := 0
+	for _, s := range report.SkippedMembers {
+		if len(s.StaleFields) > 0 {
+			stale++
+		}
+	}
+	switch {
+	case stale == 0:
+		log.Info("no skipped participant holds a stale login hash")
+	case !opts.UnsetUnresolved:
+		log.Warnw("skipped participants still hold stale (old-format) login hashes, which embed the "+
+			"login field values in near-plaintext and match no login; pass --unsetUnresolved to remove them",
+			"count", stale)
+	case opts.Apply:
+		log.Warnw("unset the stale login hashes of skipped participants; they cannot log in until "+
+			"their duplicate is resolved and this command is re-run", "count", report.ParticipantsUnset)
+	default:
+		log.Warnw("would unset the stale login hashes of skipped participants; they cannot log in "+
+			"until their duplicate is resolved and this command is re-run", "count", report.ParticipantsUnset)
 	}
 }
