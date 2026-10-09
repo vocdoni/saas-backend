@@ -723,12 +723,27 @@ func (ms *MongoStorage) DeleteOrgMembers(
 		},
 	}
 
+	deleted, err := ms.deleteOrgMembersLocked(ctx, orgAddress, filter, oids)
+	if err != nil {
+		return 0, nil, err
+	}
+	// the members are gone: revoke them once more to drop any participant a concurrent census
+	// build wrote back between the first revocation and the delete
+	emptied = append(emptied, ms.sweepRevokedMembers(scoped)...)
+	return deleted, emptied, nil
+}
+
+// deleteOrgMembersLocked deletes the org members matching filter and unlinks the given ids from
+// the organization's groups, under keysLock. It reports how many members were deleted.
+func (ms *MongoStorage) deleteOrgMembersLocked(
+	ctx context.Context, orgAddress common.Address, filter bson.M, oids []bson.ObjectID,
+) (int, error) {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
 	result, err := ms.orgMembers.DeleteMany(ctx, filter)
 	if err != nil {
-		return 0, nil, fmt.Errorf("failed to delete orgMembers: %w", err)
+		return 0, fmt.Errorf("failed to delete orgMembers: %w", err)
 	}
 
 	// Convert ObjectIDs to string IDs for group updates (groups store member IDs as strings)
@@ -759,7 +774,7 @@ func (ms *MongoStorage) DeleteOrgMembers(
 
 	_, err = ms.orgMemberGroups.UpdateMany(ctx, groupFilter, groupUpdate)
 	if err != nil {
-		return 0, nil, fmt.Errorf("failed to update groups after deleting orgMembers: %w", err)
+		return 0, fmt.Errorf("failed to update groups after deleting orgMembers: %w", err)
 	}
 
 	// Clean up the auto group if the org now has no members.
@@ -767,8 +782,30 @@ func (ms *MongoStorage) DeleteOrgMembers(
 		log.Warnw("could not clean up auto member group after DeleteOrgMembers", "error", err)
 	}
 
-	return int(result.DeletedCount), emptied, nil
+	return int(result.DeletedCount), nil
 }
+
+// sweepRevokedMembers revokes already deleted members from every census once more. Member deletion
+// revokes before deleting, so a failed revocation leaves everything retryable; but a census build
+// that read a member before that revocation can still write its participant afterwards, leaving a
+// row for a member that no longer exists (counted in the census size and weight). The sweep drops
+// those. It is best-effort: the members are already deleted, so a failure is only logged. It
+// returns the questions the sweep emptied, if any.
+func (ms *MongoStorage) sweepRevokedMembers(memberIDs []string) []VotingProcessQuestion {
+	if afterMemberDeleteHook != nil {
+		afterMemberDeleteHook(memberIDs)
+	}
+	_, emptied, err := ms.RevokeMembersEverywhere(memberIDs)
+	if err != nil {
+		log.Warnw("could not sweep census participants of deleted members", "members", len(memberIDs), "error", err)
+		return nil
+	}
+	return emptied
+}
+
+// afterMemberDeleteHook, when set (tests only), runs between a member deletion and its revocation
+// sweep, to simulate a concurrent census build writing a participant back.
+var afterMemberDeleteHook func(memberIDs []string)
 
 // DeleteAllOrgMembers removes all members from an organization, revoking them from every census
 // they were part of. The returned questions are those whose eligibility list became empty.
@@ -796,12 +833,24 @@ func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, []V
 		"orgAddress": orgAddress,
 	}
 
+	deleted, err := ms.deleteAllOrgMembersLocked(ctx, orgAddress, filter)
+	if err != nil {
+		return 0, nil, err
+	}
+	// see DeleteOrgMembers: drop participants a concurrent census build wrote back meanwhile
+	emptied = append(emptied, ms.sweepRevokedMembers(memberIDs)...)
+	return deleted, emptied, nil
+}
+
+// deleteAllOrgMembersLocked deletes the org members matching filter and empties the
+// organization's groups, under keysLock. It reports how many members were deleted.
+func (ms *MongoStorage) deleteAllOrgMembersLocked(ctx context.Context, orgAddress common.Address, filter bson.M) (int, error) {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
 	result, err := ms.orgMembers.DeleteMany(ctx, filter)
 	if err != nil {
-		return 0, nil, fmt.Errorf("failed to delete all orgMembers: %w", err)
+		return 0, fmt.Errorf("failed to delete all orgMembers: %w", err)
 	}
 
 	// Update all groups to remove the deleted member IDs
@@ -817,7 +866,7 @@ func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, []V
 
 	_, err = ms.orgMemberGroups.UpdateMany(ctx, groupFilter, groupUpdate)
 	if err != nil {
-		return 0, nil, fmt.Errorf("failed to update groups after deleting all orgMembers: %w", err)
+		return 0, fmt.Errorf("failed to update groups after deleting all orgMembers: %w", err)
 	}
 
 	// All members are gone — remove the auto group too.
@@ -825,7 +874,7 @@ func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, []V
 		log.Warnw("could not delete auto member group after DeleteAllOrgMembers", "error", err)
 	}
 
-	return int(result.DeletedCount), emptied, nil
+	return int(result.DeletedCount), nil
 }
 
 // GetAllOrgMemberIDs retrieves all member IDs for an organization
