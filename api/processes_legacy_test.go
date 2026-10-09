@@ -391,6 +391,7 @@ func TestLegacyProjectionStoredParams(t *testing.T) {
 // still resolve its questions, or the record projects to nothing and stays invisible.
 func TestLegacyProjectionExternalMetadata(t *testing.T) {
 	c := qt.New(t)
+	allowLoopbackMetadata(t)
 	election := legacyTestElection([][]uint64{{8, 0}}, []map[string]any{legacyTestQuestion("Statuto")})
 	doc, err := json.Marshal(election.Metadata)
 	c.Assert(err, qt.IsNil)
@@ -622,6 +623,7 @@ func TestLegacyProcessesProjection(t *testing.T) {
 // document is decoded, a non-200 yields nil, and a body over the 1 MiB cap is rejected.
 func TestFetchExternalMetadata(t *testing.T) {
 	c := qt.New(t)
+	allowLoopbackMetadata(t)
 
 	t.Run("ok", func(_ *testing.T) {
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
