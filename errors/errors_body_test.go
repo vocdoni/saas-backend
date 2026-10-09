@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
+	"go.vocdoni.io/dvote/log"
 )
 
 var (
@@ -62,6 +65,23 @@ func TestWriteKeepsClientMessagesOn5xx(t *testing.T) {
 
 	_, body = writtenBody(t, testInternalErr.WithData(map[string]any{"retryAfter": 5}))
 	c.Assert(body["data"], qt.DeepEquals, map[string]any{"retryAfter": float64(5)})
+}
+
+func TestWriteLogs4xxAtTheirLevel(t *testing.T) {
+	c := qt.New(t)
+	logFile := filepath.Join(t.TempDir(), "api.log")
+	log.Init(log.LogLevelInfo, logFile, nil)
+	t.Cleanup(func() { log.Init(log.LogLevelDebug, "stdout", nil) })
+
+	testBadInputErr.With("tagged warn").WithLogLevel("warn").Write(httptest.NewRecorder())
+	testBadInputErr.With("tagged info").WithLogLevel("info").Write(httptest.NewRecorder())
+	testBadInputErr.With("untagged").Write(httptest.NewRecorder())
+
+	out, err := os.ReadFile(logFile)
+	c.Assert(err, qt.IsNil)
+	c.Assert(string(out), qt.Contains, "malformed body: tagged warn")
+	c.Assert(string(out), qt.Contains, "malformed body: tagged info")
+	c.Assert(string(out), qt.Not(qt.Contains), "malformed body: untagged")
 }
 
 func TestWriteKeepsDetailOn4xx(t *testing.T) {

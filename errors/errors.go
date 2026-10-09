@@ -137,8 +137,9 @@ func (e Error) Write(w http.ResponseWriter) {
 		// For internal errors, log the full error details
 		log.Errorw(e.Err, fmt.Sprintf("API error response [%d]: %s (code: %d, caller: %s, file: %s:%d)",
 			e.HTTPstatus, e.Error(), e.Code, caller, file, line))
-	} else if log.Level() == log.LogLevelDebug {
-		// For 4xx errors, log with debug level
+	} else {
+		// For 4xx errors, log at the error's own level (debug unless set): the logger filters
+		// by level, so errors tagged info or warn are still logged when running at info.
 		errMsg := fmt.Sprintf("API error response [%d]: %s (code: %d, caller: %s)",
 			e.HTTPstatus, e.Error(), e.Code, caller)
 
