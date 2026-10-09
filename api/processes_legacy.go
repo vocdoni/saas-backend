@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -825,16 +826,22 @@ func isVotingProcessIDShape(raw string) bool {
 
 // fetchExternalMetadata best-effort downloads and JSON-decodes a metadata document from
 // an external http(s) reference (one that does not point at our own object storage).
-// Returns nil on any failure.
-func fetchExternalMetadata(ctx context.Context, url string) map[string]any {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+// The reference is untrusted, so it is fetched with metadataHTTPClient: public addresses only,
+// no redirects, bounded in time and size. Returns nil on any failure.
+func fetchExternalMetadata(ctx context.Context, rawURL string) map[string]any {
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, metadataFetchTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := metadataHTTPClient.Do(req)
 	if err != nil {
+		log.Debugw("legacy processes: external metadata fetch failed", "url", rawURL, "error", err)
 		return nil
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -842,7 +849,7 @@ func fetchExternalMetadata(ctx context.Context, url string) map[string]any {
 		return nil
 	}
 	var m map[string]any
-	if json.NewDecoder(io.LimitReader(resp.Body, internal.MiB)).Decode(&m) != nil {
+	if json.NewDecoder(io.LimitReader(resp.Body, metadataMaxBytes)).Decode(&m) != nil {
 		return nil
 	}
 	return m
