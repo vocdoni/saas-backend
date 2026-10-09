@@ -402,6 +402,33 @@ func TestResendChallenge(t *testing.T) {
 		mailCode := fetchOTPCodeFromEmail(c, testUserEmail)
 		c.Assert(mailCode, qt.Equals, expectedCode)
 	})
+
+	c.Run("resend limit", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testAnchorID, gotp.RandomSecret(16)), qt.IsNil)
+		// as the resend handler does: claim one of the token's resends, then resend. A dedicated
+		// inbox: these challenges are delivered asynchronously, so sending them to the shared
+		// address would leave stale codes for the next test's OTP fetch
+		resend := func() error {
+			if err := csp.ClaimChallengeResend(testToken); err != nil {
+				return err
+			}
+			return csp.ResendChallenge(
+				testToken,
+				"resend-limit@test.com",
+				notifications.EmailChallenge,
+				apicommon.DefaultLang,
+				testOrgName,
+				testOrgLogo,
+				testAddress.Address(),
+			)
+		}
+		for range MaxChallengeResends {
+			c.Assert(resend(), qt.IsNil)
+		}
+		// every resend sends an email or SMS, so a token cannot be resent forever
+		c.Assert(resend(), qt.ErrorIs, errors.ErrVerificationMaxAttempts)
+	})
 }
 
 func TestAuthTokenResendAndVerifyFlow(t *testing.T) {

@@ -583,7 +583,7 @@ func TestUpsertOrganizationMember(t *testing.T) {
 			MemberNumber: members[0].MemberNumber,
 			Email:        members[0].Email,
 		}),
-			qt.ErrorMatches, errors.ErrCensusParticipantNotFound.Err.Error()+".*")
+			qt.ErrorMatches, errors.ErrCSPAuthFailed.Err.Error()+".*")
 
 		// New values should work
 		testCSPAuthenticateWithFields(t, pid, &handlers.AuthRequest{
@@ -729,7 +729,7 @@ func TestUpsertOrganizationMember(t *testing.T) {
 			Email: members[0].Email,
 			Phone: members[0].Phone,
 		}),
-			qt.ErrorMatches, errors.ErrCensusParticipantNotFound.Err.Error()+".*")
+			qt.ErrorMatches, errors.ErrCSPAuthFailed.Err.Error()+".*")
 		c.Assert(postProcessAuth0AndExpectError(t, pid, &handlers.AuthRequest{
 			Name:         members[0].Name,
 			Surname:      members[0].Surname,
@@ -739,7 +739,7 @@ func TestUpsertOrganizationMember(t *testing.T) {
 
 			Phone: members[0].Phone,
 		}),
-			qt.ErrorMatches, errors.ErrCensusParticipantNotFound.Err.Error()+".*")
+			qt.ErrorMatches, errors.ErrCSPAuthFailed.Err.Error()+".*")
 		c.Assert(postProcessAuth0AndExpectError(t, pid, &handlers.AuthRequest{
 			Name:         members[0].Name,
 			Surname:      members[0].Surname,
@@ -749,7 +749,7 @@ func TestUpsertOrganizationMember(t *testing.T) {
 
 			Email: members[0].Email,
 		}),
-			qt.ErrorMatches, errors.ErrCensusParticipantNotFound.Err.Error()+".*")
+			qt.ErrorMatches, errors.ErrCSPAuthFailed.Err.Error()+".*")
 
 		// New values should work
 		testCSPAuthenticateWithFields(t, pid, &handlers.AuthRequest{

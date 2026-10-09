@@ -58,13 +58,24 @@ func TestHandlePhoneContact(t *testing.T) {
 	c := qt.New(t)
 
 	test := func(org *db.Organization, phone, want string) {
+		// the member's stored phone, hashed from the raw input as on member creation
 		hashedPhone, err := db.NewHashedPhone(phone, org)
 		c.Assert(err, qt.IsNil)
 
-		phone, challengeType, err := handlePhoneContact(org, phone, hashedPhone)
+		submitted, err := parseVoterPhone(phone, org)
 		c.Assert(err, qt.IsNil)
-		c.Assert(phone, qt.Equals, want)
+		normalized, challengeType, err := handlePhoneContact(submitted, hashedPhone)
+		c.Assert(err, qt.IsNil)
+		c.Assert(normalized, qt.Equals, want)
 		c.Assert(challengeType, qt.Equals, notifications.SMSChallenge)
+
+		// another number, or none at all, fails with the same error as an unknown participant
+		other, err := parseVoterPhone("+34699999999", org)
+		c.Assert(err, qt.IsNil)
+		_, _, err = handlePhoneContact(other, hashedPhone)
+		c.Assert(err, qt.ErrorIs, errors.ErrCSPAuthFailed)
+		_, _, err = handlePhoneContact(nil, hashedPhone)
+		c.Assert(err, qt.ErrorIs, errors.ErrCSPAuthFailed)
 	}
 
 	org := &db.Organization{

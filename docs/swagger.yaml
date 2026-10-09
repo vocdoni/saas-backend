@@ -4757,6 +4757,12 @@ paths:
         - Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
         If valid the token is marked verified and returned. Auth-only censuses may not require
         a challenge solution.
+        Step 0 returns the same error (40802) whether the login data matches no census participant
+        or the contact data does not match an existing one. Failed attempts are capped per UTC hour
+        for each submitted set of login fields on the process: once exhausted, step 0 answers 40017,
+        even with the right contact data, until the hour ends; data.retryAfter gives the seconds left.
+        A member's challenge sends (new tokens + resends) are capped per UTC day, also answering
+        40017 with data.retryAfter.
       parameters:
       - description: Process ID
         in: path
@@ -4782,15 +4788,17 @@ paths:
           schema:
             $ref: '#/definitions/handlers.AuthResponse'
         "400":
-          description: Invalid input data
+          description: Invalid input data, or failed-attempt or daily send limit reached
+            (40017)
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Unauthorized, cooldown not reached, or invalid challenge
+          description: Invalid authentication data, cooldown not reached, or invalid
+            challenge
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
-          description: Process, census, organization, or participant not found
+          description: Process, census, or organization not found
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -4808,6 +4816,8 @@ paths:
         Resend the challenge for an existing (non-verified) authentication token of a voting
         process. The request must include the auth token and a valid contact method for the
         census type (email/phone). The same token is returned if the challenge is queued.
+        A token can be resent at most 3 times, and a contact that does not match the member spends
+        one of them too.
       parameters:
       - description: Process ID
         in: path
@@ -4828,8 +4838,8 @@ paths:
           schema:
             $ref: '#/definitions/handlers.AuthResponse'
         "400":
-          description: Malformed body, missing auth token, invalid contact, or token
-            already verified
+          description: Malformed body, missing token, invalid contact, verified token,
+            or resend limit (40017)
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
