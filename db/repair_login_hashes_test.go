@@ -408,6 +408,199 @@ func TestRepairLoginHashes(t *testing.T) {
 	})
 }
 
+// TestRepairLoginHashesCollisions covers how colliding participants are
+// reported and, with UnsetUnresolved, cleaned up.
+func TestRepairLoginHashesCollisions(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	org := &Organization{Address: testOrgAddress, CreatedAt: time.Now(), Country: "ES"}
+	authFields := OrgMemberAuthFields{
+		OrgMemberAuthFieldsName, OrgMemberAuthFieldsSurname, OrgMemberAuthFieldsMemberNumber,
+	}
+	ctx := context.Background()
+
+	reset := func() *Census {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		c.Assert(testDB.SetOrganization(org), qt.IsNil)
+		census := &Census{
+			OrgAddress: testOrgAddress, AuthFields: authFields,
+			TwoFaFields: OrgMemberTwoFaFields{}, CreatedAt: time.Now(),
+		}
+		id, err := testDB.SetCensus(census)
+		c.Assert(err, qt.IsNil)
+		census.ID, err = bson.ObjectIDFromHex(id)
+		c.Assert(err, qt.IsNil)
+		return census
+	}
+	newMember := func(name, surname, number string) *OrgMember {
+		return &OrgMember{
+			ID: bson.NewObjectID(), OrgAddress: testOrgAddress,
+			Name: name, Surname: surname, MemberNumber: number, CreatedAt: time.Now(),
+		}
+	}
+	// storedHash returns the stored loginHash, and whether the field exists at all.
+	storedHash := func(memberID, censusID string) ([]byte, bool) {
+		var raw bson.M
+		c.Assert(testDB.censusParticipants.FindOne(ctx,
+			bson.M{"participantID": memberID, "censusId": censusID}).Decode(&raw), qt.IsNil)
+		v, ok := raw["loginHash"]
+		if !ok {
+			return nil, false
+		}
+		bin, isBin := v.(bson.Binary)
+		c.Assert(isBin, qt.IsTrue)
+		return bin.Data, true
+	}
+	sortedIDs := func(ms ...*OrgMember) []string {
+		ids := make([]string, 0, len(ms))
+		for _, m := range ms {
+			ids = append(ids, m.ID.Hex())
+		}
+		slices.Sort(ids)
+		return ids
+	}
+
+	t.Run("groups colliding members per census and unsets their stale hashes on request", func(_ *testing.T) {
+		census := reset()
+		censusID := census.ID.Hex()
+
+		// A case-only pair, a case-only triple and a clean member: two groups of
+		// different sizes, so each can be checked by its members. None is all
+		// lowercase, so every legacy hash differs from the current one.
+		pairA := newMember("Casey", "Clash", "M-001")
+		pairB := newMember("CASEY", "CLASH", "M-001")
+		tripleA := newMember("Trip", "Le", "M-002")
+		tripleB := newMember("TRIP", "LE", "M-002")
+		tripleC := newMember("tRiP", "lE", "m-002")
+		clean := newMember("Clean", "Member", "M-003")
+		legacy := map[string][]byte{}
+		for _, m := range []*OrgMember{pairA, pairB, tripleA, tripleB, tripleC, clean} {
+			legacy[m.ID.Hex()] = unfoldedHash(*m, census.AuthFields, census.TwoFaFields)
+			seedLegacyParticipant(t, censusID, m, legacy[m.ID.Hex()])
+		}
+
+		// Dry run: reports groups and what would be unset, writes nothing.
+		report := runRepair(t, migrations.RepairOptions{UnsetUnresolved: true})
+		c.Assert(report.ParticipantsSkipped, qt.Equals, 5)
+		c.Assert(report.ParticipantsRehashed, qt.Equals, 1)
+		c.Assert(report.ParticipantsUnset, qt.Equals, 5)
+		c.Assert(report.CollisionGroups, qt.HasLen, 2)
+		groups := map[int][]string{}
+		for _, g := range report.CollisionGroups {
+			c.Assert(g.CensusID, qt.Equals, censusID)
+			c.Assert(g.OrphanMemberIDs, qt.HasLen, 0)
+			groups[len(g.MemberIDs)] = g.MemberIDs
+		}
+		c.Assert(groups[2], qt.DeepEquals, sortedIDs(pairA, pairB))
+		c.Assert(groups[3], qt.DeepEquals, sortedIDs(tripleA, tripleB, tripleC))
+		for _, s := range report.SkippedMembers {
+			c.Assert(s.StaleFields, qt.DeepEquals, []string{"loginHash"})
+		}
+		for id, want := range legacy {
+			got, ok := storedHash(id, censusID)
+			c.Assert(ok, qt.IsTrue)
+			c.Assert(got, qt.DeepEquals, want)
+		}
+
+		// Without the flag the stale hashes stay, even on apply.
+		report = runRepair(t, migrations.RepairOptions{Apply: true})
+		c.Assert(report.ParticipantsSkipped, qt.Equals, 5)
+		c.Assert(report.ParticipantsUnset, qt.Equals, 0)
+		c.Assert(report.CollisionGroups, qt.HasLen, 2)
+		got, ok := storedHash(pairA.ID.Hex(), censusID)
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(got, qt.DeepEquals, legacy[pairA.ID.Hex()])
+
+		// Apply with the flag: every colliding row loses its stale hash.
+		report = runRepair(t, migrations.RepairOptions{Apply: true, UnsetUnresolved: true})
+		c.Assert(report.ParticipantsUnset, qt.Equals, 5)
+		for _, m := range []*OrgMember{pairA, pairB, tripleA, tripleB, tripleC} {
+			_, ok := storedHash(m.ID.Hex(), censusID)
+			c.Assert(ok, qt.IsFalse)
+			_, err := testDB.CensusParticipantByLoginHash(*census, *m)
+			c.Assert(err, qt.Equals, ErrNotFound)
+		}
+		// The clean member was rehashed on the earlier apply and still logs in.
+		found, err := testDB.CensusParticipantByLoginHash(*census, *clean)
+		c.Assert(err, qt.IsNil)
+		c.Assert(found.ParticipantID, qt.Equals, clean.ID.Hex())
+
+		// A re-run still reports the groups but has nothing left to unset.
+		report = runRepair(t, migrations.RepairOptions{Apply: true, UnsetUnresolved: true})
+		c.Assert(report.ParticipantsSkipped, qt.Equals, 5)
+		c.Assert(report.CollisionGroups, qt.HasLen, 2)
+		c.Assert(report.ParticipantsUnset, qt.Equals, 0)
+
+		// An admin resolves the pair by giving one member a distinct number; the
+		// next run rehashes both and they log in again.
+		_, err = testDB.orgMembers.UpdateOne(ctx, bson.M{"_id": pairB.ID},
+			bson.M{"$set": bson.M{"memberNumber": "m-099"}})
+		c.Assert(err, qt.IsNil)
+		pairB.MemberNumber = "m-099"
+		report = runRepair(t, migrations.RepairOptions{Apply: true, UnsetUnresolved: true})
+		c.Assert(report.ParticipantsRehashed, qt.Equals, 2)
+		c.Assert(report.ParticipantsSkipped, qt.Equals, 3)
+		c.Assert(report.CollisionGroups, qt.HasLen, 1)
+		for _, m := range []*OrgMember{pairA, pairB} {
+			found, err := testDB.CensusParticipantByLoginHash(*census, *m)
+			c.Assert(err, qt.IsNil)
+			c.Assert(found.ParticipantID, qt.Equals, m.ID.Hex())
+		}
+	})
+
+	t.Run("keeps the current hash of a colliding row and unsets only the stale one", func(_ *testing.T) {
+		census := reset()
+		censusID := census.ID.Hex()
+
+		// current was written by the new code; stale by the old one, and folds
+		// onto the same hash.
+		current := newMember("casey", "clash", "m-001")
+		stale := newMember("Casey", "Clash", "M-001")
+		currentHash := HashAuthTwoFaFields(*current, census.AuthFields, census.TwoFaFields)
+		seedLegacyParticipant(t, censusID, current, currentHash)
+		seedLegacyParticipant(t, censusID, stale, unfoldedHash(*stale, census.AuthFields, census.TwoFaFields))
+
+		report := runRepair(t, migrations.RepairOptions{Apply: true, UnsetUnresolved: true})
+		c.Assert(report.ParticipantsSkipped, qt.Equals, 2)
+		c.Assert(report.ParticipantsUnset, qt.Equals, 1)
+		c.Assert(report.CollisionGroups, qt.DeepEquals, []migrations.CollisionGroup{
+			{CensusID: censusID, MemberIDs: sortedIDs(current, stale)},
+		})
+
+		got, ok := storedHash(current.ID.Hex(), censusID)
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(got, qt.DeepEquals, currentHash)
+		_, ok = storedHash(stale.ID.Hex(), censusID)
+		c.Assert(ok, qt.IsFalse)
+
+		// The row with the current hash logs in exactly as before.
+		found, err := testDB.CensusParticipantByLoginHash(*census, *stale)
+		c.Assert(err, qt.IsNil)
+		c.Assert(found.ParticipantID, qt.Equals, current.ID.Hex())
+	})
+
+	t.Run("lists the orphan a member collides with", func(_ *testing.T) {
+		census := reset()
+		censusID := census.ID.Hex()
+
+		ghost := newMember("ghost", "member", "m-001")
+		seedLegacyParticipant(t, censusID, ghost,
+			HashAuthTwoFaFields(*ghost, census.AuthFields, census.TwoFaFields))
+		_, err := testDB.orgMembers.DeleteOne(ctx, bson.M{"_id": ghost.ID})
+		c.Assert(err, qt.IsNil)
+		live := newMember("Ghost", "Member", "M-001")
+		seedLegacyParticipant(t, censusID, live, unfoldedHash(*live, census.AuthFields, census.TwoFaFields))
+
+		report := runRepair(t, migrations.RepairOptions{})
+		c.Assert(report.ParticipantsSkipped, qt.Equals, 1)
+		c.Assert(report.OrphanParticipants, qt.Equals, 1)
+		c.Assert(report.CollisionGroups, qt.DeepEquals, []migrations.CollisionGroup{
+			{CensusID: censusID, MemberIDs: []string{live.ID.Hex()}, OrphanMemberIDs: []string{ghost.ID.Hex()}},
+		})
+	})
+}
+
 // TestRepairMatchesCanonicalHash guards the duplicated hash logic.
 //
 // migrations.hashMemberFields is a byte-for-byte mirror of HashAuthTwoFaFields,
