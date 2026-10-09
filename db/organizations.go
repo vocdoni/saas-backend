@@ -100,11 +100,22 @@ func (ms *MongoStorage) SetOrganization(org *Organization) error {
 	if err != nil {
 		return err
 	}
+	// fields written only when the document is created: the subscription (see above) and the
+	// signer seed, which takes part in the organization key derivation and is never rewritten.
+	// Both go into one $setOnInsert map so neither can overwrite the other.
+	setOnInsert := bson.M{}
 	if set, ok := updateDoc["$set"].(bson.M); ok {
 		if subscription, ok := set["subscription"]; ok {
 			delete(set, "subscription")
-			updateDoc["$setOnInsert"] = bson.M{"subscription": subscription}
+			setOnInsert["subscription"] = subscription
 		}
+		delete(set, "signerSeed")
+	}
+	if org.SignerSeed != "" {
+		setOnInsert["signerSeed"] = org.SignerSeed
+	}
+	if len(setOnInsert) > 0 {
+		updateDoc["$setOnInsert"] = setOnInsert
 	}
 	// set upsert to true to create the document if it doesn't exist
 	opts := options.UpdateOne().SetUpsert(true)
@@ -116,9 +127,8 @@ func (ms *MongoStorage) SetOrganization(org *Organization) error {
 		return err
 	}
 	// grant the creator the admin role only when the organization was just created. Updates
-	// must not touch memberships — and must never delete the organization on a failure, which
-	// previously let any update wipe an organization whose creator no longer resolves (e.g. an
-	// erased user) and re-admined a creator whose role had been changed or removed.
+	// must not touch memberships, so they cannot re-admin a creator whose role was changed or
+	// removed, and a failed grant never deletes an organization that already existed.
 	if res.UpsertedCount > 0 && org.Creator != "" {
 		if err := ms.addOrganizationToUser(ctx, org.Creator, org.Address, AdminRole); err != nil {
 			// roll back the freshly created organization so creation stays all-or-nothing
@@ -152,10 +162,23 @@ func (ms *MongoStorage) ReplaceCreatorEmail(oldEmail, newEmail string) error {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	// update the creator email in the organizations where it is the creator
-	updateDoc := bson.M{"$set": bson.M{"creator": newEmail}}
+	// update the creator email in the organizations where it is the creator. The organization
+	// signer is derived from signerSeed, falling back to the creator for rows the backfill
+	// migration has not stamped (see Organization.SignerSeedValue). Rewriting the creator of
+	// such a row would silently re-derive a different key and strand its on-chain account, so
+	// the same update first pins the seed to the current (old) creator when it is missing.
+	// Within a pipeline $set stage, "$creator" still reads the value before this update.
+	updateDoc := mongo.Pipeline{{{Key: "$set", Value: bson.M{
+		"signerSeed": bson.M{"$cond": bson.A{
+			bson.M{"$in": bson.A{bson.M{"$ifNull": bson.A{"$signerSeed", ""}}, bson.A{""}}},
+			"$creator",
+			"$signerSeed",
+		}},
+		// $literal: inside a pipeline a string starting with "$" would be read as a field path
+		"creator": bson.M{"$literal": newEmail},
+	}}}}
 	if _, err := ms.organizations.UpdateMany(ctx, bson.M{"creator": oldEmail}, updateDoc); err != nil {
-		return err
+		return fmt.Errorf("could not replace organization creator email: %w", err)
 	}
 	return nil
 }

@@ -23,9 +23,12 @@ type UserErasureReport struct {
 	KeptOrgs []common.Address
 	// CreatorEmailRetained lists surviving organizations whose creator field
 	// still holds the erased user's email. It is retained deliberately: the
-	// organization signing key is derived from secret+creator+nonce (see
-	// account.OrganizationSigner), so redacting it would change the derived
-	// key and break the organization's on-chain account.
+	// organization signing key is derived from secret+signerSeed+nonce (see
+	// Organization.SignerSeedValue), where signerSeed is the creator's email at
+	// creation time and must never change, and rows without a seed still fall
+	// back to the creator field. The email therefore also survives in signerSeed,
+	// and redacting either would change the derived key and break the
+	// organization's on-chain account.
 	CreatorEmailRetained []common.Address
 }
 
@@ -115,7 +118,7 @@ func (ms *MongoStorage) deleteAllVerificationCodes(userID uint64) error {
 	defer ms.keysLock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	_, err := ms.verifications.DeleteMany(ctx, bson.M{"_id": userID})
+	_, err := ms.verifications.DeleteMany(ctx, bson.M{"userId": userID})
 	return err
 }
 

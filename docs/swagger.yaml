@@ -6059,7 +6059,14 @@ paths:
     put:
       consumes:
       - application/json
-      description: Update information for the authenticated user
+      description: |-
+        Update information for the authenticated user. Changing the email does not take
+        effect immediately: a verification code is sent to the requested address and the
+        email is switched only once the code is confirmed via POST /users/me/email/verify.
+        Changing the email of an account with a password requires the current password in
+        the password field; accounts without a password (OAuth-only) cannot change it.
+        A new change code can be requested once per OTP cooldown. The code is mailed to the
+        new address with a link to the web app page /account/email/verify?code=<code>.
       parameters:
       - description: User information to update
         in: body
@@ -6082,6 +6089,10 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
+        "409":
+          description: Email already in use
+          schema:
+            $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
           schema:
@@ -6091,11 +6102,60 @@ paths:
       summary: Update user information
       tags:
       - users
+  /users/me/email/verify:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Confirm the email change requested via PUT /users/me with the code sent to the
+        new address. On success the account email is switched, every existing session is
+        revoked and a fresh token is returned.
+      parameters:
+      - description: Verification code
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.UserVerification'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.LoginResponse'
+        "400":
+          description: Invalid input data or max attempts reached
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized or code mismatch
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Email already in use
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "410":
+          description: Verification code expired
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Confirm a pending email change
+      tags:
+      - users
   /users/password:
     put:
       consumes:
       - application/json
-      description: Update the password for the authenticated user
+      description: |-
+        Update the password for the authenticated user. Every existing session is revoked;
+        a fresh token for the current client is returned in the response.
       parameters:
       - description: Password update information
         in: body
@@ -6109,7 +6169,7 @@ paths:
         "200":
           description: OK
           schema:
-            type: string
+            $ref: '#/definitions/apicommon.LoginResponse'
         "400":
           description: Invalid input data
           schema:
@@ -6269,18 +6329,6 @@ paths:
             $ref: '#/definitions/apicommon.UserVerification'
         "400":
           description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: User not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "409":
-          description: User already verified
           schema:
             $ref: '#/definitions/errors.Error'
         "500":

@@ -185,6 +185,22 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(org, qt.Not(qt.IsNil))
 		c.Assert(org.Address, qt.DeepEquals, address)
 		c.Assert(org.Creator, qt.Equals, newCreator)
+		// a row without a signer seed (not yet backfilled) gets it pinned to the previous
+		// creator by the same update, so its derived signer does not change
+		c.Assert(org.SignerSeed, qt.Equals, testUserEmail)
+		c.Assert(org.SignerSeedValue(), qt.Equals, testUserEmail)
+		// an existing seed is never rewritten by later creator changes
+		c.Assert(testDB.ReplaceCreatorEmail(newCreator, "myThird@email.test"), qt.IsNil)
+		org, err = testDB.Organization(address)
+		c.Assert(err, qt.IsNil)
+		c.Assert(org.Creator, qt.Equals, "myThird@email.test")
+		c.Assert(org.SignerSeed, qt.Equals, testUserEmail)
+		// the new email is written literally, never evaluated as a pipeline field path
+		c.Assert(testDB.ReplaceCreatorEmail("myThird@email.test", "$signerSeed"), qt.IsNil)
+		org, err = testDB.Organization(address)
+		c.Assert(err, qt.IsNil)
+		c.Assert(org.Creator, qt.Equals, "$signerSeed")
+		c.Assert(org.SignerSeed, qt.Equals, testUserEmail)
 	})
 
 	t.Run("OrganizationsUsers", func(_ *testing.T) {
