@@ -3,16 +3,88 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"reflect"
+	"slices"
+	"strings"
 
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 )
 
+// identityMetaKeys are the organization meta keys that carry the organization identity shown to
+// voters (emails, public organization info). As with PUT /organizations, changing them is
+// admin-only; managers may still write every other meta key (e.g. the web app's tutorial flags).
+var identityMetaKeys = []string{"name", "logo", "description"}
+
+// isIdentityMetaKey reports whether key targets an identity meta key, either directly ("name")
+// or through MongoDB dot notation ("name.default"), which UpdateOrganizationMeta and
+// DeleteOrganizationMetaKeys pass straight into $set / $unset.
+func isIdentityMetaKey(key string) bool {
+	top, _, _ := strings.Cut(key, ".")
+	return slices.Contains(identityMetaKeys, top)
+}
+
+// sameMetaValue reports whether two meta values are equal once both go through a JSON
+// round-trip, so a value decoded from a request body compares equal to the same value
+// decoded from MongoDB.
+func sameMetaValue(a, b any) bool {
+	ja, err := json.Marshal(a)
+	if err != nil {
+		return false
+	}
+	jb, err := json.Marshal(b)
+	if err != nil {
+		return false
+	}
+	var na, nb any
+	if json.Unmarshal(ja, &na) != nil || json.Unmarshal(jb, &nb) != nil {
+		return false
+	}
+	return reflect.DeepEqual(na, nb)
+}
+
+// identityMetaReplaced reports whether replacing the whole current meta map with next would
+// add, change or remove any identity meta key.
+func identityMetaReplaced(current, next map[string]any) bool {
+	for _, key := range identityMetaKeys {
+		cur, hasCur := current[key]
+		nxt, hasNext := next[key]
+		if hasCur != hasNext || (hasCur && !sameMetaValue(cur, nxt)) {
+			return true
+		}
+	}
+	return false
+}
+
+// identityMetaUpdated reports whether merging updates into current would add or change any
+// identity meta key. Resending a key with its stored value (the web app PUTs back the whole
+// meta map it read) is not a change; a dotted sub-key write (e.g. "name.default") always is.
+func identityMetaUpdated(current, updates map[string]any) bool {
+	for key, value := range updates {
+		if !isIdentityMetaKey(key) {
+			continue
+		}
+		cur, ok := current[key]
+		if !ok || !sameMetaValue(cur, value) {
+			return true
+		}
+	}
+	return false
+}
+
+// writeIdentityMetaAdminOnly writes the error returned when a non-admin tries to change an
+// identity meta key.
+func writeIdentityMetaAdminOnly(w http.ResponseWriter) {
+	errors.ErrUnauthorized.Withf("only organization admins can change the organization name, logo or description").Write(w)
+}
+
 // addOrganizationMetaHandler godoc
 //
 //	@Summary		Add meta information to an organization
 //	@Description	Overwrite the meta information of an organization. Requires Manager/Admin role.
+//	@Description	Only admins may change the organization identity keys (name, logo, description): a manager's
+//	@Description	request must carry them exactly as they are stored, or it is rejected with 401.
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -51,6 +123,10 @@ func (a *API) addOrganizationMetaHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrInvalidUserData.WithErr(err).Withf("invalid meta information").Write(w)
 		return
 	}
+	if !user.HasRoleFor(org.Address, db.AdminRole) && identityMetaReplaced(org.Meta, meta.Meta) {
+		writeIdentityMetaAdminOnly(w)
+		return
+	}
 	// Update the organization meta information
 	if err := a.db.AddOrganizationMeta(org.Address, meta.Meta); err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -65,7 +141,9 @@ func (a *API) addOrganizationMetaHandler(w http.ResponseWriter, r *http.Request)
 //	@Description	Updates existing or adds new key/value pairs in the meta information of an organization.
 //	@Description	Has only one layer of depth. If a second layer document is provided, for example meta.doc = [a,b,c],
 //	@Description	the entire document will be updated.
-//	@Description	Requires Manager/Admin role.
+//	@Description	Requires Manager/Admin role. Only admins may change the organization identity keys
+//	@Description	(name, logo, description, including dotted sub-keys such as name.default): a manager may
+//	@Description	resend them with their stored value, but any other write to them is rejected with 401.
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -102,6 +180,10 @@ func (a *API) updateOrganizationMetaHandler(w http.ResponseWriter, r *http.Reque
 	var meta apicommon.OrganizationAddMetaRequest
 	if err := json.NewDecoder(r.Body).Decode(&meta); err != nil {
 		errors.ErrInvalidUserData.WithErr(err).Withf("invalid meta information").Write(w)
+		return
+	}
+	if !user.HasRoleFor(org.Address, db.AdminRole) && identityMetaUpdated(org.Meta, meta.Meta) {
+		writeIdentityMetaAdminOnly(w)
 		return
 	}
 	// Update the organization meta information
@@ -154,7 +236,8 @@ func (a *API) organizationMetaHandler(w http.ResponseWriter, r *http.Request) {
 //
 //	@Summary		Delete organization meta information
 //	@Description	Deletes a set of keys from the meta information of an organization.
-//					Requires Manager/Admin role.
+//	@Description	Requires Manager/Admin role. Only admins may delete the organization identity keys
+//	@Description	(name, logo, description); a manager's request naming any of them is rejected with 401.
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -191,6 +274,10 @@ func (a *API) deleteOrganizationMetaHandler(w http.ResponseWriter, r *http.Reque
 	var meta apicommon.OrganizationDeleteMetaRequest
 	if err := json.NewDecoder(r.Body).Decode(&meta); err != nil {
 		errors.ErrInvalidUserData.WithErr(err).Withf("invalid meta information").Write(w)
+		return
+	}
+	if !user.HasRoleFor(org.Address, db.AdminRole) && slices.ContainsFunc(meta.Keys, isIdentityMetaKey) {
+		writeIdentityMetaAdminOnly(w)
 		return
 	}
 	// Update the organization meta information

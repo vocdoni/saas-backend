@@ -8,6 +8,7 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/db"
 )
 
 func TestOrganizationMeta(t *testing.T) {
@@ -297,4 +298,116 @@ func TestOrganizationMeta(t *testing.T) {
 	// Test 6.1: Test that the manager can't access the organization meta initially
 	_, code = testRequest(t, http.MethodGet, managerToken, nil, "organizations", orgAddress.String(), "meta")
 	c.Assert(code, qt.Equals, http.StatusUnauthorized)
+}
+
+// TestOrganizationMetaIdentityKeysAdminOnly checks that managers can write the organization meta
+// (as the web app does for its tutorial flags) but cannot change the identity keys (name, logo,
+// description) that PUT /organizations already restricts to admins.
+func TestOrganizationMetaIdentityKeysAdminOnly(t *testing.T) {
+	c := qt.New(t)
+
+	adminToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	metaPath := []string{"organizations", orgAddress.String(), "meta"}
+
+	// give the organization an identity through the admin-only PUT /organizations
+	orgUpdate := &apicommon.OrganizationInfo{
+		Name: &apicommon.MultilingualText{"default": "Acme", "es": "Acme ES"},
+		Logo: &apicommon.MultilingualText{"default": "https://example.com/logo.png"},
+	}
+	requestAndAssertCode(http.StatusOK, t, http.MethodPut, adminToken, orgUpdate, "organizations", orgAddress.String())
+
+	// make a second user a manager of the organization
+	managerToken := testCreateUser(t, "managerpassword123")
+	managerInfo := requestAndParse[apicommon.UserInfo](t, http.MethodGet, managerToken, nil, usersMeEndpoint)
+	managerUser, err := testDB.UserByEmail(managerInfo.Email)
+	c.Assert(err, qt.IsNil)
+	managerUser.Organizations = append(managerUser.Organizations, db.OrganizationUser{
+		Address: orgAddress,
+		Role:    db.ManagerRole,
+	})
+	_, err = testDB.SetUser(managerUser)
+	c.Assert(err, qt.IsNil)
+
+	getMeta := func() map[string]any {
+		return requestAndParse[apicommon.OrganizationMetaResponse](t, http.MethodGet, adminToken, nil, metaPath...).Meta
+	}
+	original := getMeta()
+	c.Assert(original["name"], qt.IsNotNil)
+	c.Assert(original["logo"], qt.IsNotNil)
+
+	t.Run("manager can read meta", func(t *testing.T) {
+		requestAndAssertCode(http.StatusOK, t, http.MethodGet, managerToken, nil, metaPath...)
+	})
+
+	t.Run("manager can write non-identity keys", func(t *testing.T) {
+		c := qt.New(t)
+		// mirror the web app: PUT back the whole meta map it read, plus a tutorial flag
+		meta := requestAndParse[apicommon.OrganizationMetaResponse](t, http.MethodGet, managerToken, nil, metaPath...).Meta
+		meta["isSidebarTutorialClosed"] = true
+		requestAndAssertCode(http.StatusOK, t, http.MethodPut, managerToken,
+			&apicommon.OrganizationAddMetaRequest{Meta: meta}, metaPath...)
+		c.Assert(getMeta()["isSidebarTutorialClosed"], qt.IsTrue)
+
+		requestAndAssertCode(http.StatusOK, t, http.MethodDelete, managerToken,
+			&apicommon.OrganizationDeleteMetaRequest{Keys: []string{"isSidebarTutorialClosed"}}, metaPath...)
+		_, ok := getMeta()["isSidebarTutorialClosed"]
+		c.Assert(ok, qt.IsFalse)
+
+		// POST replacing the whole map is fine as long as the identity keys are kept as stored
+		replace := getMeta()
+		replace["region"] = "Europe"
+		requestAndAssertCode(http.StatusOK, t, http.MethodPost, managerToken,
+			&apicommon.OrganizationAddMetaRequest{Meta: replace}, metaPath...)
+		c.Assert(getMeta()["region"], qt.Equals, "Europe")
+	})
+
+	t.Run("manager cannot change identity keys", func(t *testing.T) {
+		c := qt.New(t)
+		for _, tc := range []struct {
+			name   string
+			method string
+			body   any
+		}{
+			{"put name", http.MethodPut, &apicommon.OrganizationAddMetaRequest{
+				Meta: map[string]any{"name": map[string]any{"default": "Evil Corp"}},
+			}},
+			{"put dotted name", http.MethodPut, &apicommon.OrganizationAddMetaRequest{
+				Meta: map[string]any{"name.default": "Evil Corp"},
+			}},
+			{"put new description", http.MethodPut, &apicommon.OrganizationAddMetaRequest{
+				Meta: map[string]any{"description": map[string]any{"default": "pay here"}},
+			}},
+			{"post replacing logo", http.MethodPost, &apicommon.OrganizationAddMetaRequest{
+				Meta: map[string]any{"name": original["name"], "logo": map[string]any{"default": "https://evil.example/x.png"}},
+			}},
+			{"post dropping identity", http.MethodPost, &apicommon.OrganizationAddMetaRequest{
+				Meta: map[string]any{"region": "Europe"},
+			}},
+			{"delete logo", http.MethodDelete, &apicommon.OrganizationDeleteMetaRequest{Keys: []string{"logo"}}},
+			{"delete dotted name", http.MethodDelete, &apicommon.OrganizationDeleteMetaRequest{Keys: []string{"name.es"}}},
+		} {
+			requestAndAssertCode(http.StatusUnauthorized, t, tc.method, managerToken, tc.body, metaPath...)
+			meta := getMeta()
+			c.Assert(meta["name"], qt.DeepEquals, original["name"], qt.Commentf(tc.name))
+			c.Assert(meta["logo"], qt.DeepEquals, original["logo"], qt.Commentf(tc.name))
+			_, hasDescription := meta["description"]
+			c.Assert(hasDescription, qt.IsFalse, qt.Commentf(tc.name))
+		}
+	})
+
+	t.Run("admin can change identity keys", func(t *testing.T) {
+		c := qt.New(t)
+		requestAndAssertCode(http.StatusOK, t, http.MethodPut, adminToken, &apicommon.OrganizationAddMetaRequest{
+			Meta: map[string]any{"name.default": "Acme Renamed"},
+		}, metaPath...)
+		name, ok := getMeta()["name"].(map[string]any)
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(name["default"], qt.Equals, "Acme Renamed")
+
+		requestAndAssertCode(http.StatusOK, t, http.MethodDelete, adminToken,
+			&apicommon.OrganizationDeleteMetaRequest{Keys: []string{"logo"}}, metaPath...)
+		_, ok = getMeta()["logo"]
+		c.Assert(ok, qt.IsFalse)
+	})
 }
