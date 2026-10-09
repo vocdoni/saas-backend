@@ -343,9 +343,11 @@ func TestOrganizations(t *testing.T) {
 		})
 		c.Assert(err, qt.IsNil)
 
-		// Create two organizations for the second user
-		firstOrgAddress := testOrgAddress
-		secondOrgAddress := testAnotherOrgAddress
+		// Create two organizations for the second user. Fresh addresses: SetOrganization grants
+		// the creator a role only when it actually creates the organization, so reusing the
+		// already-created testOrgAddress would (correctly) grant nothing.
+		firstOrgAddress := testThirdOrgAddress
+		secondOrgAddress := testFourthOrgAddress
 
 		c.Assert(testDB.SetOrganization(&Organization{
 			Address: firstOrgAddress,
