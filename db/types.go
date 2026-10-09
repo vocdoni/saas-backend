@@ -31,17 +31,33 @@ type User struct {
 	OAuth         map[string]OAuthProvider `json:"oauth,omitempty" bson:"oauth,omitempty"` // OAuth providers by name
 	Organizations []OrganizationUser       `json:"organizations" bson:"organizations"`
 	Verified      bool                     `json:"verified" bson:"verified"`
+	// SessionVersion is the version every JWT session of the user is bound to. It is bumped
+	// (atomically, by the credential-update methods) whenever all existing sessions must be
+	// revoked: password change, password reset or email change. Tokens minted with an older
+	// version are rejected by the authenticator. It is never written by SetUser, so a stale
+	// snapshot cannot roll a revocation back.
+	SessionVersion uint64 `json:"-" bson:"sessionVersion"`
 }
 
 type CodeType string
 
 type UserVerification struct {
-	ID         uint64    `json:"id" bson:"_id"`
+	UserID     uint64    `json:"userId" bson:"userId"`
 	SealedCode []byte    `json:"sealedCode" bson:"sealedCode"`
 	Type       CodeType  `json:"type" bson:"type"`
 	CreatedAt  time.Time `json:"createdAt" bson:"createdAt"`
 	Expiration time.Time `json:"expiration" bson:"expiration"`
-	Attempts   int       `json:"attempts" bson:"attempts"`
+	// PendingEmail is the address an email-update code (CodeTypeUpdateEmail) was sent to; the
+	// user's email is switched to it only once the code is confirmed.
+	PendingEmail string `json:"pendingEmail,omitempty" bson:"pendingEmail,omitempty"`
+	// Attempts counts failed guesses of the code; it starts at zero and is bounded by
+	// VerificationCodeCheckAndAddAttempt.
+	Attempts int `json:"attempts" bson:"attempts"`
+	// Sends counts deliveries of the code (the initial email plus resends); it starts at one
+	// and is bounded by VerificationCodeTrySend, independently of the guess budget.
+	Sends int `json:"sends" bson:"sends"`
+	// LastSentAt is when the code was last delivered, used to enforce the send cooldown.
+	LastSentAt time.Time `json:"lastSentAt" bson:"lastSentAt"`
 }
 
 // TODO this is the default role function while it should be
@@ -78,11 +94,17 @@ type Organization struct {
 	Creator   string           `json:"creator" bson:"creator"`
 	CreatedAt time.Time        `json:"createdAt" bson:"createdAt"`
 	Nonce     string           `json:"nonce" bson:"nonce"`
-	Size      string           `json:"size" bson:"size"`
-	Color     string           `json:"color" bson:"color"`
-	Subdomain string           `json:"subdomain" bson:"subdomain"`
-	Country   string           `json:"country" bson:"country"`
-	Timezone  string           `json:"timezone" bson:"timezone"`
+	// SignerSeed is the immutable per-organization component of the signer key derivation
+	// (secret + seed + nonce). It is set once at creation to the creator's email (migration
+	// 0028 backfills it from Creator) and never rewritten — unlike Creator, which
+	// ReplaceCreatorEmail rewrites on an email change — so the derived on-chain key cannot
+	// silently change. Never exposed over the API.
+	SignerSeed string `json:"-" bson:"signerSeed,omitempty"`
+	Size       string `json:"size" bson:"size"`
+	Color      string `json:"color" bson:"color"`
+	Subdomain  string `json:"subdomain" bson:"subdomain"`
+	Country    string `json:"country" bson:"country"`
+	Timezone   string `json:"timezone" bson:"timezone"`
 	// DefaultLang is the language of the notifications sent on behalf of the organization
 	// (see apicommon.NotificationLang). Every organization has one, defaulting to "en".
 	// It can be changed but not cleared, dynamicUpdateDocument skipping zero-valued fields.
@@ -136,6 +158,16 @@ func (o *Organization) DisplayName() string {
 		return ""
 	}
 	return metaDefaultString(o.Meta["name"])
+}
+
+// SignerSeedValue returns the seed component used to derive the organization signer,
+// falling back to the creator email for rows the backfill migration has not stamped yet
+// (the value the backfill copies into the seed).
+func (o *Organization) SignerSeedValue() string {
+	if o.SignerSeed != "" {
+		return o.SignerSeed
+	}
+	return o.Creator
 }
 
 // LogoURL returns the organization logo URL stored in its metadata,

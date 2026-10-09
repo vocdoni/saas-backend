@@ -298,7 +298,7 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 		}()
 	}
 
-	orgSigner, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce)
+	orgSigner, err := account.OrganizationSigner(a.secret, org.SignerSeedValue(), org.Nonce)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not restore organization signer: %v", err).Write(w)
 		return
@@ -746,7 +746,7 @@ func (a *API) enqueueStatusChange(
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	orgSigner, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce)
+	orgSigner, err := account.OrganizationSigner(a.secret, org.SignerSeedValue(), org.Nonce)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not restore organization signer: %v", err).Write(w)
 		return
