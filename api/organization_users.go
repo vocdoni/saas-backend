@@ -287,10 +287,24 @@ func (a *API) acceptOrganizationUserInvitationHandler(w http.ResponseWriter, r *
 			Verified:  true,
 		}
 		// create the user first and grant the membership below through the same atomic path as
-		// an existing user; a concurrent registration losing this race simply falls through to it
-		if _, err := a.db.SetUser(dbUser); err != nil && err != db.ErrAlreadyExists {
-			errors.ErrGenericInternalServerError.Withf("could not set user: %v", err).Write(w)
-			return
+		// an existing user
+		if _, err := a.db.SetUser(dbUser); err != nil {
+			if err != db.ErrAlreadyExists {
+				errors.ErrGenericInternalServerError.Withf("could not set user: %v", err).Write(w)
+				return
+			}
+			// the account was created concurrently (another acceptance or a signup). Reuse it only
+			// under the same rule as an existing user: an unverified account may belong to someone
+			// who signed up with an email they do not own, so it must not receive the invited role
+			existing, err := a.db.UserByEmail(invitation.NewUserEmail)
+			if err != nil {
+				errors.ErrGenericInternalServerError.Withf("could not get user: %v", err).Write(w)
+				return
+			}
+			if !existing.Verified {
+				errors.ErrUserNoVerified.With("user already exists but is not verified").Write(w)
+				return
+			}
 		}
 	} else {
 		// if it does, check if the user is already verified
