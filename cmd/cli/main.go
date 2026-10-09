@@ -17,7 +17,8 @@ func main() {
 	flag.StringP("mongoDB", "d", "", "MongoDB database name")
 	flag.Bool("setIntegrator", false, "enable the given organization as an integrator and set its managed-org limit")
 	flag.String("orgAddress", "", "organization address (hex) for --setIntegrator")
-	flag.Int("maxManagedOrgs", 0, "integrator limit: max managed organizations")
+	flag.Int("maxManagedOrgs", 0,
+		"required with --setIntegrator: max managed organizations (must be > 0; it overrides the plan's integrator limit)")
 	flag.Parse()
 
 	viper.SetEnvPrefix("VOCDONI")
@@ -50,27 +51,35 @@ func main() {
 // sets its managed-org limit override. The aggregate process/census caps come from the
 // integrator's subscription plan (Plan.Organization.MaxProcesses / MaxCensus).
 func setIntegrator(database *db.MongoStorage, orgAddress string, maxOrgs int) error {
-	if orgAddress == "" {
-		return fmt.Errorf("orgAddress is required")
-	}
-	if !common.IsHexAddress(orgAddress) {
-		return fmt.Errorf("invalid orgAddress: %q is not a hex address", orgAddress)
-	}
-	addr := common.HexToAddress(orgAddress)
-	org, err := database.Organization(addr)
+	addr, err := validateSetIntegratorArgs(orgAddress, maxOrgs)
 	if err != nil {
-		return fmt.Errorf("could not get organization: %w", err)
+		return err
 	}
 	// Setting a per-organization limits override both enables integrator status and
 	// caps how many organizations it may manage (see Subscriptions.IsIntegrator).
-	org.IntegratorLimits = &db.IntegratorLimits{
-		MaxManagedOrgs: maxOrgs,
-	}
-	if err := database.SetOrganization(org); err != nil {
+	limits := &db.IntegratorLimits{MaxManagedOrgs: maxOrgs}
+	if err := database.SetOrganizationIntegratorLimits(addr, limits); err != nil {
 		return fmt.Errorf("could not update organization: %w", err)
 	}
 	log.Infow("organization is now an integrator",
 		"address", addr.Hex(),
 		"maxManagedOrgs", maxOrgs)
 	return nil
+}
+
+// validateSetIntegratorArgs checks the --setIntegrator arguments and returns the parsed
+// organization address. maxOrgs must be positive: a per-organization override with
+// MaxManagedOrgs 0 does not fall back to the plan, it disables integrator status
+// (see Subscriptions.IsIntegrator), which is the opposite of what --setIntegrator is for.
+func validateSetIntegratorArgs(orgAddress string, maxOrgs int) (common.Address, error) {
+	if orgAddress == "" {
+		return common.Address{}, fmt.Errorf("orgAddress is required")
+	}
+	if !common.IsHexAddress(orgAddress) {
+		return common.Address{}, fmt.Errorf("invalid orgAddress: %q is not a hex address", orgAddress)
+	}
+	if maxOrgs <= 0 {
+		return common.Address{}, fmt.Errorf("maxManagedOrgs must be greater than 0, got %d", maxOrgs)
+	}
+	return common.HexToAddress(orgAddress), nil
 }

@@ -772,3 +772,26 @@ func (ms *MongoStorage) addToOrganizationCounter(orgAddress common.Address, coun
 	}
 	return nil
 }
+
+// SetOrganizationIntegratorLimits sets the per-organization integrator limits override of
+// the organization at address, or removes it when limits is nil so the organization falls
+// back to its plan. Only the integratorLimits field is written. It returns ErrNotFound when
+// the organization does not exist.
+func (ms *MongoStorage) SetOrganizationIntegratorLimits(address common.Address, limits *IntegratorLimits) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	update := bson.M{"$unset": bson.M{"integratorLimits": ""}}
+	if limits != nil {
+		update = bson.M{"$set": bson.M{"integratorLimits": limits}}
+	}
+	res, err := ms.organizations.UpdateOne(ctx, bson.M{"_id": address}, update)
+	if err != nil {
+		return fmt.Errorf("could not set integrator limits: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
