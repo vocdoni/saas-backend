@@ -264,7 +264,9 @@ explicitly out of scope — handle those separately if the erasure request cover
 ### [cmd/cli](cmd/cli/) — integrator switch
 
 **What it does.** `--setIntegrator` flags an organization as an integrator and sets its
-`maxManagedOrgs` limit.
+`maxManagedOrgs` limit. `--maxManagedOrgs` is required and must be greater than 0: the value is
+a per-organization override that replaces the plan's integrator limit, and an override of 0 would
+disable integrator status instead.
 
 **How to run.**
 
