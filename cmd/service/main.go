@@ -30,6 +30,7 @@ import (
 
 func main() {
 	// define flags
+	flag.String("logLevel", log.LogLevelInfo, "log level (debug, info, warn, error); debug logs voter credentials and PII")
 	flag.String("serverURL", "http://localhost:8080", "The full URL of the server (http or https)")
 	flag.StringP("host", "h", "0.0.0.0", "listen address")
 	flag.IntP("port", "p", 8080, "listen port")
@@ -113,7 +114,13 @@ func main() {
 	// oauth vars
 	oauthServiceURL := viper.GetString("oauthServiceURL")
 
-	log.Init("debug", "stdout", os.Stderr)
+	logLevel := viper.GetString("logLevel")
+	switch logLevel {
+	case log.LogLevelDebug, log.LogLevelInfo, log.LogLevelWarn, log.LogLevelError:
+	default:
+		log.Fatalf("invalid logLevel %q (allowed: debug, info, warn, error)", logLevel)
+	}
+	log.Init(logLevel, "stdout", os.Stderr)
 
 	// Validate Stripe configuration
 	if stripeAPISecret == "" || stripeWebhookSecret == "" {
