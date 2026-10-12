@@ -70,6 +70,7 @@ import (
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/chainclient"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
@@ -77,8 +78,6 @@ import (
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/objectstorage"
 	"github.com/vocdoni/saas-backend/subscriptions"
-	dvoteapi "go.vocdoni.io/dvote/api"
-	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -93,7 +92,6 @@ type Config struct {
 	Secret      string
 	Chain       string
 	DB          *db.MongoStorage
-	Client      *apiclient.HTTPclient
 	Account     *account.Account
 	MailService notifications.NotificationService
 	SMSService  notifications.NotificationService
@@ -145,7 +143,6 @@ type API struct {
 	host            string
 	port            int
 	router          *chi.Mux
-	client          *apiclient.HTTPclient
 	account         *account.Account
 	mail            notifications.NotificationService
 	sms             notifications.NotificationService
@@ -175,9 +172,9 @@ type API struct {
 	otpCooldown       time.Duration
 	notifySync        bool
 	statusSyncer      StatusEnqueuer
-	electionCache     *lru.Cache[string, *dvoteapi.Election]
+	electionCache     *lru.Cache[string, *chainclient.Election]
 	// liveElectionCache holds not-yet-final legacy elections for legacyLiveElectionTTL.
-	liveElectionCache *expirable.LRU[string, *dvoteapi.Election]
+	liveElectionCache *expirable.LRU[string, *chainclient.Election]
 	// legacyProjectionCache holds fully-final legacy records already projected onto /processes.
 	legacyProjectionCache *lru.Cache[string, *apicommon.VotingProcessResponse]
 }
@@ -246,8 +243,8 @@ func New(ctx context.Context, conf *Config) *API {
 	}
 
 	// lru.New only fails on a non-positive size, and the size is a positive constant.
-	electionCache, _ := lru.New[string, *dvoteapi.Election](legacyElectionCacheSize)
-	liveElectionCache := expirable.NewLRU[string, *dvoteapi.Election](legacyElectionCacheSize, nil, legacyLiveElectionTTL)
+	electionCache, _ := lru.New[string, *chainclient.Election](legacyElectionCacheSize)
+	liveElectionCache := expirable.NewLRU[string, *chainclient.Election](legacyElectionCacheSize, nil, legacyLiveElectionTTL)
 	legacyProjectionCache, _ := lru.New[string, *apicommon.VotingProcessResponse](legacyElectionCacheSize)
 
 	a := &API{
@@ -256,7 +253,6 @@ func New(ctx context.Context, conf *Config) *API {
 		auth:                  jwtauth.New("HS256", []byte(conf.Secret), nil),
 		host:                  conf.Host,
 		port:                  conf.Port,
-		client:                conf.Client,
 		account:               conf.Account,
 		mail:                  conf.MailService,
 		sms:                   conf.SMSService,

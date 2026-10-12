@@ -108,6 +108,10 @@ Component packages (each is a focused service composed in `main.go`):
   (HTTP), `csp/notifications/` (challenge queue). Signing key derives from the service `RootKey`.
 - **`account/`** — wraps the Vocdoni blockchain account: signs transactions, funds accounts via
   faucet, computes election prices. This is the "remote signer" core.
+- **`chainclient/`** — thin HTTP client and wire DTOs for the vocdoni-node endpoints the service
+  calls, plus inlined chain helpers (nullifier, faucet package, tx cost names). Non-test code must
+  not import `go.vocdoni.io/dvote/{api,apiclient,vochain}` (they link cometbft/IPFS/ZK into the
+  binary); equivalence tests in `chainclient/` pin the helpers to the node originals.
 - **`notifications/`** — `NotificationService` interface with `smtp/` (email) and `twilio/` (SMS)
   implementations, plus `mailtemplates/` (HTML/text email templates, loaded with `mailtemplates.Load()`).
   `FailoverService` composes multiple services and delivers via the first that succeeds; the service

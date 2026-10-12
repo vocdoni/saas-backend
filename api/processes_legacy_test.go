@@ -11,10 +11,10 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/chainclient"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
-	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/types"
 	"go.vocdoni.io/proto/build/go/models"
 )
@@ -26,7 +26,7 @@ const explorerElectionID = "6b342d99f2187f3debbb14afcde7f41407f6cf87d4e7667f787c
 // legacyTestElection builds an election as the node returns it: metadata inlined as the untyped
 // document the projection decodes, and maxCount set to the ballot's field count (one per result row),
 // which describes the election itself and not its tally.
-func legacyTestElection(results [][]uint64, questions []map[string]any) *dvoteapi.Election {
+func legacyTestElection(results [][]uint64, questions []map[string]any) *chainclient.Election {
 	rows := make([][]*types.BigInt, 0, len(results))
 	for _, row := range results {
 		values := make([]*types.BigInt, 0, len(row))
@@ -35,17 +35,17 @@ func legacyTestElection(results [][]uint64, questions []map[string]any) *dvoteap
 		}
 		rows = append(rows, values)
 	}
-	return &dvoteapi.Election{
-		ElectionSummary: dvoteapi.ElectionSummary{
+	return &chainclient.Election{
+		ElectionSummary: chainclient.ElectionSummary{
 			ElectionID:   types.HexStringToHexBytes(explorerElectionID),
 			Status:       "RESULTS",
 			VoteCount:    8,
 			FinalResults: true,
 			Results:      rows,
 		},
-		Census:   &dvoteapi.ElectionCensus{MaxCensusSize: 13},
-		VoteMode: dvoteapi.VoteMode{EnvelopeType: &models.EnvelopeType{EncryptedVotes: true}},
-		TallyMode: dvoteapi.TallyMode{
+		Census:   &chainclient.ElectionCensus{MaxCensusSize: 13},
+		VoteMode: chainclient.VoteMode{EnvelopeType: &models.EnvelopeType{EncryptedVotes: true}},
+		TallyMode: chainclient.TallyMode{
 			ProcessVoteOptions: &models.ProcessVoteOptions{MaxCount: uint32(len(results)), MaxValue: 1},
 		},
 		Metadata: map[string]any{
@@ -169,7 +169,7 @@ func legacyTestChoices(title string, n int) map[string]any {
 
 // legacyTestElectionType stamps a metadata "type" block on a fixture election: the declared name is a
 // claim the chain never saw, so the projection only passes it through once the ballot corroborates it.
-func legacyTestElectionType(election *dvoteapi.Election, name string, properties map[string]any) {
+func legacyTestElectionType(election *chainclient.Election, name string, properties map[string]any) {
 	if meta, ok := election.Metadata.(map[string]any); ok {
 		meta["type"] = map[string]any{"name": name, "properties": properties}
 	}
@@ -355,8 +355,8 @@ func TestLegacyProjectionTypeContradictsChoices(t *testing.T) {
 func TestLegacyProjectionStoredParams(t *testing.T) {
 	c := qt.New(t)
 	// no Metadata on the election: whatever the projection reports has to come from the params.
-	election := &dvoteapi.Election{
-		ElectionSummary: dvoteapi.ElectionSummary{
+	election := &chainclient.Election{
+		ElectionSummary: chainclient.ElectionSummary{
 			ElectionID: types.HexStringToHexBytes(explorerElectionID),
 			Status:     "ENDED",
 			VoteCount:  2,
@@ -427,7 +427,7 @@ func TestLegacyProcessIDShape(t *testing.T) {
 // legacyTestSource registers election under a fresh id in the election caches, as a chain read
 // would, and returns a source spanning it. The election id is not on the test chain, so any read
 // that misses the caches fails.
-func legacyTestSource(election *dvoteapi.Election) *legacyProcessSource {
+func legacyTestSource(election *chainclient.Election) *legacyProcessSource {
 	election.ElectionID = types.HexStringToHexBytes(fmt.Sprintf("%064x", bson.NewObjectID()))
 	if election.Status == "RESULTS" {
 		testAPI.electionCache.Add(election.ElectionID.String(), election)

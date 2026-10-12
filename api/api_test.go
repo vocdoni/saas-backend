@@ -340,8 +340,8 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	// create the remote test API client
-	testAPIClient, err := apiclient.New(testAPIEndpoint)
+	// wait until the node API answers before creating the account on it
+	_, err = apiclient.New(testAPIEndpoint)
 	retries := 3
 	for i := range retries {
 		if err == nil {
@@ -349,7 +349,7 @@ func TestMain(m *testing.M) {
 		}
 		log.Warnf("failed to create api client (%s), will wait and retry (%d/%d)", err, i, retries)
 		time.Sleep(time.Second)
-		testAPIClient, err = apiclient.New(testAPIEndpoint)
+		_, err = apiclient.New(testAPIEndpoint)
 	}
 	if err != nil {
 		panic(err)
@@ -410,7 +410,6 @@ func TestMain(m *testing.M) {
 		Port:                testPort,
 		Secret:              testSecret,
 		DB:                  testDB,
-		Client:              testAPIClient,
 		Account:             testAccount,
 		MailService:         testMailService,
 		SMSService:          testSMSService,

@@ -5,23 +5,20 @@ package account
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/chainclient"
 	"github.com/vocdoni/saas-backend/internal"
-	vocdoniapi "go.vocdoni.io/dvote/api"
-	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
-	"go.vocdoni.io/dvote/vochain"
 	"go.vocdoni.io/dvote/vochain/state/electionprice"
 	"go.vocdoni.io/proto/build/go/models"
 )
 
 // Account handles the account operations that include signing transactions, creating faucet packages, etc.
 type Account struct {
-	client *apiclient.HTTPclient
+	client *chainclient.Client
 	signer *ethereum.SignKeys
 
 	PubKey            internal.HexBytes `swaggertype:"string" format:"hex" example:"deadbeef"`
@@ -33,23 +30,20 @@ type Account struct {
 // If the account doesn't exist, it creates a new one.
 func New(privateKey string, apiEndpoint string) (*Account, error) {
 	// create the remote API client and ensure account exists
-	apiClient, err := apiclient.New(apiEndpoint)
+	apiClient, err := chainclient.New(apiEndpoint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create API client: %w", err)
-	}
-	if err := apiClient.SetAccount(privateKey); err != nil {
-		return nil, fmt.Errorf("failed to set account: %w", err)
-	}
-	if err := ensureAccountExist(apiEndpoint, apiClient); err != nil {
-		return nil, fmt.Errorf("failed to ensure account exists: %w", err)
 	}
 	// create the signer
 	signer := ethereum.SignKeys{}
 	if err := signer.AddHexKey(privateKey); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to set account: %w", err)
+	}
+	if err := ensureAccountExist(apiClient, &signer); err != nil {
+		return nil, fmt.Errorf("failed to ensure account exists: %w", err)
 	}
 	// get account and log some info
-	account, err := apiClient.Account("")
+	account, err := apiClient.Account(signer.AddressString())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get account: %v", err)
 	}
@@ -61,11 +55,11 @@ func New(privateKey string, apiEndpoint string) (*Account, error) {
 		"balance", account.Balance,
 	)
 	// initialize the election price calculator
-	electionPriceCalc, err := InitElectionPriceCalculator(apiEndpoint)
+	electionPriceCalc, err := InitElectionPriceCalculator(apiClient)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize election price calculator: %w", err)
 	}
-	txCosts, err := vochainTxCosts(apiEndpoint)
+	txCosts, err := vochainTxCosts(apiClient)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get transaction costs: %w", err)
 	}
@@ -90,28 +84,24 @@ func (a *Account) FaucetPackage(toAddr common.Address, amount uint64) (*models.F
 		"toAddr", toAddr,
 		"amount", amount,
 	)
-	return vochain.GenerateFaucetPackage(a.signer, toAddr, amount)
+	return chainclient.GenerateFaucetPackage(a.signer, toAddr, amount)
 }
 
-// ensureAccountExist checks if the account exists and creates it if it doesn't.
-func ensureAccountExist(baseURL string, cli *apiclient.HTTPclient) error {
-	if _, err := cli.Account(""); err == nil {
+// serviceAccountName is the on-chain name of the service account.
+const serviceAccountName = "Vocdoni SaaS backend"
+
+// ensureAccountExist checks if the signer's account exists and, if it doesn't, creates it paying
+// with a package from the node's faucet.
+func ensureAccountExist(cli *chainclient.Client, signer *ethereum.SignKeys) error {
+	addr := signer.AddressString()
+	if _, err := cli.Account(addr); err == nil {
 		return nil
 	}
-	faucetURL, err := url.JoinPath(baseURL, "/open/claim", cli.MyAddress().Hex())
-	if err != nil {
-		return fmt.Errorf("error getting faucet URL: %w", err)
-	}
-	faucetPkg, err := apiclient.GetFaucetPackageFromRemoteService(faucetURL, "")
+	faucetPkg, err := cli.FaucetPackage(addr)
 	if err != nil {
 		return fmt.Errorf("failed to get faucet package: %w", err)
 	}
-	accountMetadata := &vocdoniapi.AccountMetadata{
-		Name:        map[string]string{"default": "Vocdoni SaaS backend"},
-		Description: map[string]string{"default": "Vocdoni SaaS backend proxy account"},
-		Version:     "1.0",
-	}
-	hash, err := cli.AccountBootstrap(faucetPkg, accountMetadata, nil)
+	hash, err := cli.AccountBootstrap(signer, faucetPkg, serviceAccountName)
 	if err != nil {
 		return fmt.Errorf("failed to bootstrap account: %w", err)
 	}

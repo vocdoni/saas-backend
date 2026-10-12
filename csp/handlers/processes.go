@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/chainclient"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/db"
@@ -17,7 +18,6 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/log"
-	"go.vocdoni.io/dvote/vochain/state"
 )
 
 // parseProcessID parses the {processId} URL param (a voting-process Mongo ObjectID) and
@@ -1103,7 +1103,7 @@ func (c *CSPHandlers) ProcessSignInfoHandler(w http.ResponseWriter, r *http.Requ
 		// no server-side nullifier to report either; the voter derives its own from its address.
 		if cspProc.UsedAddress != nil {
 			entry.Address = cspProc.UsedAddress
-			entry.Nullifier = state.GenerateNullifier(common.BytesToAddress(cspProc.UsedAddress), q.UpstreamID)
+			entry.Nullifier = chainclient.GenerateNullifier(common.BytesToAddress(cspProc.UsedAddress), q.UpstreamID)
 		}
 		resp.Consumed = append(resp.Consumed, entry)
 	}

@@ -2,21 +2,18 @@ package account
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/chainclient"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.vocdoni.io/dvote/api"
-	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/proto/build/go/models"
 )
 
@@ -33,30 +30,30 @@ func BuildElectionMetadata(params *db.ElectionParams) ([]byte, error) {
 	if params == nil {
 		return nil, fmt.Errorf("nil election params")
 	}
-	meta := &api.ElectionMetadata{
-		Title:       api.LanguageString(params.Title),
+	meta := &chainclient.ElectionMetadata{
+		Title:       chainclient.LanguageString(params.Title),
 		Version:     electionMetadataVersion,
-		Description: api.LanguageString(params.Description),
-		Media: api.ProcessMedia{
+		Description: chainclient.LanguageString(params.Description),
+		Media: chainclient.ProcessMedia{
 			Header:    params.Header,
 			StreamURI: params.StreamURI,
 		},
-		Questions: make([]api.Question, 0, len(params.Questions)),
+		Questions: make([]chainclient.Question, 0, len(params.Questions)),
 	}
 	if params.TypeMetadata != nil {
-		meta.Type = api.ElectionProperties{Name: params.TypeMetadata.Name, Properties: params.TypeMetadata.Properties}
+		meta.Type = chainclient.ElectionProperties{Name: params.TypeMetadata.Name, Properties: params.TypeMetadata.Properties}
 	} else {
-		meta.Type = api.ElectionProperties{Name: DefaultElectionType}
+		meta.Type = chainclient.ElectionProperties{Name: DefaultElectionType}
 	}
 	for _, q := range params.Questions {
-		question := api.Question{
-			Title:       api.LanguageString(q.Title),
-			Description: api.LanguageString(q.Description),
-			Choices:     make([]api.ChoiceMetadata, 0, len(q.Choices)),
+		question := chainclient.Question{
+			Title:       chainclient.LanguageString(q.Title),
+			Description: chainclient.LanguageString(q.Description),
+			Choices:     make([]chainclient.ChoiceMetadata, 0, len(q.Choices)),
 		}
 		for _, ch := range q.Choices {
-			question.Choices = append(question.Choices, api.ChoiceMetadata{
-				Title: api.LanguageString(ch.Title),
+			question.Choices = append(question.Choices, chainclient.ChoiceMetadata{
+				Title: chainclient.LanguageString(ch.Title),
 				Value: ch.Value,
 			})
 		}
@@ -334,7 +331,7 @@ func (a *Account) SubmitSignedTx(stx []byte) ([]byte, error) {
 
 // Election fetches the current on-chain state of the election (process) with
 // the given id from the Vochain.
-func (a *Account) Election(processID []byte) (*api.Election, error) {
+func (a *Account) Election(processID []byte) (*chainclient.Election, error) {
 	election, err := a.client.Election(processID)
 	if err != nil {
 		return nil, fmt.Errorf("could not fetch election %x: %w", processID, err)
@@ -357,18 +354,9 @@ func (a *Account) Election(processID []byte) (*api.Election, error) {
 func (a *Account) ElectionMemos(electionID []byte, selectsOpen func(votes []int) bool) ([]string, error) {
 	var memos []string
 	for page := 0; ; page++ {
-		resp, code, err := a.client.Request(http.MethodGet, nil,
-			"elections", internal.HexBytes(electionID).String(), "votes", "page", strconv.Itoa(page))
+		list, err := a.client.ElectionVotesPage(electionID, page)
 		if err != nil {
 			return nil, fmt.Errorf("could not fetch votes of election %x: %w", electionID, err)
-		}
-		if code != http.StatusOK {
-			return nil, fmt.Errorf("could not fetch votes of election %x: unexpected status %d (%s)",
-				electionID, code, resp)
-		}
-		var list api.VotesList
-		if err := json.Unmarshal(resp, &list); err != nil {
-			return nil, fmt.Errorf("could not decode votes of election %x: %w", electionID, err)
 		}
 		if len(list.Votes) == 0 {
 			return memos, nil
@@ -422,24 +410,19 @@ var ErrVoteNotFound = fmt.Errorf("vote not found")
 // returning ErrVoteNotFound when the chain does not know it. The node keys this lookup on
 // the nullifier alone — unlike its /votes/verify route, which also needs the election id —
 // so a caller holding only a nullifier can still resolve the vote and the election it
-// belongs to. There is no apiclient wrapper for it, hence the raw request.
-func (a *Account) VoteByNullifier(nullifier []byte) (*api.Vote, error) {
-	resp, code, err := a.client.Request(apiclient.HTTPGET, nil, "votes", hex.EncodeToString(nullifier))
+// belongs to.
+func (a *Account) VoteByNullifier(nullifier []byte) (*chainclient.Vote, error) {
+	vote, err := a.client.Vote(nullifier)
+	if statusErr := (*chainclient.StatusError)(nil); errors.As(err, &statusErr) {
+		if statusErr.Code == http.StatusNotFound {
+			return nil, ErrVoteNotFound
+		}
+		return nil, fmt.Errorf("could not fetch vote %x: status %d (%s)", nullifier, statusErr.Code, statusErr.Body)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("could not fetch vote %x: %w", nullifier, err)
 	}
-	switch code {
-	case http.StatusOK:
-		vote := &api.Vote{}
-		if err := json.Unmarshal(resp, vote); err != nil {
-			return nil, fmt.Errorf("could not decode vote %x: %w", nullifier, err)
-		}
-		return vote, nil
-	case http.StatusNotFound:
-		return nil, ErrVoteNotFound
-	default:
-		return nil, fmt.Errorf("could not fetch vote %x: status %d (%s)", nullifier, code, resp)
-	}
+	return vote, nil
 }
 
 // ElectionEncryptionKeys fetches the encryption public keys of the on-chain election with

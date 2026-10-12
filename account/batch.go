@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/chainclient"
 	"github.com/vocdoni/saas-backend/internal"
-	dvoteapi "go.vocdoni.io/dvote/api"
 	dvotetypes "go.vocdoni.io/dvote/types"
 )
 
@@ -39,9 +39,9 @@ type BatchItemResult struct {
 // per-input result in input order; "submitted" means mempool-accepted, not confirmed —
 // callers must confirm each submitted item on-chain (WaitTxMined) and resubmit the rest.
 func (a *Account) SubmitSignedTxBatch(stxs [][]byte) ([]BatchItemResult, error) {
-	txs := make([]dvoteapi.TransactionPayload, len(stxs))
+	txs := make([]chainclient.TransactionPayload, len(stxs))
 	for i, stx := range stxs {
-		txs[i] = dvoteapi.TransactionPayload{Payload: stx}
+		txs[i] = chainclient.TransactionPayload{Payload: stx}
 	}
 	res, err := a.client.SendTxBatch(txs)
 	if err != nil {
@@ -55,7 +55,7 @@ func (a *Account) SubmitSignedTxBatch(stxs [][]byte) ([]BatchItemResult, error) 
 // the single failed item, then the pending remainder. Concatenating in that order reconstructs
 // the per-input results aligned with the input slice — the positional contract confirmBatch
 // relies on (results[i] ↔ pending[i]).
-func mapBatchResults(res *dvoteapi.TransactionBatchResult) []BatchItemResult {
+func mapBatchResults(res *chainclient.TransactionBatchResult) []BatchItemResult {
 	out := make([]BatchItemResult, 0, len(res.Submitted)+len(res.Failed)+len(res.Pending))
 	for _, t := range res.Submitted {
 		out = append(out, BatchItemResult{

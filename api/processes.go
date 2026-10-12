@@ -14,10 +14,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/chainclient"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
-	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -931,7 +931,7 @@ func (a *API) censusTotalWeight(census *db.Census) int64 {
 // verbatim (one row per ballot field), so both single-choice (one row of value buckets) and
 // multi-choice (one row per choice) questions are represented losslessly; it stays nil until the
 // tally publishes.
-func questionResultsFromElection(e *dvoteapi.Election) db.QuestionResults {
+func questionResultsFromElection(e *chainclient.Election) db.QuestionResults {
 	qr := db.QuestionResults{
 		VoteCount:    e.VoteCount,
 		FinalResults: e.FinalResults,

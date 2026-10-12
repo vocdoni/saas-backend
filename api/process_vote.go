@@ -7,12 +7,12 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/chainclient"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
-	"go.vocdoni.io/dvote/vochain/state"
 	"go.vocdoni.io/proto/build/go/models"
 	"google.golang.org/protobuf/proto"
 )
@@ -222,7 +222,7 @@ func (a *API) relayVotesHandler(w http.ResponseWriter, r *http.Request) {
 
 const (
 	// nullifierSize is the maximum length of a vote nullifier. Regular nullifiers are
-	// 32-byte hashes (see state.GenerateNullifier), but anonymous (ZK) ones are the minimal
+	// 32-byte hashes (see chainclient.GenerateNullifier), but anonymous (ZK) ones are the minimal
 	// big-endian bytes of a field element (zk.Proof.Nullifier), so shorter values are valid
 	// too — only empty or longer than 32 bytes cannot name a vote.
 	nullifierSize = 32
@@ -436,7 +436,7 @@ func voteNullifier(signedTx *models.SignedTx, vote *models.VoteEnvelope, pid int
 		log.Debugw("could not recover the voter address to derive its nullifier", "error", err)
 		return nil
 	}
-	return internal.HexBytes(state.GenerateNullifier(addr, pid))
+	return internal.HexBytes(chainclient.GenerateNullifier(addr, pid))
 }
 
 // submitRelayVote builds the worker closure that relays one envelope: submit, wait for it
