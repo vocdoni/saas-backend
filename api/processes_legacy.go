@@ -489,13 +489,9 @@ func (a *API) legacyElectionMetadata(ctx context.Context, election *chainclient.
 	return meta
 }
 
-// legacyMetadataDocument resolves the metadata document an election points at. The node inlines it
-// only for ipfs://, so any other reference is resolved as resolveProcessMetadata does: our own
+// legacyMetadataDocument resolves the metadata document an election points at: our own
 // object storage locally, http(s) externally. A bundle-backed election has no other content.
 func (a *API) legacyMetadataDocument(ctx context.Context, election *chainclient.Election) any {
-	if inlined, ok := election.Metadata.(map[string]any); ok && len(inlined) > 0 {
-		return inlined
-	}
 	name, isLocal := a.objectStorage.LocalName(election.MetadataURL)
 	switch {
 	case isLocal:
@@ -513,7 +509,6 @@ func (a *API) legacyMetadataDocument(ctx context.Context, election *chainclient.
 	case strings.HasPrefix(election.MetadataURL, "http://"), strings.HasPrefix(election.MetadataURL, "https://"):
 		return fetchExternalMetadata(ctx, election.MetadataURL)
 	default:
-		// an ipfs:// reference with nothing inlined, or none at all: no document to read.
 		return nil
 	}
 }

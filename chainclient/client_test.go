@@ -28,7 +28,6 @@ func fakeNode(c *qt.C, signer *ethereum.SignKeys) *httptest.Server {
 		case r.Method == http.MethodPost && r.URL.Path == "/v2/accounts":
 			req := &accountSet{}
 			c.Check(json.NewDecoder(r.Body).Decode(req), qt.IsNil)
-			c.Check(req.Metadata, qt.IsNil)
 			stx := &models.SignedTx{}
 			c.Check(proto.Unmarshal(req.TxPayload, stx), qt.IsNil)
 			tx := &models.Tx{}

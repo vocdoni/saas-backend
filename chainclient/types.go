@@ -43,10 +43,9 @@ type Transaction struct {
 }
 
 // TransactionPayload is one item of a POST /chain/transactions/batch request: a protobuf-marshaled
-// models.SignedTx plus, optionally, the raw election metadata of a NewProcess.
+// models.SignedTx.
 type TransactionPayload struct {
-	Payload  []byte `json:"payload"`
-	Metadata []byte `json:"metadata,omitempty"`
+	Payload []byte `json:"payload"`
 }
 
 // TransactionBatch is the body of POST /chain/transactions/batch.
@@ -65,11 +64,10 @@ type TransactionBatchResult struct {
 
 // TransactionBatchItem is the outcome of one transaction of a batch.
 type TransactionBatchItem struct {
-	Hash        types.HexBytes `json:"hash,omitempty"`
-	ProcessID   types.HexBytes `json:"processId,omitempty"`
-	Code        *uint32        `json:"code,omitempty"`
-	Error       string         `json:"error,omitempty"`
-	MetadataURL string         `json:"metadataURL,omitempty"`
+	Hash      types.HexBytes `json:"hash,omitempty"`
+	ProcessID types.HexBytes `json:"processId,omitempty"`
+	Code      *uint32        `json:"code,omitempty"`
+	Error     string         `json:"error,omitempty"`
 }
 
 // TransactionReference locates a mined transaction (GET /chain/transactions/reference/{hash}).
@@ -87,8 +85,6 @@ type Election struct {
 	VoteMode     VoteMode        `json:"voteMode,omitempty"`
 	ElectionMode ElectionMode    `json:"electionMode,omitempty"`
 	TallyMode    TallyMode       `json:"tallyMode,omitempty"`
-	// Metadata is the decoded metadata document, inlined by the node only when it could resolve it.
-	Metadata any `json:"metadata,omitempty"`
 }
 
 // ElectionSummary holds the election fields shared by the node's list and detail endpoints.
@@ -226,7 +222,6 @@ type ElectionProperties struct {
 // accountSet is the request and response body of POST /accounts.
 type accountSet struct {
 	TxPayload []byte         `json:"txPayload,omitempty"`
-	Metadata  []byte         `json:"metadata,omitempty"`
 	TxHash    types.HexBytes `json:"txHash"`
 }
 

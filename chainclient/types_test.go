@@ -55,7 +55,6 @@ func TestTypesMatchNodeWireFormat(t *testing.T) {
 		VoteMode:     dvoteapi.VoteMode{EnvelopeType: &models.EnvelopeType{EncryptedVotes: true, UniqueValues: true}},
 		ElectionMode: dvoteapi.ElectionMode{ProcessMode: &models.ProcessMode{AutoStart: true, Interruptible: true}},
 		TallyMode:    dvoteapi.TallyMode{ProcessVoteOptions: &models.ProcessVoteOptions{MaxCount: 3, MaxValue: 2}},
-		Metadata:     map[string]any{"title": map[string]any{"default": "x"}},
 	})
 	assertWireSubset[Vote](c, &dvoteapi.Vote{
 		TxHash: hex, VoteID: hex, EncryptionKeyIndexes: []uint32{1}, VotePackage: json.RawMessage(`{"votes":[1,0]}`),
@@ -74,15 +73,15 @@ func TestTypesMatchNodeWireFormat(t *testing.T) {
 		Costs: map[string]uint64{"NewProcess": 10}, Address: hex, ProcessID: hex,
 	})
 	assertWireSubset[TransactionBatch](c, &dvoteapi.TransactionBatch{
-		Transactions: []dvoteapi.TransactionPayload{{Payload: []byte{1}, Metadata: []byte{2}}},
+		Transactions: []dvoteapi.TransactionPayload{{Payload: []byte{1}}},
 	})
 	assertWireSubset[TransactionBatchResult](c, &dvoteapi.TransactionBatchResult{
-		Submitted: []dvoteapi.TransactionBatchItem{{Hash: hex, ProcessID: hex, Code: &code, MetadataURL: "u"}},
+		Submitted: []dvoteapi.TransactionBatchItem{{Hash: hex, ProcessID: hex, Code: &code}},
 		Failed:    []dvoteapi.TransactionBatchItem{{Error: "bad nonce"}},
 		Pending:   []dvoteapi.TransactionBatchItem{{}},
 	})
 	assertWireSubset[TransactionReference](c, &dvoteapi.TransactionReference{Height: 3, Index: 4})
-	assertWireSubset[accountSet](c, &dvoteapi.AccountSet{TxPayload: []byte{1}, Metadata: []byte{2}, TxHash: hex})
+	assertWireSubset[accountSet](c, &dvoteapi.AccountSet{TxPayload: []byte{1}, TxHash: hex})
 	assertWireSubset[ElectionMetadata](c, &dvoteapi.ElectionMetadata{
 		Title:       dvoteapi.LanguageString{"default": "t"},
 		Version:     "1.0",

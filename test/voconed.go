@@ -77,11 +77,8 @@ func startVoconed(ctx context.Context) (*Voconed, error) {
 		return nil, fmt.Errorf("could not load voconed key: %w", err)
 	}
 
-	// IPFS is disabled: it binds fixed ports (colliding with a local daemon or parallel
-	// test binaries) and the SaaS never uses the chain's IPFS-backed census — it runs an
-	// off-chain (CSP) census. We therefore also enable only the API handlers the SaaS uses
-	// (see enableVoconeAPI); census/SIK need the IPFS census DB and are skipped.
-	vc, err := vocone.NewVocone(dataDir, keymng, true, "", nil)
+	// Enable only the API handlers the SaaS uses (see enableVoconeAPI).
+	vc, err := vocone.NewVocone(dataDir, keymng)
 	if err != nil {
 		return nil, fmt.Errorf("could not create vocone: %w", err)
 	}
@@ -132,8 +129,7 @@ func startVoconed(ctx context.Context) (*Voconed, error) {
 }
 
 // enableVoconeAPI serves the Vocone API on host:port/urlPath with only the handlers the
-// SaaS uses. It mirrors vocone.EnableAPI but omits the census and SIK handlers, which
-// require the IPFS-backed census DB that is intentionally not initialized here.
+// SaaS uses. It mirrors vocone.EnableAPI.
 func enableVoconeAPI(vc *vocone.Vocone, host string, port int, urlPath string) error {
 	vc.Router = new(httprouter.HTTProuter)
 	if err := vc.Router.Init(host, port); err != nil {
@@ -143,7 +139,7 @@ func enableVoconeAPI(vc *vocone.Vocone, host string, port int, urlPath string) e
 	if err != nil {
 		return err
 	}
-	uAPI.Attach(vc.App, vc.Stats, vc.Indexer, vc.Storage, vc.CensusDB)
+	uAPI.Attach(vc.App, vc.Stats, vc.Indexer)
 	return uAPI.EnableHandlers(
 		api.ElectionHandler,
 		api.VoteHandler,

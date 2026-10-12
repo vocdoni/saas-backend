@@ -54,6 +54,7 @@ var txCostNames = map[string]models.TxType{
 	"SetProcessStatus":        models.TxType_SET_PROCESS_STATUS,
 	"SetProcessCensus":        models.TxType_SET_PROCESS_CENSUS,
 	"SetProcessDuration":      models.TxType_SET_PROCESS_DURATION,
+	"SetProcessMetadata":      models.TxType_SET_PROCESS_METADATA,
 	"SetProcessQuestionIndex": models.TxType_SET_PROCESS_QUESTION_INDEX,
 	"SendTokens":              models.TxType_SEND_TOKENS,
 	"SetAccountInfoURI":       models.TxType_SET_ACCOUNT_INFO_URI,
@@ -64,8 +65,6 @@ var txCostNames = map[string]models.TxType{
 	"AddDelegateForAccount":   models.TxType_ADD_DELEGATE_FOR_ACCOUNT,
 	"DelDelegateForAccount":   models.TxType_DEL_DELEGATE_FOR_ACCOUNT,
 	"CollectFaucet":           models.TxType_COLLECT_FAUCET,
-	"SetAccountSIK":           models.TxType_SET_ACCOUNT_SIK,
-	"DelAccountSIK":           models.TxType_DEL_ACCOUNT_SIK,
 }
 
 // TxCostNameToTxType returns the transaction type of a node cost name, or TX_UNKNOWN for a name it
