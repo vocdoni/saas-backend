@@ -59,7 +59,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -165,14 +164,16 @@ type API struct {
 	oauthServiceURL string
 	originSecret    string
 	stripeHandlers  *StripeHandlers
-	txQueue         chan txTask
-	txQueueMu       sync.Mutex
-	orgTxLocks      *orgTxMutex
-	otpExpiry       time.Duration
-	otpCooldown     time.Duration
-	notifySync      bool
-	statusSyncer    StatusEnqueuer
-	electionCache   *lru.Cache[string, *dvoteapi.Election]
+	// orgTxQueue runs organization-initiated txs (publish, status, census resize);
+	// relayTxQueue runs public vote relays. Separate so neither class starves the other.
+	orgTxQueue    *txQueue
+	relayTxQueue  *txQueue
+	orgTxLocks    *orgTxMutex
+	otpExpiry     time.Duration
+	otpCooldown   time.Duration
+	notifySync    bool
+	statusSyncer  StatusEnqueuer
+	electionCache *lru.Cache[string, *dvoteapi.Election]
 	// liveElectionCache holds not-yet-final legacy elections for legacyLiveElectionTTL.
 	liveElectionCache *expirable.LRU[string, *dvoteapi.Election]
 	// legacyProjectionCache holds fully-final legacy records already projected onto /processes.
@@ -281,7 +282,10 @@ func New(ctx context.Context, conf *Config) *API {
 	a.electionReads = newElectionReads(func(id internal.HexBytes) (*dvoteapi.Election, error) {
 		return a.account.Election(id)
 	})
-	a.startTxQueue()
+	a.startTxQueues()
+	// heartbeat this process's pending tx jobs and close those stranded by a process that died
+	// (see superviseTxJobs).
+	go a.superviseTxJobs()
 	// clear any publishing markers stranded by a previous crash/restart so those processes are
 	// publishable again (see reconcileStalePublishing).
 	a.reconcileStalePublishing()

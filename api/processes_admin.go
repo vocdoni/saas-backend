@@ -1,10 +1,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
@@ -31,7 +33,7 @@ import (
 //	@Success		200			{string}	string			"OK"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		404			{object}	errors.Error	"Process not found"
-//	@Failure		409			{object}	errors.Error	"Process already published"
+//	@Failure		409			{object}	errors.Error	"Process already published, partially published (40904), or being published"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId} [delete]
 func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
@@ -49,14 +51,46 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrDuplicateConflict.Withf("process already published and not in draft mode").Write(w)
 		return
 	}
-	// deleting mid-publish would orphan on chain whatever the worker has already mined.
-	if refusePublishInProgress(w, vp) {
+	// Deleting mid-publish would orphan on chain whatever the worker has already mined. So
+	// delete takes the claim a publish takes, and the two exclude each other: checking the
+	// marker on the read above would let a publish claim the draft right after.
+	// Every refusal below releases it; a deleted draft takes the marker with it.
+	owner, claimed, err := a.db.ClaimVotingProcessForPublish(oid, time.Time{})
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if !claimed {
+		errors.ErrPublishInProgress.Write(w)
+		return
+	}
+	deleted := false
+	defer func() {
+		if deleted {
+			return
+		}
+		if e := a.db.ClearVotingProcessPublishing(oid, owner); e != nil {
+			log.Warnw("could not release the delete's claim on a draft", "processId", oid.Hex(), "error", e)
+		}
+	}()
+	// a partially published draft (an earlier publish mined some elections before failing) is
+	// not deletable: dropping it would erase the on-chain ids and orphan the mined elections.
+	// Publishing again resumes the remaining questions instead. Reloaded under the claim, so
+	// no publish worker can be minting elections concurrently.
+	questions, err := a.db.QuestionsByProcess(oid)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if anyMined(questions) {
+		errors.ErrProcessPartiallyPublished.Write(w)
 		return
 	}
 	if err := a.db.DeleteVotingProcess(oid); err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+	deleted = true
 	// best-effort: drop the draft's inline census so it is not orphaned.
 	if !vp.CensusID.IsZero() {
 		_ = a.db.DelCensus(vp.CensusID.Hex())
@@ -659,15 +693,24 @@ func (a *API) enqueueSetProcessCensus(orgAddress common.Address, targets []censu
 	if err != nil {
 		return "", fmt.Errorf("could not restore organization signer: %w", err)
 	}
+	// the lock comes before the job is created, with a bounded wait: a busy organization
+	// answers a clear ErrOrgTxBusy (503) and leaves no orphaned pending job behind. The
+	// participant/eligibility write this follows has already committed, so there is no
+	// request body to replay — the caller simply retries the idempotent resize.
+	orgLock, err := a.orgTxLocks.lockCtx(context.Background(), org.Address)
+	if err != nil {
+		return "", err
+	}
 	jobID, err := apicommon.NewJobID()
 	if err != nil {
+		orgLock.Unlock()
 		return "", fmt.Errorf("could not create job id: %w", err)
 	}
 	if err := a.db.CreateTxJob(jobID, db.JobTypeSetProcessCensus, org.Address); err != nil {
+		orgLock.Unlock()
 		return "", fmt.Errorf("could not create tx job: %w", err)
 	}
 
-	orgLock := a.orgTxLocks.lock(org.Address)
 	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
 		defer orgLock.Unlock()
 		for i := range growing {

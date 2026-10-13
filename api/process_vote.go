@@ -69,7 +69,7 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	if !a.enqueueTx(txTask{jobID: jobID, run: a.submitRelayVote(vote)}) {
+	if !a.enqueueRelayTx(txTask{jobID: jobID, run: a.submitRelayVote(vote)}) {
 		// full queue: mark the job failed so it is not orphaned pending.
 		if e := a.db.SetJobStatus(jobID, db.JobStatusFailed, nil, "tx queue full"); e != nil {
 			log.Warnw("could not mark job failed after full queue", "error", e)
@@ -86,7 +86,7 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 // process cannot hold more questions than that, so the cap is expressed as what it actually
 // depends on rather than a duplicated literal: raising it means raising db.MaxQuestionsPerProcess
 // first, and the vochain batch transaction endpoint above that. It is deliberately NOT tied to
-// txQueueSize — the queue is sized to hold several full batches (see api/jobqueue.go), because
+// relayTxQueueSize — the queue is sized to hold several full batches (see api/jobqueue.go), because
 // a batch rejected for lack of queue room sends the client back to relaying one vote at a time,
 // which is the half-voted window this endpoint exists to close.
 //
@@ -208,8 +208,8 @@ func (a *API) relayVotesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// one task per envelope rather than one task submitting them all: each submit blocks
 	// its worker until the tx is mined, so a single task would serialize the batch and hold
-	// one worker for the whole of it. enqueueTxBatch takes all the slots or none.
-	if !a.enqueueTxBatch(tasks) {
+	// one worker for the whole of it. enqueueRelayTxBatch takes all the slots or none.
+	if !a.enqueueRelayTxBatch(tasks) {
 		if e := a.db.SetJobStatus(jobID, db.JobStatusFailed, nil, "tx queue full"); e != nil {
 			log.Warnw("could not mark job failed after full queue", "error", e)
 		}
