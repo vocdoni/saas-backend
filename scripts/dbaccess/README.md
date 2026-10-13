@@ -49,20 +49,30 @@ DB_CLIENT=compass DB_CLUSTER=my-mongo-cluster DB_USER=readonly-user \
 
 Compass registers `mongodb://` and `mongodb+srv://` as URL schemes, so the
 tool hands it the connection URI directly and Compass opens with it
-pre-filled. The grant stays open until you press enter at:
+pre-filled. By default the URI is **password-less** — type your password into
+Compass's connection form once it opens. The grant stays open until you press
+enter at:
 
 ```
 press enter when done to revoke access:
 ```
 
-#### The password goes into the URI
+#### Embedding the password in the URI (opt-in: `DB_EMBED_PASS=1`)
 
-Unlike `mongosh`, **Compass has no password prompt** — it takes the URI as
-given and fails auth if the credential is missing. So on the compass path the
-tool asks for the password (or reads `DB_PASS`), percent-encodes it, and
-embeds it in the URI. What the terminal normally shows is the redacted form
-(`lucas:***@…`) — the exception is the no-handler path below, where the full
-URI is printed because you have to paste it somewhere.
+Unlike `mongosh`, **Compass has no password prompt of its own** in the URI —
+you type it into the connection form. If you would rather have the tool embed
+the password in the URI so Compass connects without further typing, set
+`DB_EMBED_PASS=1`:
+
+```sh
+DB_CLIENT=compass DB_EMBED_PASS=1 DB_CLUSTER=my-mongo-cluster \
+  DB_USER=readonly-user ./dbaccess.sh analytics
+```
+
+The tool then asks for the password (or reads `DB_PASS`), percent-encodes it,
+and embeds it. The terminal shows only the redacted form (`lucas:***@…`) — the
+exception is the no-handler path below, where the full URI is printed because
+you have to paste it somewhere.
 
 That is a real exposure, so know where it lands:
 
@@ -72,22 +82,25 @@ That is a real exposure, so know where it lands:
 - in your terminal scrollback, when no handler is registered for the scheme
   and the tool prints the URI for you to paste
 
-On Linux the hand-off only happens when a handler is actually registered
-(`xdg-mime query default x-scheme-handler/mongodb+srv` is non-empty). Without
-one, `xdg-open`'s fallback for an unknown scheme is the **default browser** —
-which would put the password in the URL bar, browser history, and possibly a
-search engine. The tool prints the URI to paste instead.
+On Linux the hand-off only happens when a handler is actually registered for
+the URI's scheme (`xdg-mime query default x-scheme-handler/<scheme>` is
+non-empty). Without one, `xdg-open`'s fallback for an unknown scheme is the
+**default browser** — which would put a password-bearing URI in the URL bar,
+browser history, and possibly a search engine. The tool prints the URI to
+paste instead.
 
-The `mongosh` path is unchanged — no password is prompted for or embedded,
-and the URI it builds is byte-identical to previous versions.
+The `mongosh` path never embeds a password: `DB_PASS`/`DB_EMBED_PASS` are
+ignored there, the URI it builds is byte-identical to previous versions, and
+mongosh prompts for the credential as it always did.
 
 If you supply your own `MONGO_URI`, a `{PASS}` placeholder is substituted
-when a password is set; if the template has no `{PASS}`, the tool splices one
-in after `{USER}` — but only when the template literally contains `{USER}@`.
-A template with a hardcoded username (`mongodb://lucas@{HOST}/{DB}`) or no
-userinfo at all has nowhere to splice, so rather than dropping the credential
-silently the tool refuses to start and tells you to add `{PASS}` yourself.
-With no password, the whole `:{PASS}` segment is dropped.
+when embedding is on (`DB_EMBED_PASS=1`); if the template has no `{PASS}`, the
+tool splices one in after `{USER}` — but only when the template literally
+contains `{USER}@`. A template with a hardcoded username
+(`mongodb://lucas@{HOST}/{DB}`) or no userinfo at all has nowhere to splice, so
+rather than dropping the credential silently the tool refuses to start and
+tells you to add `{PASS}` yourself. When not embedding, the whole `:{PASS}`
+segment is dropped.
 
 Configuration:
 
@@ -97,7 +110,8 @@ Configuration:
 | `DB_USER`    | mongo user                                         |
 | `DB_NAME`    | mongo database (also accepted as positional arg)   |
 | `DB_CLIENT`  | `mongosh` (default), or `compass`/`gui`            |
-| `DB_PASS`    | mongo password — compass only; prompted if unset   |
+| `DB_EMBED_PASS` | set to embed the password in the Compass URI (compass only; off by default) |
+| `DB_PASS`    | mongo password — only used with `DB_EMBED_PASS`; prompted if unset |
 | `MONGO_URI`  | full connection URI template (see below)           |
 
 ### Pre-existing rule for your IP

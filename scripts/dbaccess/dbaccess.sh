@@ -38,14 +38,13 @@ urlenc() {
 }
 need doctl; need curl   # mongosh is checked in the client dispatch at the bottom
 
-# macOS `open` / Linux `xdg-open` — used only by DB_CLIENT=compass. xdg-open is
-# only reached once a handler for the scheme is actually registered: its fallback
-# for an unknown scheme is the default *web browser*, which would put the
-# password-bearing URI in the URL bar, history, and possibly a search engine.
-OPENER=$(command -v open || true)
-if [ -z "$OPENER" ] && [ -n "$(xdg-mime query default x-scheme-handler/mongodb+srv 2>/dev/null)" ]; then
-  OPENER=$(command -v xdg-open || true)
-fi
+CLIENT=${DB_CLIENT:-mongosh}
+# Embedding the password in the URI (argv, LaunchServices' opened-URL record,
+# Compass's saved-connections store) is opt-in: only the compass client, and
+# only when DB_EMBED_PASS is set. The mongosh client prompts for its own
+# password, so it never needs — and must never see — one in the URI.
+EMBED_PASS=0
+case "$CLIENT" in compass|gui) [ -n "${DB_EMBED_PASS:-}" ] && EMBED_PASS=1 ;; esac
 
 prompt() {  # prompt VAR "label" ["default"]
   local var=$1 label=$2 default=${3:-} val
@@ -66,20 +65,16 @@ prompt DB_USER    "mongo user"
 DB_NAME=${DB_NAME:-${1:-}}
 prompt DB_NAME    "mongo database"
 
-# mongosh prompts for the password itself; Compass does not — it just takes the
-# URI as given and fails auth if the credential is missing. So ask here, but
-# only for the GUI client, to keep the password out of the mongosh path.
-case "${DB_CLIENT:-mongosh}" in
-  compass|gui)
-    if [ -z "${DB_PASS:-}" ]; then
-      # `|| true`: EOF (no tty, or Ctrl-D) makes read return 1, which set -e would
-      # turn into a silent exit — let the emptiness check below report it instead.
-      read -rsp "mongo password (embedded in the Compass URI): " DB_PASS || true
-      echo >&2
-      [ -n "$DB_PASS" ] || { echo "password is required for the compass client" >&2; exit 1; }
-    fi
-    ;;
-esac
+# Prompt for the password only when we are going to embed it (compass +
+# DB_EMBED_PASS). A plain DB_CLIENT=compass run hands Compass a password-less
+# URI and lets you type the credential into its connection form.
+if [ "$EMBED_PASS" = 1 ] && [ -z "${DB_PASS:-}" ]; then
+  # `|| true`: EOF (no tty, or Ctrl-D) makes read return 1, which set -e would
+  # turn into a silent exit — let the emptiness check below report it instead.
+  read -rsp "mongo password (embedded in the Compass URI): " DB_PASS || true
+  echo >&2
+  [ -n "$DB_PASS" ] || { echo "password is required when DB_EMBED_PASS is set" >&2; exit 1; }
+fi
 
 # doctl's tabular --format output is safe here: UUIDs, IPs, hostnames, cluster
 # names, and rule types (ip_addr/app/tag/…) cannot contain whitespace.
@@ -98,28 +93,45 @@ case $URI_TEMPLATE in *'{PASS}'*) ;; *) URI_TEMPLATE=${URI_TEMPLATE/\{USER\}@/\{
 URI=${URI_TEMPLATE//\{USER\}/$DB_USER}
 URI=${URI//\{HOST\}/$HOST}
 URI=${URI//\{DB\}/$DB_NAME}
-# With no password the whole ":{PASS}" segment goes, leaving exactly the URI this
-# tool built before — so mongosh keeps prompting for the credential as it always did.
-if [ -n "${DB_PASS:-}" ]; then
+# Embed the password only on the opt-in compass path. Otherwise the whole
+# ":{PASS}" segment goes, leaving exactly the URI this tool built before — so
+# mongosh keeps prompting for the credential, and a default compass hand-off
+# carries no password.
+if [ "$EMBED_PASS" = 1 ]; then
   URI=${URI//\{PASS\}/$(urlenc "$DB_PASS")}
   URI_SAFE=${URI_TEMPLATE//\{USER\}/$DB_USER}
   URI_SAFE=${URI_SAFE//\{HOST\}/$HOST}
   URI_SAFE=${URI_SAFE//\{DB\}/$DB_NAME}
   URI_SAFE=${URI_SAFE//\{PASS\}/***}
+  # A $MONGO_URI with no {PASS} *and* no "{USER}@" for the splice above to bite
+  # on (a hardcoded username, or no userinfo at all) would drop the credential
+  # silently — Compass would just fail auth with no clue why.
+  if [ "$URI" = "${URI/$(urlenc "$DB_PASS")/}" ]; then
+    echo "MONGO_URI has no {PASS} placeholder and no '{USER}@' to splice one into," >&2
+    echo "so the password would be dropped. Add {PASS} explicitly, e.g." >&2
+    echo "  MONGO_URI='mongodb+srv://{USER}:{PASS}@{HOST}/{DB}?tls=true&authSource=admin'" >&2
+    exit 1
+  fi
 else
   URI=${URI//:\{PASS\}/}
   URI=${URI//\{PASS\}/}
   URI_SAFE=$URI
 fi
-# A $MONGO_URI with no {PASS} *and* no "{USER}@" for the splice above to bite on
-# (a hardcoded username, or no userinfo at all) matches neither case and would
-# drop the credential silently — Compass would just fail auth with no clue why.
-if [ -n "${DB_PASS:-}" ] && [ "$URI" = "${URI/$(urlenc "$DB_PASS")/}" ]; then
-  echo "MONGO_URI has no {PASS} placeholder and no '{USER}@' to splice one into," >&2
-  echo "so the password would be dropped. Add {PASS} explicitly, e.g." >&2
-  echo "  MONGO_URI='mongodb+srv://{USER}:{PASS}@{HOST}/{DB}?tls=true&authSource=admin'" >&2
-  exit 1
-fi
+
+# macOS `open` / Linux `xdg-open` — used only by DB_CLIENT=compass. Resolved
+# here, after $URI exists, so the handler probe uses the URI's actual scheme
+# (overridable via $MONGO_URI) rather than a hardcoded one. `command -v open`
+# alone is a bad macOS test — Linux can have open -> xdg-open — so gate on the
+# OS. On Linux xdg-open is used only once a handler for the scheme is actually
+# registered: its fallback for an unknown scheme is the default *web browser*,
+# which would put the URI in the URL bar, history, and possibly a search engine.
+SCHEME=${URI%%://*}
+OPENER=''
+case "$(uname -s)" in
+  Darwin) OPENER=$(command -v open || true) ;;
+  *) [ -n "$(xdg-mime query default "x-scheme-handler/$SCHEME" 2>/dev/null)" ] &&
+       OPENER=$(command -v xdg-open || true) ;;
+esac
 
 # uuids (one per line) of ip_addr rules matching $1. The type filter is
 # load-bearing: without it a cleanup could match and delete an `app` rule.
@@ -194,19 +206,29 @@ GRANTED=1
 # so. `open -W` would wait for *all* of Compass to quit — wrong scope, and it never
 # returns when other connections are open. The EXIT trap still covers Ctrl-C,
 # SIGTERM and terminal close while we sit on the read.
-case "${DB_CLIENT:-mongosh}" in
+case "$CLIENT" in
   compass|gui)
     echo "connect Compass to:" >&2
     echo "  $URI_SAFE" >&2
-    # `open` exits nonzero when nothing handles mongodb+srv (Compass not
+    [ "$EMBED_PASS" = 1 ] || echo "  (type your password into Compass's connection form)" >&2
+    # `open` exits nonzero when nothing handles the scheme (Compass not
     # installed). Fall back to pasting rather than letting set -e kill the run.
     if [ -z "$OPENER" ] || ! "$OPENER" "$URI"; then
-      echo "no handler for mongodb+srv — paste this into Compass:" >&2
+      echo "no handler for $SCHEME — paste this into Compass:" >&2
       echo "  $URI" >&2
     fi
-    # `|| true`: Ctrl-D (EOF) is a legitimate "done" here, but read returns 1
-    # and set -e would turn a clean exit into a nonzero one.
-    read -r -p "press enter when done to revoke access: " || true
+    # Hold the grant open until the user is done. With a tty, wait on a prompt.
+    # Without one, `read` returns instantly and the EXIT trap would revoke the
+    # rule the moment Compass launches — so block on a sleep loop instead (the
+    # trap still reaps on Ctrl-C/SIGTERM/terminal close).
+    if [ -t 0 ]; then
+      # `|| true`: Ctrl-D (EOF) is a legitimate "done" here, but read returns 1
+      # and set -e would turn a clean exit into a nonzero one.
+      read -r -p "press enter when done to revoke access: " || true
+    else
+      echo "no tty; holding access until interrupted (Ctrl-C/SIGTERM)…" >&2
+      while :; do sleep 3600; done
+    fi
     ;;
   *)
     need mongosh
