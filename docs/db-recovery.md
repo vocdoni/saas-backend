@@ -22,7 +22,8 @@ Automated version: `scripts/test-db-recovery.sh`. Teardown: `scripts/test-db-rec
 
 Tools: **Docker** (compose v2), **aws CLI**, **gpg**, **mongorestore**
 (`brew install mongodb-database-tools`), **git**, **curl**, **openssl**; frontend: **pnpm**
-(node 22 pinned; newer majors work with a warning). Free ports: 8080, 27017, 8081, 3000.
+(node 22 pinned; newer majors work with a warning). Free ports: 8080, 27017, 3000 (mongo is bound
+to 127.0.0.1 — not reachable from the LAN; teardown removes its data volume via `down -v`).
 
 Secrets (the script requires all three and fails fast without them):
 

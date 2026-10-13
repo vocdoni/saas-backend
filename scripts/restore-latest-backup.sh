@@ -54,9 +54,12 @@ mkdir -p "$WORKDIR"
 
 # --- locate latest backup ----------------------------------------------------
 latest_key() {
+  # `|| true`: an empty listing prints `None` (aws --output text), which the grep
+  # filters out and exits 1; under pipefail that would otherwise kill the caller's
+  # KEY="$(latest_key …)" via set -e before the previous-month fallback runs.
   aws --endpoint-url "$ENDPOINT" s3api list-objects-v2 --bucket "$BUCKET" \
     --prefix "backups/$1/" --query 'Contents[].Key' --output text 2>/dev/null |
-    tr '\t' '\n' | grep '\.archive\.gz\.gpg$' | sort | tail -1
+    tr '\t' '\n' | grep '\.archive\.gz\.gpg$' | sort | tail -1 || true
 }
 if [[ -n "${BACKUP_KEY:-}" ]]; then
   KEY="$BACKUP_KEY"

@@ -55,7 +55,10 @@ fi
 # --- teardown ----------------------------------------------------------------
 if [[ "${1:-}" == "--down" ]]; then
   [[ -f "$WORKDIR/ui.pid" ]] && kill "$(cat "$WORKDIR/ui.pid")" 2>/dev/null || true
-  [[ -d "$LTS_DIR" ]] && compose down 2>/dev/null || true
+  # -v: mongo's data lives in an anonymous volume (the compose file mounts the
+  # named volume at /data/mongodb, not mongo:7's /data/db), so without -v the
+  # restored production DB would survive teardown and pile up across runs.
+  [[ -d "$LTS_DIR" ]] && compose down -v --remove-orphans 2>/dev/null || true
   [[ -d "$LTS_DIR" ]] && git -C "$BACKEND_GIT" worktree remove --force "$LTS_DIR"
   [[ -d "$APP_DIR" ]] && git -C "$APP_GIT" worktree remove --force "$APP_DIR"
   rm -rf "$WORKDIR"
@@ -90,8 +93,12 @@ else
   fail "BACKUP_PASSPHRASE or BACKUP_PASSPHRASE_FILE is required"
 fi
 
-for port in "$API_PORT" 27017 8081 "$UI_PORT"; do
-  if nc -z localhost "$port" 2>/dev/null; then
+# bash /dev/tcp rather than nc (not a guaranteed tool): a successful connect
+# means the port is already bound. UI_PORT matters most — vite isn't strictPort,
+# so a silent bind elsewhere would leave the script advertising the wrong port.
+for port in "$API_PORT" 27017 "$UI_PORT"; do
+  if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+    exec 3>&- 3<&- 2>/dev/null || true
     fail "port $port is already in use — stop the regular dev stack first (or $0 --down)"
   fi
 done
@@ -119,6 +126,12 @@ prepare_worktree() {
 
 log "preparing saas-backend @ origin/lts worktree"
 prepare_worktree "$BACKEND_GIT" "$LTS_DIR" lts
+# The drill loads the production dump; the base compose publishes mongo on all
+# interfaces (root/vocdoni), so rebind it to loopback — testers only need the
+# API and UI. The checkout is disposable (reset --hard each run), so this edit
+# is transient. Host mongorestore still reaches it via localhost.
+sed -i.bak 's|- 27017:27017|- 127.0.0.1:27017:27017|' "$LTS_DIR/docker-compose.yml" &&
+  rm -f "$LTS_DIR/docker-compose.yml.bak"
 # Generate the full recovery .env (gitignored). The base compose hardcodes
 # VOCDONI_MONGOURL=.../saasdb in `environment:`, but VOCDONI_MONGODB set here
 # wins over the URL's database in db.New — no compose override file needed.
@@ -157,9 +170,12 @@ fi
 
 # --- locate + download backup ------------------------------------------------
 latest_key() {
+  # `|| true`: an empty listing prints `None` (aws --output text), which the grep
+  # filters out and exits 1; under pipefail that would otherwise kill the caller's
+  # KEY="$(latest_key …)" via set -e before the previous-month fallback runs.
   aws --endpoint-url "$ENDPOINT" s3api list-objects-v2 --bucket "$BUCKET" \
     --prefix "backups/$1/" --query 'Contents[].Key' --output text 2>/dev/null |
-    tr '\t' '\n' | grep '\.archive\.gz\.gpg$' | sort | tail -1
+    tr '\t' '\n' | grep '\.archive\.gz\.gpg$' | sort | tail -1 || true
 }
 if [[ -n "${BACKUP_KEY:-}" ]]; then
   KEY="$BACKUP_KEY"
@@ -236,8 +252,13 @@ PLANS="$(curl -sf "http://localhost:$API_PORT/plans")" && [[ "$PLANS" == *'"name
   fail "GET /plans did not return restored plans"
 pass "api serves restored data (GET /plans)"
 
-compose logs api 2>/dev/null | grep -qiE 'migration.*(fail|error)' &&
+# dump to a file first, then grep: piping into `grep -q` closes the pipe on the
+# first match, docker compose logs dies with SIGPIPE, and under pipefail the
+# pipeline is non-zero even though grep matched — which would skip the fail.
+compose logs api >"$WORKDIR/api.log" 2>/dev/null || true
+if grep -qiE 'migration.*(fail|error)' "$WORKDIR/api.log"; then
   fail "migration errors in api logs (docker compose -p $PROJECT logs api)"
+fi
 pass "no migration errors in api logs"
 
 # --- frontend ----------------------------------------------------------------
@@ -261,7 +282,6 @@ printf '  %s\n' "${RESULTS[@]}"
 echo
 echo "User testing:   http://$DR_HOST:${UI_PORT}   (share with testers on your network)"
 echo "API:            http://$DR_HOST:$API_PORT"
-echo "mongo-express:  http://localhost:8081  (root/vocdoni)"
 echo
 echo "API debug logs (the lts branch always logs at debug level):"
 echo "  docker compose -p $PROJECT -f $LTS_DIR/docker-compose.yml logs -f api"
