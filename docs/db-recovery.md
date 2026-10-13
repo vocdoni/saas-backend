@@ -33,7 +33,8 @@ Secrets (the script requires all three and fails fast without them):
 | `VOCDONI_PRIVATEKEY` | a funded LTS vochain account key (64 hex). Used as the service account and CSP root key |
 
 Optional: `RECOVERY_SECRET` (API secret; default random), `DR_HOST` (hostname/IP testers use;
-default autodetected LAN IP), `BACKUP_KEY` (pin an archive), `SKIP_UI=1` (backend only).
+default autodetected LAN IP), `API_PORT` (default 8080 — override when it conflicts with other
+local services), `BACKUP_KEY` (pin an archive), `SKIP_UI=1` (backend only).
 
 ## What the script does
 
