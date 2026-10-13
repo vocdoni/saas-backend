@@ -174,11 +174,18 @@ SIZE="$(aws --endpoint-url "$ENDPOINT" s3api head-object --bucket "$BUCKET" --ke
 ARCHIVE="$WORKDIR/$(basename "$KEY")"
 pass "backup selected: $KEY ($((SIZE / 1024 / 1024)) MB)"
 
-log "downloading archive + sha256 sidecar"
-aws --endpoint-url "$ENDPOINT" s3 cp "s3://$BUCKET/$KEY" "$ARCHIVE"
-aws --endpoint-url "$ENDPOINT" s3 cp "s3://$BUCKET/$KEY.sha256" "$ARCHIVE.sha256"
-( cd "$WORKDIR" && { shasum -a 256 -c "$(basename "$ARCHIVE").sha256" 2>/dev/null || \
-                     sha256sum -c "$(basename "$ARCHIVE").sha256"; } ) || fail "checksum mismatch"
+verify_checksum() {
+  ( cd "$WORKDIR" && { shasum -a 256 -c "$(basename "$ARCHIVE").sha256" 2>/dev/null || \
+                       sha256sum -c "$(basename "$ARCHIVE").sha256" 2>/dev/null; } ) >/dev/null
+}
+if [[ -f "$ARCHIVE" && -f "$ARCHIVE.sha256" ]] && verify_checksum; then
+  log "archive already downloaded and checksum-valid, skipping download"
+else
+  log "downloading archive + sha256 sidecar"
+  aws --endpoint-url "$ENDPOINT" s3 cp "s3://$BUCKET/$KEY" "$ARCHIVE"
+  aws --endpoint-url "$ENDPOINT" s3 cp "s3://$BUCKET/$KEY.sha256" "$ARCHIVE.sha256"
+  verify_checksum || fail "checksum mismatch"
+fi
 pass "checksum verified"
 
 # --- mongo up + restore ------------------------------------------------------
