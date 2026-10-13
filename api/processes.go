@@ -349,6 +349,8 @@ func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id bson.ObjectID, u
 		errors.ErrDuplicateConflict.Withf("process already published and not in draft mode").Write(w)
 	case current.PublishInProgress():
 		errors.ErrPublishInProgress.Write(w)
+	case current.HasMinedElections:
+		errors.ErrProcessPartiallyPublished.Write(w)
 	default:
 		errors.ErrStaleUpdate.Withf("the process was modified after updatedAt %s; refetch and retry",
 			updatedAt).Write(w)
@@ -358,7 +360,9 @@ func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id bson.ObjectID, u
 // updateVotingProcessHandler godoc
 //
 //	@Summary		Update a voting process draft
-//	@Description	Update a voting process while it is still a draft (not published). 409 if already published.
+//	@Description	Update a voting process while it is still a draft (not published). 409 if already published,
+//	@Description	and 409 (40904) if partially published — an earlier publish already mined some of its
+//	@Description	questions on-chain, so the draft can only be published again (resuming the rest), not edited.
 //	@Description	The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
 //	@Description	as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
 //	@Description	`typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
@@ -413,6 +417,18 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization").Write(w)
 		return
 	}
+	// a partially published draft (an earlier publish mined some elections before failing) is not
+	// editable: replacing its questions would erase their on-chain ids and orphan the mined
+	// elections. Publishing again resumes the remaining questions instead.
+	storedQuestions, err := a.db.QuestionsByProcess(oid)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if anyMined(storedQuestions) {
+		errors.ErrProcessPartiallyPublished.Write(w)
+		return
+	}
 	if len(req.Questions) == 0 || len(req.Questions) > db.MaxQuestionsPerProcess {
 		errors.ErrMalformedBody.Withf("questions must be between 1 and %d", db.MaxQuestionsPerProcess).Write(w)
 		return
@@ -458,6 +474,7 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	// that went live *after* that guard read is a different matter — the write's own precondition
 	// refuses it rather than replacing it away.
 	vp.Publishing = time.Time{}
+	vp.PublishingOwner = ""
 	if err := a.db.SetVotingProcessDraft(vp, seen); err != nil {
 		_ = a.db.DelCensus(census.ID.Hex())
 		if stderrors.Is(err, db.ErrConflict) {
@@ -752,7 +769,7 @@ func (a *API) validateVotingProcessHandler(w http.ResponseWriter, r *http.Reques
 	census, _ := a.db.Census(vp.CensusID.Hex())
 	// the dry-run reports every problem the same way: a mismatched question set is just one more
 	// entry in errors, so the mismatch flag publish acts on is irrelevant here.
-	problems, _ := a.publishPreflightProblems(vp, questions, census, user)
+	problems, _ := a.publishPreflightProblems(publishTarget{vp: vp, questions: questions, census: census, user: user})
 	apicommon.HTTPWriteJSON(w, &apicommon.VotingProcessValidateResponse{
 		Valid:  len(problems) == 0,
 		Errors: problems,

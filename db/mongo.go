@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -38,6 +39,9 @@ type MongoStorage struct {
 	database string
 	DBClient *mongo.Client
 	keysLock sync.RWMutex
+	// instanceID is a random identifier of this service process, stamped on the transaction
+	// jobs it creates so replicas sharing the database can tell whose jobs are whose.
+	instanceID string
 
 	users               *mongo.Collection
 	verifications       *mongo.Collection
@@ -69,7 +73,7 @@ type Options struct {
 
 func New(url, database string) (*MongoStorage, error) {
 	var err error
-	ms := &MongoStorage{}
+	ms := &MongoStorage{instanceID: internal.RandomHex(16)}
 	if url == "" {
 		return nil, fmt.Errorf("mongo URL is not defined")
 	}
