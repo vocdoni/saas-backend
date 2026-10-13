@@ -22,7 +22,7 @@ Automated version: `scripts/test-db-recovery.sh`. Teardown: `scripts/test-db-rec
 
 Tools: **Docker** (compose v2), **aws CLI**, **gpg**, **mongorestore**
 (`brew install mongodb-database-tools`), **git**, **curl**, **openssl**; frontend: **pnpm**
-(node 22 pinned; newer majors work with a warning). Free ports: 8080, 27017, 8081, 5173.
+(node 22 pinned; newer majors work with a warning). Free ports: 8080, 27017, 8081, 3000.
 
 Secrets (the script requires all three and fails fast without them):
 
@@ -64,7 +64,7 @@ scripts/test-db-recovery.sh
 
 ### User testing
 
-Share `http://<DR_HOST>:5173` with testers on your network (`DR_HOST` is printed; override it
+Share `http://<DR_HOST>:3000` with testers on your network (`DR_HOST` is printed; override it
 if autodetection picks the wrong interface). Testers log in with **real production accounts**
 — password hashes come from the restored dump, JWTs are issued locally.
 

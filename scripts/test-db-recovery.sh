@@ -27,6 +27,7 @@ ENDPOINT="https://fra1.digitaloceanspaces.com"
 PROD_DB="saas-lts"
 PROJECT="saas-dr"
 API_PORT="${API_PORT:-8080}"
+UI_PORT=3000   # vike's dev server default; not configurable from here
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
@@ -89,7 +90,7 @@ else
   fail "BACKUP_PASSPHRASE or BACKUP_PASSPHRASE_FILE is required"
 fi
 
-for port in "$API_PORT" 27017 8081 5173; do
+for port in "$API_PORT" 27017 8081 "$UI_PORT"; do
   if nc -z localhost "$port" 2>/dev/null; then
     fail "port $port is already in use — stop the regular dev stack first (or $0 --down)"
   fi
@@ -123,7 +124,7 @@ VOCDONI_VOCDONIAPI=https://api.vocdoni.net/v2
 # port and the port the service listens on
 VOCDONI_PORT=$API_PORT
 VOCDONI_SERVERURL=http://$DR_HOST:$API_PORT
-VOCDONI_WEBURL=http://$DR_HOST:5173
+VOCDONI_WEBURL=http://$DR_HOST:${UI_PORT}
 VOCDONI_PRIVATEKEY=${VOCDONI_PRIVATEKEY#0x}
 VOCDONI_SECRET=$RECOVERY_SECRET
 # non-empty dummies are enough to boot; the restored plans collection serves reads
@@ -236,10 +237,10 @@ if [[ -z "${SKIP_UI:-}" ]]; then
   ( cd "$APP_DIR" && SAAS_URL="http://$DR_HOST:$API_PORT" VOCDONI_ENVIRONMENT=prod \
       nohup pnpm dev >"$WORKDIR/ui.log" 2>&1 & echo $! >"$WORKDIR/ui.pid" )
   for _ in $(seq 1 60); do
-    curl -sf "http://localhost:5173" >/dev/null 2>&1 && break
+    curl -sf "http://localhost:${UI_PORT}" >/dev/null 2>&1 && break
     sleep 2
   done
-  curl -sf "http://localhost:5173" >/dev/null || fail "frontend not responding (see $WORKDIR/ui.log)"
+  curl -sf "http://localhost:${UI_PORT}" >/dev/null || fail "frontend not responding (see $WORKDIR/ui.log)"
   pass "frontend up"
 fi
 
@@ -248,7 +249,7 @@ echo
 log "recovery environment ready (backup: $KEY)"
 printf '  %s\n' "${RESULTS[@]}"
 echo
-echo "User testing:   http://$DR_HOST:5173   (share with testers on your network)"
+echo "User testing:   http://$DR_HOST:${UI_PORT}   (share with testers on your network)"
 echo "API:            http://$DR_HOST:$API_PORT"
 echo "mongo-express:  http://localhost:8081  (root/vocdoni)"
 echo
