@@ -104,13 +104,21 @@ mkdir -p "$WORKDIR"
 pass "prerequisites (DR_HOST=$DR_HOST)"
 
 # --- checkouts ---------------------------------------------------------------
+# prepare_worktree <repo> <dir> <branch>: disposable detached worktree synced to
+# origin/<branch>; a stale/broken dir (e.g. missing .git link) is recreated.
+prepare_worktree() {
+  git -C "$1" fetch -q origin "$3"
+  if [[ -d "$2" ]] && git -C "$2" rev-parse --git-dir >/dev/null 2>&1; then
+    git -C "$2" reset --hard -q "origin/$3"
+  else
+    rm -rf "$2"
+    git -C "$1" worktree prune
+    git -C "$1" worktree add -q --detach "$2" "origin/$3"
+  fi
+}
+
 log "preparing saas-backend @ origin/lts worktree"
-git -C "$BACKEND_GIT" fetch -q origin lts
-if [[ -d "$LTS_DIR" ]]; then
-  git -C "$LTS_DIR" reset --hard -q origin/lts   # disposable DR worktree only
-else
-  git -C "$BACKEND_GIT" worktree add -q --detach "$LTS_DIR" origin/lts
-fi
+prepare_worktree "$BACKEND_GIT" "$LTS_DIR" lts
 # Generate the full recovery .env (gitignored). The base compose hardcodes
 # VOCDONI_MONGOURL=.../saasdb in `environment:`, but VOCDONI_MONGODB set here
 # wins over the URL's database in db.New — no compose override file needed.
@@ -141,12 +149,7 @@ pass "backend checkout: $(git -C "$LTS_DIR" log -1 --format='%h %s')"
 
 if [[ -z "${SKIP_UI:-}" ]]; then
   log "preparing vocdoni-app @ origin/main worktree"
-  git -C "$APP_GIT" fetch -q origin main
-  if [[ -d "$APP_DIR" ]]; then
-    git -C "$APP_DIR" reset --hard -q origin/main
-  else
-    git -C "$APP_GIT" worktree add -q --detach "$APP_DIR" origin/main
-  fi
+  prepare_worktree "$APP_GIT" "$APP_DIR" main
   node_major="$(node -v | sed 's/^v//;s/\..*//')"
   [[ "$node_major" == 22 ]] || log "warning: node v$node_major (app pins 22.x) — proceeding"
   pass "frontend checkout: $(git -C "$APP_DIR" log -1 --format='%h %s')"
