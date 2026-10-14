@@ -669,6 +669,10 @@ definitions:
       email:
         description: Member's email address
         type: string
+      hasPassword:
+        description: 'HasPassword is true on reads when the member has a password.
+          Read-only: ignored on writes.'
+        type: boolean
       id:
         description: Member's internal unique internal ID
         type: string
@@ -686,7 +690,10 @@ definitions:
         description: Additional custom fields
         type: object
       password:
-        description: Member's password (for authentication)
+        description: |-
+          Member's password, write-only: the client hash of the plaintext, 64 lowercase hex characters,
+          lowercase_hex(SHA-256("vocdoni-member-password:" + org address as 0x + 40 lowercase hex + ":" +
+          trimmed password)). Stored as an argon2 hash and never returned: reads report hasPassword.
         type: string
       phone:
         description: Member's phone number
@@ -1532,7 +1539,9 @@ definitions:
         description: Additional custom fields, replaced as a whole
         type: object
       password:
-        description: Member's password (for authentication)
+        description: |-
+          Member's password as its client hash (see OrgMember.Password). Empty clears it; leave it out
+          to keep it.
         type: string
       phone:
         description: Member's phone number

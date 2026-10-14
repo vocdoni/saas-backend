@@ -1,6 +1,7 @@
 package apicommon
 
 import (
+	"strings"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
@@ -98,4 +99,37 @@ func TestOrgMemberWeight(t *testing.T) {
 		_, err := (&AddMembersRequest{Members: []OrgMember{{}, {Weight: weight}}}).ToDB()
 		c.Assert(err, qt.ErrorMatches, `member 1: invalid weight ".*"`, qt.Commentf("weight %q", weight))
 	}
+}
+
+// TestMemberPasswordClientHash pins the member password the API takes: the client hash (64 lowercase
+// hex characters) or nothing. A plaintext password is refused by both write paths, before anything
+// is stored, and a read never returns the password, only whether there is one.
+func TestMemberPasswordClientHash(t *testing.T) {
+	c := qt.New(t)
+	hash := strings.Repeat("0123456789abcdef", 4)
+
+	member, err := (&OrgMember{Password: hash}).ToDB()
+	c.Assert(err, qt.IsNil)
+	c.Assert(member.Password, qt.Equals, hash)
+	_, err = (&OrgMember{}).ToDB()
+	c.Assert(err, qt.IsNil)
+
+	update, err := (&UpsertOrgMemberRequest{Password: new("")}).ToDB()
+	c.Assert(err, qt.IsNil)
+	c.Assert(*update.Password, qt.Equals, "")
+	update, err = (&UpsertOrgMemberRequest{Password: new(hash)}).ToDB()
+	c.Assert(err, qt.IsNil)
+	c.Assert(*update.Password, qt.Equals, hash)
+
+	for _, bad := range []string{"s3cret", strings.ToUpper(hash), hash[:63]} {
+		_, err := (&AddMembersRequest{Members: []OrgMember{{}, {Password: bad}}}).ToDB()
+		c.Assert(err, qt.ErrorMatches, `member 1: invalid password: .*`, qt.Commentf("password %q", bad))
+		c.Assert(err, qt.Not(qt.ErrorMatches), ".*"+bad+".*")
+		_, err = (&UpsertOrgMemberRequest{Password: new(bad)}).ToDB()
+		c.Assert(err, qt.ErrorMatches, `invalid password: .*`, qt.Commentf("password %q", bad))
+	}
+
+	c.Assert(OrgMemberFromDb(db.OrgMember{HashedPass: []byte{1}}).HasPassword, qt.IsTrue)
+	c.Assert(OrgMemberFromDb(db.OrgMember{HashedPass: []byte{1}}).Password, qt.Equals, "")
+	c.Assert(OrgMemberFromDb(db.OrgMember{}).HasPassword, qt.IsFalse)
 }

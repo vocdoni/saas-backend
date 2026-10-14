@@ -1048,8 +1048,13 @@ type OrgMember struct {
 	// Member's phone number
 	Phone string `json:"phone,omitempty"`
 
-	// Member's password (for authentication)
+	// Member's password, write-only: the client hash of the plaintext, 64 lowercase hex characters,
+	// lowercase_hex(SHA-256("vocdoni-member-password:" + org address as 0x + 40 lowercase hex + ":" +
+	// trimmed password)). Stored as an argon2 hash and never returned: reads report hasPassword.
 	Password string `json:"password,omitempty"`
+
+	// HasPassword is true on reads when the member has a password. Read-only: ignored on writes.
+	HasPassword bool `json:"hasPassword,omitempty"`
 
 	// Member's census weight
 	Weight string `json:"weight,omitempty"`
@@ -1074,6 +1079,9 @@ func (p *OrgMember) ToDB() (*db.OrgMember, error) {
 	// we are performing the conversion here to avoid having a parsedweight field in the db
 	weight, err := parseMemberWeight(p.Weight)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateMemberPassword(p.Password); err != nil {
 		return nil, err
 	}
 
@@ -1103,6 +1111,16 @@ func parseMemberWeight(s string) (uint64, error) {
 		return 0, fmt.Errorf("invalid weight %q", s)
 	}
 	return weight, nil
+}
+
+// validateMemberPassword checks that a member password is a client hash (see OrgMember.Password),
+// or empty for none, so a plaintext password is refused before it reaches the database. The error
+// never echoes the value.
+func validateMemberPassword(password string) error {
+	if password != "" && !internal.ValidMemberPasswordHash(password) {
+		return fmt.Errorf("invalid password: expected the client hash, 64 lowercase hex characters")
+	}
+	return nil
 }
 
 // UpsertOrgMemberRequest creates or updates an organization member. On an update a field left
@@ -1135,7 +1153,8 @@ type UpsertOrgMemberRequest struct {
 	// Member's phone number
 	Phone *string `json:"phone,omitempty"`
 
-	// Member's password (for authentication)
+	// Member's password as its client hash (see OrgMember.Password). Empty clears it; leave it out
+	// to keep it.
 	Password *string `json:"password,omitempty"`
 
 	// Member's census weight. Empty sets the default 1, as does leaving it out of a new member.
@@ -1172,6 +1191,11 @@ func (r *UpsertOrgMemberRequest) ToDB() (*db.OrgMemberUpdate, error) {
 		}
 		update.Weight = &weight
 	}
+	if r.Password != nil {
+		if err := validateMemberPassword(*r.Password); err != nil {
+			return nil, err
+		}
+	}
 	return update, nil
 }
 
@@ -1185,6 +1209,7 @@ func OrgMemberFromDb(p db.OrgMember) OrgMember {
 		BirthDate:    p.BirthDate,
 		Email:        p.Email,
 		Phone:        p.Phone.String(), // This returns either "" or the masked hash
+		HasPassword:  len(p.HashedPass) > 0,
 		Other:        p.Other,
 		Weight:       fmt.Sprintf("%d", p.Weight),
 	}

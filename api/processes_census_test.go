@@ -45,7 +45,8 @@ func TestValidateProcessCensus(t *testing.T) {
 	// add a member that duplicates member[0] on name+surname.
 	dup := apicommon.OrgMember{
 		MemberNumber: "DUP1", Name: members[0].Name, Surname: members[0].Surname,
-		Email: "dup1@example.com", Phone: "+34699999991", Password: "pw", NationalID: "DNIDUP1", BirthDate: "1980-01-01",
+		Email: "dup1@example.com", Phone: "+34699999991", Password: testMemberPassword("pw"),
+		NationalID: "DNIDUP1", BirthDate: "1980-01-01",
 	}
 	all := postOrgMembers(t, token, orgAddress, dup)
 	var dupID string
