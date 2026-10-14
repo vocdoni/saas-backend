@@ -18,6 +18,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.vocdoni.io/dvote/log"
 )
 
 // parseAuthStep parses the authentication step from the URL parameters
@@ -318,7 +319,9 @@ func (c *CSPHandlers) authFirstStep(
 	// Fetch the corresponding org member using the participant ID (which is the ObjectID hex string)
 	orgMember, err := c.mainDB.OrgMember(census.OrgAddress, censusParticipant.ParticipantID)
 	if err != nil {
-		return nil, c.unknownParticipant(r.Context(), password, errors.ErrCensusParticipantNotFound.With("failed to get org member"))
+		// logged rather than put in the body, which must match the unknown-participant answer exactly
+		log.Warnw("census participant without org member", "participantID", censusParticipant.ParticipantID, "error", err)
+		return nil, c.unknownParticipant(r.Context(), password, errors.ErrCensusParticipantNotFound)
 	}
 
 	// the password goes first: the weight and contact checks below answer differently, so running
