@@ -17,7 +17,10 @@ type CensusSpec struct {
 	// Anonymous selects blind-CSP voting: the process publishes with census origin OFF_CHAIN_CA_V2
 	// and the CSP blind-signs each ballot so it cannot link a signature to the voter. Orthogonal to
 	// the mail/sms/auth 2FA channel; may be combined with Weighted (V2 binds the weight into the salt).
-	Anonymous   bool                    `json:"anonymous,omitempty"`
+	Anonymous bool `json:"anonymous,omitempty"`
+	// AuthFields are the member fields a voter logs in with. "password" is checked against the
+	// member's stored password after the other fields find the participant, so it needs at least
+	// one other auth field or a 2FA field.
 	AuthFields  db.OrgMemberAuthFields  `json:"authFields,omitempty"`
 	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
 	// GroupID is the org member group the census was built from. Round-trips: it is echoed back on

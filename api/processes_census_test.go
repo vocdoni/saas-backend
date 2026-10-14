@@ -436,3 +436,46 @@ func TestProcessCensusExceedsTwoFaAllowance(t *testing.T) {
 		})
 	}
 }
+
+// TestProcessCensusPassword covers the password auth field on the census pre-flight and on process
+// creation: alone it is refused, since it never takes part in the login hash and every member would
+// hash alike; next to another auth field or a 2FA field it is accepted.
+func TestProcessCensusPassword(t *testing.T) {
+	token := testCreateUser(t, "censuspassword123")
+	orgAddress := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	// newOrgMembers gives every member a password and an email
+	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(2)...))
+
+	passwordOnly := db.OrgMemberAuthFields{db.OrgMemberAuthFieldsPassword}
+	senders := map[string]func(t *testing.T, spec apicommon.CensusSpec) ([]byte, int){
+		"validation": func(t *testing.T, spec apicommon.CensusSpec) ([]byte, int) {
+			return testRequest(t, http.MethodPost, token,
+				&apicommon.ValidateProcessCensusRequest{OrgAddress: orgAddress.Bytes(), Census: spec},
+				"processes", "census", "validation")
+		},
+		"creation": func(t *testing.T, spec apicommon.CensusSpec) ([]byte, int) {
+			req := minimalVotingProcessRequest(orgAddress)
+			req.Census = spec
+			return testRequest(t, http.MethodPost, token, req, processesCreateEndpoint)
+		},
+	}
+	for name, send := range senders {
+		t.Run(name, func(t *testing.T) {
+			c := qt.New(t)
+			body, code := send(t, apicommon.CensusSpec{AuthFields: passwordOnly, MemberIDs: ids})
+			c.Assert(code, qt.Equals, http.StatusBadRequest, qt.Commentf("response: %s", body))
+			c.Assert(string(body), qt.Contains, "password needs another credential or a 2FA field")
+
+			withEmail := db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail}
+			withMemberNumber := db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber, db.OrgMemberAuthFieldsPassword}
+			for _, spec := range []apicommon.CensusSpec{
+				{AuthFields: passwordOnly, TwoFaFields: withEmail, MemberIDs: ids},
+				{AuthFields: withMemberNumber, MemberIDs: ids},
+			} {
+				body, code := send(t, spec)
+				c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("census %+v: %s", spec, body))
+			}
+		})
+	}
+}

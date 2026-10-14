@@ -94,6 +94,10 @@ definitions:
           the mail/sms/auth 2FA channel; may be combined with Weighted (V2 binds the weight into the salt).
         type: boolean
       authFields:
+        description: |-
+          AuthFields are the member fields a voter logs in with. "password" is checked against the
+          member's stored password after the other fields find the participant, so it needs at least
+          one other auth field or a 2FA field.
         items:
           $ref: '#/definitions/db.OrgMemberAuthField'
         type: array
@@ -5716,8 +5720,9 @@ paths:
         explicit memberIds subset, or the whole organization when neither is set. Returns 400
         with the offending member ids (duplicates / missingData) when the census is not usable,
         otherwise 200. A field that is empty or only whitespace counts as missing data, and
-        members with missing data are never reported as duplicates. Requires Manager/Admin role
-        of the organization.
+        members with missing data are never reported as duplicates. The `password` auth field
+        never identifies a member on its own: a census with no other auth field and no 2FA field
+        is a 400. Requires Manager/Admin role of the organization.
 
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
