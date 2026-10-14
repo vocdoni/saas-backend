@@ -170,8 +170,23 @@ func (c *CSPHandlers) memberPasswordMatches(ctx context.Context, clientHash stri
 		return false, fmt.Errorf("waiting for a password check: %w", ctx.Err())
 	}
 	defer func() { <-c.passwordSlots }()
-	computed := internal.HashPassword(c.csp.PasswordSalt, clientHash)
+	computed := c.hashPassword(c.csp.PasswordSalt, clientHash)
 	return len(stored) > 0 && subtle.ConstantTimeCompare(computed, stored) == 1, nil
+}
+
+// unknownParticipant answers a login whose participant or member was not found. password is the
+// request's client hash, set exactly when the census uses the password (authFirstStep only reads it
+// then, and refuses it empty). With one, it first runs a password check against no stored password,
+// the work a wrong password costs, so the answer takes as long whether the other fields name a member
+// or not and the response time does not list the census. A failed check answers like it does for a
+// member.
+func (c *CSPHandlers) unknownParticipant(ctx context.Context, password string, notFound error) error {
+	if password != "" {
+		if _, err := c.memberPasswordMatches(ctx, password, nil); err != nil {
+			return errors.ErrGenericInternalServerError.WithErr(err)
+		}
+	}
+	return notFound
 }
 
 // authFirstStep is the first step of the authentication process. It receives
@@ -196,7 +211,8 @@ func (c *CSPHandlers) memberPasswordMatches(ctx context.Context, clientHash stri
 // When the census auth fields include the member password, the request must carry it as the client
 // hash. It takes no part in the lookup: once the other fields have found the participant, it is
 // compared with the member's stored password before anything else about the member is revealed, and
-// a mismatch answers exactly like an unknown participant.
+// a mismatch answers exactly like an unknown participant. An unknown participant pays for a password
+// check too (see unknownParticipant), so the two cannot be told apart by their timing either.
 func (c *CSPHandlers) authFirstStep(
 	r *http.Request,
 	anchorID internal.HexBytes,
@@ -275,7 +291,7 @@ func (c *CSPHandlers) authFirstStep(
 	censusParticipant, err := c.mainDB.CensusParticipantByLoginHash(*census, *inputMember)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			return nil, errors.ErrCensusParticipantNotFound
+			return nil, c.unknownParticipant(r.Context(), password, errors.ErrCensusParticipantNotFound)
 		}
 		return nil, errors.ErrGenericInternalServerError.WithErr(err)
 	}
@@ -283,7 +299,7 @@ func (c *CSPHandlers) authFirstStep(
 	// Fetch the corresponding org member using the participant ID (which is the ObjectID hex string)
 	orgMember, err := c.mainDB.OrgMember(census.OrgAddress, censusParticipant.ParticipantID)
 	if err != nil {
-		return nil, errors.ErrCensusParticipantNotFound.With("failed to get org member")
+		return nil, c.unknownParticipant(r.Context(), password, errors.ErrCensusParticipantNotFound.With("failed to get org member"))
 	}
 
 	// the password goes first: the weight and contact checks below answer differently, so running

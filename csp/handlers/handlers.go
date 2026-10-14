@@ -8,6 +8,7 @@ import (
 
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 )
 
 const (
@@ -26,6 +27,8 @@ type CSPHandlers struct {
 	// passwordSlots bounds the member password checks running at once: each is an argon2id pass
 	// holding 64 MiB, so excess login attempts wait for a slot instead of piling up memory.
 	passwordSlots chan struct{}
+	// hashPassword computes a member password hash; a seam so tests can count the checks run.
+	hashPassword func(salt, password string) []byte
 }
 
 // New creates a new instance of the CSP handlers instance. It receives the CSP
@@ -35,5 +38,6 @@ func New(c *csp.CSP, mainDB *db.MongoStorage) *CSPHandlers {
 		csp:           c,
 		mainDB:        mainDB,
 		passwordSlots: make(chan struct{}, runtime.NumCPU()),
+		hashPassword:  internal.HashPassword,
 	}
 }
