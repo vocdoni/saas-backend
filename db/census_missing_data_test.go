@@ -17,6 +17,7 @@ func TestClassifyCensusMembers(t *testing.T) {
 	type member struct {
 		name, surname, nationalID, email string
 		phone                            HashedPhone
+		pass                             []byte
 	}
 	nameNationalID := OrgMemberAuthFields{OrgMemberAuthFieldsName, OrgMemberAuthFieldsNationalID}
 	emailOnly := OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail}
@@ -81,6 +82,24 @@ func TestClassifyCensusMembers(t *testing.T) {
 			duplicates: []int{0, 1},
 		},
 		{
+			name: "password census: a member without a stored password is missing data",
+			auth: OrgMemberAuthFields{OrgMemberAuthFieldsName, OrgMemberAuthFieldsPassword},
+			members: []member{
+				{name: "Ann", pass: []byte("argon2-ann")},
+				{name: "Bob"},
+			},
+			missing: []int{1},
+		},
+		{
+			name: "password census: the password takes no part in duplicate detection",
+			auth: OrgMemberAuthFields{OrgMemberAuthFieldsName, OrgMemberAuthFieldsPassword},
+			members: []member{
+				{name: "Ann", pass: []byte("argon2-one")},
+				{name: "ann", pass: []byte("argon2-two")},
+			},
+			duplicates: []int{0, 1},
+		},
+		{
 			name:       "a member clashing with an existing participant",
 			auth:       nameNationalID,
 			members:    []member{{name: "Solo", nationalID: "X1"}, {name: "Other", nationalID: "X2"}},
@@ -94,7 +113,7 @@ func TestClassifyCensusMembers(t *testing.T) {
 			toMember := func(m member) OrgMember {
 				return OrgMember{
 					ID: bson.NewObjectID(), Name: m.name, Surname: m.surname, NationalID: m.nationalID,
-					Email: m.email, Phone: m.phone,
+					Email: m.email, Phone: m.phone, HashedPass: m.pass,
 				}
 			}
 			ids := make([]bson.ObjectID, len(tc.members))
@@ -297,6 +316,30 @@ func TestCensusMembersEmptyValues(t *testing.T) {
 		var clash *CensusMembersError
 		c.Assert(errors.As(err, &clash), qt.IsTrue, qt.Commentf("got %v", err))
 		c.Assert(hexes(clash.Duplicates), qt.ContentEquals, ids)
+	})
+
+	t.Run("a password census reads the stored password hash", func(t *testing.T) {
+		c := qt.New(t)
+		withPass := insertRaw(bson.M{"memberNumber": "PW-1", "pass": []byte("argon2-hash")})
+		withoutPass := insertRaw(bson.M{"memberNumber": "PW-2"})
+		ids := []string{withPass, withoutPass}
+		auth := OrgMemberAuthFields{OrgMemberAuthFieldsMemberNumber, OrgMemberAuthFieldsPassword}
+
+		res, err := testDB.CheckMembersFields(testOrgAddress, ids, auth, nil)
+		c.Assert(err, qt.IsNil)
+		c.Assert(hexes(res.MissingData), qt.DeepEquals, []string{withoutPass})
+		c.Assert(hexes(res.Members), qt.DeepEquals, []string{withPass})
+
+		res, err = testDB.CheckGroupMembersFields(testOrgAddress, group(ids...), auth, nil)
+		c.Assert(err, qt.IsNil)
+		c.Assert(hexes(res.MissingData), qt.DeepEquals, []string{withoutPass})
+		c.Assert(hexes(res.Members), qt.DeepEquals, []string{withPass})
+
+		census := &Census{OrgAddress: testOrgAddress, AuthFields: auth}
+		size, missing, err := testDB.PopulateMembersCensus(census, ids)
+		c.Assert(err, qt.IsNil)
+		c.Assert(size, qt.Equals, int64(1))
+		c.Assert(hexes(missing), qt.DeepEquals, []string{withoutPass})
 	})
 
 	t.Run("a member edited out of its login data leaves an inert participant", func(t *testing.T) {

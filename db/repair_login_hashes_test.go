@@ -435,6 +435,7 @@ func TestRepairMatchesCanonicalHash(t *testing.T) {
 		{OrgMemberAuthFields{OrgMemberAuthFieldsMemberNumber}, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail}},
 		{OrgMemberAuthFields{OrgMemberAuthFieldsNationalID}, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail}},
 		{OrgMemberAuthFields{OrgMemberAuthFieldsBirthDate}, OrgMemberTwoFaFields{}},
+		{OrgMemberAuthFields{OrgMemberAuthFieldsMemberNumber, OrgMemberAuthFieldsPassword}, OrgMemberTwoFaFields{}},
 		{
 			OrgMemberAuthFields{OrgMemberAuthFieldsName, OrgMemberAuthFieldsSurname},
 			OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail, OrgMemberTwoFaFieldPhone},
@@ -496,5 +497,13 @@ func TestRepairMatchesCanonicalHash(t *testing.T) {
 		found, err := testDB.CensusParticipantByLoginHash(s.census, stored)
 		c.Assert(err, qt.IsNil)
 		c.Assert(found.ParticipantID, qt.Equals, s.memberID.Hex())
+
+		// the password never takes part in the login hash: with it, the hash is the one without it
+		if slices.Contains(s.census.AuthFields, OrgMemberAuthFieldsPassword) {
+			withoutPassword := slices.DeleteFunc(slices.Clone(s.census.AuthFields), func(f OrgMemberAuthField) bool {
+				return f == OrgMemberAuthFieldsPassword
+			})
+			c.Assert(got.LoginHash, qt.DeepEquals, HashAuthTwoFaFields(stored, withoutPassword, s.census.TwoFaFields))
+		}
 	}
 }

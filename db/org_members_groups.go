@@ -567,12 +567,21 @@ func (ms *MongoStorage) findMemberFieldsCursor(
 		{Key: "orgAddress", Value: 1},
 	}
 	for _, f := range authFields {
-		proj = append(proj, bson.E{Key: string(f), Value: 1})
+		proj = append(proj, bson.E{Key: authFieldBSONKey(f), Value: 1})
 	}
 	for _, f := range twoFaFields {
 		proj = append(proj, bson.E{Key: string(f), Value: 1})
 	}
 	return ms.orgMembers.Find(ctx, filter, options.Find().SetProjection(proj))
+}
+
+// authFieldBSONKey returns the orgMembers document key holding an auth field: the field name itself,
+// except for the password, which a member holds as its argon2 hash under "pass" (OrgMember.HashedPass).
+func authFieldBSONKey(f OrgMemberAuthField) string {
+	if f == OrgMemberAuthFieldsPassword {
+		return "pass"
+	}
+	return string(f)
 }
 
 // Helper function to check if a string is in a slice

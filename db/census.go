@@ -6,6 +6,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -14,6 +15,25 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.vocdoni.io/dvote/log"
 )
+
+// ValidateCensusFields checks that the login fields of a census can tell its members apart. The
+// member password is checked after the participant lookup and never hashed, so a census using it
+// needs at least one other auth field or a 2FA field; otherwise it returns ErrPasswordNeedsLookupField.
+func ValidateCensusFields(authFields OrgMemberAuthFields, twoFaFields OrgMemberTwoFaFields) error {
+	if !slices.Contains(authFields, OrgMemberAuthFieldsPassword) {
+		return nil
+	}
+	lookupFields := len(twoFaFields)
+	for _, f := range authFields {
+		if f != OrgMemberAuthFieldsPassword {
+			lookupFields++
+		}
+	}
+	if lookupFields == 0 {
+		return ErrPasswordNeedsLookupField
+	}
+	return nil
+}
 
 // SetCensus creates a new census for an organization
 // Returns the hex representation of the census
@@ -24,6 +44,9 @@ func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
 
 	if census.OrgAddress.Cmp(common.Address{}) == 0 {
 		return "", ErrInvalidData
+	}
+	if err := ValidateCensusFields(census.AuthFields, census.TwoFaFields); err != nil {
+		return "", err
 	}
 	// check that the org exists
 	_, err := ms.Organization(census.OrgAddress)

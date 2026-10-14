@@ -1981,6 +1981,7 @@ definitions:
     - memberNumber
     - nationalId
     - birthDate
+    - password
     type: string
     x-enum-varnames:
     - OrgMemberAuthFieldsName
@@ -1988,6 +1989,7 @@ definitions:
     - OrgMemberAuthFieldsMemberNumber
     - OrgMemberAuthFieldsNationalID
     - OrgMemberAuthFieldsBirthDate
+    - OrgMemberAuthFieldsPassword
   db.OrgMemberTwoFaField:
     enum:
     - email

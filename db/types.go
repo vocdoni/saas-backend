@@ -416,7 +416,8 @@ func (f *OrgMemberAuthField) UnmarshalJSON(data []byte) error {
 		OrgMemberAuthFieldsSurname,
 		OrgMemberAuthFieldsMemberNumber,
 		OrgMemberAuthFieldsNationalID,
-		OrgMemberAuthFieldsBirthDate:
+		OrgMemberAuthFieldsBirthDate,
+		OrgMemberAuthFieldsPassword:
 		*f = OrgMemberAuthField(s)
 		return nil
 	default:
@@ -430,6 +431,10 @@ const (
 	OrgMemberAuthFieldsMemberNumber OrgMemberAuthField = "memberNumber"
 	OrgMemberAuthFieldsNationalID   OrgMemberAuthField = "nationalId"
 	OrgMemberAuthFieldsBirthDate    OrgMemberAuthField = "birthDate"
+	// OrgMemberAuthFieldsPassword is the member password. It never takes part in the login hash:
+	// the CSP finds the participant on the other fields, then checks the password against the
+	// member's stored hash (see OrgMember.MissingLoginData and ValidateCensusFields).
+	OrgMemberAuthFieldsPassword OrgMemberAuthField = "password"
 )
 
 // OrgMemberAuthFields is a list of fields that can be used for member authentication.
@@ -498,6 +503,10 @@ func (f OrgMemberTwoFaFields) GetCensusType() CensusType {
 // emails. A full Unicode case-fold would be marginally more correct for a few
 // scripts, but diverging from the existing convention would be worse: the two
 // sides of the comparison only agree because they fold identically.
+//
+// The password auth field is not part of the hash (memberAuthFieldValue reports it unknown): it is
+// checked after the participant lookup instead, so passwords never affect loginHash, uniqueness or
+// duplicate detection.
 //
 // IMPORTANT: migrations.hashMemberFields mirrors this function byte for byte so
 // that the repair tooling can recompute stored hashes without importing db. Any
