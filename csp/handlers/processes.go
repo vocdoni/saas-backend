@@ -87,8 +87,10 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 //	@Description	Two-step voter authentication for a multi-question voting process (the /processes
 //	@Description	replacement of the bundle auth flow); the issued token is anchored to the process.
 //	@Description	- Step 0: handlers.AuthRequest — member identification fields (name, surname,
-//	@Description	memberNumber, nationalId, birthDate, email, phone); which are required depends on the
-//	@Description	census auth configuration. If valid, a challenge is sent and a token returned.
+//	@Description	memberNumber, nationalId, birthDate, email, phone, password); which are required depends
+//	@Description	on the census auth configuration. If valid, a challenge is sent and a token returned.
+//	@Description	`password` is the member password's client hash (64 lowercase hex characters); a wrong
+//	@Description	one answers exactly like an unknown participant (404, code 40029).
 //	@Description	- Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
 //	@Description	If valid the token is marked verified and returned. Auth-only censuses may not require
 //	@Description	a challenge solution.

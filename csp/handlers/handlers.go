@@ -4,6 +4,8 @@
 package handlers
 
 import (
+	"runtime"
+
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/db"
 )
@@ -21,13 +23,17 @@ const (
 type CSPHandlers struct {
 	csp    *csp.CSP
 	mainDB *db.MongoStorage
+	// passwordSlots bounds the member password checks running at once: each is an argon2id pass
+	// holding 64 MiB, so excess login attempts wait for a slot instead of piling up memory.
+	passwordSlots chan struct{}
 }
 
 // New creates a new instance of the CSP handlers instance. It receives the CSP
 // instance and the main database instance as parameters.
 func New(c *csp.CSP, mainDB *db.MongoStorage) *CSPHandlers {
 	return &CSPHandlers{
-		csp:    c,
-		mainDB: mainDB,
+		csp:           c,
+		mainDB:        mainDB,
+		passwordSlots: make(chan struct{}, runtime.NumCPU()),
 	}
 }

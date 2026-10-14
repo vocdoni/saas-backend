@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	stderrors "errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,4 +81,36 @@ func TestHandlePhoneContact(t *testing.T) {
 
 	org.Country = "US" // a valid phone with prefix, should keep it regardless of org country
 	t.Run(org.Country, func(*testing.T) { test(org, "+34612345601", "+34612345601") })
+}
+
+// TestMemberPasswordMatches covers the password check behind auth step 0: it matches the stored
+// argon2 hash of the client hash and nothing else, and a check waiting for a slot gives up with its
+// request instead of blocking forever.
+func TestMemberPasswordMatches(t *testing.T) {
+	c := qt.New(t)
+	h := New(&csp.CSP{PasswordSalt: "salt"}, nil)
+	clientHash := strings.Repeat("ab", 32)
+	stored := internal.HashPassword("salt", clientHash)
+
+	ok, err := h.memberPasswordMatches(context.Background(), clientHash, stored)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+
+	ok, err = h.memberPasswordMatches(context.Background(), strings.Repeat("cd", 32), stored)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+
+	// a member without a stored password never matches
+	ok, err = h.memberPasswordMatches(context.Background(), clientHash, nil)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+
+	// every slot taken: a cancelled request does not wait for one
+	for range cap(h.passwordSlots) {
+		h.passwordSlots <- struct{}{}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = h.memberPasswordMatches(ctx, clientHash, stored)
+	c.Assert(err, qt.ErrorIs, context.Canceled)
 }

@@ -1,8 +1,12 @@
 package handlers
 
 import (
+	"context"
+	"crypto/subtle"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -155,6 +159,21 @@ func determineContactMethod(
 	}
 }
 
+// memberPasswordMatches reports whether the client hash a voter sent matches the member's stored
+// password, comparing the argon2 hashes in constant time. A member without a stored password never
+// matches. At most cap(c.passwordSlots) checks run at once; the rest wait for a slot until their
+// request is cancelled, which is the only error returned.
+func (c *CSPHandlers) memberPasswordMatches(ctx context.Context, clientHash string, stored []byte) (bool, error) {
+	select {
+	case c.passwordSlots <- struct{}{}:
+	case <-ctx.Done():
+		return false, fmt.Errorf("waiting for a password check: %w", ctx.Err())
+	}
+	defer func() { <-c.passwordSlots }()
+	computed := internal.HashPassword(c.csp.PasswordSalt, clientHash)
+	return len(stored) > 0 && subtle.ConstantTimeCompare(computed, stored) == 1, nil
+}
+
 // authFirstStep is the first step of the authentication process. It receives
 // the request, the anchor (process) ID and the census ID as parameters. It checks the
 // request data (participant ID, email and phone) against the census data.
@@ -173,6 +192,11 @@ func determineContactMethod(
 // returns an authentication token that will be used in the second step. If the
 // cooldown period between authentication attempts has not elapsed, the underlying
 // AuthToken call may return ErrAttemptCoolDownTime.
+//
+// When the census auth fields include the member password, the request must carry it as the client
+// hash. It takes no part in the lookup: once the other fields have found the participant, it is
+// compared with the member's stored password before anything else about the member is revealed, and
+// a mismatch answers exactly like an unknown participant.
 func (c *CSPHandlers) authFirstStep(
 	r *http.Request,
 	anchorID internal.HexBytes,
@@ -213,6 +237,17 @@ func (c *CSPHandlers) authFirstStep(
 		return nil, errors.ErrInvalidData.WithErr(err)
 	}
 
+	// the password is only read when the census asks for it; an empty one is left to
+	// MissingLoginData below, so it fails like any other missing login field
+	usesPassword := slices.Contains(census.AuthFields, db.OrgMemberAuthFieldsPassword)
+	password := ""
+	if usesPassword {
+		password = req.Password
+		if password != "" && !internal.ValidMemberPasswordHash(password) {
+			return nil, errors.ErrInvalidUserData.Withf("invalid password format")
+		}
+	}
+
 	// create an empty member and assign the input data where applicable, then
 	// normalize it through the same method that normalized the member at
 	// creation time. Both sides of the login-hash comparison therefore derive
@@ -226,6 +261,8 @@ func (c *CSPHandlers) authFirstStep(
 		BirthDate:    req.BirthDate,
 		Email:        req.Email,
 		Phone:        phone,
+		// the request's client hash, never stored: only MissingLoginData reads it
+		HashedPass: []byte(password),
 	}).Normalized()
 
 	// a voter must supply every login field the census requires: an empty value would otherwise hash
@@ -247,6 +284,18 @@ func (c *CSPHandlers) authFirstStep(
 	orgMember, err := c.mainDB.OrgMember(census.OrgAddress, censusParticipant.ParticipantID)
 	if err != nil {
 		return nil, errors.ErrCensusParticipantNotFound.With("failed to get org member")
+	}
+
+	// the password goes first: the weight and contact checks below answer differently, so running
+	// them before it would tell a caller without the password things about the member
+	if usesPassword {
+		matches, err := c.memberPasswordMatches(r.Context(), password, orgMember.HashedPass)
+		if err != nil {
+			return nil, errors.ErrGenericInternalServerError.WithErr(err)
+		}
+		if !matches {
+			return nil, errors.ErrCensusParticipantNotFound
+		}
 	}
 
 	if census.Weighted && orgMember.Weight == 0 {

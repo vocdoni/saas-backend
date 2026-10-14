@@ -2245,6 +2245,11 @@ definitions:
         type: string
       nationalId:
         type: string
+      password:
+        description: |-
+          Password is the member password as its client hash, 64 lowercase hex characters (see
+          apicommon.OrgMember.Password). Only read when the census auth fields include "password".
+        type: string
       phone:
         type: string
       surname:
@@ -4751,8 +4756,10 @@ paths:
         Two-step voter authentication for a multi-question voting process (the /processes
         replacement of the bundle auth flow); the issued token is anchored to the process.
         - Step 0: handlers.AuthRequest — member identification fields (name, surname,
-        memberNumber, nationalId, birthDate, email, phone); which are required depends on the
-        census auth configuration. If valid, a challenge is sent and a token returned.
+        memberNumber, nationalId, birthDate, email, phone, password); which are required depends
+        on the census auth configuration. If valid, a challenge is sent and a token returned.
+        `password` is the member password's client hash (64 lowercase hex characters); a wrong
+        one answers exactly like an unknown participant (404, code 40029).
         - Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
         If valid the token is marked verified and returned. Auth-only censuses may not require
         a challenge solution.
