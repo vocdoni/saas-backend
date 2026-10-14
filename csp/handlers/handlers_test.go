@@ -84,8 +84,8 @@ func TestHandlePhoneContact(t *testing.T) {
 }
 
 // TestMemberPasswordMatches covers the password check behind auth step 0: it matches the stored
-// argon2 hash of the client hash and nothing else, and a check waiting for a slot gives up with its
-// request instead of blocking forever.
+// argon2 hash of the client hash and nothing else, and a check waiting for a slot gives up, with its
+// request or after a bounded wait, instead of blocking forever.
 func TestMemberPasswordMatches(t *testing.T) {
 	c := qt.New(t)
 	h := New(&csp.CSP{PasswordSalt: "salt"}, nil)
@@ -113,4 +113,11 @@ func TestMemberPasswordMatches(t *testing.T) {
 	cancel()
 	_, err = h.memberPasswordMatches(ctx, clientHash, stored)
 	c.Assert(err, qt.ErrorIs, context.Canceled)
+
+	// nor does one waiting longer than passwordSlotWait: it tells the voter to retry later
+	h.passwordSlotWait = time.Millisecond
+	_, err = h.memberPasswordMatches(context.Background(), clientHash, stored)
+	c.Assert(err, qt.ErrorIs, errors.ErrAttemptCoolDownTime)
+	c.Assert(passwordCheckFailed(err), qt.ErrorIs, errors.ErrAttemptCoolDownTime)
+	c.Assert(passwordCheckFailed(context.Canceled), qt.ErrorIs, errors.ErrGenericInternalServerError)
 }

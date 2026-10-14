@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -161,11 +162,16 @@ func determineContactMethod(
 
 // memberPasswordMatches reports whether the client hash a voter sent matches the member's stored
 // password, comparing the argon2 hashes in constant time. A member without a stored password never
-// matches. At most cap(c.passwordSlots) checks run at once; the rest wait for a slot until their
-// request is cancelled, which is the only error returned.
+// matches. At most cap(c.passwordSlots) checks run at once; the rest wait for a slot for at most
+// c.passwordSlotWait, then give up with errors.ErrAttemptCoolDownTime, or sooner with the request's
+// context error when it is cancelled.
 func (c *CSPHandlers) memberPasswordMatches(ctx context.Context, clientHash string, stored []byte) (bool, error) {
+	wait := time.NewTimer(c.passwordSlotWait)
+	defer wait.Stop()
 	select {
 	case c.passwordSlots <- struct{}{}:
+	case <-wait.C:
+		return false, errors.ErrAttemptCoolDownTime.Withf("no password check slot freed up")
 	case <-ctx.Done():
 		return false, fmt.Errorf("waiting for a password check: %w", ctx.Err())
 	}
@@ -183,10 +189,19 @@ func (c *CSPHandlers) memberPasswordMatches(ctx context.Context, clientHash stri
 func (c *CSPHandlers) unknownParticipant(ctx context.Context, password string, notFound error) error {
 	if password != "" {
 		if _, err := c.memberPasswordMatches(ctx, password, nil); err != nil {
-			return errors.ErrGenericInternalServerError.WithErr(err)
+			return passwordCheckFailed(err)
 		}
 	}
 	return notFound
+}
+
+// passwordCheckFailed is the answer to a password check that could not run: the API error it gave
+// up with (no slot freed up in time), or an internal error (the request was cancelled).
+func passwordCheckFailed(err error) error {
+	if apiErr, ok := err.(errors.Error); ok {
+		return apiErr
+	}
+	return errors.ErrGenericInternalServerError.WithErr(err)
 }
 
 // authFirstStep is the first step of the authentication process. It receives
@@ -212,7 +227,8 @@ func (c *CSPHandlers) unknownParticipant(ctx context.Context, password string, n
 // hash. It takes no part in the lookup: once the other fields have found the participant, it is
 // compared with the member's stored password before anything else about the member is revealed, and
 // a mismatch answers exactly like an unknown participant. An unknown participant pays for a password
-// check too (see unknownParticipant), so the two cannot be told apart by their timing either.
+// check too (see unknownParticipant), so the two cannot be told apart by their timing either. When
+// no password check slot frees up in time, both answer ErrAttemptCoolDownTime.
 func (c *CSPHandlers) authFirstStep(
 	r *http.Request,
 	anchorID internal.HexBytes,
@@ -307,7 +323,7 @@ func (c *CSPHandlers) authFirstStep(
 	if usesPassword {
 		matches, err := c.memberPasswordMatches(r.Context(), password, orgMember.HashedPass)
 		if err != nil {
-			return nil, errors.ErrGenericInternalServerError.WithErr(err)
+			return nil, passwordCheckFailed(err)
 		}
 		if !matches {
 			return nil, errors.ErrCensusParticipantNotFound
