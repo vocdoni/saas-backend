@@ -269,8 +269,8 @@ func (c *CSPHandlers) authFirstStep(
 		return nil, errors.ErrInvalidData.WithErr(err)
 	}
 
-	// the password is only read when the census asks for it; an empty one is left to
-	// MissingLoginData below, so it fails like any other missing login field
+	// the password is only read when the census asks for it; an empty one fails below like any other
+	// missing login field
 	usesPassword := slices.Contains(census.AuthFields, db.OrgMemberAuthFieldsPassword)
 	password := ""
 	if usesPassword {
@@ -293,13 +293,16 @@ func (c *CSPHandlers) authFirstStep(
 		BirthDate:    req.BirthDate,
 		Email:        req.Email,
 		Phone:        phone,
-		// the request's client hash, never stored: only MissingLoginData reads it
-		HashedPass: []byte(password),
 	}).Normalized()
 
 	// a voter must supply every login field the census requires: an empty value would otherwise hash
-	// like a member stored without it, letting that member in on the remaining fields alone
-	if inputMember.MissingLoginData(census.AuthFields, census.TwoFaFields) {
+	// like a member stored without it, letting that member in on the remaining fields alone. The
+	// password is checked apart, since the request carries it as a client hash and inputMember has
+	// no field for that (HashedPass is the stored argon2 hash).
+	lookupFields := slices.DeleteFunc(slices.Clone(census.AuthFields), func(f db.OrgMemberAuthField) bool {
+		return f == db.OrgMemberAuthFieldsPassword
+	})
+	if inputMember.MissingLoginData(lookupFields, census.TwoFaFields) || (usesPassword && password == "") {
 		return nil, errors.ErrInvalidUserData.Withf("missing required auth data")
 	}
 
