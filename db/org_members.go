@@ -197,6 +197,16 @@ func (p *bulkOrgMembersProgress) snapshot() *BulkOrgMembersJob {
 	return &snap
 }
 
+// HashMemberPassword returns the stored form of a member password: the argon2 hash of the client
+// hash the member's password arrives as, salted with the service password salt followed by the
+// member ID in hex. The member ID makes the salt unique per member, so members sharing a password
+// (say, an initial one an organizer handed out) store different hashes, and one guess cannot be
+// tried against all of them at once. Both the write path (prepareOrgMember) and the CSP check use
+// it, so they cannot drift apart.
+func HashMemberPassword(salt string, memberID bson.ObjectID, clientHash string) []byte {
+	return internal.HashPassword(salt+memberID.Hex(), clientHash)
+}
+
 // prepareOrgMember processes a member for storage by:
 //   - Normalizing the fields that feed the CSP login hash (OrgMember.Normalized)
 //   - Setting the organization address
@@ -245,9 +255,9 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 		member.PlaintextPhone = ""
 	}
 
-	// Hash password if present
+	// Hash password if present, with the member ID assigned above as part of its salt
 	if member.Password != "" {
-		member.HashedPass = internal.HashPassword(salt, member.Password)
+		member.HashedPass = HashMemberPassword(salt, member.ID, member.Password)
 		member.Password = ""
 	}
 

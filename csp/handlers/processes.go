@@ -89,8 +89,10 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 //	@Description	- Step 0: handlers.AuthRequest — member identification fields (name, surname,
 //	@Description	memberNumber, nationalId, birthDate, email, phone, password); which are required depends
 //	@Description	on the census auth configuration. If valid, a challenge is sent and a token returned.
-//	@Description	`password` is the member password's client hash (64 lowercase hex characters); a wrong
-//	@Description	one answers exactly like an unknown participant (404, code 40029).
+//	@Description	`password` is the member password's client hash (64 lowercase hex characters, see
+//	@Description	handlers.AuthRequest); a wrong one answers exactly like an unknown participant (404,
+//	@Description	code 40029). When too many password checks are already running, it answers 401, code
+//	@Description	40103: retry later.
 //	@Description	- Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
 //	@Description	If valid the token is marked verified and returned. Auth-only censuses may not require
 //	@Description	a challenge solution.

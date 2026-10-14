@@ -8,8 +8,9 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
-	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // TestOrgMemberPassword covers the member password over HTTP: it travels as the client hash (64
@@ -69,6 +70,13 @@ func TestOrgMemberPassword(t *testing.T) {
 		_, ok := m[key]
 		return ok
 	}
+	// wantPass is the stored hash of the client hash for the member: salted with its ID
+	wantPass := func(t *testing.T, id string) []byte {
+		t.Helper()
+		oid, err := bson.ObjectIDFromHex(id)
+		qt.Assert(t, err, qt.IsNil)
+		return db.HashMemberPassword(passwordSalt, oid, hash)
+	}
 	storedPass := func(t *testing.T, id string) []byte {
 		t.Helper()
 		m, err := testDB.OrgMember(orgAddress, id)
@@ -78,7 +86,7 @@ func TestOrgMemberPassword(t *testing.T) {
 
 	t.Run("the client hash is stored argon2-hashed and never returned", func(t *testing.T) {
 		c := qt.New(t)
-		c.Assert(storedPass(t, withPassword), qt.DeepEquals, internal.HashPassword(passwordSalt, hash))
+		c.Assert(storedPass(t, withPassword), qt.DeepEquals, wantPass(t, withPassword))
 		got := rawMember(t, withPassword)
 		c.Assert(got["hasPassword"], qt.DeepEquals, true)
 		c.Assert(hasKey(got, "password"), qt.IsFalse)
@@ -91,11 +99,14 @@ func TestOrgMemberPassword(t *testing.T) {
 		requestAndParse[apicommon.UpsertOrgMemberResponse](t, http.MethodPut, token,
 			map[string]any{"id": withoutPassword, "password": hash}, membersURL)
 		c.Assert(rawMember(t, withoutPassword)["hasPassword"], qt.DeepEquals, true)
+		// same password, different member: a different stored hash
+		c.Assert(storedPass(t, withoutPassword), qt.DeepEquals, wantPass(t, withoutPassword))
+		c.Assert(storedPass(t, withoutPassword), qt.Not(qt.DeepEquals), storedPass(t, withPassword))
 
 		// left out: kept
 		requestAndParse[apicommon.UpsertOrgMemberResponse](t, http.MethodPut, token,
 			map[string]any{"id": withPassword, "name": "Renamed"}, membersURL)
-		c.Assert(storedPass(t, withPassword), qt.DeepEquals, internal.HashPassword(passwordSalt, hash))
+		c.Assert(storedPass(t, withPassword), qt.DeepEquals, wantPass(t, withPassword))
 
 		// sent empty: cleared
 		requestAndParse[apicommon.UpsertOrgMemberResponse](t, http.MethodPut, token,

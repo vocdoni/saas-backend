@@ -161,11 +161,11 @@ func determineContactMethod(
 }
 
 // memberPasswordMatches reports whether the client hash a voter sent matches the member's stored
-// password, comparing the argon2 hashes in constant time. A member without a stored password never
-// matches. At most cap(c.passwordSlots) checks run at once; the rest wait for a slot for at most
-// c.passwordSlotWait, then give up with errors.ErrAttemptCoolDownTime, or sooner with the request's
-// context error when it is cancelled.
-func (c *CSPHandlers) memberPasswordMatches(ctx context.Context, clientHash string, stored []byte) (bool, error) {
+// password, hashing it as db.HashMemberPassword does and comparing the argon2 hashes in constant
+// time. A member without a stored password never matches. At most cap(c.passwordSlots) checks run at
+// once; the rest wait for a slot for at most c.passwordSlotWait, then give up with
+// errors.ErrAttemptCoolDownTime, or sooner with the request's context error when it is cancelled.
+func (c *CSPHandlers) memberPasswordMatches(ctx context.Context, clientHash string, member *db.OrgMember) (bool, error) {
 	wait := time.NewTimer(c.passwordSlotWait)
 	defer wait.Stop()
 	select {
@@ -176,8 +176,8 @@ func (c *CSPHandlers) memberPasswordMatches(ctx context.Context, clientHash stri
 		return false, fmt.Errorf("waiting for a password check: %w", ctx.Err())
 	}
 	defer func() { <-c.passwordSlots }()
-	computed := c.hashPassword(c.csp.PasswordSalt, clientHash)
-	return len(stored) > 0 && subtle.ConstantTimeCompare(computed, stored) == 1, nil
+	computed := c.hashPassword(c.csp.PasswordSalt, member.ID, clientHash)
+	return len(member.HashedPass) > 0 && subtle.ConstantTimeCompare(computed, member.HashedPass) == 1, nil
 }
 
 // unknownParticipant answers a login whose participant or member was not found. password is the
@@ -188,7 +188,7 @@ func (c *CSPHandlers) memberPasswordMatches(ctx context.Context, clientHash stri
 // member.
 func (c *CSPHandlers) unknownParticipant(ctx context.Context, password string, notFound error) error {
 	if password != "" {
-		if _, err := c.memberPasswordMatches(ctx, password, nil); err != nil {
+		if _, err := c.memberPasswordMatches(ctx, password, &db.OrgMember{}); err != nil {
 			return passwordCheckFailed(err)
 		}
 	}
@@ -324,7 +324,7 @@ func (c *CSPHandlers) authFirstStep(
 	// the password goes first: the weight and contact checks below answer differently, so running
 	// them before it would tell a caller without the password things about the member
 	if usesPassword {
-		matches, err := c.memberPasswordMatches(r.Context(), password, orgMember.HashedPass)
+		matches, err := c.memberPasswordMatches(r.Context(), password, orgMember)
 		if err != nil {
 			return nil, passwordCheckFailed(err)
 		}

@@ -58,9 +58,9 @@ func TestAuthFirstStepUnknownParticipantPasswordWork(t *testing.T) {
 
 	h := New(&csp.CSP{PasswordSalt: salt}, mainDB)
 	checks := 0
-	h.hashPassword = func(salt, password string) []byte {
+	h.hashPassword = func(salt string, memberID bson.ObjectID, clientHash string) []byte {
 		checks++
-		return internal.HashPassword(salt, password)
+		return db.HashMemberPassword(salt, memberID, clientHash)
 	}
 	// auth0 runs auth step 0 and returns its API error code and the password checks it ran
 	auth0 := func(censusID, memberNumber, password string) (int, int) {

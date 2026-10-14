@@ -47,7 +47,7 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(createdMember.Phone.Bytes(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, testPlaintextPhone))
 		c.Assert(createdMember.MemberNumber, qt.Equals, member.MemberNumber)
 		c.Assert(createdMember.Name, qt.Equals, testName)
-		c.Assert(createdMember.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, testPassword))
+		c.Assert(createdMember.HashedPass, qt.DeepEquals, HashMemberPassword(testSalt, createdMember.ID, testPassword))
 		c.Assert(createdMember.CreatedAt, qt.Not(qt.IsNil))
 
 		// Test updating an existing member
@@ -256,12 +256,12 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(lastStatus.MemberIDs, qt.Contains, member1.ID.Hex())
 		c.Assert(member1.Phone.Bytes(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, testPlaintextPhone))
-		c.Assert(member1.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, testPassword))
+		c.Assert(member1.HashedPass, qt.DeepEquals, HashMemberPassword(testSalt, member1.ID, testPassword))
 
 		member2, err := testDB.OrgMemberByMemberNumber(testOrgAddress, members[1].MemberNumber)
 		c.Assert(err, qt.IsNil)
 		c.Assert(member2.Phone.Bytes(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, members[1].PlaintextPhone))
-		c.Assert(member2.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, members[1].Password))
+		c.Assert(member2.HashedPass, qt.DeepEquals, HashMemberPassword(testSalt, member2.ID, members[1].Password))
 
 		// Verify that the org members count is correct
 		count, err := testDB.CountOrgMembers(testOrgAddress)

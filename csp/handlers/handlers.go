@@ -9,7 +9,7 @@ import (
 
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/db"
-	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 const (
@@ -37,7 +37,7 @@ type CSPHandlers struct {
 	// passwordSlotWait is how long a check waits for a slot (passwordSlotWait, shortened by tests).
 	passwordSlotWait time.Duration
 	// hashPassword computes a member password hash; a seam so tests can count the checks run.
-	hashPassword func(salt, password string) []byte
+	hashPassword func(salt string, memberID bson.ObjectID, clientHash string) []byte
 }
 
 // New creates a new instance of the CSP handlers instance. It receives the CSP
@@ -51,6 +51,6 @@ func New(c *csp.CSP, mainDB *db.MongoStorage) *CSPHandlers {
 		// dozens of 64 MiB checks at once
 		passwordSlots:    make(chan struct{}, runtime.GOMAXPROCS(0)),
 		passwordSlotWait: passwordSlotWait,
-		hashPassword:     internal.HashPassword,
+		hashPassword:     db.HashMemberPassword,
 	}
 }

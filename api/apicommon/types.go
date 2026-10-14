@@ -1049,8 +1049,9 @@ type OrgMember struct {
 	Phone string `json:"phone,omitempty"`
 
 	// Member's password, write-only: the client hash of the plaintext, 64 lowercase hex characters,
-	// lowercase_hex(SHA-256("vocdoni-member-password:" + org address as 0x + 40 lowercase hex + ":" +
-	// trimmed password)). Stored as an argon2 hash and never returned: reads report hasPassword.
+	// lowercase_hex(SHA-256(UTF-8("vocdoni-member-password:" + org address as 0x + 40 lowercase hex +
+	// ":" + trim(password).normalize("NFC")))). Stored as an argon2 hash salted per member (with the
+	// member id) and never returned: reads report hasPassword.
 	Password string `json:"password,omitempty"`
 
 	// HasPassword is true on reads when the member has a password. Read-only: ignored on writes.

@@ -16,6 +16,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func TestSignOutcome(t *testing.T) {
@@ -90,7 +91,8 @@ func TestMemberPasswordMatches(t *testing.T) {
 	c := qt.New(t)
 	h := New(&csp.CSP{PasswordSalt: "salt"}, nil)
 	clientHash := strings.Repeat("ab", 32)
-	stored := internal.HashPassword("salt", clientHash)
+	stored := &db.OrgMember{ID: bson.NewObjectID()}
+	stored.HashedPass = db.HashMemberPassword("salt", stored.ID, clientHash)
 
 	ok, err := h.memberPasswordMatches(context.Background(), clientHash, stored)
 	c.Assert(err, qt.IsNil)
@@ -100,8 +102,14 @@ func TestMemberPasswordMatches(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsFalse)
 
+	// the hash is salted with the member ID: another member's stored hash does not match
+	ok, err = h.memberPasswordMatches(context.Background(), clientHash,
+		&db.OrgMember{ID: bson.NewObjectID(), HashedPass: stored.HashedPass})
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+
 	// a member without a stored password never matches
-	ok, err = h.memberPasswordMatches(context.Background(), clientHash, nil)
+	ok, err = h.memberPasswordMatches(context.Background(), clientHash, &db.OrgMember{ID: stored.ID})
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsFalse)
 

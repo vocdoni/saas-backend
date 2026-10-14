@@ -696,8 +696,9 @@ definitions:
       password:
         description: |-
           Member's password, write-only: the client hash of the plaintext, 64 lowercase hex characters,
-          lowercase_hex(SHA-256("vocdoni-member-password:" + org address as 0x + 40 lowercase hex + ":" +
-          trimmed password)). Stored as an argon2 hash and never returned: reads report hasPassword.
+          lowercase_hex(SHA-256(UTF-8("vocdoni-member-password:" + org address as 0x + 40 lowercase hex +
+          ":" + trim(password).normalize("NFC")))). Stored as an argon2 hash salted per member (with the
+          member id) and never returned: reads report hasPassword.
         type: string
       phone:
         description: Member's phone number
@@ -2247,8 +2248,10 @@ definitions:
         type: string
       password:
         description: |-
-          Password is the member password as its client hash, 64 lowercase hex characters (see
-          apicommon.OrgMember.Password). Only read when the census auth fields include "password".
+          Password is the member password as its client hash, 64 lowercase hex characters:
+          lowercase_hex(SHA-256(UTF-8("vocdoni-member-password:" + org address as 0x + 40 lowercase hex +
+          ":" + trim(password).normalize("NFC")))), as in apicommon.OrgMember.Password. Only read when the
+          census auth fields include "password".
         type: string
       phone:
         type: string
@@ -4758,8 +4761,10 @@ paths:
         - Step 0: handlers.AuthRequest — member identification fields (name, surname,
         memberNumber, nationalId, birthDate, email, phone, password); which are required depends
         on the census auth configuration. If valid, a challenge is sent and a token returned.
-        `password` is the member password's client hash (64 lowercase hex characters); a wrong
-        one answers exactly like an unknown participant (404, code 40029).
+        `password` is the member password's client hash (64 lowercase hex characters, see
+        handlers.AuthRequest); a wrong one answers exactly like an unknown participant (404,
+        code 40029). When too many password checks are already running, it answers 401, code
+        40103: retry later.
         - Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
         If valid the token is marked verified and returned. Auth-only censuses may not require
         a challenge solution.
