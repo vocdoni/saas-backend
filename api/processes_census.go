@@ -50,7 +50,7 @@ func (a *API) resolveOrCreateDefaultCensus(
 	if err != nil {
 		// a census the caller configured wrong is theirs to fix, not a 500
 		if errors.Is(err, db.ErrPasswordNeedsLookupField) {
-			return nil, nil, errors.ErrInvalidData.With("password needs another credential or a 2FA field")
+			return nil, nil, errors.ErrInvalidData.With(db.PasswordNeedsLookupFieldMessage)
 		}
 		return nil, nil, fmt.Errorf("failed to create census: %w", err)
 	}

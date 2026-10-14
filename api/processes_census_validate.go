@@ -61,7 +61,7 @@ func (a *API) validateProcessCensusHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err := db.ValidateCensusFields(census.AuthFields, census.TwoFaFields); err != nil {
-		errors.ErrInvalidData.With("password needs another credential or a 2FA field").Write(w)
+		errors.ErrInvalidData.With(db.PasswordNeedsLookupFieldMessage).Write(w)
 		return
 	}
 
