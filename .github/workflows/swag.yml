@@ -16,8 +16,8 @@ jobs:
     name: Generate swagger.yaml
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: 'go.mod'
           cache: false
@@ -25,7 +25,7 @@ jobs:
         run: ./scripts/generate-swagger.sh
 
       - name: Publish Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: swagger.yaml
           path: docs/swagger.yaml
@@ -38,7 +38,7 @@ jobs:
 
       - name: Mark previous comment as outdated if no diff
         if: ${{ github.event_name == 'pull_request' && steps.diff.outputs.stdout == '' }}
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: diff
           hide: true
@@ -46,7 +46,7 @@ jobs:
 
       - name: Post comment with diff in original PR
         if: ${{ github.event_name == 'pull_request' && steps.diff.outputs.stdout }}
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           header: diff
@@ -90,23 +90,23 @@ jobs:
       group: pages
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The checked out swagger.yaml predates the "regenerate after merge"
       # commit, so take the spec api-swagger just produced instead.
       - name: Overwrite docs/swagger.yaml with the freshly generated spec
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: swagger.yaml
           path: docs
 
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
 
       - name: Upload docs/ (Swagger UI + spec)
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: docs
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
