@@ -644,7 +644,7 @@ func TestFetchExternalMetadata(t *testing.T) {
 	t.Run("over size cap", func(_ *testing.T) {
 		// a valid JSON document larger than the 1 MiB read cap is truncated and fails to
 		// decode, so it must be rejected rather than partially parsed.
-		big, err := json.Marshal(map[string]any{"x": strings.Repeat("a", 2<<20)})
+		big, err := json.Marshal(map[string]any{"x": strings.Repeat("a", 2*internal.MiB)})
 		c.Assert(err, qt.IsNil)
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write(big)
