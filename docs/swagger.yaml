@@ -5526,9 +5526,9 @@ paths:
         already signed for a different address; re-send with the address sign-info
         reports) or sign_failed (internal failure; retry). Retry ONLY the entries that
         carry a retryable code: re-sending the whole batch re-signs the ballots that
-        already succeeded, and each re-sign counts toward the election's finite overwrite
-        budget (MaxVoteOverwritesPerProcess, 10) — past it the election is permanently
-        locked.
+        already succeeded, and every signature, re-signs included, counts toward the election's
+        limit (MaxCSPSignaturesPerElection, 10 in total) — past it the election is permanently
+        locked for the voter.
       parameters:
       - description: Process ID
         in: path

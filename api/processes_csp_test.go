@@ -385,8 +385,8 @@ func TestProcessCSPSignBatch(t *testing.T) {
 	c.Assert(mismatch.Signatures[0].Signature, qt.HasLen, 0)
 
 	// --- a spent signing slot is a per-ballot error, not a failed batch: exhaust the open
-	// election's overwrites (it is at 1 after the batch above) and re-run the same batch ---
-	for i := 0; i < db.MaxVoteOverwritesPerProcess; i++ {
+	// election's signatures (it is at 1 after the batch above) and re-run the same batch ---
+	for i := 0; i < db.MaxCSPSignaturesPerElection-1; i++ {
 		requestAndParse[handlers.AuthResponse](t, http.MethodPost, "",
 			&handlers.SignRequest{AuthToken: tok0, ProcessID: openElection, Payload: address.String()},
 			"processes", pid, "sign")

@@ -226,7 +226,7 @@ func (ms *MongoStorage) IsCSPProcessConsumed(userID, processID internal.HexBytes
 	default:
 		return false, err
 	}
-	return currentStatus.TimesVoted > MaxVoteOverwritesPerProcess, nil
+	return currentStatus.TimesVoted >= MaxCSPSignaturesPerElection, nil
 }
 
 // ConsumeCSPProcess method consumes a CSP process for a user. It returns an
@@ -254,7 +254,7 @@ func (ms *MongoStorage) ConsumeCSPProcess(token, processID, address internal.Hex
 		return err
 	}
 	// check if the token is already consumed
-	if tokenStatus != nil && tokenStatus.TimesVoted > MaxVoteOverwritesPerProcess {
+	if tokenStatus != nil && tokenStatus.TimesVoted >= MaxCSPSignaturesPerElection {
 		return ErrProcessAlreadyConsumed
 	}
 	timesVoted := 1

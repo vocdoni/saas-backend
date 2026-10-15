@@ -299,7 +299,7 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 		// verify the token
 		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
 		// consume the process
-		for i := 0; i <= 10; i++ {
+		for range db.MaxCSPSignaturesPerElection {
 			c.Assert(csp.Storage.ConsumeCSPProcess(testToken, testPID, testAddress), qt.IsNil)
 		}
 		_, _, _, err := csp.prepareSaltedKeySigner(testToken, testAddress, testPID, testUserWeightBytes)
