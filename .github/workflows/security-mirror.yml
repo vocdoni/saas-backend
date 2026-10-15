@@ -1,0 +1,33 @@
+name: Security mirror
+
+on:
+  push:
+    branches:
+      - main
+      - stage
+      - lts
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    name: Push to the security mirror
+    if: github.repository == 'vocdoni/saas-backend'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Push upstream/${{ github.ref_name }}
+        env:
+          SSH_KEY: ${{ secrets.SECURITY_MIRROR_SSH_KEY }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          key="$RUNNER_TEMP/mirror_key"
+          printf '%s\n' "$SSH_KEY" > "$key"
+          chmod 600 "$key"
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$RUNNER_TEMP/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts"
+          git push --force git@github.com:vocdoni/saas-backend-security.git "HEAD:refs/heads/upstream/$BRANCH"

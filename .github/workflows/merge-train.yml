@@ -1,0 +1,55 @@
+name: Merge train
+
+on:
+  push:
+    branches:
+      - 'upstream/**'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: merge-train-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    name: Merge into ${{ github.ref_name }}
+    if: github.repository == 'vocdoni/saas-backend-security'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Merge upstream
+        env:
+          SSH_KEY: ${{ secrets.SECURITY_MIRROR_SSH_KEY }}
+          UPSTREAM: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="${UPSTREAM#upstream/}"
+          key="$RUNNER_TEMP/mirror_key"
+          printf '%s\n' "$SSH_KEY" > "$key"
+          chmod 600 "$key"
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$RUNNER_TEMP/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts"
+          remote="git@github.com:${GITHUB_REPOSITORY}.git"
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+
+          git checkout -B "$branch" "origin/$branch"
+          if ! git merge --ff-only "origin/$UPSTREAM" &&
+            ! git merge --no-ff --no-edit -m "Merge vocdoni/saas-backend $branch" "origin/$UPSTREAM"; then
+            git merge --abort
+            sync="sync-$branch-with-vocdoni/saas-backend"
+            git push --force "$remote" "origin/$UPSTREAM:refs/heads/$sync"
+            if [ -z "$(gh pr list --head "$sync" --base "$branch" --json number -q '.[].number')" ]; then
+              gh pr create --head "$sync" --base "$branch" \
+                --title "Merge vocdoni/saas-backend $branch" \
+                --body "The merge train hit a conflict merging \`$UPSTREAM\` into \`$branch\`. Resolve it here; until then \`$branch\` gets no upstream changes."
+            fi
+            exit 1
+          fi
+          git push "$remote" "HEAD:refs/heads/$branch"
