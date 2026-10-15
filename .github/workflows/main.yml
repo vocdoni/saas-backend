@@ -18,6 +18,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: 'go.mod'
+          cache: ${{ runner.environment == 'github-hosted' }}
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
@@ -33,6 +34,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: 'go.mod'
+          cache: ${{ runner.environment == 'github-hosted' }}
       - name: Tidy go module
         run: |
           go mod tidy
