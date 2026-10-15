@@ -371,7 +371,7 @@ func authorizeLoadedQuestion(
 // bytes each leaves ample headroom. The cap tracks db.MaxQuestionsPerProcess (a voter holds at
 // most one ballot per question); like the relay endpoints this one is public, so the body has to
 // be bounded before it is buffered.
-const maxSignBatchBodyBytes = db.MaxQuestionsPerProcess*512 + 4<<10
+const maxSignBatchBodyBytes = db.MaxQuestionsPerProcess*512 + 4*internal.KiB
 
 // authorizedBallot is one item of a sign batch that survived the authorization pass: the
 // question's on-chain election id, resolved from the request, and the voter address.

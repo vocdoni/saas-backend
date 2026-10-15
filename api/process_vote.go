@@ -102,10 +102,10 @@ const (
 	// envelope marshals to ~300 bytes, ~600 characters once hex-encoded into the JSON field, so
 	// this leaves an order of magnitude of headroom for larger proofs while keeping these public,
 	// unauthenticated endpoints from reading an unbounded body.
-	maxVoteBodyBytes = 8 << 10
+	maxVoteBodyBytes = 8 * internal.KiB
 	// maxVotesBodyBytes bounds a whole batch: one envelope allowance each, plus slack for the
 	// JSON framing around them.
-	maxVotesBodyBytes = db.MaxQuestionsPerProcess*maxVoteBodyBytes + 4<<10
+	maxVotesBodyBytes = db.MaxQuestionsPerProcess*maxVoteBodyBytes + 4*internal.KiB
 )
 
 // relayVotesHandler godoc
@@ -230,7 +230,7 @@ const (
 	// characters, so 80 leaves room for the JSON quoting and separator around each, plus
 	// slack for the framing. Like the relay endpoints this one is public, so the body has
 	// to be bounded before it is buffered.
-	maxVerifyVotesBodyBytes = db.MaxQuestionsPerProcess*80 + 4<<10
+	maxVerifyVotesBodyBytes = db.MaxQuestionsPerProcess*80 + 4*internal.KiB
 )
 
 // verifyLookupSem bounds concurrent node reads across every POST /votes/verify request.

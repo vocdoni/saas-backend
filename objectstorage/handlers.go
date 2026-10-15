@@ -13,6 +13,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/internal"
 )
 
 // isObjectNameRgx is a regular expression to match object names.
@@ -30,8 +31,8 @@ func validateUser(w http.ResponseWriter, r *http.Request) (*db.User, bool) {
 
 // parseMultipartForm parses the multipart form from the request
 func parseMultipartForm(w http.ResponseWriter, r *http.Request) bool {
-	// 32 MB is the default used by FormFile() function
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
+	// 32 MiB is the default used by FormFile() function
+	if err := r.ParseMultipartForm(32 * internal.MiB); err != nil {
 		errors.ErrStorageInvalidObject.Withf("could not parse form: %v", err).Write(w)
 		return false
 	}

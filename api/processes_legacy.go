@@ -842,7 +842,7 @@ func fetchExternalMetadata(ctx context.Context, url string) map[string]any {
 		return nil
 	}
 	var m map[string]any
-	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&m) != nil { // 1 MiB cap
+	if json.NewDecoder(io.LimitReader(resp.Body, internal.MiB)).Decode(&m) != nil {
 		return nil
 	}
 	return m
