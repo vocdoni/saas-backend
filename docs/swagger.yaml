@@ -3824,7 +3824,10 @@ paths:
     delete:
       consumes:
       - application/json
-      description: Deletes a set of keys from the meta information of an organization.
+      description: |-
+        Deletes a set of keys from the meta information of an organization.
+        Requires Manager/Admin role. Only admins may delete the organization identity keys
+        (name, logo, description); a manager's request naming any of them is rejected with 401.
       parameters:
       - description: Organization address
         in: path
@@ -3911,8 +3914,11 @@ paths:
     post:
       consumes:
       - application/json
-      description: Overwrite the meta information of an organization. Requires Manager/Admin
-        role.
+      description: |-
+        Overwrite the meta information of an organization. Requires Manager/Admin role.
+        Only admins may change the organization identity keys (name, logo, description): a manager's
+        request must carry them exactly as they are stored, or it is rejected with 401.
+        Top-level keys cannot contain dots (400), for any role.
       parameters:
       - description: Organization address
         in: path
@@ -3932,6 +3938,10 @@ paths:
           description: OK
           schema:
             type: string
+        "400":
+          description: Invalid meta information (e.g. a key containing a dot)
+          schema:
+            $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
           schema:
@@ -3964,7 +3974,9 @@ paths:
         Updates existing or adds new key/value pairs in the meta information of an organization.
         Has only one layer of depth. If a second layer document is provided, for example meta.doc = [a,b,c],
         the entire document will be updated.
-        Requires Manager/Admin role.
+        Requires Manager/Admin role. Only admins may change the organization identity keys
+        (name, logo, description, including dotted sub-keys such as name.default): a manager may
+        resend them with their stored value, but any other write to them is rejected with 401.
       parameters:
       - description: Organization address
         in: path
