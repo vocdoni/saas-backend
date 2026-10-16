@@ -57,7 +57,7 @@ jobs:
             ```
 
       - name: Commit and push if stage is outdated
-        if: ${{ github.event_name == 'push' && !github.event.repository.private && steps.diff.outputs.stdout }}
+        if: ${{ github.event_name == 'push' && steps.diff.outputs.stdout }}
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
@@ -70,7 +70,7 @@ jobs:
     needs: api-swagger
     # on.push.branches is already [stage], so a push event is always stage.
     # Pull request runs must never publish.
-    if: github.event_name == 'push' && !github.event.repository.private
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     # Scoped to this job on purpose: api-swagger pushes the regenerated
     # swagger.yaml with the repo-default token, so it must keep its own scopes.
