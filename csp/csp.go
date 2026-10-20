@@ -173,7 +173,7 @@ func (c *CSP) PubKey() (internal.HexBytes, error) {
 }
 
 // BlindPubKey returns the CSP blind-signature root public key, serialized as a compressed
-// secp256k1 point. It is the census root of a blind (OFF_CHAIN_CA_V2) census: the Vochain
+// secp256k1 point. It is the census root of a blind (anonymous) census: the Vochain
 // decompresses it and reads it back as a blind public key when verifying ECDSA_BLIND proofs.
 func (c *CSP) BlindPubKey() (internal.HexBytes, error) {
 	bp := c.Signer.BlindPubKey()

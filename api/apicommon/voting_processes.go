@@ -14,8 +14,8 @@ import (
 // inferred from the auth/2FA fields; there is no prebuilt-by-id reference over the API.
 type CensusSpec struct {
 	Weighted bool `json:"weighted"`
-	// Anonymous selects blind-CSP voting: the process publishes with census origin OFF_CHAIN_CA_V2
-	// and the CSP blind-signs each ballot so it cannot link a signature to the voter. Orthogonal to
+	// Anonymous selects blind-CSP voting: the census root is the CSP blind public key and the
+	// CSP blind-signs each ballot so it cannot link a signature to the voter. Orthogonal to
 	// the mail/sms/auth 2FA channel; may be combined with Weighted (V2 binds the weight into the salt).
 	Anonymous   bool                    `json:"anonymous,omitempty"`
 	AuthFields  db.OrgMemberAuthFields  `json:"authFields,omitempty"`

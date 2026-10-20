@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 	qt "github.com/frankban/quicktest"
 	blind "github.com/vocdoni/go-blindsecp256k1"
 	"github.com/vocdoni/saas-backend/csp/signers"
@@ -17,6 +18,7 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/test"
 	"go.vocdoni.io/dvote/crypto/ethereum"
+	dvotesaltedkey "go.vocdoni.io/dvote/crypto/saltedkey"
 	"go.vocdoni.io/dvote/util"
 	"go.vocdoni.io/proto/build/go/models"
 	"google.golang.org/protobuf/proto"
@@ -424,5 +426,129 @@ func TestFinishSaltedKeySigner(t *testing.T) {
 		c.Assert(status.UsedAt.IsZero(), qt.IsFalse)
 		c.Assert(status.UsedAt.After(time.Now().Add(-time.Second)), qt.IsTrue)
 		c.Assert(status.TimesVoted, qt.Equals, 1)
+	})
+}
+
+// TestECDSASaltedV2Recovery verifies that the V2 ECDSA signer produces a signature that recovers
+// to the CSP ECDSA public key salted with keccak256(processID || weight)[:20], and that the same
+// signature does NOT recover to the legacy processID[:20]-salted key.
+// It also tests nil weight (treated as weight=1 by V2Salt, matching the on-chain verifier).
+func TestECDSASaltedV2Recovery(t *testing.T) {
+	c := qt.New(t)
+
+	testDB, err := db.New(testMongoURI, test.RandomDatabaseName())
+	c.Assert(err, qt.IsNil)
+
+	ctx := context.Background()
+	csp, err := New(ctx, &Config{
+		DB:                       testDB,
+		MailService:              testMailService,
+		SMSService:               testSMSService,
+		NotificationCoolDownTime: time.Second * 5,
+		RootKey:                  *testRootKey,
+	})
+	c.Assert(err, qt.IsNil)
+
+	root, err := csp.Signer.ECDSAPubKey()
+	c.Assert(err, qt.IsNil)
+
+	// signAndRecover signs with the given signer type and recovers the public key from the
+	// resulting signature. The CA bundle matches what prepareSaltedKeySigner builds internally.
+	signAndRecover := func(c *qt.C, pid, weight internal.HexBytes, st signers.SignerType) []byte {
+		c.Helper()
+		c.Cleanup(func() {
+			c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+			csp.unlock(testUserID, pid)
+		})
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testAnchorID, ""), qt.IsNil)
+		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
+
+		sig, err := csp.Sign(testToken, testAddress, pid, weight, st)
+		c.Assert(err, qt.IsNil)
+
+		// Reconstruct the message that was signed. SignEthereum hashes with the Ethereum
+		// prefix ("\x19Ethereum Signed Message:\n"), so recovery must use the same prefixed
+		// hash — ethereum.Hash, not ethereum.HashRaw.
+		bundle, err := proto.Marshal(&models.CAbundle{
+			ProcessId:  pid,
+			Address:    testAddress,
+			VoteWeight: weight,
+		})
+		c.Assert(err, qt.IsNil)
+		hash := ethereum.Hash(bundle)
+
+		// Recover the public key from the signature.
+		recovered, err := ethcrypto.Ecrecover(hash, sig)
+		c.Assert(err, qt.IsNil)
+		return recovered
+	}
+
+	c.Run("V2 signature recovers to V2-salted pubkey", func(c *qt.C) {
+		pid := internal.HexBytes(util.RandomBytes(32))
+		weight := testUserWeightBytes
+		recovered := signAndRecover(c, pid, weight, signers.SignerTypeECDSASaltedV2)
+
+		v2salt, err := saltedkey.V2Salt(pid, weight)
+		c.Assert(err, qt.IsNil)
+		saltedPub, err := dvotesaltedkey.SaltECDSAPubKey(root, v2salt[:])
+		c.Assert(err, qt.IsNil)
+		c.Assert(recovered, qt.DeepEquals, ethcrypto.FromECDSAPub(saltedPub))
+	})
+
+	c.Run("V1 signature recovers to V1-salted pubkey (legacy processID[:20])", func(c *qt.C) {
+		pid := internal.HexBytes(util.RandomBytes(32))
+		weight := testUserWeightBytes
+		recovered := signAndRecover(c, pid, weight, signers.SignerTypeECDSASalted)
+
+		v1salt := pid[:saltedkey.SaltSize]
+		saltedPub, err := dvotesaltedkey.SaltECDSAPubKey(root, v1salt)
+		c.Assert(err, qt.IsNil)
+		c.Assert(recovered, qt.DeepEquals, ethcrypto.FromECDSAPub(saltedPub))
+	})
+
+	c.Run("V2 signature does not recover to V1-salted pubkey", func(c *qt.C) {
+		pid := internal.HexBytes(util.RandomBytes(32))
+		weight := testUserWeightBytes
+		recovered := signAndRecover(c, pid, weight, signers.SignerTypeECDSASaltedV2)
+
+		v1salt := pid[:saltedkey.SaltSize]
+		v1SaltedPub, err := dvotesaltedkey.SaltECDSAPubKey(root, v1salt)
+		c.Assert(err, qt.IsNil)
+		c.Assert(bytes.Equal(recovered, ethcrypto.FromECDSAPub(v1SaltedPub)), qt.IsFalse)
+	})
+
+	c.Run("V2 nil weight and weight=1 produce the same salt", func(c *qt.C) {
+		pid := internal.HexBytes(util.RandomBytes(32))
+
+		// sign with nil weight
+		{
+			c.Cleanup(func() {
+				c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+				csp.unlock(testUserID, pid)
+			})
+			c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testAnchorID, ""), qt.IsNil)
+			c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
+			sigNil, err := csp.Sign(testToken, testAddress, pid, nil, signers.SignerTypeECDSASaltedV2)
+			c.Assert(err, qt.IsNil)
+
+			bundleNil, err := proto.Marshal(&models.CAbundle{ProcessId: pid, Address: testAddress, VoteWeight: nil})
+			c.Assert(err, qt.IsNil)
+			hashNil := ethereum.Hash(bundleNil)
+			recoveredNil, err := ethcrypto.Ecrecover(hashNil, sigNil)
+			c.Assert(err, qt.IsNil)
+
+			// nil weight → dvote Salt treats it as 1
+			v2saltNil, err := saltedkey.V2Salt(pid, nil)
+			c.Assert(err, qt.IsNil)
+			saltedPubNil, err := dvotesaltedkey.SaltECDSAPubKey(root, v2saltNil[:])
+			c.Assert(err, qt.IsNil)
+			c.Assert(recoveredNil, qt.DeepEquals, ethcrypto.FromECDSAPub(saltedPubNil))
+
+			// weight=1 yields the same salt
+			weight1 := big.NewInt(1).Bytes()
+			v2saltOne, err := saltedkey.V2Salt(pid, weight1)
+			c.Assert(err, qt.IsNil)
+			c.Assert(v2saltNil, qt.Equals, v2saltOne)
+		}
 	})
 }

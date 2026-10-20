@@ -80,10 +80,14 @@ func parseAddress(w http.ResponseWriter, payload string) (*internal.HexBytes, bo
 // signOutcome so the public body carries the sanitized message, not the raw signer error
 // (csp.Sign joins internal detail into it), which stays in the log: authorization outcomes
 // are 401, internal failures 500.
-func (c *CSPHandlers) signAndRespond(w http.ResponseWriter, authToken, address, processID, weight internal.HexBytes) {
+func (c *CSPHandlers) signAndRespond(
+	w http.ResponseWriter,
+	authToken, address, processID, weight internal.HexBytes,
+	signerType signers.SignerType,
+) {
 	log.Debugw("new CSP sign request", "address", address, "procId", processID, "weight", weight)
 
-	signature, err := c.csp.Sign(authToken, address, processID, weight, signers.SignerTypeECDSASalted)
+	signature, err := c.csp.Sign(authToken, address, processID, weight, signerType)
 	if err != nil {
 		code, message := signOutcome(err)
 		if code == signCodeFailed {

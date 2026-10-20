@@ -283,8 +283,8 @@ type Census struct {
 	OrgAddress common.Address `json:"orgAddress" bson:"orgAddress"`
 	Type       CensusType     `json:"type" bson:"type"`
 	Weighted   bool           `json:"weighted" bson:"weighted"`
-	// Anonymous marks a blind-CSP census: published with census origin OFF_CHAIN_CA_V2 and a blind
-	// public-key root, so the CSP blind-signs ballots and cannot link a signature to the voter.
+	// Anonymous marks a blind-CSP census: the census root is the CSP blind public key and the
+	// CSP blind-signs each ballot so it cannot link a signature to the voter.
 	Anonymous   bool                 `json:"anonymous" bson:"anonymous"`
 	Size        int64                `json:"size" bson:"size"`
 	GroupID     bson.ObjectID        `json:"groupId" bson:"groupId"`
@@ -811,8 +811,12 @@ type VotingProcessQuestion struct {
 	Metadata          map[string]any    `json:"metadata,omitempty" bson:"metadata,omitempty"`
 	UpstreamID        internal.HexBytes `json:"upstreamId,omitempty" bson:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	MetadataURL       string            `json:"-" bson:"metadataURL,omitempty"`
-	Status            string            `json:"status,omitempty" bson:"status,omitempty"`
-	SyncedAt          time.Time         `json:"-" bson:"syncedAt,omitempty"`
+	// CensusOrigin is the on-chain census origin the question's election was published with
+	// (e.g. "OFF_CHAIN_CA_V2"). Empty means a draft or an OFF_CHAIN_CA election, which the CSP
+	// signs with the legacy processID[:20] salt.
+	CensusOrigin string    `json:"-" bson:"censusOrigin,omitempty"`
+	Status       string    `json:"status,omitempty" bson:"status,omitempty"`
+	SyncedAt     time.Time `json:"-" bson:"syncedAt,omitempty"`
 	// EndedAt is the actual on-chain moment this question's election stopped accepting votes,
 	// set only when the vote was ended early (before its scheduled end, i.e. ManuallyEnded on
 	// the chain). Absent while the vote is open or when it ran to its scheduled end. Recorded by

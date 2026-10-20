@@ -26,6 +26,12 @@ const electionMetadataVersion = "1.0"
 // DefaultElectionType is the metadata type used when ElectionParams.TypeMetadata is nil.
 const DefaultElectionType = "single-choice-multiquestion"
 
+// CSPCensusOrigin is the string form of the census origin this service writes to every
+// election it publishes and to db.VotingProcessQuestion.CensusOrigin at publish time.
+// It matches models.CensusOrigin_OFF_CHAIN_CA_V2.String(). Centralised here so
+// publish code and the per-question stored value cannot silently diverge.
+var CSPCensusOrigin = models.CensusOrigin_OFF_CHAIN_CA_V2.String()
+
 // BuildElectionMetadata maps the high-level ElectionParams into an on-chain
 // ElectionMetadata document and returns its JSON encoding. The returned bytes are
 // stored content-addressed; their public URL becomes the on-chain process metadata.
@@ -73,13 +79,10 @@ func BuildElectionMetadata(params *db.ElectionParams) ([]byte, error) {
 type NewProcessParams struct {
 	OrgAddress common.Address // organization (entity) that owns the election
 	Params     *db.ElectionParams
-	CensusRoot []byte // census root: the CSP ECDSA public key, or its blind public key when Anonymous
-	CensusURI  string // census endpoint (SaaS CSP base URL)
-	// Anonymous selects blind CSP: the election is published with census origin OFF_CHAIN_CA_V2
-	// (the CSP blind-signs ballots so it cannot link a signature to the voter). CensusRoot must then
-	// be the CSP blind public key. This is unrelated to EnvelopeType.Anonymous (the zk-SNARK flag),
-	// which stays false — the Vochain routes both CA origins to the CSP verifier regardless of it.
-	Anonymous   bool
+	// CensusRoot is the on-chain census authority: the CSP ECDSA public key for a plain
+	// census, or the CSP blind public key for an anonymous (blind-sign) census.
+	CensusRoot  []byte
+	CensusURI   string // census endpoint (SaaS CSP base URL)
 	MetadataURL string // public https URL of the stored ElectionMetadata JSON
 	// Nonce, when set, is used as the tx account nonce instead of reading the current
 	// on-chain nonce. Batch publishing sets explicit consecutive nonces so N txs can be
@@ -207,13 +210,9 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 		return nil, err
 	}
 
-	// blind CSP publishes under the V2 origin (weight-binding salt); the plain ECDSA CSP stays on
-	// the legacy origin. Both are verified on-chain by the CSP verifier; the flag never touches
-	// EnvelopeType.Anonymous.
-	censusOrigin := models.CensusOrigin_OFF_CHAIN_CA
-	if p.Anonymous {
-		censusOrigin = models.CensusOrigin_OFF_CHAIN_CA_V2
-	}
+	// every CSP election uses V2: keccak256(processID || weight) as the signing salt, binding
+	// the authorization to the specific election and the CSP-authorized vote weight.
+	censusOrigin := models.CensusOrigin_OFF_CHAIN_CA_V2
 
 	metadataURL := p.MetadataURL
 	process := &models.Process{

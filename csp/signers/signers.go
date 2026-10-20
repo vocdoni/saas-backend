@@ -13,8 +13,14 @@ type SignerType string
 const (
 	// SignerTypeBlindSalted represents a salted blind signature type.
 	SignerTypeBlindSalted SignerType = "blind-salted"
-	// SignerTypeECDSASalted represents a salted ECDSA signature type using the secp256k1 curve.
+	// SignerTypeECDSASalted represents a legacy salted ECDSA signature type. The salt is
+	// processID[:20], shared by every election of the same organization on the same chain.
+	// Used only for elections already published under census origin OFF_CHAIN_CA.
 	SignerTypeECDSASalted SignerType = "ecdsa-salted"
+	// SignerTypeECDSASaltedV2 represents the V2 salted ECDSA signature type. The salt is
+	// keccak256(processID || voteWeight-as-32-big-endian)[:20], binding the salt to the full
+	// election id and the CSP-authorized weight. Used for elections published under OFF_CHAIN_CA_V2.
+	SignerTypeECDSASaltedV2 SignerType = "ecdsa-salted-v2"
 )
 
 var (

@@ -29,27 +29,34 @@ func (c *CSP) Sign(
 	token, address, processID, weight internal.HexBytes,
 	signType signers.SignerType,
 ) (internal.HexBytes, error) {
-	switch signType {
-	case signers.SignerTypeECDSASalted:
-		userID, salt, message, err := c.prepareSaltedKeySigner(token, address, processID, weight)
-		defer c.unlock(userID, processID)
-		if err != nil {
-			return nil, err
-		}
-		signature, err := c.Signer.SignECDSA(*salt, message)
+	if signType != signers.SignerTypeECDSASalted && signType != signers.SignerTypeECDSASaltedV2 {
+		return nil, ErrInvalidSignerType
+	}
+	userID, salt, message, err := c.prepareSaltedKeySigner(token, address, processID, weight)
+	defer c.unlock(userID, processID)
+	if err != nil {
+		return nil, err
+	}
+	if signType == signers.SignerTypeECDSASaltedV2 {
+		// OFF_CHAIN_CA_V2 binds the salt to the whole election id and the CSP-authorized weight,
+		// the same weight bytes carried in the signed CA bundle.
+		v2Salt, err := saltedkey.V2Salt(processID, weight)
 		if err != nil {
 			return nil, errors.Join(ErrSign, err)
 		}
-		if err := c.finishSaltedKeySigner(token, address, processID); err != nil {
-			return nil, err
-		}
-		return signature, nil
-	default:
-		return nil, ErrInvalidSignerType
+		salt = &v2Salt
 	}
+	signature, err := c.Signer.SignECDSA(*salt, message)
+	if err != nil {
+		return nil, errors.Join(ErrSign, err)
+	}
+	if err := c.finishSaltedKeySigner(token, address, processID); err != nil {
+		return nil, err
+	}
+	return signature, nil
 }
 
-// NewBlindRequest issues the round-1 blind point R for a blind (OFF_CHAIN_CA_V2) signature on the
+// NewBlindRequest issues the round-1 blind point R for a blind-census signature on the
 // given election and arms the matching one-time nonce k, alongside the CSP-authorized weight used to
 // salt round 2. It validates the auth token but never sees the voter address — signing a message the
 // CSP cannot read is what keeps the vote unlinkable. Arming is atomic and idempotent: a repeated

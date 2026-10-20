@@ -523,7 +523,6 @@ func (pw *publishWorker) buildBatch(
 			Params:        ep,
 			CensusRoot:    pw.cspPubKey,
 			CensusURI:     a.serverURL,
-			Anonymous:     pw.census.Anonymous,
 			MetadataURL:   q.MetadataURL,
 			Nonce:         &nonce,
 			InitialStatus: initialStatus,
@@ -583,9 +582,13 @@ func (pw *publishWorker) confirmBatch(pending []*db.VotingProcessQuestion, resul
 		if pw.vp.InitialStatus == db.QuestionStatusPaused {
 			initialStatus = db.QuestionStatusPaused
 		}
-		if err := a.db.SetQuestionPublished(
-			pending[i].ID, res.UpstreamID, pending[i].MetadataURL, initialStatus,
-		); err != nil {
+		if err := a.db.SetQuestionPublished(db.QuestionPublishedParams{
+			ID:           pending[i].ID,
+			UpstreamID:   res.UpstreamID,
+			MetadataURL:  pending[i].MetadataURL,
+			Status:       initialStatus,
+			CensusOrigin: account.CSPCensusOrigin,
+		}); err != nil {
 			// leave UpstreamID unset so the question stays pending and is retried, rather
 			// than letting the process be marked published with an unpersisted row.
 			log.Warnw("could not persist published question", "error", err)

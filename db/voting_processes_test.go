@@ -52,7 +52,9 @@ func TestVotingProcessCRUD(t *testing.T) {
 
 	// publish one question, reverse lookup, then reset
 	upstream := internal.HexBytes("election-1")
-	c.Assert(testDB.SetQuestionPublished(q1ID, upstream, "url", QuestionStatusReady), qt.IsNil)
+	c.Assert(testDB.SetQuestionPublished(QuestionPublishedParams{
+		ID: q1ID, UpstreamID: upstream, MetadataURL: "url", Status: QuestionStatusReady,
+	}), qt.IsNil)
 	byUp, err := testDB.QuestionByUpstreamID(upstream)
 	c.Assert(err, qt.IsNil)
 	c.Assert(byUp.ID, qt.Equals, q1ID)
@@ -411,7 +413,9 @@ func TestServedUpstreamIDs(t *testing.T) {
 	_, err = testDB.SetQuestion(&VotingProcessQuestion{ProcessID: id, OrgAddress: org, Order: 1, Type: VotingTypeSingleChoice})
 	c.Assert(err, qt.IsNil)
 	served := internal.HexBytes("served-election")
-	c.Assert(testDB.SetQuestionPublished(qID, served, "url", QuestionStatusReady), qt.IsNil)
+	c.Assert(testDB.SetQuestionPublished(QuestionPublishedParams{
+		ID: qID, UpstreamID: served, MetadataURL: "url", Status: QuestionStatusReady,
+	}), qt.IsNil)
 
 	got, err := testDB.ServedUpstreamIDs([]internal.HexBytes{served, internal.HexBytes("orphan-election")})
 	c.Assert(err, qt.IsNil)
@@ -420,4 +424,42 @@ func TestServedUpstreamIDs(t *testing.T) {
 	got, err = testDB.ServedUpstreamIDs(nil)
 	c.Assert(err, qt.IsNil)
 	c.Assert(got, qt.HasLen, 0)
+}
+
+// TestSetQuestionPublishedCensusOrigin verifies that SetQuestionPublished persists the
+// CensusOrigin field and that it is readable back via QuestionByUpstreamID.
+func TestSetQuestionPublishedCensusOrigin(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	org := common.HexToAddress("0x1234")
+	setupVotingProcessOrg(c, org)
+	id, err := testDB.SetVotingProcess(&VotingProcess{OrgAddress: org})
+	c.Assert(err, qt.IsNil)
+	qID, err := testDB.SetQuestion(&VotingProcessQuestion{ProcessID: id, OrgAddress: org, Type: VotingTypeSingleChoice})
+	c.Assert(err, qt.IsNil)
+
+	upstream := internal.HexBytes("election-origin-test")
+	const wantOrigin = "OFF_CHAIN_CA_V2"
+	c.Assert(testDB.SetQuestionPublished(QuestionPublishedParams{
+		ID: qID, UpstreamID: upstream, MetadataURL: "url", Status: QuestionStatusReady,
+		CensusOrigin: wantOrigin,
+	}), qt.IsNil)
+
+	got, err := testDB.QuestionByUpstreamID(upstream)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.CensusOrigin, qt.Equals, wantOrigin)
+
+	// an empty CensusOrigin is stored as empty and round-trips correctly (legacy elections).
+	qID2, err := testDB.SetQuestion(&VotingProcessQuestion{ProcessID: id, OrgAddress: org, Order: 1, Type: VotingTypeSingleChoice})
+	c.Assert(err, qt.IsNil)
+	upstream2 := internal.HexBytes("election-legacy-origin")
+	c.Assert(testDB.SetQuestionPublished(QuestionPublishedParams{
+		ID: qID2, UpstreamID: upstream2, MetadataURL: "url2", Status: QuestionStatusReady,
+		CensusOrigin: "",
+	}), qt.IsNil)
+	got2, err := testDB.QuestionByUpstreamID(upstream2)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got2.CensusOrigin, qt.Equals, "")
 }

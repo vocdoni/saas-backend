@@ -9,8 +9,10 @@ import (
 	qt "github.com/frankban/quicktest"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/notifications"
+	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
@@ -52,6 +54,16 @@ func TestValidateVoterAddress(t *testing.T) {
 	c.Assert(validateVoterAddress(nil), qt.Not(qt.IsNil))
 	c.Assert(validateVoterAddress(internal.HexBytes(make([]byte, common.AddressLength-1))), qt.Not(qt.IsNil))
 	c.Assert(validateVoterAddress(internal.HexBytes(make([]byte, common.AddressLength+1))), qt.Not(qt.IsNil))
+}
+
+// TestSignerTypeForCensusOrigin verifies that signerTypeForCensusOrigin returns the V2 type for
+// questions stored with account.CSPCensusOrigin and the legacy type for empty or unknown origins.
+func TestSignerTypeForCensusOrigin(t *testing.T) {
+	c := qt.New(t)
+
+	c.Assert(signerTypeForCensusOrigin(account.CSPCensusOrigin), qt.Equals, signers.SignerTypeECDSASaltedV2)
+	c.Assert(signerTypeForCensusOrigin(""), qt.Equals, signers.SignerTypeECDSASalted)
+	c.Assert(signerTypeForCensusOrigin("OFF_CHAIN_CA"), qt.Equals, signers.SignerTypeECDSASalted)
 }
 
 func TestHandlePhoneContact(t *testing.T) {

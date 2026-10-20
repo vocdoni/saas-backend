@@ -89,8 +89,8 @@ definitions:
     properties:
       anonymous:
         description: |-
-          Anonymous selects blind-CSP voting: the process publishes with census origin OFF_CHAIN_CA_V2
-          and the CSP blind-signs each ballot so it cannot link a signature to the voter. Orthogonal to
+          Anonymous selects blind-CSP voting: the census root is the CSP blind public key and the
+          CSP blind-signs each ballot so it cannot link a signature to the voter. Orthogonal to
           the mail/sms/auth 2FA channel; may be combined with Weighted (V2 binds the weight into the salt).
         type: boolean
       authFields:
@@ -4838,7 +4838,7 @@ paths:
       - application/json
       description: |-
         Round 1 of the two-round blind CSP signing flow, for a process whose census is
-        anonymous (OFF_CHAIN_CA_V2). For each requested on-chain election id the CSP returns a
+        anonymous. For each requested on-chain election id the CSP returns a
         fresh blind point R (tokenR) the client uses to blind its CA bundle before calling
         blind-sign, plus the CSP-authorized weight the client must carry in that bundle. The
         batch is authorized as a unit (each election must belong to the process and the member
