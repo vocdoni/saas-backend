@@ -6,6 +6,7 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/subscriptions"
 )
 
 func TestCreateGroupWithAllMembers(t *testing.T) {
@@ -183,7 +184,10 @@ func TestCreateGroupWithLargeNumberOfMembers(t *testing.T) {
 
 	// Add a larger number of test members to the organization
 	var testMembers []apicommon.OrgMember
-	for i := 1; i <= mockFreePlan.Organization.MaxCensus+1; i++ {
+	const limit = 50
+	defer func(prev int64) { subscriptions.MaxMembersPerOrg = prev }(subscriptions.MaxMembersPerOrg)
+	subscriptions.MaxMembersPerOrg = limit
+	for i := 1; i <= limit+1; i++ {
 		testMembers = append(testMembers, apicommon.OrgMember{
 			MemberNumber: string(rune('0'+(i%10))) + string(rune('0'+((i/10)%10))) + string(rune('0'+((i/100)%10))),
 			Name:         "Member",
@@ -196,14 +200,11 @@ func TestCreateGroupWithLargeNumberOfMembers(t *testing.T) {
 		Members: testMembers,
 	}
 
-	// adding members should initially fail based on the free plan (5o members)
+	// adding members should initially fail on the memberbase limit
 	requestAndAssertCode(http.StatusUnauthorized,
 		t, http.MethodPost, adminToken, members,
 		"organizations", orgAddress.String(), "members")
-	// Adjust the free plan
-	increasedFreePlan := *mockFreePlan
-	increasedFreePlan.Organization.MaxCensus = len(testMembers)
-	qt.Assert(t, testDB.SetPlan(&increasedFreePlan), qt.IsNil)
+	subscriptions.MaxMembersPerOrg = int64(len(testMembers))
 
 	// Add members to the organization
 	addedResponse := requestAndParse[apicommon.AddMembersResponse](
@@ -229,7 +230,4 @@ func TestCreateGroupWithLargeNumberOfMembers(t *testing.T) {
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "groups", groupResponse.ID)
 	c.Assert(groupDetails.MemberIDs, qt.HasLen, len(testMembers))
-
-	// revert plan changes
-	qt.Assert(t, testDB.SetPlan(mockFreePlan), qt.IsNil)
 }

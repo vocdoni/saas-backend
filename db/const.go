@@ -31,7 +31,7 @@ const (
 	// MaxQuestionsPerProcess bounds the number of questions a voting process may hold, and so the
 	// number of ballots a voter can sign for one. Shared by the /processes validation and the CSP
 	// sign-batch cap (which cannot reach the api-package constant through the import cycle).
-	MaxQuestionsPerProcess = 100
+	MaxQuestionsPerProcess = 15
 
 	// Voting-process question status values (derived at read; empty means draft).
 	QuestionStatusReady    = "READY"

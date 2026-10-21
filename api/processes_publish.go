@@ -104,7 +104,7 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 		questionsMismatch = true
 	}
 	if census == nil {
-		return problems, questionsMismatch // plan checks below need the census
+		return problems, questionsMismatch // the checks below need the census
 	}
 	orgDoc, err := a.db.Organization(vp.OrgAddress)
 	if err != nil {
@@ -113,33 +113,7 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	if !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
 		problems = append(problems, "publishing requires the admin role")
 	}
-	// Per-question plan voting-type gate, on the ballot each question actually encodes rather
-	// than the type it is labelled with: a stored type is only a label, and a question written
-	// before the two halves were reconciled may carry one its protocol contradicts.
-	//
-	// EffectiveQuestionType recognises the four named types (singlechoice, multichoice, ranked,
-	// cumulative) from their canonical protocol and gates each on its plan flag, so a raw protocol
-	// that encodes one of them is gated too — the label cannot be dropped to evade the plan.
-	//
-	// What still slips through is a protocol that is *almost* canonical: {maxCount:2, maxValue:1,
-	// maxTotalCost:2} is the multichoice ballot field-for-field bar costExponent, so it is not
-	// recognised and stays ungated. EffectiveQuestionType recognises a shape only when it is
-	// exactly canonical, which is what storage needs and what authorization does not. Actually
-	// holding the gate needs a deliberately loose classifier (maxValue == 1 && maxCount > 1 ⇒
-	// effectively multiple-choice, whatever else is set), not this one.
-	for i := range questions {
-		// a question that already mined (UpstreamID set) is immutable on chain: its type cannot be
-		// changed, and gating it would only block a resume that mints the remaining questions. So the
-		// voting-type gate covers only questions still pending their first publish.
-		if len(questions[i].UpstreamID) > 0 {
-			continue
-		}
-		if err := a.subscriptions.OrgAllowsVotingType(vp.OrgAddress, account.EffectiveQuestionType(&questions[i])); err != nil {
-			problems = append(problems, err.Error())
-		}
-	}
-	// the largest per-question census is the binding constraint for the plan MaxCensus cap;
-	// process count/weighted/duration are process-level, so one call covers them all.
+	// the largest per-question census: a process whose every question has no voter cannot publish
 	var maxSize uint64
 	for i := range questions {
 		if s := account.ComputeMaxCensusSize(questions[i].EligibleMemberIDs, census.Size); s > maxSize {
@@ -160,25 +134,7 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	if vp.EndDate.After(start) {
 		durationSeconds = uint32(vp.EndDate.Sub(start).Seconds())
 	}
-	if err := a.subscriptions.OrgCanPublishProcess(orgDoc, maxSize, durationSeconds, census.Weighted); err != nil {
-		problems = append(problems, err.Error())
-	}
-	// managed orgs draw a process slot from the integrator's shared quota (read-only here). Key
-	// this on census.Size — the same basis reserveManagedProcessSlot uses at publish — so the
-	// dry-run and the real reservation agree.
-	if orgDoc.ManagedBy != (common.Address{}) && uint64(census.Size) > uint64(db.TestMaxCensusSize) {
-		if integrator, err := a.db.Organization(orgDoc.ManagedBy); err != nil {
-			problems = append(problems, "integrator organization not found")
-		} else if err := a.subscriptions.CanReserveManagedPublish(integrator); err != nil {
-			problems = append(problems, err.Error())
-		}
-	}
-	// email/SMS/vote allowance for the inline census. One auth (2FA challenge) per voter, but the
-	// N questions are N elections so each voter can cast N ballots → votes scale with the question
-	// count while notifications do not.
-	notifyCount := int(census.Size)
-	voteCount := int(census.Size) * len(questions)
-	if err := a.subscriptions.OrgCanPublishCensus(census, notifyCount, voteCount); err != nil {
+	if err := a.subscriptions.OrgCanPublishProcess(orgDoc, durationSeconds); err != nil {
 		problems = append(problems, err.Error())
 	}
 	return problems, questionsMismatch
@@ -330,28 +286,7 @@ func (a *API) startProcessPublish(t publishTarget) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get organization: %w", err)
 	}
-	// a process is one billed unit; reserve a single managed slot when applicable. A resume (a
-	// re-publish of a process that already mined some elections) must NOT reserve again — the
-	// original reservation from the first attempt still stands.
 	nonTestSized := uint64(census.Size) > uint64(db.TestMaxCensusSize)
-	var integratorAddr common.Address
-	var managedReserved bool
-	if !anyMined(questions) {
-		integratorAddr, managedReserved, err = a.reserveManagedProcessSlot(org, uint64(census.Size))
-		if err != nil {
-			return "", err
-		}
-	}
-	if managedReserved {
-		defer func() {
-			if !managedReserved {
-				return
-			}
-			if e := a.db.AddOrganizationManagedProcesses(integratorAddr, -1); e != nil {
-				log.Warnw("could not roll back managed processes counter", "error", e)
-			}
-		}()
-	}
 
 	// payment: a managed organization's process is charged to its integrator's wallet
 	// here, after the claim, so two concurrent publishes cannot both debit — and the
@@ -400,11 +335,9 @@ func (a *API) startProcessPublish(t publishTarget) (string, error) {
 		return "", fmt.Errorf("failed to create tx job: %w", err)
 	}
 
-	reserved := managedReserved
 	worker := &publishWorker{
 		a: a, vp: vp, questions: questions, census: census, org: org, user: user,
-		orgSigner: orgSigner, cspPubKey: cspPubKey, integratorAddr: integratorAddr,
-		reserved: reserved, nonTestSized: nonTestSized,
+		orgSigner: orgSigner, cspPubKey: cspPubKey, nonTestSized: nonTestSized,
 	}
 	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
 		defer orgLock.Unlock()
@@ -418,9 +351,8 @@ func (a *API) startProcessPublish(t publishTarget) (string, error) {
 		}
 		return "", errors.ErrTxQueueFull
 	}
-	// the worker now owns the lock, the publishing claim and the managed reservation.
+	// the worker now owns the lock and the publishing claim.
 	committed = true
-	managedReserved = false
 	lockHeld = false
 	return jobID, nil
 }
@@ -428,17 +360,15 @@ func (a *API) startProcessPublish(t publishTarget) (string, error) {
 // publishWorker carries the state of an async voting-process publish across the batch +
 // retry rounds executed on the tx worker pool.
 type publishWorker struct {
-	a              *API
-	vp             *db.VotingProcess
-	questions      []db.VotingProcessQuestion
-	census         *db.Census
-	org            *db.Organization
-	user           *db.User
-	orgSigner      *ethereum.SignKeys
-	cspPubKey      []byte
-	integratorAddr common.Address
-	reserved       bool
-	nonTestSized   bool
+	a            *API
+	vp           *db.VotingProcess
+	questions    []db.VotingProcessQuestion
+	census       *db.Census
+	org          *db.Organization
+	user         *db.User
+	orgSigner    *ethereum.SignKeys
+	cspPubKey    []byte
+	nonTestSized bool
 }
 
 // run builds and submits one election per question in a single batch, confirms them on
@@ -532,9 +462,7 @@ func (pw *publishWorker) resolveStartDate() time.Time {
 }
 
 // abandon rolls back a failed/aborted publish: it resets the not-yet-mined questions (so a later
-// publish resumes them), clears the publishing marker, and releases the managed-process
-// reservation only when nothing was mined this run. A partial-mine failure keeps the slot so the
-// resume (which skips a new reservation) consumes it, avoiding a leak or a double-reserve.
+// publish resumes them) and clears the publishing marker.
 func (pw *publishWorker) abandon() {
 	a := pw.a
 	if e := a.db.ResetQuestionsPublish(pw.vp.ID); e != nil {
@@ -542,11 +470,6 @@ func (pw *publishWorker) abandon() {
 	}
 	if e := a.db.ClearVotingProcessPublishing(pw.vp.ID); e != nil {
 		log.Warnw("could not clear publishing state after failed publish", "error", e)
-	}
-	if pw.reserved && !anyMined(pw.questions) {
-		if e := a.db.AddOrganizationManagedProcesses(pw.integratorAddr, -1); e != nil {
-			log.Warnw("could not roll back managed processes counter", "error", e)
-		}
 	}
 }
 
@@ -885,39 +808,4 @@ func parseProcessStatus(s string) (models.ProcessStatus, bool) {
 	default:
 		return 0, false
 	}
-}
-
-// reserveManagedProcessSlot reserves one process slot against the integrator's shared
-// ManagedProcesses quota when org is a managed organization publishing a non-test-sized
-// election. It returns the integrator address and reserved=true when a slot was taken — the
-// caller MUST roll it back with AddOrganizationManagedProcesses(integratorAddr, -1) if the
-// publish/sign later fails. For a standalone org or a test-sized election it is a no-op
-// (reserved=false, nil error).
-//
-// HasTxPermission skips the per-org process-count check for managed orgs precisely because
-// this integrator-level reservation enforces it instead.
-func (a *API) reserveManagedProcessSlot(org *db.Organization, maxCensusSize uint64) (common.Address, bool, error) {
-	if org.ManagedBy == (common.Address{}) || maxCensusSize <= uint64(db.TestMaxCensusSize) {
-		return common.Address{}, false, nil
-	}
-	integrator, err := a.db.Organization(org.ManagedBy)
-	if err != nil {
-		// a managed org whose integrator no longer exists is a not-found condition, not a
-		// server fault — map it like subscriptions.limitsOwner does rather than 500.
-		if err == db.ErrNotFound {
-			return common.Address{}, false, errors.ErrOrganizationNotFound.WithErr(err)
-		}
-		return common.Address{}, false, errors.ErrGenericInternalServerError.Withf("could not get integrator organization: %v", err)
-	}
-	maxProcesses, err := a.subscriptions.ManagedPublishLimits(integrator)
-	if err != nil {
-		return common.Address{}, false, err
-	}
-	if err := a.db.ReserveManagedPublish(integrator.Address, maxProcesses); err != nil {
-		if err == db.ErrManagedQuotaReached {
-			return common.Address{}, false, errors.ErrIntegratorQuotaExceeded
-		}
-		return common.Address{}, false, errors.ErrGenericInternalServerError.WithErr(err)
-	}
-	return integrator.Address, true, nil
 }

@@ -25,7 +25,7 @@ func TestWalletEndpoints(t *testing.T) {
 
 	integratorOrg, err := testDB.Organization(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	integratorOrg.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 2}
+	integratorOrg.Integrator = true
 	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
 
 	// an empty wallet reads as zero balance, empty ledger

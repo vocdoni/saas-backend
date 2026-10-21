@@ -205,7 +205,7 @@ func newIntegratorWithManagedOrg(
 
 	integratorOrg, err := testDB.Organization(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	integratorOrg.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 1}
+	integratorOrg.Integrator = true
 	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
 	integratorPlan := &db.Plan{
 		ID:           planID,

@@ -120,7 +120,10 @@ Component packages (each is a focused service composed in `main.go`):
   `cmd/service/main.go` into `api.Config.StatusSyncer` (a nil enqueuer — as in tests — makes enqueues
   no-ops). The managed-org delete guard deliberately reads the chain *synchronously* rather than
   trusting the stored status.
-- **`subscriptions/`** — permission/quota manager enforcing what an organization's plan allows.
+- **`subscriptions/`** — roles and the fixed pay-per-process restrictions, the same for every
+  organization (5 admins/managers, 50 000 members, 20 drafts, 90-day processes). Subscription
+  plans no longer limit anything; integrators are an `integrator` flag on the organization and
+  are bounded only by their wallet.
 - **`stripe/`** — Stripe client, checkout/portal sessions, and webhook handling for billing.
 - **`objectstorage/`** — S3-like object storage (images) backed by Mongo, with upload/download handlers.
 - **`errors/`** — typed API `Error` (code + HTTP status + optional data), JSON-serializable; handlers

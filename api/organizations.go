@@ -87,17 +87,6 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		errors.ErrNoDefaultPlan.WithErr(err).Write(w)
 		return
 	}
-	// integrator portal opt-in: subscribe the new org to the free integrator plan so it
-	// becomes an integrator on the free tier with no checkout (see Subscriptions.IsIntegrator).
-	selectedPlan := defaultPlan
-	if orgInfo.Integrator {
-		freePlan, err := a.db.FreeIntegratorPlan()
-		if err != nil || freePlan == nil {
-			errors.ErrPlanNotFound.Withf("free integrator plan not available").Write(w)
-			return
-		}
-		selectedPlan = freePlan
-	}
 	// check if the user has permission to create new organizations
 	hasPermission, err := a.subscriptions.HasDBPermission(user.Email, common.Address{}, subscriptions.CreateOrg)
 	if !hasPermission || err != nil {
@@ -162,8 +151,10 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		Communications: orgInfo.Communications,
 		Meta:           apicommon.BuildOrgMeta(nil, orgInfo.Name, orgInfo.Logo, orgInfo.Description, orgInfo.Meta),
 		Parent:         parentOrg,
+		// integrator portal opt-in: the new organization pays for its managed ones from its wallet
+		Integrator: orgInfo.Integrator,
 		Subscription: db.OrganizationSubscription{
-			PlanID:    selectedPlan.ID,
+			PlanID:    defaultPlan.ID,
 			StartDate: time.Now(),
 			Active:    true,
 		},

@@ -59,34 +59,4 @@ func TestPlans(t *testing.T) {
 		_, err := testDB.Plan(plan.ID)
 		c.Assert(err, qt.Equals, ErrNotFound)
 	})
-
-	t.Run("FreeIntegratorPlan", func(_ *testing.T) {
-		// FreeIntegratorPlan selects a zero-priced plan that grants managed-org capacity. We seed
-		// an explicit one and assert the selector returns it (robust to which matching plan FindOne
-		// returns), plus non-matching plans that must never be selected.
-		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
-
-		// non-matching plans must never be selected
-		c.Assert(testDB.SetPlan(&Plan{
-			ID:               "prod_paid_integrator",
-			Name:             "Paid Integrator",
-			MonthlyPrice:     1000,
-			YearlyPrice:      10000,
-			IntegratorLimits: IntegratorLimits{MaxManagedOrgs: 10},
-		}), qt.IsNil)
-		c.Assert(testDB.SetPlan(&Plan{ID: "prod_free_basic", Name: "Free Basic"}), qt.IsNil)
-
-		// a free integrator plan: zero-priced and grants managed-org capacity
-		c.Assert(testDB.SetPlan(&Plan{
-			ID:               "prod_free_integrator",
-			Name:             "Free Integrator",
-			IntegratorLimits: IntegratorLimits{MaxManagedOrgs: 1},
-		}), qt.IsNil)
-
-		plan, err := testDB.FreeIntegratorPlan()
-		c.Assert(err, qt.IsNil)
-		c.Assert(plan.MonthlyPrice, qt.Equals, int64(0))
-		c.Assert(plan.YearlyPrice, qt.Equals, int64(0))
-		c.Assert(plan.IntegratorLimits.MaxManagedOrgs > 0, qt.IsTrue)
-	})
 }

@@ -267,7 +267,7 @@ never what marks anything paid.
   `TestDeleteWalletPaidDraftCreditsIntegratorWallet`; the dashboard is what only a browser
   can show you.
 - **Integrator wallet**: make your org an integrator
-  (`go run ./cmd/cli --setIntegrator --orgAddress $ORG --maxManagedOrgs 5 --mongoURL mongodb://root:vocdoni@localhost:27017/saasdb`),
+  (`go run ./cmd/cli --setIntegrator --orgAddress $ORG --mongoURL mongodb://root:vocdoni@localhost:27017/saasdb`),
   then `POST /wallet/topup -d '{"amountCents":10000,"returnURL":"http://localhost:8000/checkout.html"}'`,
   pay it with a test card, and `GET /wallet` shows the credited balance and ledger; a
   managed organization's process then publishes by debiting it (no checkout involved).

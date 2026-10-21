@@ -65,13 +65,7 @@ func (a *API) resolveOrCreateDefaultCensus(
 		if _, missing, err = a.db.PopulateGroupCensus(census, spec.GroupID); err != nil {
 			return nil, nil, censusBuildError(err)
 		}
-		if err := a.subscriptions.OrgCanAddCensusParticipants(orgAddress, censusID, 0); err != nil {
-			return nil, nil, err
-		}
 	case len(spec.MemberIDs) > 0:
-		if err := a.subscriptions.OrgCanAddCensusParticipants(orgAddress, censusID, len(spec.MemberIDs)); err != nil {
-			return nil, nil, err
-		}
 		if _, missing, err = a.db.PopulateMembersCensus(census, spec.MemberIDs); err != nil {
 			return nil, nil, censusBuildError(err)
 		}

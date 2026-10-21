@@ -15,7 +15,6 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
-	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/types"
@@ -460,7 +459,7 @@ func TestVotingProcessAPIKeyAuth(t *testing.T) {
 	setOrganizationSubscription(t, orgAddr, mockEssentialPlan.ID)
 	org, err := testDB.Organization(orgAddr)
 	c.Assert(err, qt.IsNil)
-	org.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 2}
+	org.Integrator = true
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
 	// mint a voting:write key (managed:write is needed to create the managed org)
@@ -1155,109 +1154,4 @@ func TestVotingProcessCumulativeBallotType(t *testing.T) {
 	validation := requestAndParse[apicommon.VotingProcessValidateResponse](
 		t, http.MethodGet, adminToken, nil, "processes", created.ProcessID, "validation")
 	c.Assert(validation.Valid, qt.IsTrue, qt.Commentf("errors: %v", validation.Errors))
-}
-
-// TestVotingProcessPlanGateOnEffectiveType covers the gate a raw ballotProtocol used to walk past:
-// the plan's voting-type limits apply to the ballot a question encodes, not the label it carries,
-// so an org whose plan forbids a type cannot mint one by describing it in raw terms. Ranked is a
-// named type now, so a raw ranked protocol is gated on plan.VotingTypes.Ranked like any other.
-func TestVotingProcessPlanGateOnEffectiveType(t *testing.T) {
-	c := qt.New(t)
-	token := testCreateUser(t, "adminpassword123")
-	orgAddress := testCreateOrganization(t, token)
-
-	singleOnlyPlan := *mockEssentialPlan
-	singleOnlyPlan.ID = "prod_test_single_only"
-	singleOnlyPlan.Name = "Single Choice Only Plan"
-	singleOnlyPlan.StripeMonthlyPriceID = "price_month_test_single_only"
-	singleOnlyPlan.StripeYearlyPriceID = "price_year_test_single_only"
-	singleOnlyPlan.Public = false
-	singleOnlyPlan.VotingTypes.Multiple = false
-	singleOnlyPlan.VotingTypes.Ranked = false
-	c.Assert(testDB.SetPlan(&singleOnlyPlan), qt.IsNil)
-	setOrganizationSubscription(t, orgAddress, singleOnlyPlan.ID)
-
-	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
-	ids := memberIDs(members)
-
-	// a multichoice ballot, stated in raw terms and with no type at all, is gated on multiple
-	rawMulti := newVotingProcessRequest(orgAddress, ids)
-	rawMulti.Questions = rawMulti.Questions[:1]
-	rawMulti.Questions[0].Type = ""
-	rawMulti.Questions[0].TypeSetup = db.QuestionTypeSetup{}
-	rawMulti.Questions[0].BallotProtocol = &db.BallotProtocol{
-		MaxCount: 2, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2,
-	}
-	created := requestAndParse[apicommon.CreateVotingProcessResponse](
-		t, http.MethodPost, token, rawMulti, processesCreateEndpoint)
-	val := requestAndParse[apicommon.VotingProcessValidateResponse](
-		t, http.MethodGet, token, nil, "processes", created.ProcessID, "validation")
-	c.Assert(val.Valid, qt.IsFalse, qt.Commentf("a plan without multiple-choice must not mint one"))
-
-	// a ranked ballot stated the same way is gated on ranked: the raw protocol is recognised as
-	// the named type, so dropping the label no longer evades the plan
-	rawRanked := newVotingProcessRequest(orgAddress, ids)
-	rawRanked.Questions = rawRanked.Questions[:1]
-	rawRanked.Questions[0].Type = ""
-	rawRanked.Questions[0].TypeSetup = db.QuestionTypeSetup{}
-	rawRanked.Questions[0].BallotProtocol = &db.BallotProtocol{MaxCount: 2, MaxValue: 1, UniqueValues: true}
-	created = requestAndParse[apicommon.CreateVotingProcessResponse](
-		t, http.MethodPost, token, rawRanked, processesCreateEndpoint)
-	val = requestAndParse[apicommon.VotingProcessValidateResponse](
-		t, http.MethodGet, token, nil, "processes", created.ProcessID, "validation")
-	c.Assert(val.Valid, qt.IsFalse, qt.Commentf("a plan without ranked must not mint a ranked ballot: %v", val.Errors))
-}
-
-// TestVotingProcessPublishGateSkipsMinted covers the resume case: a question that already mined
-// (UpstreamID set) is immutable on chain, so the voting-type gate must skip it. Otherwise a plan
-// change after a partial publish wedges the process — the remaining questions can never be minted
-// while the mined one's election is live.
-func TestVotingProcessPublishGateSkipsMinted(t *testing.T) {
-	c := qt.New(t)
-	token := testCreateUser(t, "adminpassword123")
-	orgAddress := testCreateOrganization(t, token)
-
-	singleOnlyPlan := *mockEssentialPlan
-	singleOnlyPlan.ID = "prod_test_single_only_minted"
-	singleOnlyPlan.Name = "Single Only (minted)"
-	singleOnlyPlan.StripeMonthlyPriceID = "price_month_test_single_only_minted"
-	singleOnlyPlan.StripeYearlyPriceID = "price_year_test_single_only_minted"
-	singleOnlyPlan.Public = false
-	singleOnlyPlan.VotingTypes.Multiple = false
-	singleOnlyPlan.VotingTypes.Ranked = false
-	c.Assert(testDB.SetPlan(&singleOnlyPlan), qt.IsNil)
-	setOrganizationSubscription(t, orgAddress, singleOnlyPlan.ID)
-
-	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
-	ids := memberIDs(members)
-
-	// a ranked ballot over 2 choices; create does not gate voting type, only publish preflight does
-	req := newVotingProcessRequest(orgAddress, ids)
-	req.Questions = req.Questions[:1]
-	req.Questions[0].Type = ""
-	req.Questions[0].TypeSetup = db.QuestionTypeSetup{}
-	req.Questions[0].BallotProtocol = &db.BallotProtocol{MaxCount: 2, MaxValue: 1, UniqueValues: true}
-	created := requestAndParse[apicommon.CreateVotingProcessResponse](
-		t, http.MethodPost, token, req, processesCreateEndpoint)
-
-	// before mining: the plan has no Ranked flag, so the unmined question is gated
-	val := requestAndParse[apicommon.VotingProcessValidateResponse](
-		t, http.MethodGet, token, nil, "processes", created.ProcessID, "validation")
-	c.Assert(val.Valid, qt.IsFalse, qt.Commentf("unmined ranked question must be gated"))
-
-	// simulate the question having already mined on chain (UpstreamID set)
-	oid, err := bson.ObjectIDFromHex(created.ProcessID)
-	c.Assert(err, qt.IsNil)
-	stored, err := testDB.QuestionsByProcess(oid)
-	c.Assert(err, qt.IsNil)
-	c.Assert(stored, qt.HasLen, 1)
-	stored[0].UpstreamID = internal.HexBytes{0xab, 0xcd, 0xef, 0x01}
-	_, err = testDB.SetQuestion(&stored[0])
-	c.Assert(err, qt.IsNil)
-
-	// after mining: the gate skips it (immutable), so validation no longer reports the type — a
-	// resume can still mint the remaining questions
-	val = requestAndParse[apicommon.VotingProcessValidateResponse](
-		t, http.MethodGet, token, nil, "processes", created.ProcessID, "validation")
-	c.Assert(val.Valid, qt.IsTrue, qt.Commentf("a minted question must not block the process: %v", val.Errors))
 }

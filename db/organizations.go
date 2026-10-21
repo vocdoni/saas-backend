@@ -551,54 +551,6 @@ func (ms *MongoStorage) IncrementOrganizationSentVotesCounter(address common.Add
 	return ms.addToOrganizationCounter(address, "sentVotes", 1)
 }
 
-// IncrementOrganizationManagedOrgsCounterWithLimit atomically increments the managed
-// organizations counter only if it stays within limit, re-reading the counter under
-// keysLock so two concurrent creates cannot both pass a stale check and exceed the cap
-// (each managed org provisions a faucet-funded on-chain account, so over-provisioning is
-// a real cost vector). Returns ErrManagedQuotaReached when the limit is already reached.
-func (ms *MongoStorage) IncrementOrganizationManagedOrgsCounterWithLimit(address common.Address, limit int) error {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-
-	org, err := ms.Organization(address)
-	if err != nil {
-		return fmt.Errorf("could not get organization: %w", err)
-	}
-	if org.Counters.ManagedOrgs >= limit {
-		return ErrManagedQuotaReached
-	}
-	return ms.addToOrganizationCounter(address, "managedOrgs", 1)
-}
-
-// DecrementOrganizationManagedOrgsCounter atomically decrements the managed organizations counter.
-func (ms *MongoStorage) DecrementOrganizationManagedOrgsCounter(address common.Address) error {
-	return ms.addToOrganizationCounter(address, "managedOrgs", -1)
-}
-
-// ReserveManagedPublish atomically reserves one managed process slot for the integrator,
-// re-reading the counter under keysLock so concurrent publishes cannot each pass a stale
-// check and exceed the integrator's aggregate process quota. Returns ErrManagedQuotaReached
-// if the limit would be exceeded. Roll back with AddOrganizationManagedProcesses(-1) if the
-// publish later fails.
-func (ms *MongoStorage) ReserveManagedPublish(address common.Address, processLimit int) error {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-
-	org, err := ms.Organization(address)
-	if err != nil {
-		return fmt.Errorf("could not get organization: %w", err)
-	}
-	if org.Counters.ManagedProcesses >= processLimit {
-		return ErrManagedQuotaReached
-	}
-	return ms.addToOrganizationCounter(address, "managedProcesses", 1)
-}
-
-// AddOrganizationManagedProcesses atomically adds delta to the managed processes counter.
-func (ms *MongoStorage) AddOrganizationManagedProcesses(address common.Address, delta int64) error {
-	return ms.addToOrganizationCounter(address, "managedProcesses", delta)
-}
-
 // ListManagedOrganizations returns a paginated list of organizations managed by
 // the integrator at the given address.
 func (ms *MongoStorage) ListManagedOrganizations(
@@ -608,114 +560,19 @@ func (ms *MongoStorage) ListManagedOrganizations(
 	return paginatedDocuments[Organization](ms.organizations, page, limit, filter, options.Find())
 }
 
-// managedOrgAddresses returns the addresses of all organizations managed by
-// integratorAddr, projected to just their _id to keep the read lightweight.
-func (ms *MongoStorage) managedOrgAddresses(ctx context.Context, integratorAddr common.Address) ([]common.Address, error) {
-	if integratorAddr.Cmp(common.Address{}) == 0 {
-		return nil, ErrInvalidData
-	}
-	filter := bson.M{"managedBy": integratorAddr}
-	opts := options.Find().SetProjection(bson.M{"_id": 1})
-	cursor, err := ms.organizations.Find(ctx, filter, opts)
-	if err != nil {
-		return nil, fmt.Errorf("could not list managed organizations: %w", err)
-	}
-	defer func() { _ = cursor.Close(ctx) }()
-
-	var orgs []Organization
-	if err := cursor.All(ctx, &orgs); err != nil {
-		return nil, fmt.Errorf("could not decode managed organizations: %w", err)
-	}
-	addrs := make([]common.Address, len(orgs))
-	for i := range orgs {
-		addrs[i] = orgs[i].Address
-	}
-	return addrs, nil
-}
-
-// sumManagedCounter returns the sum of the given counters subfield (e.g. "sentEmails")
-// across all organizations managed by integratorAddr, computed server-side so only the
-// total crosses the wire.
-func (ms *MongoStorage) sumManagedCounter(integratorAddr common.Address, field string) (int, error) {
-	if integratorAddr.Cmp(common.Address{}) == 0 {
-		return 0, ErrInvalidData
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-
-	pipeline := mongo.Pipeline{
-		{{Key: "$match", Value: bson.M{"managedBy": integratorAddr}}},
-		{{Key: "$group", Value: bson.M{"_id": nil, "total": bson.M{"$sum": "$counters." + field}}}},
-	}
-	cursor, err := ms.organizations.Aggregate(ctx, pipeline)
-	if err != nil {
-		return 0, fmt.Errorf("could not aggregate managed counter %q: %w", field, err)
-	}
-	defer func() { _ = cursor.Close(ctx) }()
-
-	var results []struct {
-		Total int `bson:"total"`
-	}
-	if err := cursor.All(ctx, &results); err != nil {
-		return 0, fmt.Errorf("could not decode managed counter %q: %w", field, err)
-	}
-	if len(results) == 0 {
-		return 0, nil
-	}
-	return results[0].Total, nil
-}
-
-// CountMembersManagedBy returns the total org-member count across all organizations
-// managed by integratorAddr. It is the shared-pool denominator for the member limit
-// of an integrator's managed orgs.
-func (ms *MongoStorage) CountMembersManagedBy(integratorAddr common.Address) (int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-
-	addrs, err := ms.managedOrgAddresses(ctx, integratorAddr)
-	if err != nil {
-		return 0, err
-	}
-	if len(addrs) == 0 {
-		return 0, nil
-	}
-	// single query over all managed orgs rather than one CountOrgMembers per org
-	return ms.orgMembers.CountDocuments(ctx, bson.M{"orgAddress": bson.M{"$in": addrs}}) //nolint:goconst
-}
-
-// SumSentEmailsManagedBy returns the total 2FA emails sent across all organizations
-// managed by integratorAddr (the integrator's shared 2FA-email pool consumption).
-func (ms *MongoStorage) SumSentEmailsManagedBy(integratorAddr common.Address) (int, error) {
-	return ms.sumManagedCounter(integratorAddr, "sentEmails")
-}
-
-// SumSentSMSManagedBy returns the total 2FA SMS sent across all organizations managed
-// by integratorAddr (the integrator's shared 2FA-SMS pool consumption).
-func (ms *MongoStorage) SumSentSMSManagedBy(integratorAddr common.Address) (int, error) {
-	return ms.sumManagedCounter(integratorAddr, "sentSMS")
-}
-
-// SumSentVotesManagedBy returns the total votes relayed across all organizations managed
-// by integratorAddr (the integrator's shared vote pool consumption).
-func (ms *MongoStorage) SumSentVotesManagedBy(integratorAddr common.Address) (int, error) {
-	return ms.sumManagedCounter(integratorAddr, "sentVotes")
-}
-
-// ManagedCounters is an integrator's shared-pool usage summed across all of its managed
-// organizations: votes relayed and 2FA SMS/emails sent. bson tags match the $group output
-// of SumManagedCounters.
+// ManagedCounters is an integrator's usage summed across all of its managed organizations:
+// how many it manages, votes relayed and 2FA SMS/emails sent. bson tags match the $group
+// output of SumManagedCounters.
 type ManagedCounters struct {
-	SentVotes  int `bson:"sentVotes"`
-	SentSMS    int `bson:"sentSMS"`
-	SentEmails int `bson:"sentEmails"`
+	ManagedOrgs int `bson:"managedOrgs"`
+	SentVotes   int `bson:"sentVotes"`
+	SentSMS     int `bson:"sentSMS"`
+	SentEmails  int `bson:"sentEmails"`
 }
 
-// SumManagedCounters returns the vote/SMS/email totals across all organizations managed by
-// integratorAddr in a single aggregation, so the frequently-hit /integrator dashboard reads
-// the whole shared-pool usage in one round trip instead of three separate sumManagedCounter
-// calls.
+// SumManagedCounters returns the managed organization count and their vote/SMS/email totals
+// in a single aggregation, so the /integrator dashboard reads them in one round trip.
 //
-// one $match+$group over the managedBy set the other integrator paths already scan.
 // If /integrator ever gets hot, denormalise these onto the integrator's own Counters at
 // increment time and drop the aggregation.
 func (ms *MongoStorage) SumManagedCounters(integratorAddr common.Address) (ManagedCounters, error) {
@@ -728,10 +585,11 @@ func (ms *MongoStorage) SumManagedCounters(integratorAddr common.Address) (Manag
 	pipeline := mongo.Pipeline{
 		{{Key: "$match", Value: bson.M{"managedBy": integratorAddr}}},
 		{{Key: "$group", Value: bson.M{
-			"_id":        nil,
-			"sentVotes":  bson.M{"$sum": "$counters.sentVotes"},
-			"sentSMS":    bson.M{"$sum": "$counters.sentSMS"},
-			"sentEmails": bson.M{"$sum": "$counters.sentEmails"},
+			"_id":         nil,
+			"managedOrgs": bson.M{"$sum": 1},
+			"sentVotes":   bson.M{"$sum": "$counters.sentVotes"},
+			"sentSMS":     bson.M{"$sum": "$counters.sentSMS"},
+			"sentEmails":  bson.M{"$sum": "$counters.sentEmails"},
 		}}},
 	}
 	cursor, err := ms.organizations.Aggregate(ctx, pipeline)

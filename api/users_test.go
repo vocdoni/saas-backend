@@ -11,7 +11,6 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
-	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
@@ -369,12 +368,9 @@ func TestUserInfoIsIntegrator(t *testing.T) {
 	c.Assert(before.Organizations, qt.HasLen, 1)
 	c.Assert(before.Organizations[0].IsIntegrator, qt.IsFalse)
 
-	// Enable integrator status via a per-org IntegratorLimits override.
 	org, err := testDB.Organization(orgAddr)
 	c.Assert(err, qt.IsNil)
-	org.IntegratorLimits = &db.IntegratorLimits{
-		MaxManagedOrgs: 1,
-	}
+	org.Integrator = true
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
 	// The organization is now flagged as an integrator.

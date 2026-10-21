@@ -146,9 +146,6 @@ func (a *API) preflightCensusGrowth(org *db.Organization, censusIDs []string, co
 		}
 	}
 	for _, censusID := range censusIDs {
-		if err := a.subscriptions.OrgCanAddCensusParticipants(org.Address, censusID, count); err != nil {
-			return err
-		}
 		census, err := a.db.Census(censusID)
 		if err != nil {
 			return fmt.Errorf("could not load census %s: %w", censusID, err)

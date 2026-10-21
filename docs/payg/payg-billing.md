@@ -198,6 +198,11 @@ would only bury the events that can still succeed.
 
 ## Integrator wallet (managed organizations)
 
+An integrator is an organization flagged `integrator` (`cmd/cli --setIntegrator`, or opted in at
+creation). It manages any number of organizations and has no quota of its own: the only limit on
+what it spends is its wallet balance. Its own organization holds no processes (403, 40174); to
+run its own votes it creates a managed organization of itself.
+
 Integrators publish on behalf of managed organizations, so the payer is not present at
 publish time. Each integrator holds a prepaid **EUR balance** (money, not resource
 units — unit pools would clash with the non-linear base price):
@@ -408,6 +413,7 @@ process metadata (a subscription's) is ignored.
 | 40176 | 422 | census above 50 000 — custom quote only, refused on every payment path |
 | 40177 | 409 | a payment is already processing or completed, or a session is completing |
 | 40178 | 402 | census growth beyond the paid price (`ProcessCensusGrowthQuote` in data) |
+| 40174 | 403 | an integrator's own organization cannot own processes |
 
 ## Storage summary (migration 0026)
 
@@ -466,8 +472,8 @@ Three layers, from hermetic to manual:
 
 ## Open questions / follow-ups
 
-- Census growth of a **published unpaid-tier** process is governed by plan quotas; a paid
-  one is governed by its envelope, which `census/checkout` can raise.
+- Census growth of a published process is governed by its envelope, which `census/checkout`
+  can raise; subscription plans no longer limit it.
 - Payments recorded before the custom URL became once per organization priced it per process
   and do not record `customUrl`: they neither stamp the organization nor withhold or release it
   on refund, and their growth quotes leave the €89 they paid out of the projection, so that much

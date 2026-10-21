@@ -108,10 +108,9 @@ type Organization struct {
 	Subscription      OrganizationSubscription `json:"subscription" bson:"subscription"`
 	Counters          OrganizationCounters     `json:"counters" bson:"counters"`
 	ManagedBy         common.Address           `json:"managedBy,omitempty" bson:"managedBy,omitempty"`
-	// IntegratorLimits, when set, is a per-organization override that both enables
-	// integrator status (manual/admin path) and caps its managed resources. When unset,
-	// integrator status and limits derive from the active subscription plan instead.
-	IntegratorLimits *IntegratorLimits `json:"integratorLimits,omitempty" bson:"integratorLimits,omitempty"`
+	// Integrator enables the organization to create and pay for managed organizations
+	// (ignored on a managed organization itself).
+	Integrator bool `json:"integrator,omitempty" bson:"integrator,omitempty"`
 }
 
 // metaDefaultString extracts the "default" locale value from a meta entry, stored
@@ -160,21 +159,12 @@ func (o *Organization) LogoURL() string {
 	return metaDefaultString(o.Meta["logo"])
 }
 
-// IntegratorLimits caps how many organizations an integrator may manage. The
-// aggregate process and census-size caps across those managed orgs are taken from
-// the integrator's plan top-level limits (Plan.Organization.MaxProcesses /
-// MaxCensus), not duplicated here.
-type IntegratorLimits struct {
-	MaxManagedOrgs int `json:"maxManagedOrgs" bson:"maxManagedOrgs"`
-}
-
 type PlanLimits struct {
 	Users        int `json:"teamMembers" bson:"users"`
 	SubOrgs      int `json:"subOrgs" bson:"subOrgs"`
 	MaxProcesses int `json:"maxProcesses" bson:"maxProcesses"`
 	MaxCensus    int `json:"maxCensus" bson:"maxCensus"`
-	// Max votes that may be relayed; 0 means unlimited. For managed orgs this is the
-	// integrator's shared pool, summed across all its managed orgs.
+	// Max votes that may be relayed; 0 means unlimited.
 	MaxVotes int `json:"maxVotes" bson:"maxVotes"`
 	// Max process duration in days
 	MaxDuration int  `json:"maxDaysDuration" bson:"maxDuration"`
@@ -219,12 +209,11 @@ type Plan struct {
 	// Public reports whether the plan is listed on the public /plans catalog. Private plans
 	// (custom per-customer contracts and the internal free integrator tier) are hidden from
 	// the listing but remain visible to their own subscriber via the subscription payload.
-	Public           bool             `json:"public" bson:"public"`
-	FreeTrialDays    int              `json:"freeTrialDays" bson:"freeTrialDays"`
-	Organization     PlanLimits       `json:"organization" bson:"organization"`
-	VotingTypes      VotingTypes      `json:"votingTypes" bson:"votingTypes"`
-	Features         Features         `json:"features" bson:"features"`
-	IntegratorLimits IntegratorLimits `json:"integratorLimits" bson:"integratorLimits"`
+	Public        bool        `json:"public" bson:"public"`
+	FreeTrialDays int         `json:"freeTrialDays" bson:"freeTrialDays"`
+	Organization  PlanLimits  `json:"organization" bson:"organization"`
+	VotingTypes   VotingTypes `json:"votingTypes" bson:"votingTypes"`
+	Features      Features    `json:"features" bson:"features"`
 }
 
 type BillingPeriod string
@@ -248,14 +237,12 @@ type OrganizationSubscription struct {
 }
 
 type OrganizationCounters struct {
-	SentSMS          int `json:"sentSMS" bson:"sentSMS"`
-	SentEmails       int `json:"sentEmails" bson:"sentEmails"`
-	SentVotes        int `json:"sentVotes" bson:"sentVotes"`
-	SubOrgs          int `json:"subOrgs" bson:"subOrgs"`
-	Users            int `json:"users" bson:"users"`
-	Processes        int `json:"processes" bson:"processes"`
-	ManagedOrgs      int `json:"managedOrgs" bson:"managedOrgs"`
-	ManagedProcesses int `json:"managedProcesses" bson:"managedProcesses"`
+	SentSMS    int `json:"sentSMS" bson:"sentSMS"`
+	SentEmails int `json:"sentEmails" bson:"sentEmails"`
+	SentVotes  int `json:"sentVotes" bson:"sentVotes"`
+	SubOrgs    int `json:"subOrgs" bson:"subOrgs"`
+	Users      int `json:"users" bson:"users"`
+	Processes  int `json:"processes" bson:"processes"`
 }
 
 type OrganizationInvite struct {

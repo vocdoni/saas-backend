@@ -388,10 +388,6 @@ func (a *API) addProcessCensusMembers(
 		writeSubscriptionError(w, err)
 		return nil, false
 	}
-	if err := a.subscriptions.OrgCanAddCensusParticipants(census.OrgAddress, census.ID.Hex(), len(memberIDs)); err != nil {
-		writeSubscriptionError(w, err)
-		return nil, false
-	}
 
 	added, memberErrs, err := a.db.AddCensusParticipantsByMemberIDs(census.ID.Hex(), memberIDs)
 	switch {

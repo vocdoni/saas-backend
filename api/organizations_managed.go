@@ -50,23 +50,14 @@ func (a *API) integratorAddress(w http.ResponseWriter, r *http.Request) (common.
 	return common.Address{}, false
 }
 
-// releaseManagedOrgSlot rolls back a managed-org slot reserved by
-// IncrementOrganizationManagedOrgsCounterWithLimit when provisioning or persisting the
-// managed org fails. Best-effort: a failed rollback is only logged, never fatal.
-func (a *API) releaseManagedOrgSlot(integratorAddr common.Address) {
-	if err := a.db.DecrementOrganizationManagedOrgsCounter(integratorAddr); err != nil {
-		log.Warnw("could not roll back managed orgs counter", "integrator", integratorAddr.Hex(), "error", err)
-	}
-}
-
 // createManagedOrganizationHandler godoc
 //
 //	@Summary		Create a managed organization under an integrator
 //	@Description	Create a new organization managed by the caller's integrator organization. The
 //	@Description	integrator is resolved from the authenticated principal (the API key's org, or the
 //	@Description	user's organization for a session) — no address is passed in the URL. The caller must
-//	@Description	be an admin of that integrator organization, which must be enabled as an integrator and
-//	@Description	within its managed-organizations quota. The managed org's on-chain account is always
+//	@Description	be an admin of that integrator organization, which must be enabled as an integrator;
+//	@Description	there is no limit on how many organizations it manages. The managed org's on-chain account is always
 //	@Description	provisioned eagerly. The optional `ownerEmail` designates the managed org's owner/admin
 //	@Description	(defaults to the calling user); the per-user MaxOrgsPerUser cap is bypassed for managed orgs.
 //	@Description
@@ -79,7 +70,7 @@ func (a *API) releaseManagedOrgSlot(integratorAddr common.Address) {
 //	@Success		200		{object}	apicommon.OrganizationInfo
 //	@Failure		400		{object}	errors.Error	"Invalid input data"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		403		{object}	errors.Error	"Not an integrator or quota reached"
+//	@Failure		403		{object}	errors.Error	"Not an integrator"
 //	@Failure		404		{object}	errors.Error	"Integrator organization not found"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/integrator/organizations [post]
@@ -106,18 +97,13 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	// quota / eligibility checks (all enforcement lives in the subscriptions package)
+	// eligibility: an integrator may manage any number of organizations
 	if err := a.subscriptions.CanCreateManagedOrg(integrator); err != nil {
 		var apiErr errors.Error
 		if errors.As(err, &apiErr) {
 			apiErr.Write(w)
 			return
 		}
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-	limits, err := a.subscriptions.EffectiveIntegratorLimits(integrator)
-	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
@@ -179,28 +165,15 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 			Active:    true,
 		},
 	}
-	// atomically reserve a managed-org slot BEFORE provisioning the (faucet-funded)
-	// on-chain account, so two concurrent creates from the same integrator cannot both
-	// pass the stale CanCreateManagedOrg check above and over-provision past the cap.
-	if err := a.db.IncrementOrganizationManagedOrgsCounterWithLimit(integratorAddr, limits.MaxManagedOrgs); err != nil {
-		if err == db.ErrManagedQuotaReached {
-			errors.ErrMaxManagedOrgsReached.Write(w)
-			return
-		}
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
 	// forge the managed org's on-chain account (always eager) BEFORE persisting the DB
 	// row. CreateOrgAccount is idempotent and the address derives from the signer, so a
 	// failure here leaves nothing to clean up and the request can be retried safely.
 	infoURI := fmt.Sprintf("%s/organizations/%s", a.serverURL, dbOrg.Address.String())
 	if err := a.account.CreateOrgAccount(signer, apicommon.OrgDisplayName(dbOrg.Meta, dbOrg.Address.String()), infoURI); err != nil {
-		a.releaseManagedOrgSlot(integratorAddr)
 		errors.ErrGenericInternalServerError.Withf("could not provision managed organization account: %v", err).Write(w)
 		return
 	}
 	if err := a.db.SetOrganization(dbOrg); err != nil {
-		a.releaseManagedOrgSlot(integratorAddr)
 		if err == db.ErrAlreadyExists {
 			errors.ErrInvalidOrganizationData.WithErr(err).Write(w)
 			return
@@ -276,10 +249,10 @@ func (a *API) managedOrganizationsHandler(w http.ResponseWriter, r *http.Request
 //
 //	@Summary		Get integrator quota and usage
 //	@Description	Returns whether the caller's organization (resolved from the API key's org or the user
-//	@Description	session — no address in the URL) is enabled as an integrator, along with its effective
-//	@Description	managed-resource limits and current usage. The caller must be an admin or manager of the
-//	@Description	organization. When the organization is not an integrator, `enabled` is false and `limits`
-//	@Description	is omitted (usage counters are still returned). A 0 in any limit field means unlimited.
+//	@Description	session — no address in the URL) is enabled as an integrator, along with the usage summed
+//	@Description	across its managed organizations. The caller must be an admin or manager of the
+//	@Description	organization. An integrator has no limits: its spending is bounded by its wallet
+//	@Description	balance (GET /wallet). When the organization is not an integrator, `enabled` is false.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `quota:read`).
 //	@Tags			integrator
@@ -314,47 +287,20 @@ func (a *API) integratorInfoHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	resp := &apicommon.IntegratorInfoResponse{
-		Enabled: a.subscriptions.IsIntegrator(org),
-		Usage: apicommon.IntegratorUsage{
-			ManagedOrgs:      org.Counters.ManagedOrgs,
-			ManagedProcesses: org.Counters.ManagedProcesses,
-		},
-	}
+	resp := &apicommon.IntegratorInfoResponse{Enabled: a.subscriptions.IsIntegrator(org)}
 	if resp.Enabled {
-		limits, err := a.subscriptions.EffectiveIntegratorLimits(org)
-		if err != nil {
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
-		}
-		apiLimits := apicommon.IntegratorLimits{MaxManagedOrgs: limits.MaxManagedOrgs}
-
-		// The process/votes/SMS/email caps are the integrator plan's pooled limits. An
-		// override-enabled integrator may have no subscription plan; leave those caps at 0
-		// (unlimited/unknown) in that case rather than failing the dashboard. A real lookup
-		// failure on a plan that is supposed to exist is surfaced rather than masked as 0.
-		if org.Subscription.PlanID != "" {
-			plan, err := a.db.Plan(org.Subscription.PlanID)
-			if err != nil {
-				errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-				return
-			}
-			apiLimits.MaxManagedProcesses = plan.Organization.MaxProcesses
-			apiLimits.MaxVotes = plan.Organization.MaxVotes
-			apiLimits.MaxSMS = plan.Features.TwoFaSms
-			apiLimits.MaxEmails = plan.Features.TwoFaEmail
-		}
-		resp.Limits = &apiLimits
-
-		// Shared-pool usage summed across the integrator's managed orgs, in one aggregation.
+		// usage summed across the integrator's managed orgs, in one aggregation
 		counters, err := a.db.SumManagedCounters(integratorAddr)
 		if err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
-		resp.Usage.SentVotes = counters.SentVotes
-		resp.Usage.SentSMS = counters.SentSMS
-		resp.Usage.SentEmails = counters.SentEmails
+		resp.Usage = apicommon.IntegratorUsage{
+			ManagedOrgs: counters.ManagedOrgs,
+			SentVotes:   counters.SentVotes,
+			SentSMS:     counters.SentSMS,
+			SentEmails:  counters.SentEmails,
+		}
 	}
 	apicommon.HTTPWriteJSON(w, resp)
 }
@@ -366,8 +312,7 @@ func (a *API) integratorInfoHandler(w http.ResponseWriter, r *http.Request) {
 //	@Description	tied to it (memberbase, censuses + participants, processes, bundles, CSP tokens,
 //	@Description	jobs, pending invites), and unlink it from its members. The caller must be an admin
 //	@Description	of their integrator organization (resolved from the API key's org or the user session
-//	@Description	— no address in the URL), and the target must be managed by it. The integrator's usage
-//	@Description	counters are rolled back accordingly.
+//	@Description	— no address in the URL), and the target must be managed by it.
 //	@Description
 //	@Description	Deletion is blocked with 409 when any of the managed org's published elections is
 //	@Description	still active on-chain (READY/PAUSED); end them (or wait for them to end) first.
@@ -425,11 +370,11 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Active-election guard + usage capture: fetch the managed org's published processes once.
-	// The guard blocks deletion while any published election is READY or PAUSED on-chain (a lookup
-	// error fails closed so we never orphan a live election). The same list feeds the integrator
-	// counter rollback below. AllProcessesByOrg is unbounded so the guard inspects every
-	// published election, not just the first page.
+	// Active-election guard: fetch the managed org's published processes once. The guard blocks
+	// deletion while any published election is READY or PAUSED on-chain (a lookup error fails
+	// closed so we never orphan a live election). The same list feeds the CSP cleanup below.
+	// AllProcessesByOrg is unbounded so the guard inspects every published election, not just
+	// the first page.
 	published, err := a.db.AllProcessesByOrg(managedAddr, db.PublishedOnly)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -469,19 +414,6 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 			errors.ErrManagedOrgHasActiveElections.Write(w)
 			return
 		}
-	}
-
-	// capture usage to roll back the integrator counters after deletion. The integrator's
-	// ManagedProcesses counter is bumped on publish only for non-test-sized elections
-	// (ElectionParams.MaxCensusSize > db.TestMaxCensusSize), by 1 (the legacy /process publish). The
-	// rollback delta must mirror that rule exactly, so it is derived from the published
-	// non-test-sized processes' ElectionParams rather than from the census documents.
-	var nonTestPublishedCount int64
-	for _, p := range published {
-		if p.ElectionParams == nil || p.ElectionParams.MaxCensusSize <= uint64(db.TestMaxCensusSize) {
-			continue
-		}
-		nonTestPublishedCount++
 	}
 
 	// cascade: each step is best-effort. Failures are logged but do not abort the teardown, so a
@@ -555,22 +487,6 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// roll back the integrator's aggregate usage counters (best-effort). ManagedOrgs always -1;
-	// processes only by the delta captured above (published non-test-sized elections), mirroring
-	// the publish-time bump rule so the counter never goes negative.
-	if err := a.db.DecrementOrganizationManagedOrgsCounter(integratorAddr); err != nil {
-		log.Warnw("could not decrement managed orgs counter",
-			"integrator", integratorAddr.Hex(), "error", err)
-	}
-	if nonTestPublishedCount > 0 {
-		if err := a.db.AddOrganizationManagedProcesses(integratorAddr, -nonTestPublishedCount); err != nil {
-			log.Warnw("could not decrement managed processes counter",
-				"integrator", integratorAddr.Hex(), "delta", -nonTestPublishedCount, "error", err)
-		}
-	}
-
-	log.Infow("deleted managed organization",
-		"integrator", integratorAddr.Hex(), "org", managedAddr.Hex(),
-		"processes", nonTestPublishedCount)
+	log.Infow("deleted managed organization", "integrator", integratorAddr.Hex(), "org", managedAddr.Hex())
 	apicommon.HTTPWriteJSON(w, &apicommon.DeleteManagedOrganizationResponse{Address: managedAddr.Hex()})
 }

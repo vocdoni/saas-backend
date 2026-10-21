@@ -383,7 +383,7 @@ func TestStripeCheckoutWebhookWalletTopUp(t *testing.T) {
 	integratorAddr := testCreateOrganization(t, token)
 	integratorOrg, err := testDB.Organization(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	integratorOrg.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 1}
+	integratorOrg.Integrator = true
 	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
 
 	sessionID := "cs_topup_" + util.RandomHex(8)
@@ -502,7 +502,7 @@ func TestStripeCheckoutWebhookPermanentlyInvalidEvents(t *testing.T) {
 	integratorAddr := testCreateOrganization(t, token)
 	integratorOrg, err := testDB.Organization(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	integratorOrg.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 1}
+	integratorOrg.Integrator = true
 	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
 
 	// a top-up whose organization is not an address: nothing to credit, ever

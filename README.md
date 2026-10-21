@@ -263,13 +263,14 @@ explicitly out of scope — handle those separately if the erasure request cover
 
 ### [cmd/cli](cmd/cli/) — integrator switch
 
-**What it does.** `--setIntegrator` flags an organization as an integrator and sets its
-`maxManagedOrgs` limit.
+**What it does.** `--setIntegrator` flags an organization as an integrator: it can create
+managed organizations and pay for their processes from its prepaid wallet, with no limit other
+than the wallet balance.
 
 **How to run.**
 
 ```bash
-go run ./cmd/cli --setIntegrator --orgAddress <hex> --maxManagedOrgs 5 -m <mongoURL> -d <mongoDB>
+go run ./cmd/cli --setIntegrator --orgAddress <hex> -m <mongoURL> -d <mongoDB>
 ```
 
 **Precautions.** It writes to the organizations collection, so treat it like any prod

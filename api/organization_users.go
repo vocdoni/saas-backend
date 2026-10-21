@@ -143,6 +143,13 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// a write role is capped per organization, pending invitations included
+	if invite.Role == db.AdminRole || invite.Role == db.ManagerRole {
+		if err := a.subscriptions.OrgCanAddWriter(org.Address); err != nil {
+			writeSubscriptionError(w, err)
+			return
+		}
+	}
 	// all pre-checks OK, now update the org users counter
 	if err := a.db.IncrementOrganizationUsersCounter(org.Address); err != nil {
 		errors.ErrGenericInternalServerError.Withf("increment users: %v", err).Write(w)
@@ -603,6 +610,20 @@ func (a *API) updateOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 	if valid := db.IsValidUserRole(db.UserRole(update.Role)); !valid {
 		errors.ErrInvalidUserData.Withf("invalid role").Write(w)
 		return
+	}
+	// promoting a viewer to a write role takes one of the organization's capped write seats
+	if newRole := db.UserRole(update.Role); newRole == db.AdminRole || newRole == db.ManagerRole {
+		target, err := a.db.User(uint64(userIDInt))
+		if err != nil {
+			errors.ErrInvalidUserData.Withf("user not found: %v", err).Write(w)
+			return
+		}
+		if current, ok := target.RoleFor(org.Address); !ok || (current != db.AdminRole && current != db.ManagerRole) {
+			if err := a.subscriptions.OrgCanAddWriter(org.Address); err != nil {
+				writeSubscriptionError(w, err)
+				return
+			}
+		}
 	}
 	// prevent demoting the last admin, which would orphan the organization
 	if db.UserRole(update.Role) != db.AdminRole && uint64(userIDInt) == user.ID {

@@ -1,5 +1,4 @@
-// Package main provides a CLI tool that enables an organization as an integrator
-// and sets its managed-org limit.
+// Package main provides a CLI tool that enables an organization as an integrator.
 package main
 
 import (
@@ -15,9 +14,8 @@ import (
 func main() {
 	flag.StringP("mongoURL", "m", "", "MongoDB connection URL")
 	flag.StringP("mongoDB", "d", "", "MongoDB database name")
-	flag.Bool("setIntegrator", false, "enable the given organization as an integrator and set its managed-org limit")
+	flag.Bool("setIntegrator", false, "enable the given organization as an integrator")
 	flag.String("orgAddress", "", "organization address (hex) for --setIntegrator")
-	flag.Int("maxManagedOrgs", 0, "integrator limit: max managed organizations")
 	flag.Parse()
 
 	viper.SetEnvPrefix("VOCDONI")
@@ -40,16 +38,16 @@ func main() {
 		log.Fatalf("could not connect to MongoDB: %v", err)
 	}
 	defer database.Close()
-	err = setIntegrator(database, viper.GetString("orgAddress"), viper.GetInt("maxManagedOrgs"))
+	err = setIntegrator(database, viper.GetString("orgAddress"))
 	if err != nil {
 		log.Fatalf("could not set integrator: %v", err)
 	}
 }
 
-// setIntegrator enables the organization at the given address as an integrator and
-// sets its managed-org limit override. The aggregate process/census caps come from the
-// integrator's subscription plan (Plan.Organization.MaxProcesses / MaxCensus).
-func setIntegrator(database *db.MongoStorage, orgAddress string, maxOrgs int) error {
+// setIntegrator enables the organization at the given address as an integrator: it may
+// create managed organizations and pay for their processes from its wallet, with no limit
+// other than the wallet balance.
+func setIntegrator(database *db.MongoStorage, orgAddress string) error {
 	if orgAddress == "" {
 		return fmt.Errorf("orgAddress is required")
 	}
@@ -61,16 +59,13 @@ func setIntegrator(database *db.MongoStorage, orgAddress string, maxOrgs int) er
 	if err != nil {
 		return fmt.Errorf("could not get organization: %w", err)
 	}
-	// Setting a per-organization limits override both enables integrator status and
-	// caps how many organizations it may manage (see Subscriptions.IsIntegrator).
-	org.IntegratorLimits = &db.IntegratorLimits{
-		MaxManagedOrgs: maxOrgs,
+	if org.ManagedBy != (common.Address{}) {
+		return fmt.Errorf("organization %s is managed by %s and cannot be an integrator", addr.Hex(), org.ManagedBy.Hex())
 	}
+	org.Integrator = true
 	if err := database.SetOrganization(org); err != nil {
 		return fmt.Errorf("could not update organization: %w", err)
 	}
-	log.Infow("organization is now an integrator",
-		"address", addr.Hex(),
-		"maxManagedOrgs", maxOrgs)
+	log.Infow("organization is now an integrator", "address", addr.Hex())
 	return nil
 }

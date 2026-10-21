@@ -25,7 +25,7 @@ func TestAPIKeysAPI(t *testing.T) {
 	// make the org an integrator (override) so the integrator endpoints are usable
 	org, err := testDB.Organization(orgAddr)
 	c.Assert(err, qt.IsNil)
-	org.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 2}
+	org.Integrator = true
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
 	// create a key scoped to quota:read + managed:read
@@ -90,7 +90,7 @@ func TestIntegratorAPIKeyPathless(t *testing.T) {
 
 	org, err := testDB.Organization(orgAddr)
 	c.Assert(err, qt.IsNil)
-	org.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 2}
+	org.Integrator = true
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
 	// mint a key with the integrator scopes
@@ -134,7 +134,7 @@ func TestIntegratorAPIKeyDeletesVotingProcessDraft(t *testing.T) {
 
 	org, err := testDB.Organization(orgAddr)
 	c.Assert(err, qt.IsNil)
-	org.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 2}
+	org.Integrator = true
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
 	createBody := &apicommon.CreateAPIKeyRequest{
@@ -200,7 +200,7 @@ func TestAPIKeysRequireIntegrator(t *testing.T) {
 	// enable the org as an integrator (override) and creation now succeeds
 	org, err := testDB.Organization(orgAddr)
 	c.Assert(err, qt.IsNil)
-	org.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 1}
+	org.Integrator = true
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
 	data, code := testRequest(t, http.MethodPost, token, createBody, "integrator", "organizations", orgAddr.String(), "apikeys")
