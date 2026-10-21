@@ -66,8 +66,8 @@ func (ms *MongoStorage) SetVotingProcessDraft(vp *VotingProcess, seen time.Time)
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
-	// a voting process outlives its organization (nothing deletes votingProcesses on teardown), so
-	// this is checked here exactly as in SetVotingProcess rather than assumed from the caller
+	// the organization may have been torn down since the caller read the process, so this is
+	// checked here exactly as in SetVotingProcess rather than assumed from the caller
 	if _, err := ms.Organization(vp.OrgAddress); err != nil {
 		return fmt.Errorf("failed to get organization %s: %w", vp.OrgAddress, err)
 	}
@@ -324,6 +324,47 @@ func (ms *MongoStorage) StaleVotingProcesses() ([]bson.ObjectID, error) {
 		out = append(out, doc.ID)
 	}
 	return out, cur.Err()
+}
+
+// RefreshVotingProcessPublishing moves a held publishing marker to now, so a publish that keeps
+// working on a process — retrying a transient failure, confirming a long batch — is not mistaken
+// for a crashed one and reclaimed after PublishStaleAfter. It reports false when there is no marker
+// to refresh: the claim was released or reclaimed, and the caller no longer owns the process.
+func (ms *MongoStorage) RefreshVotingProcessPublishing(id bson.ObjectID) (bool, error) {
+	if id == bson.NilObjectID {
+		return false, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.votingProcesses.UpdateOne(ctx,
+		bson.M{"_id": id, "published": false, "publishing": bson.M{"$exists": true}},
+		bson.M{"$set": bson.M{"publishing": time.Now()}})
+	if err != nil {
+		return false, fmt.Errorf("failed to refresh voting process publishing state: %w", err)
+	}
+	return res.MatchedCount == 1, nil
+}
+
+// DeleteVotingProcessesByOrg removes every voting process of an organization and all their
+// questions, returning how many processes went. It is the bulk step of an organization teardown,
+// which must have deleted the drafts first the way a draft delete does, refunding the paid ones:
+// this touches no payment, and the payment rows are kept as the audit trail.
+func (ms *MongoStorage) DeleteVotingProcessesByOrg(orgAddress common.Address) (int64, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return 0, ErrInvalidData
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	if _, err := ms.processesQuestions.DeleteMany(ctx, bson.M{"orgAddress": orgAddress}); err != nil {
+		return 0, fmt.Errorf("failed to delete voting process questions: %w", err)
+	}
+	res, err := ms.votingProcesses.DeleteMany(ctx, bson.M{"orgAddress": orgAddress})
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete voting processes: %w", err)
+	}
+	return res.DeletedCount, nil
 }
 
 // ClearVotingProcessPublishing clears the transient publishing marker set by
