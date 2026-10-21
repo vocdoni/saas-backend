@@ -78,7 +78,10 @@ Any endpoint that submits a transaction returns **202 + `{"jobId": ...}`** and t
 `GET /jobs/{jobId}`. The machinery is `api/jobqueue.go`:
 
 - `a.enqueueTx(txTask{...})` / `a.enqueueTxBatch(tasks)` push onto a buffered `txQueue`
-  (512 slots, 16 workers). `enqueueTxBatch` takes all the slots or none; a full queue is a 503.
+  (512 slots, 16 workers). `enqueueTxBatch` takes all the slots or none; a full queue is a 503 —
+  except for a voting-process publish, which treats it as a transient failure: the job stays
+  `pending` and `publishWorker.finish` re-enqueues with backoff (`publishRetryAttempts`), crediting the
+  payer's wallet back if the retries run out before anything is mined (`reversePublishDebit`).
 - A `txTask.run` closure does the submit *and* waits for the tx to be mined, so it blocks a worker
   the whole time — never spend one on work that isn't an on-chain submit.
 - `txTask.record` overrides how the outcome is written. Tasks sharing one job (the envelopes of a

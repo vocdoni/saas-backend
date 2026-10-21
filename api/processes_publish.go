@@ -180,7 +180,8 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 //	@Description	Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
 //	@Description	GET /jobs/{jobId}. Idempotent once published.
 //	@Description	Transient failures (the chain not answering or confirming, a full tx queue) are retried
-//	@Description	by the service up to 5 times over about 2.5 minutes; the job stays pending meanwhile.
+//	@Description	by the service up to 5 times over about 2.5 minutes; the job stays pending meanwhile,
+//	@Description	so poll GET /jobs/{jobId} for at least 3 minutes before treating a publish as stuck.
 //	@Description	If the publish finally fails before any election is mined, a failed publish credits the
 //	@Description	payer's wallet back (a `creditBack` history row) and publishing again charges again.
 //	@Description	409 (40172) means the stored questions do not match the process and the draft has to be

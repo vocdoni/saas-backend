@@ -101,7 +101,7 @@ organization, whose processes its integrator pays. It is created on its first cr
 |---|---|---|
 | `topup` | + | a verified Stripe top-up, net of VAT (key: the session id) |
 | `payment` | − | a process publish or census headroom (`processId`, and `processOrgAddress`: the managed organization that spent it) |
-| `creditBack` | + | a payment returned to the wallet: a paid draft deleted (`refund:<process id>`) |
+| `creditBack` | + | a payment returned to the wallet: a paid draft deleted (`refund:<process id>`), or a publish that failed for good (`publishfail:<process id>:<attempt>`) |
 | `refund` | − | a top-up refunded by hand in the Stripe dashboard (`striperefund:<refund id>`) |
 
 The ledger is the append-only audit trail; the wallet document is authoritative for the
@@ -146,8 +146,10 @@ documents. Every payment is a wallet debit; the card only ever fills a wallet.
   the envelope can be raised ([Buying census headroom](#buying-census-headroom)).
 - `refunded`: the draft was deleted and its payment credited back to `payer`
   ([Deleting a paid draft](#deleting-a-paid-draft)). Terminal; kept as the audit trail.
-- `failed`: reserved for a wallet payment that a failed publish reverts; nothing in this flow
-  writes it.
+- `failed`: a wallet payment that a publish failing for good reverted
+  ([Publish retries and credit-backs](#publish-retries-and-credit-backs)): `walletAttempt` moved
+  on, and `creditBackCents` is what it owes `payer`. The draft is unpaid again; a publish, a new
+  checkout or the €0 envelope replaces the row, keeping its `walletAttempt`.
 
 Every transition is a single conditional Mongo write whose **filter is the state
 machine** (`db/process_payments.go`): matching the filter is winning the transition,
@@ -174,16 +176,44 @@ of acting twice.
    claim, so two concurrent publishes cannot both debit and a delete cannot credit back between
    the debit and the publish. It claims the once-per-organization add-ons, re-prices, and debits
    `total − paid` from the payer's wallet under the payer's wallet lock, keyed
-   `<process id>:<price>`: a retry at the same price debits nothing, a retry of a draft that grew
-   debits only the difference. The balance can move between gate and debit; the debit's own
+   `<process id>:<price>` for a payment's first attempt and `<process id>:<attempt>:<price>` after
+   a credit-back: a retry at the same price debits nothing, a retry of a draft that grew debits
+   only the difference. The balance can move between gate and debit; the debit's own
    refusal (402, claims released) is the authoritative answer. The paid record (`payer`, the
    new envelope) is written right after the debit and is not optional: a payment the wallet may
    not write over — an open checkout, a planned refund — is refused (409) before any money moves,
    and a record write that still fails is a 500 a retry heals without charging again. Anything
-   failing after that — a full tx queue (503) included — leaves a paid draft: publishing again is
-   free and deleting it credits the wallet back.
+   failing after that is retried or credited back, below.
 
 Free processes (net €0) publish directly and record a €0 `paid` envelope.
+
+### Publish retries and credit-backs
+
+A publish answers **202** with its job even when the tx queue is full. A transient failure — the
+queue full, the chain not answering or not confirming a batch — is retried by the service
+itself, up to 5 times with a 5 s → 80 s backoff (about 2.5 minutes in all). The job stays
+`pending` meanwhile, so clients polling `GET /jobs/{jobId}` should wait at least 3 minutes
+before treating a publish as stuck. The publish claim is held and refreshed throughout, while
+the organization's tx lock is released between publish attempts, not held across the backoff.
+
+A publish that then fails for good — retries exhausted, a permanent failure (the draft cannot be
+built, permission, a panic), the publish request failing after the debit, or a worker that died
+with the service (the stale-marker sweep at startup and again `PublishStaleAfter` later) — is
+**credited back** when none of its elections was mined, for every payer alike: the payment
+becomes `failed` with `walletAttempt` incremented and the amount owed in `creditBackCents`, then
+`payment.payer`'s wallet (never an organization re-resolved at that time) is credited with a
+`creditBack` row keyed `publishfail:<process id>:<attempt>`. Publishing again charges again,
+under the next attempt's key, whether from the wallet or through a new top-up checkout (which
+keeps the attempt). The revert comes before the credit so that a crash in between leaves the
+payer owed, never a draft both credited and still `paid`. An owed credit that has not yet
+posted is applied the next time the draft is touched: a publish, a census headroom charge, a
+new checkout, or the draft's delete (or another reversal). Once-per-organization add-ons
+another process already relies on are withheld from the credit-back, as in a delete's. A
+publish that mined some elections keeps the debit: those elections exist, and publishing again
+resumes the rest for free.
+
+A top-up webhook redelivered after its publish was credited back finds the row `failed` and
+stops: the credit is not repeated (session key), nothing is debited and nothing is published.
 
 ## Topping up for a process
 
@@ -221,7 +251,7 @@ ever refunded to the card.
 |---|---|
 | credited and published (or already published) | 200 |
 | no row, another session's row, refunded, price rose, wallet short, draft changed, deleted or failing preflight, requesting user gone | 200 — the credit stays for a manual publish |
-| a read error, another publish holding the claim, a full tx queue | 500 — Stripe redelivers, the credit is not repeated (session key) |
+| a read error, another publish holding the claim | 500 — Stripe redelivers, the credit is not repeated (session key) |
 
 ## Webhook handling and idempotency
 
@@ -367,7 +397,8 @@ already landed is not refused as growth it is not.
 (a consumed row, or a completed session, needs no Stripe call: that money lands in the wallet
 whatever happens to the draft); if Stripe cannot confirm an open session expired, the delete
 fails closed rather than leave a payable session for a process that no longer exists. The row
-goes with the draft and its add-on claims are released.
+goes with the draft and its add-on claims are released. A `failed` row first gets the
+credit-back it may still owe applied, then goes with the draft.
 
 ### Deleting a paid draft
 
@@ -394,7 +425,7 @@ quoted it again) — before the payment is marked, so a release that fails fails
 retry runs it again — the payment becomes `refunded`, its document is **kept** as the audit
 trail, and only then is the draft removed. If the credit fails, nothing else is written and the
 draft stays. The reverse — credited, but the draft not removed — leaves a draft that can only be
-deleted again: publish refuses it with **409**, since the debit's `<process id>:<price>` key is
+deleted again: publish refuses it with **409**, since the debit's key is
 still applied and a re-publish would otherwise go on chain unpaid.
 
 **Add-ons already relied on.** Branding and the custom URL are paid once per organization, so
@@ -407,6 +438,24 @@ through; closing it would take a re-check on both sides. Each relied-on add-on i
 not come back: the organization keeps its `<addOn>PaidAt` (the sibling is not re-priced) and the
 credit withholds its list price (€149 branding, €99 custom URL), while an add-on nobody relies
 on is released and credited back with the rest.
+
+## Deleting an organization
+
+Tearing an organization down never strands money. `DELETE /integrator/organizations/{orgAddress}`
+first deletes every draft of the managed organization exactly as `DELETE /processes/{processId}`
+does — paid drafts credited back to their payer's wallet, open checkouts expired, owed
+credit-backs applied — and stops at the first draft it cannot delete (a publish in flight, a
+credit-back or Stripe call that failed), answering with that draft's error and removing nothing
+else; a retry resumes. Only then are the remaining (published) voting processes and their
+questions deleted with the rest of the organization. Payment rows are kept as the audit trail.
+
+GDPR erasure (`cmd/userdel`) does the same for every organization it tears down: it deletes their
+drafts through `api.DeleteOrgDrafts` before erasing anything, with no Stripe secret: an open
+top-up checkout is dropped with its draft and left to Stripe's own expiry (paying it meanwhile
+only credits the kept wallet). `db.EraseUser` refuses, erasing nothing, while such an
+organization still has drafts. Wallets and their history are kept; the command prints the
+balance of each torn-down organization's own wallet, to be returned by hand, and a positive
+balance never blocks the erasure.
 
 ## Stripe refunds of top-ups
 
@@ -443,8 +492,10 @@ up.
   `payer` (the wallet debited), `amountCents` (the envelope), `checkoutSessionId` (the open
   top-up while pending, the one that funded the debit once paid), `consumed`, `topUpCents`,
   `requestedBy`, `branding`/`customUrl` (which once-per-organization add-ons the payment
-  charged), and a delete's refund plan (`refundWithheldCents`, `refundWithheldAddOns`). No card
-  state: no payment intent, charge amounts, refund id or quote hash.
+  charged), a delete's refund plan (`refundWithheldCents`, `refundWithheldAddOns`),
+  `walletAttempt` (how many times a failed publish credited the wallet payment back; part of the
+  debit and credit-back keys) and `creditBackCents` (what a reverted wallet payment still owes
+  its payer). No card state: no payment intent, charge amounts, refund id or quote hash.
 - `wallets` — one document per payer (`_id` = organization address).
 - `walletLedger` — append-only, unique index on `idempotencyKey` and a sparse index on
   `paymentIntentId` (a top-up's, which a Stripe refund names); rows carry `kind`, the signed
@@ -504,5 +555,10 @@ Three layers, from hermetic to manual:
   ledger row names its payment intent yet); a human cannot realistically do that.
 - VAT treatment of wallet top-ups (single- vs multi-purpose voucher) needs accountant
   sign-off before launch; `automatic_tax` is on for top-up sessions.
+- The spec's "publication retries keep the debit, debits are never silently reversed" is
+  superseded: a publish that fails for good before mining anything is credited back, with a
+  ledger row. The HackMD spec needs the same update.
+- An open top-up checkout of an organization erased by `cmd/userdel` stays payable until Stripe
+  expires it, and paying it credits the kept wallet.
 - Legacy subscriptions convert to process credits and the subscription system is
   removed in the follow-up PR (see the spec's "Legacy plans transition").

@@ -5794,7 +5794,8 @@ paths:
         Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
         GET /jobs/{jobId}. Idempotent once published.
         Transient failures (the chain not answering or confirming, a full tx queue) are retried
-        by the service up to 5 times over about 2.5 minutes; the job stays pending meanwhile.
+        by the service up to 5 times over about 2.5 minutes; the job stays pending meanwhile,
+        so poll GET /jobs/{jobId} for at least 3 minutes before treating a publish as stuck.
         If the publish finally fails before any election is mined, a failed publish credits the
         payer's wallet back (a `creditBack` history row) and publishing again charges again.
         409 (40172) means the stored questions do not match the process and the draft has to be
