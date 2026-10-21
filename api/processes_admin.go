@@ -53,10 +53,25 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	if err := a.deleteDraftProcess(vp); err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+	apicommon.HTTPWriteOK(w)
+}
+
+// deleteDraftProcess deletes a draft, returning its money first: a paid one is credited back to
+// the wallet that paid it, an open top-up checkout is expired so it can no longer be paid, and a
+// credit a failed publish still owes the payer's wallet is applied. The payment row of a paid
+// draft stays as the audit record. It is what DELETE /processes/{processId} does after
+// authorization, and what an organization teardown does to each of its drafts. Errors are
+// errors.Error values carrying their HTTP semantics (write with writeSubscriptionError) or plain
+// errors meaning 500; the draft is then kept and the delete can be retried.
+func (a *API) deleteDraftProcess(vp *db.VotingProcess) error {
+	oid := vp.ID
 	// only a draft can be deleted; a published process lives on-chain and is immutable.
 	if vp.Published {
-		errors.ErrDuplicateConflict.Withf("process already published and not in draft mode").Write(w)
-		return
+		return errors.ErrDuplicateConflict.Withf("process already published and not in draft mode")
 	}
 	// Deleting mid-publish would orphan on chain whatever the worker has already mined, and
 	// refund it. So delete takes the claim a publish takes, and the two exclude each other:
@@ -64,12 +79,10 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	// Every refusal below releases it; a deleted draft takes the marker with it.
 	claimed, err := a.db.ClaimVotingProcessForPublish(oid)
 	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
+		return fmt.Errorf("failed to claim the draft: %w", err)
 	}
 	if !claimed {
-		errors.ErrPublishInProgress.Write(w)
-		return
+		return errors.ErrPublishInProgress
 	}
 	deleted := false
 	defer func() {
@@ -84,9 +97,9 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	// session so it can no longer be paid, and its payment record goes with the draft.
 	payment, err := a.db.ProcessPayment(oid)
 	if err != nil {
+		// a payment state it cannot read is never taken as absent: the draft may hold money
 		if !errors.Is(err, db.ErrNotFound) {
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
+			return fmt.Errorf("failed to get process payment: %w", err)
 		}
 		payment = nil // free process, or never quoted: nothing to release
 	}
@@ -98,51 +111,95 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	case payment.Status == db.ProcessPaymentPaid:
 		// the money goes back before the draft goes away, and the payment row stays as
 		// the record that it did
-		if !a.refundPaidProcess(w, vp, payment) {
-			return
+		if err := a.refundPaidProcess(vp, payment); err != nil {
+			return err
 		}
 	case payment.Status == db.ProcessPaymentRefunded:
 		// an earlier delete refunded it and then failed to drop the draft: the row is
 		// already the audit record, so only the draft is left to go
 	case payment.Status == db.ProcessPaymentPending:
 		if claimHolder, err = a.db.Organization(vp.OrgAddress); err != nil {
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
+			return fmt.Errorf("failed to get organization: %w", err)
 		}
 		// a consumed top-up is in the wallet already; an open one must not stay payable
-		if !payment.Consumed && !a.releasePendingCheckout(w, payment) {
-			return
+		if !payment.Consumed {
+			if err := a.releasePendingCheckout(payment); err != nil {
+				return err
+			}
 		}
 		fallthrough
 	case payment.Status == db.ProcessPaymentFailed:
+		// a failed wallet payment may still owe its payer a publish credit-back: it lands
+		// before the payment that records it goes
+		if err := a.ensurePublishCreditBack(payment); err != nil {
+			return err
+		}
 		// pending (released above) or failed: the process holds no money, so the payment state
 		// goes with the draft — conditionally, since the status may have moved on since it was read
 		dropped, err := a.db.DeleteProcessPayment(oid)
 		if err != nil {
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
+			return fmt.Errorf("failed to delete process payment: %w", err)
 		}
 		if !dropped {
-			errors.ErrPaymentSessionConflict.Withf("the draft payment changed while deleting it; retry").Write(w)
-			return
+			return errors.ErrPaymentSessionConflict.Withf("the draft payment changed while deleting it; retry")
 		}
 		if claimHolder != nil {
 			a.releaseDroppedCheckoutClaim(vp, claimHolder)
 		}
 	default:
-		errors.ErrPaymentSessionConflict.Withf("the draft payment is %s", payment.Status).Write(w)
-		return
+		return errors.ErrPaymentSessionConflict.Withf("the draft payment is %s", payment.Status)
 	}
 	if err := a.db.DeleteVotingProcess(oid); err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
+		return fmt.Errorf("failed to delete the draft: %w", err)
 	}
 	deleted = true
 	// best-effort: drop the draft's inline census so it is not orphaned.
 	if !vp.CensusID.IsZero() {
 		_ = a.db.DelCensus(vp.CensusID.Hex())
 	}
-	apicommon.HTTPWriteOK(w)
+	return nil
+}
+
+// deleteOrgDrafts deletes every draft of an organization with deleteDraftProcess, so the paid
+// ones are credited back before they go. It stops at the first draft it cannot delete, returning
+// that error and leaving it and the rest in place, so a teardown aborts with no money stranded and
+// a retry resumes where it stopped.
+func (a *API) deleteOrgDrafts(org common.Address) error {
+	for {
+		// always the first page: each pass deletes what it read, and stops on a failure
+		_, drafts, err := a.db.ListVotingProcesses(org, "", db.DraftOnly, 1, 100)
+		if err != nil {
+			return fmt.Errorf("failed to list drafts: %w", err)
+		}
+		if len(drafts) == 0 {
+			return nil
+		}
+		for i := range drafts {
+			if err := a.deleteDraftProcess(&drafts[i]); err != nil {
+				log.Warnw("could not delete a draft of an organization being torn down",
+					"org", org.Hex(), "processId", drafts[i].ID.Hex(), "error", err)
+				return fmt.Errorf("draft %s: %w", drafts[i].ID.Hex(), err)
+			}
+		}
+	}
+}
+
+// DeleteOrgDrafts deletes every draft of the organization the way DELETE /processes/{processId}
+// does — a paid one credited back first to the wallet that paid it — for a caller outside the API
+// server: cmd/userdel, whose erasure must not strand money when it tears an organization down. It
+// has no payment gateway: an open top-up checkout is dropped with its draft and left to Stripe's
+// own expiry, and paying it meanwhile only credits the wallet. It stops at the first draft it
+// cannot delete, leaving it and the rest in place.
+//
+// ponytail: the wallet lock it takes is its own, not the running server's — a census headroom
+// charge on the same payer racing the erasure is guarded only by the refund plan's amount
+// check; a DB-level lock if erasures ever run against live traffic.
+func DeleteOrgDrafts(database *db.MongoStorage, org common.Address) error {
+	if database == nil {
+		return fmt.Errorf("a database is required")
+	}
+	a := &API{db: database, walletLocks: newOrgTxMutex()}
+	return a.deleteOrgDrafts(org)
 }
 
 // votingProcessParticipantsHandler godoc

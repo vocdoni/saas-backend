@@ -253,7 +253,12 @@ go run ./cmd/userdel -id 42 -yes                       # skip confirmation
 ```
 
 Mongo connection via `-mongoURL`/`-mongoDB` flags or `VOCDONI_MONGOURL`/`VOCDONI_MONGODB`
-env vars.
+env vars. Drafts of the orgs to delete go first, each credited back the way `DELETE /processes/{id}`
+does (to the wallet that paid it), and payment records are kept. No Stripe secret is needed: an
+open top-up checkout is left to Stripe's own expiry, and paying it meanwhile only credits the
+wallet. A draft that cannot be deleted (a publish holds it) aborts the run; rerun once it settles.
+Wallets and their history are kept, and the balance of each torn-down organization's own wallet
+is printed, to be returned by hand; a positive balance never blocks the erasure.
 
 **Precautions.** This is the destructive one of the two. Always run `-dryRun` first and
 read the impact report — a sole-admin org takes its entire voting history down with it.

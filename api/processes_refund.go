@@ -2,7 +2,6 @@ package api
 
 import (
 	"fmt"
-	"net/http"
 	"slices"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -27,43 +26,39 @@ import (
 // before it records: planned between the two, the credit would leave that debit refused a record
 // and returned by nobody.
 //
-// Reports false with the response already written when the money could not be credited. The
-// draft stays then, delete-only, so the delete can be retried.
-func (a *API) refundPaidProcess(w http.ResponseWriter, vp *db.VotingProcess, payment *db.ProcessPayment) bool {
-	plan, ok := a.planPaidProcessRefund(w, vp, payment)
-	if !ok {
-		return false
+// Returns why the money could not be credited, as an errors.Error or a plain error meaning 500.
+// The draft stays then, delete-only, so the delete can be retried.
+func (a *API) refundPaidProcess(vp *db.VotingProcess, payment *db.ProcessPayment) error {
+	plan, err := a.planPaidProcessRefund(vp, payment)
+	if err != nil {
+		return err
 	}
 	if err := a.returnProcessPayment(vp, payment, plan); err != nil {
-		writeSubscriptionError(w, err)
-		return false
+		return err
 	}
 	// released before the payment is marked refunded: a failure then leaves the delete to retry
 	// (the credit is keyed, the release is idempotent) instead of an organization keeping an
 	// add-on it got its money back for
 	if err := a.releaseOrgAddOnsNotWithheld(vp, payment, plan.AddOns); err != nil {
-		errors.ErrGenericInternalServerError.
+		return errors.ErrGenericInternalServerError.
 			Withf("the payment was credited back but its add-ons could not be released; retry the delete").
-			WithErr(err).Write(w)
-		return false
+			WithErr(err)
 	}
 	marked, err := a.db.MarkProcessPaymentRefunded(vp.ID, payment.AmountCents)
 	if err != nil {
 		// the money is already back; losing the status write would let a retry look unpaid,
 		// so this is reported rather than swallowed
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return false
+		return fmt.Errorf("failed to mark process payment refunded: %w", err)
 	}
 	if !marked {
 		// the plan locks the envelope, so this is only a guard: a payment that moved anyway
 		// is not recorded as refunded, and the draft stays for a retry
-		errors.ErrPaymentSessionConflict.
-			Withf("the process payment changed while it was being refunded; retry the delete").Write(w)
-		return false
+		return errors.ErrPaymentSessionConflict.
+			Withf("the process payment changed while it was being refunded; retry the delete")
 	}
 	log.Infow("paid draft credited back", "processId", vp.ID.Hex(), "amountCents", payment.AmountCents,
 		"payer", payment.Payer.String(), "withheldAddOns", plan.AddOns)
-	return true
+	return nil
 }
 
 // reliedOnOrgAddOns is what giving vp's payment back must withhold: each once-per-organization
@@ -106,13 +101,11 @@ func (a *API) releaseOrgAddOnsNotWithheld(
 
 // planPaidProcessRefund returns the refund's withholding: the one an earlier attempt fixed, or a
 // new one — withholding the add-ons another process relies on, else nothing — fixed on the
-// payment before the caller moves money. Reports false with the response written.
-func (a *API) planPaidProcessRefund(
-	w http.ResponseWriter, vp *db.VotingProcess, payment *db.ProcessPayment,
-) (db.RefundWithholding, bool) {
+// payment before the caller moves money.
+func (a *API) planPaidProcessRefund(vp *db.VotingProcess, payment *db.ProcessPayment) (db.RefundWithholding, error) {
 	if payment.RefundWithheldCents != nil {
 		withheld := db.RefundWithholding{Cents: *payment.RefundWithheldCents, AddOns: payment.RefundWithheldAddOns}
-		return withheld, true
+		return withheld, nil
 	}
 	if payment.Payer != (common.Address{}) {
 		// a headroom charge holds this lock from reading the payment to recording it, so its
@@ -123,27 +116,24 @@ func (a *API) planPaidProcessRefund(
 	}
 	withheld, err := a.reliedOnOrgAddOns(vp, payment)
 	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return withheld, false
+		return withheld, err
 	}
 	planned, err := a.db.PlanProcessPaymentRefund(vp.ID, payment.AmountCents, withheld)
 	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return withheld, false
+		return withheld, fmt.Errorf("failed to plan the refund: %w", err)
 	}
 	if !planned {
 		// nothing has moved: a census top-up raised the payment after it was read
-		errors.ErrPaymentSessionConflict.
-			Withf("the process payment changed while it was being refunded; retry the delete").Write(w)
-		return withheld, false
+		return withheld, errors.ErrPaymentSessionConflict.
+			Withf("the process payment changed while it was being refunded; retry the delete")
 	}
-	return withheld, true
+	return withheld, nil
 }
 
 // refuseRefundedDraft refuses a draft a delete started refunding and did not finish dropping:
 // its money is back, or its refund is fixed and on its way, so finishing that delete is all it
 // can do. Publishing it again would be free, since the wallet debit is keyed per (process,
-// price) and the original key stays applied after its refund; growing it would buy voters its
+// attempt, price) and the original key stays applied after its refund; growing it would buy voters its
 // refund does not return. A payment state it cannot read is returned, never taken as absent.
 func (a *API) refuseRefundedDraft(processID bson.ObjectID) error {
 	payment, err := a.db.ProcessPayment(processID)

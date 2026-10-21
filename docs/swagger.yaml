@@ -2957,8 +2957,13 @@ paths:
     delete:
       description: |-
         Delete the managed organization at {orgAddress} together with every piece of data
-        tied to it (memberbase, censuses + participants, processes, bundles, CSP tokens,
-        jobs, pending invites), and unlink it from its members. The caller must be an admin
+        tied to it (memberbase, censuses + participants, processes and their questions,
+        bundles, CSP tokens, jobs, pending invites), and unlink it from its members. Drafts
+        are deleted first, exactly as DELETE /processes/{processId} does: a paid draft is
+        credited back to the payer's wallet before it goes, and payment records are kept as
+        the audit trail. If any draft cannot be deleted (a publish holds it, or its credit-back
+        failed), the deletion stops with that draft's error and nothing else is removed; retry
+        once it settles. The caller must be an admin
         of their integrator organization (resolved from the API key's org or the user session
         — no address in the URL), and the target must be managed by it.
 
@@ -2998,7 +3003,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Managed organization has active elections
+          description: Managed organization has active elections, or a draft cannot
+            be deleted yet
           schema:
             $ref: '#/definitions/errors.Error'
         "500":

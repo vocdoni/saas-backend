@@ -196,6 +196,12 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 		switch payment.Status {
 		case db.ProcessPaymentPending, db.ProcessPaymentFailed:
 			previousSessionID = payment.CheckoutSessionID
+			// the pending payment stored below replaces a failed one and what it still owes:
+			// that credit lands first
+			if err := a.ensurePublishCreditBack(payment); err != nil {
+				errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+				return
+			}
 		default:
 			// paid (a draft whose census outgrew its price buys the difference as headroom), or
 			// refunded by a delete that did not finish
@@ -440,8 +446,11 @@ func (a *API) cancelProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	if !payment.Consumed && !a.releasePendingCheckout(w, payment) {
-		return
+	if !payment.Consumed {
+		if err := a.releasePendingCheckout(payment); err != nil {
+			writeSubscriptionError(w, err)
+			return
+		}
 	}
 	dropped, err := a.db.DeleteProcessPaymentCheckout(oid, cancelled)
 	if err != nil {
@@ -456,26 +465,25 @@ func (a *API) cancelProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 }
 
 // releasePendingCheckout makes sure a pending payment's open checkout session can no longer be
-// paid once the payment goes (cancelled, or deleted with its draft), writing the error and
-// reporting false when it cannot. A session already completed or expired needs nothing: a
-// completed one credits the wallet whatever happens to the process, and nothing else.
-func (a *API) releasePendingCheckout(w http.ResponseWriter, payment *db.ProcessPayment) bool {
+// paid once the payment goes (cancelled, or deleted with its draft). A session already completed
+// or expired needs nothing: a completed one credits the wallet whatever happens to the process.
+// With no payment gateway (cmd/userdel) the session is left to Stripe's own expiry: paying it only
+// credits the wallet. Returns why it cannot as an errors.Error.
+func (a *API) releasePendingCheckout(payment *db.ProcessPayment) error {
 	if a.paymentGW == nil {
-		errors.ErrPaymentSessionConflict.
-			Withf("the payment gateway is unavailable; the checkout session cannot be released").Write(w)
-		return false
+		log.Warnw("no payment gateway: the open checkout stays payable until stripe expires it; paying it only credits the wallet",
+			"processId", payment.ProcessID.Hex(), "sessionId", payment.CheckoutSessionID)
+		return nil
 	}
 	session, err := a.paymentGW.GetPaymentSession(payment.CheckoutSessionID)
 	if err != nil {
-		errors.ErrStripeError.Withf("cannot reconcile checkout session").WithErr(err).Write(w)
-		return false
+		return errors.ErrStripeError.Withf("cannot reconcile checkout session").WithErr(err)
 	}
 	if session.Status != stripe.SessionStatusOpen {
-		return true
+		return nil
 	}
 	if err := a.paymentGW.ExpirePaymentSession(payment.CheckoutSessionID); err != nil {
-		errors.ErrStripeError.Withf("cannot expire checkout session").WithErr(err).Write(w)
-		return false
+		return errors.ErrStripeError.Withf("cannot expire checkout session").WithErr(err)
 	}
-	return true
+	return nil
 }

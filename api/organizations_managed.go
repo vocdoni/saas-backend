@@ -310,8 +310,13 @@ func (a *API) integratorInfoHandler(w http.ResponseWriter, r *http.Request) {
 //
 //	@Summary		Delete a managed organization and all its data
 //	@Description	Delete the managed organization at {orgAddress} together with every piece of data
-//	@Description	tied to it (memberbase, censuses + participants, processes, bundles, CSP tokens,
-//	@Description	jobs, pending invites), and unlink it from its members. The caller must be an admin
+//	@Description	tied to it (memberbase, censuses + participants, processes and their questions,
+//	@Description	bundles, CSP tokens, jobs, pending invites), and unlink it from its members. Drafts
+//	@Description	are deleted first, exactly as DELETE /processes/{processId} does: a paid draft is
+//	@Description	credited back to the payer's wallet before it goes, and payment records are kept as
+//	@Description	the audit trail. If any draft cannot be deleted (a publish holds it, or its credit-back
+//	@Description	failed), the deletion stops with that draft's error and nothing else is removed; retry
+//	@Description	once it settles. The caller must be an admin
 //	@Description	of their integrator organization (resolved from the API key's org or the user session
 //	@Description	— no address in the URL), and the target must be managed by it.
 //	@Description
@@ -330,7 +335,7 @@ func (a *API) integratorInfoHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		403			{object}	errors.Error	"Forbidden"
 //	@Failure		404			{object}	errors.Error	"Managed organization not found"
-//	@Failure		409			{object}	errors.Error	"Managed organization has active elections"
+//	@Failure		409			{object}	errors.Error	"Managed organization has active elections, or a draft cannot be deleted yet"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/integrator/organizations/{orgAddress} [delete]
 func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Request) {
@@ -417,6 +422,15 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		}
 	}
 
+	// drafts first, each the way DELETE /processes/{processId} deletes it, so a paid one is
+	// credited back before it goes. Unlike the cascade below this aborts on the first failure, with
+	// nothing else deleted: money must never be left behind in a deleted organization, and a
+	// retry resumes where it stopped.
+	if err := a.deleteOrgDrafts(managedAddr); err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+
 	// cascade: each step is best-effort. Failures are logged but do not abort the teardown, so a
 	// single stuck collection can't leave the org half-deleted. The org doc itself is deleted last.
 	bundles, err := a.db.ProcessBundlesByOrg(managedAddr)
@@ -465,6 +479,10 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 	}
 	if _, err := a.db.DeleteProcessesByOrg(managedAddr); err != nil {
 		log.Warnw("could not delete processes", "org", managedAddr.Hex(), "error", err)
+	}
+	// what is left are published voting processes; their payment rows stay as the audit trail
+	if _, err := a.db.DeleteVotingProcessesByOrg(managedAddr); err != nil {
+		log.Warnw("could not delete voting processes", "org", managedAddr.Hex(), "error", err)
 	}
 	if _, err := a.db.DeleteAllOrgMemberGroups(managedAddr); err != nil {
 		log.Warnw("could not delete org member groups", "org", managedAddr.Hex(), "error", err)
