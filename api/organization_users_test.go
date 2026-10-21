@@ -107,21 +107,6 @@ func TestOrganizationUsers(t *testing.T) {
 		// Create a new organization for this test
 		newOrgAddress := testCreateOrganization(t, adminToken)
 
-		// Subscribe the organization to a plan
-		plans, err := testDB.Plans()
-		c.Assert(err, qt.IsNil)
-		c.Assert(len(plans) > 0, qt.IsTrue)
-		premiumPlan := plans[1]
-		c.Assert(premiumPlan.Organization.Users > 1, qt.IsTrue)
-
-		err = testDB.SetOrganizationSubscription(newOrgAddress, &db.OrganizationSubscription{
-			PlanID:          premiumPlan.ID,
-			StartDate:       time.Now(),
-			RenewalDate:     time.Now().Add(time.Hour * 24),
-			LastPaymentDate: time.Now(),
-			Active:          true,
-		})
-		c.Assert(err, qt.IsNil)
 		// Get the initial organization to check the users counter
 		resp, code := testRequest(t, http.MethodGet, adminToken, nil, "organizations", newOrgAddress.String())
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
@@ -169,9 +154,8 @@ func TestOrganizationUsers(t *testing.T) {
 		var finalOrg apicommon.OrganizationInfo
 		c.Assert(json.Unmarshal(resp, &finalOrg), qt.IsNil)
 
-		// After our fix, we expect the counter to be correctly incremented by nInvites,
-		// but not exceed max allowed users of the subscribed plan
-		expectedCount := min(initialUserCount+nInvites, premiumPlan.Organization.Users)
+		// every invite must be counted exactly once: no plan caps the users counter anymore
+		expectedCount := initialUserCount + nInvites
 		t.Logf("Final users counter: %d (expected %d)",
 			finalOrg.Counters.Users, expectedCount)
 
@@ -194,9 +178,7 @@ func TestOrganizationUsers(t *testing.T) {
 
 		var pendingInvites apicommon.OrganizationInviteList
 		c.Assert(json.Unmarshal(resp, &pendingInvites), qt.IsNil)
-		expectedInvitesCount := min(nInvites, premiumPlan.Organization.Users)
-		c.Assert(pendingInvites.Invites, qt.HasLen, expectedInvitesCount,
-			qt.Commentf("expected %d pending invitations, got %d", expectedInvitesCount, len(pendingInvites.Invites)))
+		c.Assert(pendingInvites.Invites, qt.HasLen, nInvites)
 	})
 
 	t.Run("UpdateOrganizationUserRole", func(t *testing.T) {
@@ -936,7 +918,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 	})
 
-	t.Run("MaxUsersReached", func(t *testing.T) {
+	t.Run("UsersCounterNotCappedByPlan", func(t *testing.T) {
 		c := qt.New(t)
 
 		// Create an admin user
@@ -949,14 +931,13 @@ func TestOrganizationUsers(t *testing.T) {
 		org, err := testDB.Organization(orgAddress)
 		c.Assert(err, qt.IsNil)
 
-		// Set the organization's subscription plan to the free plan and set the user counter to
-		// the maximum allowed by the plan, so a further invite must be rejected.
+		// Set the user counter to the free plan's former users limit: no plan caps invites anymore.
 		org.Subscription.PlanID = mockFreePlan.ID
 		org.Counters.Users = 10
 		err = testDB.SetOrganization(org)
 		c.Assert(err, qt.IsNil)
 
-		// Try to invite a user to the organization (should fail with "max users reached")
+		// Inviting a further user still succeeds
 		inviteRequest := &apicommon.OrganizationInvite{
 			Email: "maxusers@example.com",
 			Role:  db.ViewerRole,
@@ -970,16 +951,10 @@ func TestOrganizationUsers(t *testing.T) {
 			orgAddress.String(),
 			"users",
 		)
-		c.Assert(code, qt.Not(qt.Equals), http.StatusOK, qt.Commentf("expected error, got success: %s", resp))
-
-		// Verify the error message contains "max users reached"
-		var errorResp struct {
-			Error string `json:"error"`
-			Code  int    `json:"code"`
-		}
-		err = json.Unmarshal(resp, &errorResp)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+		org, err = testDB.Organization(orgAddress)
 		c.Assert(err, qt.IsNil)
-		c.Assert(errorResp.Error, qt.Contains, "max users reached")
+		c.Assert(org.Counters.Users, qt.Equals, 11)
 	})
 
 	t.Run("OrganizationRoles", func(t *testing.T) {
@@ -1022,4 +997,53 @@ func TestOrganizationUsers(t *testing.T) {
 
 		t.Logf("Organization roles response: %s", resp)
 	})
+}
+
+// TestOrganizationWriterCap drives the 5 admins/managers cap over HTTP: seats are taken by users and
+// pending invitations alike, viewers never take one, and only a promotion to a write role is checked.
+func TestOrganizationWriterCap(t *testing.T) {
+	c := qt.New(t)
+	adminToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	usersPath := []string{"organizations", orgAddress.String(), "users"}
+
+	invite := func(email string, role db.UserRole) {
+		requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken,
+			&apicommon.OrganizationInvite{Email: email, Role: role}, usersPath...)
+	}
+	// joinAsViewer creates a user, invites it as a viewer, accepts and returns its id
+	joinAsViewer := func() uint64 {
+		token := testCreateUser(t, "userpassword123")
+		info := requestAndParse[apicommon.UserInfo](t, http.MethodGet, token, nil, usersMeEndpoint)
+		invite(info.Email, db.ViewerRole)
+		code := apiTestVerificationCodeRgx.FindStringSubmatch(waitForEmail(t, info.Email))
+		c.Assert(len(code) > 1, qt.IsTrue)
+		requestAndAssertCode(http.StatusOK, t, http.MethodPost, token,
+			&apicommon.AcceptOrganizationInvitation{Code: code[1]}, append(usersPath, "accept")...)
+		return info.ID
+	}
+	setRole := func(userID uint64, role db.UserRole) func() {
+		return func() {
+			requestAndAssertCode(http.StatusOK, t, http.MethodPut, adminToken,
+				&apicommon.UpdateOrganizationUserRoleRequest{Role: string(role)},
+				append(usersPath, fmt.Sprint(userID))...)
+		}
+	}
+	randomEmail := func() string { return fmt.Sprintf("user-%s@example.com", uuid.New().String()) }
+
+	// the creator is the first writer; a second admin and a viewer join through invitations
+	secondAdmin, viewer := joinAsViewer(), joinAsViewer()
+	setRole(secondAdmin, db.AdminRole)() // 2 writers
+	for range 3 {
+		invite(randomEmail(), db.ManagerRole) // 5 writers, pending invitations included
+	}
+
+	requestAndAssertError(errors.ErrMaxWritersReached, t, http.MethodPost, adminToken,
+		&apicommon.OrganizationInvite{Email: randomEmail(), Role: db.ManagerRole}, usersPath...)
+	invite(randomEmail(), db.ViewerRole) // viewers are never capped
+	requestAndAssertError(errors.ErrMaxWritersReached, t, http.MethodPut, adminToken,
+		&apicommon.UpdateOrganizationUserRoleRequest{Role: string(db.ManagerRole)},
+		append(usersPath, fmt.Sprint(viewer))...)
+	// a swap between write roles takes no new seat
+	setRole(secondAdmin, db.ManagerRole)()
 }
