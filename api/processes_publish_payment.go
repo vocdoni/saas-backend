@@ -99,8 +99,17 @@ func (a *API) paymentDueForPublish(vp *db.VotingProcess) error {
 // startProcessPublish after the publish claim, so two concurrent publishes cannot both debit and
 // a delete cannot refund between the debit and the publish. A publish retry re-prices, so a retry
 // of an unchanged draft debits nothing while one whose census grew between the attempts pays the
-// difference. Refused without touching the balance when the wallet does not cover it.
+// difference. A draft whose earlier publish was credited back pays again, in full. Refused
+// without touching the balance when the wallet does not cover it.
 func (a *API) debitProcessWallet(vp *db.VotingProcess, org *db.Organization) error {
+	// a credit-back an earlier attempt owes lands before this attempt pays again
+	if payment, err := a.db.ProcessPayment(vp.ID); err == nil {
+		if err := a.ensurePublishCreditBack(payment); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, db.ErrNotFound) {
+		return fmt.Errorf("failed to get process payment: %w", err)
+	}
 	quote, input, err := a.processQuote(vp)
 	if err != nil {
 		return err
@@ -176,6 +185,13 @@ func (a *API) chargeProcessWallet(c processCharge) (pricing.Cents, error) {
 		return 0, errors.ErrPaymentSessionConflict.Withf(
 			"process %s has a %s payment the wallet cannot pay for", c.vp.ID.Hex(), paid.Status)
 	}
+	// the paid record written below replaces a reverted payment and what it still owes: apply
+	// that credit first (a census headroom purchase can race a failed publish's reversal)
+	if err == nil {
+		if err := a.ensurePublishCreditBack(paid); err != nil {
+			return 0, err
+		}
+	}
 	var alreadyCents pricing.Cents
 	if err == nil && paid.Status == db.ProcessPaymentPaid {
 		alreadyCents = paid.AmountCents
@@ -188,12 +204,19 @@ func (a *API) chargeProcessWallet(c processCharge) (pricing.Cents, error) {
 		return 0, nil // this price is already covered
 	}
 	dueCents := c.quote.TotalCents - alreadyCents
+	// the attempt survives every state the wallet may record over: a credit-back moved it on,
+	// so this debit is not mistaken for one an earlier, credited-back attempt already applied
+	var attempt int
+	if paid != nil {
+		attempt = paid.WalletAttempt
+	}
 	if err := a.db.DebitWalletForProcess(db.WalletDebit{
 		OrgAddress:        payer,
 		ProcessID:         c.vp.ID,
 		ProcessOrgAddress: c.vp.OrgAddress,
 		AmountCents:       dueCents,
 		PriceCents:        c.quote.TotalCents,
+		Attempt:           attempt,
 	}); err != nil {
 		if errors.Is(err, db.ErrInsufficientWalletBalance) {
 			wallet, werr := a.db.Wallet(payer)
@@ -205,13 +228,14 @@ func (a *API) chargeProcessWallet(c processCharge) (pricing.Cents, error) {
 		return 0, fmt.Errorf("failed to debit wallet: %w", err)
 	}
 	walletPayment := &db.ProcessPayment{
-		ProcessID:   c.vp.ID,
-		OrgAddress:  c.vp.OrgAddress,
-		Payer:       payer,
-		AmountCents: c.quote.TotalCents,
-		Currency:    "eur",
-		Branding:    c.branding,
-		CustomURL:   c.customURL,
+		ProcessID:     c.vp.ID,
+		OrgAddress:    c.vp.OrgAddress,
+		Payer:         payer,
+		AmountCents:   c.quote.TotalCents,
+		Currency:      "eur",
+		Branding:      c.branding,
+		CustomURL:     c.customURL,
+		WalletAttempt: attempt,
 	}
 	if paid != nil {
 		// keep the record's history across a top-up, and the checkout that funded it
@@ -243,6 +267,99 @@ func (a *API) chargeProcessWallet(c processCharge) (pricing.Cents, error) {
 		}
 	}
 	return dueCents, nil
+}
+
+// reversePublishDebit gives a draft's wallet payment back to its payer when its publish failed
+// for good before any election was mined: the publish worker's abandon, the publish request
+// failing after the debit, and the stale-marker sweep after a restart. The caller holds the
+// publish claim. A draft with mined elections keeps the debit — they exist and were paid for, and
+// publishing again resumes them for free.
+//
+// The payment is reverted first (RevertWalletProcessPayment: failed, WalletAttempt moved on, the
+// credit it owes recorded), then credited (ensurePublishCreditBack). In that order a failure in
+// between leaves the payer owed rather than a draft both credited and still paid — which the next
+// publish would take as paid for free — and the owed credit is applied by whatever touches the
+// payment next: another reversal, the next publish's debit, a checkout, or the draft's delete.
+// Once-per-organization add-ons another process already relies on are withheld and stay the
+// organization's, as a delete's credit-back withholds them; the others are released with the money.
+//
+// Anything but an unrefunded wallet payment (none, an open checkout, a refund in progress) is
+// left alone and reports nil.
+func (a *API) reversePublishDebit(processID bson.ObjectID) error {
+	vp, questions, err := a.db.ProcessWithQuestions(processID)
+	if err != nil {
+		return fmt.Errorf("failed to get process: %w", err)
+	}
+	if vp.Published || anyMined(questions) {
+		return nil
+	}
+	// the payment names the wallet to lock; it is read again under that lock
+	payment, err := a.db.ProcessPayment(processID)
+	if errors.Is(err, db.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to get process payment: %w", err)
+	}
+	// a census headroom charge debits before it records; reading the payment under the same lock
+	// means a reversal never misses a debit that charge has made
+	walletLock := a.walletLocks.lock(payment.Payer)
+	defer walletLock.Unlock()
+	payment, err = a.db.ProcessPayment(processID)
+	if errors.Is(err, db.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to get process payment: %w", err)
+	}
+	if payment.Status == db.ProcessPaymentPaid && payment.RefundWithheldCents == nil && payment.AmountCents > 0 {
+		withheld, err := a.reliedOnOrgAddOns(vp, payment)
+		if err != nil {
+			return err
+		}
+		owed := payment.AmountCents - withheld.Cents
+		reverted, err := a.db.RevertWalletProcessPayment(db.WalletPaymentRevert{
+			ProcessID: processID, AmountCents: payment.AmountCents, Attempt: payment.WalletAttempt, CreditBackCents: owed,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to revert the wallet payment: %w", err)
+		}
+		if !reverted {
+			return fmt.Errorf("the payment of process %s moved while it was being reverted", processID.Hex())
+		}
+		if err := a.releaseOrgAddOnsNotWithheld(vp, payment, withheld.AddOns); err != nil {
+			log.Errorw(err, fmt.Sprintf("add-ons of credited-back process %s not released", processID.Hex()))
+		}
+		payment.Status, payment.CreditBackCents = db.ProcessPaymentFailed, owed
+		payment.WalletAttempt++
+		log.Infow("failed publish credited back to the payer's wallet", "processId", processID.Hex(),
+			"payer", payment.Payer.String(), "amountCents", owed, "attempt", payment.WalletAttempt-1)
+	}
+	return a.ensurePublishCreditBack(payment)
+}
+
+// ensurePublishCreditBack applies the credit a reverted wallet payment owes its payer's wallet
+// (see reversePublishDebit), keyed by the attempt that paid, so applying it again is a no-op. Any
+// other payment owes nothing and reports nil. Every path that is about to debit the draft again,
+// replace its payment or drop it calls it first, so an owed credit is never lost to them.
+func (a *API) ensurePublishCreditBack(payment *db.ProcessPayment) error {
+	if payment.Status != db.ProcessPaymentFailed || payment.WalletAttempt == 0 || payment.CreditBackCents <= 0 {
+		return nil
+	}
+	if payment.Payer == (common.Address{}) {
+		return fmt.Errorf("process %s owes a wallet credit but records no payer", payment.ProcessID.Hex())
+	}
+	if err := a.db.CreditWallet(db.WalletCredit{
+		OrgAddress:        payment.Payer,
+		AmountCents:       payment.CreditBackCents,
+		IdempotencyKey:    fmt.Sprintf("publishfail:%s:%d", payment.ProcessID.Hex(), payment.WalletAttempt-1),
+		Kind:              db.WalletEntryCreditBack,
+		ProcessID:         payment.ProcessID,
+		ProcessOrgAddress: payment.OrgAddress,
+	}); err != nil {
+		return fmt.Errorf("failed to credit the wallet back: %w", err)
+	}
+	return nil
 }
 
 // walletMayRecord reports whether SetProcessPaymentPaidByWallet may write over payment: a
@@ -392,8 +509,9 @@ func (a *API) dropProcessCheckout(processID bson.ObjectID, sessionID string) err
 // since (its census grew) is left for a manual publish, never debited more than the customer
 // agreed to. Every refusal that needs the user — price rose, wallet short, draft changed, deleted
 // or already published, preflight — leaves the credit in the wallet and returns nil. A failure a
-// retry can clear (a publish already in flight, a full tx queue, a read error) is returned
-// instead, so the webhook answers 500 and Stripe redelivers the event.
+// retry can clear (a publish already in flight, a read error) is returned instead, so the
+// webhook answers 500 and Stripe redelivers the event. A full tx queue is not one: the publish is
+// accepted and retried by the service itself.
 func (a *API) publishPaidProcess(t stripe.ProcessTopUp) error {
 	processID := t.ProcessID
 	vp, questions, err := a.db.ProcessWithQuestions(processID)

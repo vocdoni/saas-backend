@@ -171,11 +171,14 @@ type API struct {
 	// censusGrowthLocks makes the pay-per-process growth check and the census write it
 	// allows one step per organization, so parallel growth cannot pass the same check
 	censusGrowthLocks *orgTxMutex
-	otpExpiry         time.Duration
-	otpCooldown       time.Duration
-	notifySync        bool
-	statusSyncer      StatusEnqueuer
-	electionCache     *lru.Cache[string, *dvoteapi.Election]
+	// publishFault, when set, runs at the start of every publish attempt and fails it with what it
+	// returns. A test seam for the retry and credit-back paths; nil in production.
+	publishFault  func() error
+	otpExpiry     time.Duration
+	otpCooldown   time.Duration
+	notifySync    bool
+	statusSyncer  StatusEnqueuer
+	electionCache *lru.Cache[string, *dvoteapi.Election]
 	// liveElectionCache holds not-yet-final legacy elections for legacyLiveElectionTTL.
 	liveElectionCache *expirable.LRU[string, *dvoteapi.Election]
 	// legacyProjectionCache holds fully-final legacy records already projected onto /processes.
@@ -284,6 +287,10 @@ func New(ctx context.Context, conf *Config) *API {
 	// clear any publishing markers stranded by a previous crash/restart so those processes are
 	// publishable again (see reconcileStalePublishing).
 	a.reconcileStalePublishing()
+	// markers a restart found still fresh belonged to workers that died with it too; sweep again
+	// once they are stale. Only stale markers are touched, so a live publish (whose worker keeps
+	// its marker fresh) is never swept.
+	time.AfterFunc(db.PublishStaleAfter, a.reconcileStalePublishing)
 	return a
 }
 

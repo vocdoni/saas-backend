@@ -5787,6 +5787,10 @@ paths:
         Publish a voting process: one on-chain election per question, submitted as a batch.
         Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
         GET /jobs/{jobId}. Idempotent once published.
+        Transient failures (the chain not answering or confirming, a full tx queue) are retried
+        by the service up to 5 times over about 2.5 minutes; the job stays pending meanwhile.
+        If the publish finally fails before any election is mined, a failed publish credits the
+        payer's wallet back (a `creditBack` history row) and publishing again charges again.
         409 (40172) means the stored questions do not match the process and the draft has to be
         saved again before it can be published.
         A priced process is paid from its payer's wallet (the organization's own, or its
@@ -5836,10 +5840,6 @@ paths:
             $ref: '#/definitions/errors.Error'
         "422":
           description: Census size requires a custom quote
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "503":
-          description: Service Unavailable
           schema:
             $ref: '#/definitions/errors.Error'
       security:
