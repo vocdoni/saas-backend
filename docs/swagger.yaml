@@ -5906,6 +5906,10 @@ paths:
           description: Organization or plan not found
           schema:
             $ref: '#/definitions/errors.Error'
+        "409":
+          description: Organization already has a paid subscription
+          schema:
+            $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
           schema:

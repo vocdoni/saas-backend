@@ -422,9 +422,10 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, integratorOrgAPIKeysEndpoint, a.createAPIKeyHandler)
 		handle(r, http.MethodGet, integratorOrgAPIKeysEndpoint, a.apiKeysHandler)
 		handle(r, http.MethodDelete, integratorOrgAPIKeyEndpoint, a.revokeAPIKeyHandler)
-		handle(r, http.MethodPost, subscriptionsCheckout, a.stripeHandlers.CreateSubscriptionCheckout)
-		// late-bound like the webhook: a method value would capture a.stripeHandlers as it
-		// is at router-build time
+		// late-bound: a method value would capture a.stripeHandlers as it is at router-build time
+		handle(r, http.MethodPost, subscriptionsCheckout, func(w http.ResponseWriter, r *http.Request) {
+			a.stripeHandlers.CreateSubscriptionCheckout(w, r)
+		})
 		handle(r, http.MethodGet, subscriptionsCheckoutSession, func(w http.ResponseWriter, r *http.Request) {
 			a.stripeHandlers.GetCheckoutSession(w, r)
 		})
