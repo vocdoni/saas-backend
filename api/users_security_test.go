@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/jwtauth/v5"
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 )
 
@@ -107,5 +108,62 @@ func TestRecoveryCooldownKeepsCode(t *testing.T) {
 		Email:       mail,
 		Code:        resetCode[1],
 		NewPassword: "cooldownpass123",
+	}, usersResetPasswordEndpoint)
+}
+
+// TestExhaustedCodeIsReplaced guards against locking an account owner out by spending a code's
+// guess budget: once a password-reset or account-verification code has used all its attempts,
+// a new recovery or resend request issues a fresh code instead of re-sending the dead one.
+func TestExhaustedCodeIsReplaced(t *testing.T) {
+	c := qt.New(t)
+	originalCooldown := testAPI.otpCooldown
+	testAPI.otpCooldown = 0
+	defer func() {
+		testAPI.otpCooldown = originalCooldown
+		if err := testDB.DeleteAllDocuments(); err != nil {
+			c.Logf("cleanup: %v", err)
+		}
+	}()
+
+	mail := fmt.Sprintf("%d-exhausted@test.com", internal.RandomInt(100000))
+	requestAndAssertCode(http.StatusOK, t, http.MethodPost, "",
+		&apicommon.UserInfo{Email: mail, Password: testPass, FirstName: testFirstName, LastName: testLastName},
+		usersEndpoint)
+	verifyCode := verificationCodeRgx.FindStringSubmatch(waitForEmail(t, mail))
+	c.Assert(len(verifyCode) > 1, qt.IsTrue)
+
+	// --- account verification: burn the registration code, then resend
+	for range apicommon.VerificationCodeMaxAttempts {
+		requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "",
+			&apicommon.UserVerification{Email: mail, Code: verifyCode[1] + "x"}, verifyUserEndpoint)
+	}
+	requestAndAssertError(errors.ErrVerificationMaxAttempts, t, http.MethodPost, "",
+		&apicommon.UserVerification{Email: mail, Code: verifyCode[1]}, verifyUserEndpoint)
+	requestAndAssertCode(http.StatusOK, t, http.MethodPost, "",
+		&apicommon.UserVerification{Email: mail}, verifyUserCodeEndpoint)
+	freshVerify := verificationCodeRgx.FindStringSubmatch(waitForEmail(t, mail))
+	c.Assert(len(freshVerify) > 1, qt.IsTrue)
+	requestAndAssertCode(http.StatusOK, t, http.MethodPost, "",
+		&apicommon.UserVerification{Email: mail, Code: freshVerify[1]}, verifyUserEndpoint)
+
+	// --- password reset: burn the reset code, then request recovery again
+	requestAndAssertCode(http.StatusOK, t, http.MethodPost, "",
+		&apicommon.UserInfo{Email: mail}, usersRecoveryPasswordEndpoint)
+	resetCode := passwordResetRgx.FindStringSubmatch(waitForEmail(t, mail))
+	c.Assert(len(resetCode) > 1, qt.IsTrue)
+	for range apicommon.VerificationCodeMaxAttempts {
+		requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "", &apicommon.UserPasswordReset{
+			Email: mail, Code: resetCode[1] + "x", NewPassword: "otherpassword123",
+		}, usersResetPasswordEndpoint)
+	}
+	requestAndAssertError(errors.ErrVerificationMaxAttempts, t, http.MethodPost, "", &apicommon.UserPasswordReset{
+		Email: mail, Code: resetCode[1], NewPassword: "otherpassword123",
+	}, usersResetPasswordEndpoint)
+	requestAndAssertCode(http.StatusOK, t, http.MethodPost, "",
+		&apicommon.UserInfo{Email: mail}, usersRecoveryPasswordEndpoint)
+	freshReset := passwordResetRgx.FindStringSubmatch(waitForEmail(t, mail))
+	c.Assert(len(freshReset) > 1, qt.IsTrue)
+	requestAndAssertCode(http.StatusOK, t, http.MethodPost, "", &apicommon.UserPasswordReset{
+		Email: mail, Code: freshReset[1], NewPassword: "otherpassword123",
 	}, usersResetPasswordEndpoint)
 }

@@ -312,8 +312,26 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
-	// if the verification code is not expired, resend the same code instead of replacing it
-	if userVerification.Expiration.After(time.Now()) {
+	// an exhausted code is replaced by a fresh one, so spending its guess budget cannot block the
+	// account owner until it expires; the replacement is still bound by the resend cooldown
+	if userVerification.Expiration.After(time.Now()) && !codeReusable(userVerification) {
+		sent, err := a.db.VerificationCodeTrySend(user, db.CodeTypeVerifyAccount, a.otpCooldown, math.MaxInt32)
+		if err != nil {
+			if err != db.ErrNotFound {
+				log.Warnw("could not record verification code send", "error", err)
+			}
+			errors.ErrUnauthorized.Write(w)
+			return
+		}
+		if !sent {
+			errors.ErrVerificationMaxAttempts.WithData(apicommon.UserVerification{
+				Expiration: userVerification.Expiration,
+			}).Write(w)
+			return
+		}
+	}
+	// if the verification code is still usable, resend the same code instead of replacing it
+	if codeReusable(userVerification) {
 		// spend one delivery from the send budget, which is separate from the guess-attempt
 		// counter so resending the code never eats into the brute-force budget. The update is
 		// a single conditional write, so concurrent resends cannot exceed the cap.
@@ -844,12 +862,13 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 	switch {
 	case err == nil:
 		// atomically claim one delivery: the previous one must be older than the cooldown and, for a
-		// still-valid code, the send budget must not be spent. A single conditional update, so
+		// reusable code, the send budget must not be spent. A single conditional update, so
 		// concurrent recovery requests cannot both pass it; when blocked (or raced), silently skip.
-		stillValid := existing.Expiration.After(time.Now())
+		reusable := codeReusable(existing)
 		maxSends := apicommon.VerificationCodeMaxSends
-		if !stillValid {
-			// an expired code is replaced by a fresh one below, which resets the send budget
+		if !reusable {
+			// an expired or exhausted code is replaced by a fresh one below, which resets the send
+			// and guess budgets
 			maxSends = math.MaxInt32
 		}
 		sent, err := a.db.VerificationCodeTrySend(user, codeType, a.otpCooldown, maxSends)
@@ -860,8 +879,8 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 			apicommon.HTTPWriteOK(w)
 			return
 		}
-		if stillValid {
-			// resend the still-valid code rather than replace it, so repeated recovery requests
+		if reusable {
+			// resend the still-usable code rather than replace it, so repeated recovery requests
 			// cannot invalidate the code the user is about to type
 			if code, err = internal.OpenToken(existing.SealedCode, user.Email, a.secret); err != nil {
 				errors.ErrGenericInternalServerError.Write(w)
@@ -1021,4 +1040,10 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apicommon.HTTPWriteOK(w)
+}
+
+// codeReusable reports whether a stored verification code can be delivered again as is: it has
+// not expired and its guess budget is not spent. Any other code is replaced by a fresh one.
+func codeReusable(v *db.UserVerification) bool {
+	return v.Expiration.After(time.Now()) && v.Attempts < apicommon.VerificationCodeMaxAttempts
 }
