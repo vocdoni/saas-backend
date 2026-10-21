@@ -88,6 +88,7 @@ func (h *StripeHandlers) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 //	@Failure		400		{object}	errors.Error					"Invalid input data"
 //	@Failure		401		{object}	errors.Error					"Unauthorized"
 //	@Failure		404		{object}	errors.Error					"Organization or plan not found"
+//	@Failure		409		{object}	errors.Error					"Organization already has a paid subscription"
 //	@Failure		500		{object}	errors.Error					"Internal server error"
 //	@Router			/subscriptions/checkout [post]
 func (h *StripeHandlers) CreateSubscriptionCheckout(w http.ResponseWriter, r *http.Request) {
@@ -126,6 +127,12 @@ func (h *StripeHandlers) CreateSubscriptionCheckout(w http.ResponseWriter, r *ht
 		checkout.Address,
 		checkout.Locale,
 	)
+	// a refusal (unknown or private plan, already subscribed) is the caller's to see as is
+	var apiErr errors.Error
+	if errors.As(err, &apiErr) && apiErr.HTTPstatus < http.StatusInternalServerError {
+		apiErr.Write(w)
+		return
+	}
 	if err != nil {
 		errors.ErrStripeError.Withf("cannot create checkout session").WithErr(err).Write(w)
 		return

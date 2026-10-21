@@ -120,6 +120,12 @@ var (
 	// ErrCheckoutSessionNotFound is the only answer for a checkout session the caller may not
 	// read, whatever the reason (missing, not theirs), so session existence is never revealed.
 	ErrCheckoutSessionNotFound = Error{Code: 40179, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("checkout session not found"), LogLevel: "info"}
+	// ErrOrganizationAlreadySubscribed refuses a new subscription checkout while the organization
+	// has a paid subscription: plan changes go through the billing portal.
+	ErrOrganizationAlreadySubscribed = Error{
+		Code: 40180, HTTPstatus: http.StatusConflict, LogLevel: "info",
+		Err: fmt.Errorf("organization already has a paid subscription, manage it from the billing portal"),
+	}
 
 	// CSP errors (408)
 	ErrZeroWeightVoter = Error{Code: 40801, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("voter weight cannot be zero")}

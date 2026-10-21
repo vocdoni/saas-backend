@@ -4,6 +4,7 @@ package stripe
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -41,12 +42,18 @@ func NewService(config *Config, database *db.MongoStorage) (*Service, error) {
 	}, nil
 }
 
-// CreateCheckoutSessionWithLookupKey creates a new checkout session by resolving the lookup key to get the plan
+// CreateCheckoutSessionWithLookupKey creates a new checkout session by resolving the lookup key to get the plan.
+// It answers errors.ErrPlanNotFound for an unknown plan and for a private plan the organization is not on,
+// and errors.ErrOrganizationAlreadySubscribed while the organization has a paid subscription: plan changes
+// go through the billing portal, so an organization never pays for two subscriptions at once.
 func (s *Service) CreateCheckoutSessionWithLookupKey(
 	lookupKey string, billingPeriod, returnURL string, orgAddress common.Address, locale string,
 ) (*stripeapi.CheckoutSession, error) {
 	// Resolve the lookup key (the plan's Stripe product ID) to get the plan
 	plan, err := s.db.Plan(lookupKey)
+	if stderrors.Is(err, db.ErrNotFound) {
+		return nil, errors.ErrPlanNotFound
+	}
 	if err != nil {
 		return nil, errors.ErrStripeError.Withf("plan with lookup key %s not found: %v", lookupKey, err)
 	}
@@ -54,6 +61,17 @@ func (s *Service) CreateCheckoutSessionWithLookupKey(
 	org, err := s.db.Organization(orgAddress)
 	if err != nil {
 		return nil, errors.ErrStripeError.Withf("organization %s not found: %v", orgAddress, err)
+	}
+
+	// a private plan (a custom contract, the integrator tier) is only for the organizations
+	// put on it; to anyone else it answers like a plan that does not exist
+	if !plan.Public && org.Subscription.PlanID != plan.ID {
+		return nil, errors.ErrPlanNotFound
+	}
+	// the webhooks set the subscription id while the organization is on a paid subscription
+	// and clear it when that subscription ends
+	if org.Subscription.StripeSubscriptionID != "" {
+		return nil, errors.ErrOrganizationAlreadySubscribed
 	}
 
 	// Determine if the organization is eligible for a free trial based on
