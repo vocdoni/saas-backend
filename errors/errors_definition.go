@@ -120,6 +120,9 @@ var (
 	// ErrManagedOrgHasNoWallet: a managed organization's processes are paid from its integrator's
 	// wallet; it has none of its own and cannot top one up.
 	ErrManagedOrgHasNoWallet = Error{Code: 40181, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("managed organizations have no wallet; their integrator pays")}
+	// ErrManagedOrgSpendCapReached: the debit would take the managed organization past the spend
+	// cap its integrator set; data carries capCents, spentCents and requiredCents.
+	ErrManagedOrgSpendCapReached = Error{Code: 40180, HTTPstatus: http.StatusPaymentRequired, Err: fmt.Errorf("managed organization spend cap reached")}
 	// ErrQuoteRequired: the census is above the self-service limit; a custom quote is the only path.
 	ErrQuoteRequired = Error{Code: 40176, HTTPstatus: http.StatusUnprocessableEntity, Err: fmt.Errorf("census size requires a custom quote, self-service checkout is unavailable")}
 	// ErrPaymentSessionConflict: the process's payment is in a state the request cannot act on

@@ -190,7 +190,8 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 //	@Description	integrator's when managed) at publish. 402 (40178) means the organization's wallet does
 //	@Description	not cover it: the error data carries the quote, balanceCents and shortfallCents; top it
 //	@Description	up via POST /processes/{processId}/checkout, which publishes once paid. For a managed
-//	@Description	organization, 402 (40175) means its integrator's wallet does not cover the price.
+//	@Description	organization, 402 (40175) means its integrator's wallet does not cover the price, and
+//	@Description	402 (40180) that the price would take it past the spend cap its integrator set.
 //	@Description	422 (40176) means the census is above 50 000 voters: quote-only, no self-service price.
 //	@Tags			processes
 //	@Accept			json
@@ -201,7 +202,7 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 //	@Success		200			{object}	apicommon.CreateVotingProcessResponse	"Already published"
 //	@Failure		400			{object}	errors.Error							"Not ready to publish"
 //	@Failure		401			{object}	errors.Error
-//	@Failure		402			{object}	errors.Error	"Wallet short (quote, balance, shortfall in data) or integrator wallet short"
+//	@Failure		402			{object}	errors.Error	"Wallet short (quote, balance, shortfall in data), or spend cap reached"
 //	@Failure		404			{object}	errors.Error
 //	@Failure		409			{object}	errors.Error	"Publish in progress, questions out of sync, or a top-up checkout is open"
 //	@Failure		422			{object}	errors.Error	"Census size requires a custom quote"

@@ -168,6 +168,12 @@ func (a *API) returnProcessPayment(
 	if payment.Payer == (common.Address{}) {
 		return fmt.Errorf("process %s paid %d eur cents but records no payer", vp.ID.Hex(), payment.AmountCents)
 	}
+	// a managed organization's credit-back frees room under its spend cap; a payer paying for
+	// its own process has no cap
+	var spentBy common.Address
+	if payment.Payer != vp.OrgAddress {
+		spentBy = vp.OrgAddress
+	}
 	if err := a.db.CreditWallet(db.WalletCredit{
 		OrgAddress:        payment.Payer,
 		AmountCents:       amount,
@@ -175,6 +181,7 @@ func (a *API) returnProcessPayment(
 		Kind:              db.WalletEntryCreditBack,
 		ProcessID:         vp.ID,
 		ProcessOrgAddress: vp.OrgAddress,
+		SpentBy:           spentBy,
 	}); err != nil {
 		return fmt.Errorf("failed to credit the payment back to the wallet: %w", err)
 	}

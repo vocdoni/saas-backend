@@ -131,7 +131,7 @@ func (a *API) debitProcessWallet(vp *db.VotingProcess, org *db.Organization) err
 	// refused before the debit, nothing backs the claims; any later failure keeps them, since
 	// the debit it follows may already be applied
 	if errors.Is(err, errors.ErrInsufficientWalletBalance) || errors.Is(err, errors.ErrPaymentRequired) ||
-		errors.Is(err, errors.ErrQuoteRequired) {
+		errors.Is(err, errors.ErrQuoteRequired) || errors.Is(err, errors.ErrManagedOrgSpendCapReached) {
 		a.releaseRefusedOrgAddOnClaims(vp, claims)
 	}
 	return err
@@ -210,6 +210,11 @@ func (a *API) chargeProcessWallet(c processCharge) (pricing.Cents, error) {
 	if paid != nil {
 		attempt = paid.WalletAttempt
 	}
+	// only a managed organization's debits count towards a spend cap (its integrator's)
+	var managedOrg common.Address
+	if c.org.ManagedBy != (common.Address{}) {
+		managedOrg = c.vp.OrgAddress
+	}
 	if err := a.db.DebitWalletForProcess(db.WalletDebit{
 		OrgAddress:        payer,
 		ProcessID:         c.vp.ID,
@@ -217,7 +222,20 @@ func (a *API) chargeProcessWallet(c processCharge) (pricing.Cents, error) {
 		AmountCents:       dueCents,
 		PriceCents:        c.quote.TotalCents,
 		Attempt:           attempt,
+		ManagedOrg:        managedOrg,
 	}); err != nil {
+		if errors.Is(err, db.ErrManagedOrgSpendCapReached) {
+			wallet, werr := a.db.Wallet(payer)
+			if werr != nil || wallet.ManagedOrgSpend(c.vp.OrgAddress).CapCents == nil {
+				return 0, errors.ErrManagedOrgSpendCapReached
+			}
+			spend := wallet.ManagedOrgSpend(c.vp.OrgAddress)
+			return 0, errors.ErrManagedOrgSpendCapReached.WithData(map[string]pricing.Cents{
+				"capCents":      *spend.CapCents,
+				"spentCents":    spend.SpentCents,
+				"requiredCents": dueCents,
+			})
+		}
 		if errors.Is(err, db.ErrInsufficientWalletBalance) {
 			wallet, werr := a.db.Wallet(payer)
 			if werr != nil {
@@ -349,6 +367,12 @@ func (a *API) ensurePublishCreditBack(payment *db.ProcessPayment) error {
 	if payment.Payer == (common.Address{}) {
 		return fmt.Errorf("process %s owes a wallet credit but records no payer", payment.ProcessID.Hex())
 	}
+	// a managed organization's credit-back frees room under its spend cap; a payer paying for
+	// its own process has no cap
+	var spentBy common.Address
+	if payment.Payer != payment.OrgAddress {
+		spentBy = payment.OrgAddress
+	}
 	if err := a.db.CreditWallet(db.WalletCredit{
 		OrgAddress:        payment.Payer,
 		AmountCents:       payment.CreditBackCents,
@@ -356,6 +380,7 @@ func (a *API) ensurePublishCreditBack(payment *db.ProcessPayment) error {
 		Kind:              db.WalletEntryCreditBack,
 		ProcessID:         payment.ProcessID,
 		ProcessOrgAddress: payment.OrgAddress,
+		SpentBy:           spentBy,
 	}); err != nil {
 		return fmt.Errorf("failed to credit the wallet back: %w", err)
 	}
@@ -599,5 +624,6 @@ func (a *API) publishPaidProcess(t stripe.ProcessTopUp) error {
 // webhook answers 200 and leaves the credit), as opposed to one a retry may get past.
 func refusedForUser(err error) bool {
 	return errors.Is(err, errors.ErrPaymentSessionConflict) || errors.Is(err, errors.ErrQuoteRequired) ||
-		errors.Is(err, errors.ErrPaymentRequired) || errors.Is(err, errors.ErrInsufficientWalletBalance)
+		errors.Is(err, errors.ErrPaymentRequired) || errors.Is(err, errors.ErrInsufficientWalletBalance) ||
+		errors.Is(err, errors.ErrManagedOrgSpendCapReached)
 }

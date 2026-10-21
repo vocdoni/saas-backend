@@ -13,6 +13,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
+	"github.com/vocdoni/saas-backend/pricing"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/log"
 )
@@ -578,8 +579,37 @@ type CreateManagedOrganizationRequest struct {
 
 // ListManagedOrganizations is the paginated list of organizations managed by an integrator.
 type ListManagedOrganizations struct {
-	Pagination    *Pagination         `json:"pagination"`
-	Organizations []*OrganizationInfo `json:"organizations"`
+	Pagination    *Pagination                `json:"pagination"`
+	Organizations []*ManagedOrganizationInfo `json:"organizations"`
+}
+
+// ManagedOrganizationInfo is a managed organization as its integrator sees it: the organization
+// plus what it may spend and has spent from the integrator's wallet.
+type ManagedOrganizationInfo struct {
+	OrganizationInfo
+	// SpendCapCents is the most the organization's processes may hold debited from the wallet at
+	// once, in EUR cents; null is unlimited.
+	SpendCapCents *pricing.Cents `json:"spendCapCents"`
+	// SpentCents is what its processes hold debited now: refunds and failed-publish credit-backs
+	// take their amount off again.
+	SpentCents pricing.Cents `json:"spentCents"`
+}
+
+// ManagedOrganizationFromDB builds the integrator's view of a managed organization from the
+// organization and its spending as recorded on the integrator's wallet.
+func ManagedOrganizationFromDB(org *db.Organization, spend db.ManagedOrgSpend) *ManagedOrganizationInfo {
+	return &ManagedOrganizationInfo{
+		OrganizationInfo: *OrganizationFromDB(org, nil),
+		SpendCapCents:    spend.CapCents,
+		SpentCents:       spend.SpentCents,
+	}
+}
+
+// UpdateManagedOrganizationRequest is the body of PUT /integrator/organizations/{orgAddress}.
+type UpdateManagedOrganizationRequest struct {
+	// SpendCapCents caps what the organization's processes may hold debited from the
+	// integrator's wallet, in EUR cents; null (or absent) lifts the cap.
+	SpendCapCents *pricing.Cents `json:"spendCapCents"`
 }
 
 // DeleteManagedOrganizationResponse is returned by DELETE

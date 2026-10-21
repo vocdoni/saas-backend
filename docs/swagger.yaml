@@ -568,7 +568,7 @@ definitions:
     properties:
       organizations:
         items:
-          $ref: '#/definitions/apicommon.OrganizationInfo'
+          $ref: '#/definitions/apicommon.ManagedOrganizationInfo'
         type: array
       pagination:
         $ref: '#/definitions/apicommon.Pagination'
@@ -592,6 +592,110 @@ definitions:
         type: string
       token:
         description: JWT authentication token
+        type: string
+    type: object
+  apicommon.ManagedOrganizationInfo:
+    properties:
+      address:
+        description: The organization's blockchain address
+        items:
+          type: integer
+        type: array
+      color:
+        description: The organization's brand color in hex format
+        type: string
+      communications:
+        description: Whether the organization has enabled communications
+        type: boolean
+      counters:
+        allOf:
+        - $ref: '#/definitions/apicommon.SubscriptionUsage'
+        description: Usage counters for the organization
+      country:
+        description: The country where the organization is based
+        type: string
+      createdAt:
+        description: Creation timestamp in RFC3339 format
+        type: string
+      defaultLang:
+        description: |-
+          Language of the notifications sent on behalf of the organization. It wins on
+          authenticated endpoints; on public ones an explicit lang param wins instead.
+          Optional on creation, where it defaults to en; empty on update means unchanged
+        type: string
+      description:
+        allOf:
+        - $ref: '#/definitions/apicommon.MultilingualText'
+        description: Description is a shorthand for meta["description"]. Same encoding
+          rules as Name.
+      integrator:
+        description: |-
+          Whether the new organization is an integrator (opt-in, used by the integrator
+          portal): it may create managed organizations and pay for their processes from
+          its wallet.
+        type: boolean
+      logo:
+        allOf:
+        - $ref: '#/definitions/apicommon.MultilingualText'
+        description: Logo is a shorthand for meta["logo"]. Same encoding rules as
+          Name.
+      managedBy:
+        description: |-
+          Integrator organization that manages this org, when it was created through
+          the integrator portal. Nil for regular organizations. Lets clients tell
+          managed orgs apart from the user's own orgs (e.g. to hide them from the org
+          switcher), a distinction Parent does not capture (managed orgs set ManagedBy,
+          not Parent).
+
+          A pointer so it is omitted rather than emitted as the zero address: json's
+          omitempty does not skip the fixed-size common.Address array.
+        example: deadbeef
+        format: hex
+        type: string
+      meta:
+        additionalProperties: {}
+        description: Arbitrary key value fields with metadata regarding the organization
+        type: object
+      name:
+        allOf:
+        - $ref: '#/definitions/apicommon.MultilingualText'
+        description: |-
+          Name is a shorthand for meta["name"]. On write accepts a plain string
+          (stored as {"default": "<string>"}) or a locale map; on read it mirrors
+          whatever is stored in meta["name"]. If both Name and meta["name"] are
+          provided on a create request, meta["name"] takes precedence.
+      parent:
+        allOf:
+        - $ref: '#/definitions/apicommon.OrganizationInfo'
+        description: Parent organization if this is a sub-organization
+      size:
+        description: The size category of the organization
+        type: string
+      spendCapCents:
+        description: |-
+          SpendCapCents is the most the organization's processes may hold debited from the wallet at
+          once, in EUR cents; null is unlimited.
+        type: integer
+      spentCents:
+        description: |-
+          SpentCents is what its processes hold debited now: refunds and failed-publish credit-backs
+          take their amount off again.
+        type: integer
+      subdomain:
+        description: The organization's subdomain
+        type: string
+      subscription:
+        allOf:
+        - $ref: '#/definitions/apicommon.SubscriptionDetails'
+        description: Subscription details for the organization
+      timezone:
+        description: The organization's timezone
+        type: string
+      type:
+        description: The type of organization
+        type: string
+      website:
+        description: The organization's website URL
         type: string
     type: object
   apicommon.MultilingualText:
@@ -1502,6 +1606,14 @@ definitions:
         items:
           $ref: '#/definitions/db.VoteJobResult'
         type: array
+    type: object
+  apicommon.UpdateManagedOrganizationRequest:
+    properties:
+      spendCapCents:
+        description: |-
+          SpendCapCents caps what the organization's processes may hold debited from the
+          integrator's wallet, in EUR cents; null (or absent) lifts the cap.
+        type: integer
     type: object
   apicommon.UpdateOrganizationMemberGroupResponse:
     properties:
@@ -2865,7 +2977,9 @@ paths:
       description: |-
         Returns a paginated list of organizations managed by the caller's integrator
         organization (resolved from the API key's org or the user session — no address in the
-        URL). The caller must be an admin or manager of the integrator organization.
+        URL). The caller must be an admin or manager of the integrator organization. Each item
+        carries its spend cap (`spendCapCents`, null when unlimited) and what its processes hold
+        debited from the integrator wallet (`spentCents`).
 
         Also callable with a scoped API key (scope: `managed:read`).
       parameters:
@@ -3014,6 +3128,64 @@ paths:
       security:
       - BearerAuth: []
       summary: Delete a managed organization and all its data
+      tags:
+      - integrator
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Caps what the managed organization at {orgAddress} may spend from the caller's integrator
+        wallet: the most its processes may hold debited at once, in EUR cents (VAT excluded).
+        `null` lifts the cap; organizations start unlimited. The cap is checked in the same write
+        as the wallet balance, so a publish or census top-up that would pass it is refused with 402
+        (40180, data: capCents, spentCents, requiredCents) without charging anything. Refunds of
+        deleted drafts and credit-backs of failed publishes free their amount again. A cap below
+        what is already spent only refuses further debits. The caller must be an admin of their
+        integrator organization, and the target must be managed by it.
+
+        Also callable with a scoped API key (scope: `managed:write`).
+      parameters:
+      - description: Managed organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: Spend cap
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.UpdateManagedOrganizationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ManagedOrganizationInfo'
+        "400":
+          description: Invalid address or negative cap
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Not an integrator
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Managed organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Set a managed organization's spend cap
       tags:
       - integrator
   /integrator/organizations/{orgAddress}/apikeys:
@@ -5443,7 +5615,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "402":
-          description: Integrator wallet does not cover the difference
+          description: Integrator wallet does not cover the difference (40175), or
+            spend cap reached (40180)
           schema:
             $ref: '#/definitions/errors.Error'
         "403":
@@ -5804,7 +5977,8 @@ paths:
         integrator's when managed) at publish. 402 (40178) means the organization's wallet does
         not cover it: the error data carries the quote, balanceCents and shortfallCents; top it
         up via POST /processes/{processId}/checkout, which publishes once paid. For a managed
-        organization, 402 (40175) means its integrator's wallet does not cover the price.
+        organization, 402 (40175) means its integrator's wallet does not cover the price, and
+        402 (40180) that the price would take it past the spend cap its integrator set.
         422 (40176) means the census is above 50 000 voters: quote-only, no self-service price.
       parameters:
       - description: Process ID
@@ -5832,8 +6006,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "402":
-          description: Wallet short (quote, balance, shortfall in data) or integrator
-            wallet short
+          description: Wallet short (quote, balance, shortfall in data), or spend
+            cap reached
           schema:
             $ref: '#/definitions/errors.Error'
         "404":

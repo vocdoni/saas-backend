@@ -193,7 +193,9 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 //	@Summary		List organizations managed by an integrator
 //	@Description	Returns a paginated list of organizations managed by the caller's integrator
 //	@Description	organization (resolved from the API key's org or the user session — no address in the
-//	@Description	URL). The caller must be an admin or manager of the integrator organization.
+//	@Description	URL). The caller must be an admin or manager of the integrator organization. Each item
+//	@Description	carries its spend cap (`spendCapCents`, null when unlimited) and what its processes hold
+//	@Description	debited from the integrator wallet (`spentCents`).
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `managed:read`).
 //	@Tags			integrator
@@ -235,9 +237,14 @@ func (a *API) managedOrganizationsHandler(w http.ResponseWriter, r *http.Request
 		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
-	list := make([]*apicommon.OrganizationInfo, 0, len(orgs))
+	wallet, err := a.db.Wallet(integratorAddr)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	list := make([]*apicommon.ManagedOrganizationInfo, 0, len(orgs))
 	for i := range orgs {
-		list = append(list, apicommon.OrganizationFromDB(&orgs[i], nil))
+		list = append(list, apicommon.ManagedOrganizationFromDB(&orgs[i], wallet.ManagedOrgSpend(orgs[i].Address)))
 	}
 	apicommon.HTTPWriteJSON(w, &apicommon.ListManagedOrganizations{
 		Pagination:    pagination,
@@ -352,29 +359,11 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrUnauthorized.Withf("user is not admin of the integrator organization").Write(w)
 		return
 	}
-	// parse + validate the managed org address from the path
-	managedAddrRaw := chi.URLParam(r, "orgAddress")
-	if !common.IsHexAddress(managedAddrRaw) {
-		errors.ErrMalformedURLParam.With("invalid managed organization address").Write(w)
+	managed, ok := a.managedOrgFromPath(w, r, integratorAddr)
+	if !ok {
 		return
 	}
-	managedAddr := common.HexToAddress(managedAddrRaw)
-
-	managed, err := a.db.Organization(managedAddr)
-	if err != nil {
-		if err == db.ErrNotFound {
-			errors.ErrOrganizationNotFound.Write(w)
-			return
-		}
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-	// the org must actually be managed by the integrator at {orgAddress}. Use a 404 (not 403) so a
-	// caller cannot probe which addresses are managed by other integrators.
-	if managed.ManagedBy.Cmp(integratorAddr) != 0 {
-		errors.ErrOrganizationNotFound.Write(w)
-		return
-	}
+	managedAddr := managed.Address
 
 	// Active-election guard: fetch the managed org's published processes once. The guard blocks
 	// deletion while any published election is READY or PAUSED on-chain (a lookup error fails
@@ -508,4 +497,96 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 
 	log.Infow("deleted managed organization", "integrator", integratorAddr.Hex(), "org", managedAddr.Hex())
 	apicommon.HTTPWriteJSON(w, &apicommon.DeleteManagedOrganizationResponse{Address: managedAddr.Hex()})
+}
+
+// managedOrgFromPath resolves the {orgAddress} path parameter to an organization managed by
+// integratorAddr, writing the error and reporting false otherwise. One managed by another
+// integrator is a 404 (not 403), so a caller cannot probe which addresses other integrators manage.
+func (a *API) managedOrgFromPath(
+	w http.ResponseWriter, r *http.Request, integratorAddr common.Address,
+) (*db.Organization, bool) {
+	raw := chi.URLParam(r, "orgAddress")
+	if !common.IsHexAddress(raw) {
+		errors.ErrMalformedURLParam.With("invalid managed organization address").Write(w)
+		return nil, false
+	}
+	managed, err := a.db.Organization(common.HexToAddress(raw))
+	if err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrOrganizationNotFound.Write(w)
+			return nil, false
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return nil, false
+	}
+	if managed.ManagedBy.Cmp(integratorAddr) != 0 {
+		errors.ErrOrganizationNotFound.Write(w)
+		return nil, false
+	}
+	return managed, true
+}
+
+// updateManagedOrganizationHandler godoc
+//
+//	@Summary		Set a managed organization's spend cap
+//	@Description	Caps what the managed organization at {orgAddress} may spend from the caller's integrator
+//	@Description	wallet: the most its processes may hold debited at once, in EUR cents (VAT excluded).
+//	@Description	`null` lifts the cap; organizations start unlimited. The cap is checked in the same write
+//	@Description	as the wallet balance, so a publish or census top-up that would pass it is refused with 402
+//	@Description	(40180, data: capCents, spentCents, requiredCents) without charging anything. Refunds of
+//	@Description	deleted drafts and credit-backs of failed publishes free their amount again. A cap below
+//	@Description	what is already spent only refuses further debits. The caller must be an admin of their
+//	@Description	integrator organization, and the target must be managed by it.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `managed:write`).
+//	@Tags			integrator
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			orgAddress	path		string										true	"Managed organization address"
+//	@Param			request		body		apicommon.UpdateManagedOrganizationRequest	true	"Spend cap"
+//	@Success		200			{object}	apicommon.ManagedOrganizationInfo
+//	@Failure		400			{object}	errors.Error	"Invalid address or negative cap"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		403			{object}	errors.Error	"Not an integrator"
+//	@Failure		404			{object}	errors.Error	"Managed organization not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/integrator/organizations/{orgAddress} [put]
+func (a *API) updateManagedOrganizationHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	integratorAddr, ok := a.integratorAddress(w, r)
+	if !ok {
+		return
+	}
+	if !user.HasRoleFor(integratorAddr, db.AdminRole) {
+		errors.ErrUnauthorized.Withf("user is not admin of the integrator organization").Write(w)
+		return
+	}
+	managed, ok := a.managedOrgFromPath(w, r, integratorAddr)
+	if !ok {
+		return
+	}
+	req := &apicommon.UpdateManagedOrganizationRequest{}
+	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	if req.SpendCapCents != nil && *req.SpendCapCents < 0 {
+		errors.ErrMalformedBody.Withf("spendCapCents cannot be negative").Write(w)
+		return
+	}
+	if err := a.db.SetManagedOrgSpendCap(integratorAddr, managed.Address, req.SpendCapCents); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	wallet, err := a.db.Wallet(integratorAddr)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	apicommon.HTTPWriteJSON(w, apicommon.ManagedOrganizationFromDB(managed, wallet.ManagedOrgSpend(managed.Address)))
 }

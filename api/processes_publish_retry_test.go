@@ -107,6 +107,10 @@ func TestPublishFinalFailureCreditsBack(t *testing.T) {
 	c.Assert(entries[0].AmountCents, qt.Equals, pricing.Cents(integratorProcessCents))
 	c.Assert(entries[0].IdempotencyKey, qt.Equals, "publishfail:"+oid.Hex()+":0")
 	c.Assert(entries[0].ProcessOrgAddress, qt.Equals, payment.OrgAddress)
+	// the credit-back frees what the managed organization had spent under its cap
+	wallet, err := testDB.Wallet(integratorAddr)
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.ManagedOrgSpend(payment.OrgAddress).SpentCents, qt.Equals, pricing.Cents(0))
 	vp, err := testDB.VotingProcess(oid)
 	c.Assert(err, qt.IsNil)
 	c.Assert(vp.PublishInProgress(), qt.IsFalse)
