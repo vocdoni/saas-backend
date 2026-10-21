@@ -33,7 +33,7 @@ func fakeVotesNode(t *testing.T, electionID []byte, pages [][]*api.Vote,
 				t.Errorf("page query param: %v", err)
 			}
 			*requested = append(*requested, page)
-			if page >= len(pages) && !(page == 0 && len(pages) == 0) {
+			if page >= len(pages) && (page != 0 || len(pages) != 0) {
 				w.WriteHeader(http.StatusNotFound)
 				_, _ = w.Write([]byte(`{"error":"page not found","code":4057}`))
 				return
