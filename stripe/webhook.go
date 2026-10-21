@@ -155,7 +155,9 @@ func (s *Service) handleSubscription(event *stripeapi.Event) error {
 
 	// Handle different subscription statuses
 	switch subscriptionInfo.Status {
-	case stripeapi.SubscriptionStatusActive:
+	case stripeapi.SubscriptionStatusActive,
+		stripeapi.SubscriptionStatusTrialing:
+		// a trialing subscription grants its plan for the trial, like a paid one
 		return s.handleSubscriptionCreateOrUpdate(subscriptionInfo, org)
 	case stripeapi.SubscriptionStatusCanceled,
 		stripeapi.SubscriptionStatusUnpaid:
