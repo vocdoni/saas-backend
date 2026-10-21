@@ -2,6 +2,7 @@ package subscriptions
 
 import (
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
@@ -92,12 +93,13 @@ func TestOrgCanAddWriter(t *testing.T) {
 	user := func(role db.UserRole) db.User {
 		return db.User{Organizations: []db.OrganizationUser{{Address: testOrgAddress, Role: role}}}
 	}
+	valid := time.Now().Add(time.Hour)
 	mockDB := &mockMongoStorage{
 		orgUsers: map[string][]db.User{testOrgAddress.String(): {
 			user(db.AdminRole), user(db.ManagerRole), user(db.ManagerRole), user(db.ViewerRole), user(db.ViewerRole),
 		}},
 		invitations: map[string][]db.OrganizationInvite{testOrgAddress.String(): {
-			{Role: db.ManagerRole}, {Role: db.ViewerRole},
+			{Role: db.ManagerRole, Expiration: valid}, {Role: db.ViewerRole, Expiration: valid},
 		}},
 	}
 	subs := &Subscriptions{db: mockDB}
@@ -105,8 +107,13 @@ func TestOrgCanAddWriter(t *testing.T) {
 	// 3 writers + 1 pending write invitation: one seat left; viewers never count
 	c.Assert(subs.OrgCanAddWriter(testOrgAddress), qt.IsNil)
 
+	// an expired write invitation holds no seat
 	mockDB.invitations[testOrgAddress.String()] = append(mockDB.invitations[testOrgAddress.String()],
-		db.OrganizationInvite{Role: db.AdminRole})
+		db.OrganizationInvite{Role: db.AdminRole, Expiration: time.Now().Add(-time.Hour)})
+	c.Assert(subs.OrgCanAddWriter(testOrgAddress), qt.IsNil)
+
+	mockDB.invitations[testOrgAddress.String()] = append(mockDB.invitations[testOrgAddress.String()],
+		db.OrganizationInvite{Role: db.AdminRole, Expiration: valid})
 	c.Assert(subs.OrgCanAddWriter(testOrgAddress), qt.ErrorIs, errors.ErrMaxWritersReached)
 }
 

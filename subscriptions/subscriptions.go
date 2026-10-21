@@ -166,8 +166,10 @@ func (p *Subscriptions) OrgCanAddWriter(orgAddress common.Address) error {
 			writers++
 		}
 	}
+	now := time.Now()
 	for i := range invitations {
-		if writeRole(invitations[i].Role) {
+		// an expired invitation can no longer be accepted, so it holds no seat
+		if writeRole(invitations[i].Role) && invitations[i].Expiration.After(now) {
 			writers++
 		}
 	}
