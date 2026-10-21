@@ -28,10 +28,14 @@ const (
 	TestMaxCensusSize = pricing.FreeCensusSize
 	// max vote overwrites per process
 	MaxVoteOverwritesPerProcess = 10
-	// MaxQuestionsPerProcess bounds the number of questions a voting process may hold, and so the
-	// number of ballots a voter can sign for one. Shared by the /processes validation and the CSP
-	// sign-batch cap (which cannot reach the api-package constant through the import cycle).
+	// MaxQuestionsPerProcess bounds the number of questions a new or edited voting process may
+	// hold. It does not apply to processes published before it was lowered.
 	MaxQuestionsPerProcess = 15
+	// MaxBallotsPerBatch bounds the voter-facing batch endpoints (/votes, /votes/verify, CSP
+	// sign-batch and auth batches). It stays at the former question limit so processes published
+	// before MaxQuestionsPerProcess was lowered remain votable in one batch. Defined here because
+	// the CSP handlers cannot reach the api-package constants through the import cycle.
+	MaxBallotsPerBatch = 100
 
 	// Voting-process question status values (derived at read; empty means draft).
 	QuestionStatusReady    = "READY"

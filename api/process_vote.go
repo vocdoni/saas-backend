@@ -81,10 +81,10 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, &apicommon.EnqueuedResponse{JobID: jobID})
 }
 
-// A POST /votes call is bounded by db.MaxQuestionsPerProcess, used directly rather than through a
+// A POST /votes call is bounded by db.MaxBallotsPerBatch, used directly rather than through a
 // local alias so the api package names the cap one way. A voter casts one vote per question, and a
 // process cannot hold more questions than that, so the cap is expressed as what it actually
-// depends on rather than a duplicated literal: raising it means raising db.MaxQuestionsPerProcess
+// depends on rather than a duplicated literal: raising it means raising db.MaxBallotsPerBatch
 // first, and the vochain batch transaction endpoint above that. It is deliberately NOT tied to
 // txQueueSize — the queue is sized to hold several full batches (see api/jobqueue.go), because
 // a batch rejected for lack of queue room sends the client back to relaying one vote at a time,
@@ -105,7 +105,7 @@ const (
 	maxVoteBodyBytes = 8 << 10
 	// maxVotesBodyBytes bounds a whole batch: one envelope allowance each, plus slack for the
 	// JSON framing around them.
-	maxVotesBodyBytes = db.MaxQuestionsPerProcess*maxVoteBodyBytes + 4<<10
+	maxVotesBodyBytes = db.MaxBallotsPerBatch*maxVoteBodyBytes + 4<<10
 )
 
 // relayVotesHandler godoc
@@ -147,8 +147,8 @@ func (a *API) relayVotesHandler(w http.ResponseWriter, r *http.Request) {
 	case len(req.Votes) == 0:
 		errors.ErrVoteBatchEmpty.Write(w)
 		return
-	case len(req.Votes) > db.MaxQuestionsPerProcess:
-		errors.ErrVoteBatchTooLarge.Withf("%d votes, the maximum is %d", len(req.Votes), db.MaxQuestionsPerProcess).Write(w)
+	case len(req.Votes) > db.MaxBallotsPerBatch:
+		errors.ErrVoteBatchTooLarge.Withf("%d votes, the maximum is %d", len(req.Votes), db.MaxBallotsPerBatch).Write(w)
 		return
 	}
 
@@ -230,7 +230,7 @@ const (
 	// characters, so 80 leaves room for the JSON quoting and separator around each, plus
 	// slack for the framing. Like the relay endpoints this one is public, so the body has
 	// to be bounded before it is buffered.
-	maxVerifyVotesBodyBytes = db.MaxQuestionsPerProcess*80 + 4<<10
+	maxVerifyVotesBodyBytes = db.MaxBallotsPerBatch*80 + 4<<10
 )
 
 // verifyLookupSem bounds concurrent node reads across every POST /votes/verify request.
@@ -273,9 +273,9 @@ func (a *API) verifyVotesHandler(w http.ResponseWriter, r *http.Request) {
 	case len(req.Nullifiers) == 0:
 		errors.ErrVoteBatchEmpty.Write(w)
 		return
-	case len(req.Nullifiers) > db.MaxQuestionsPerProcess:
+	case len(req.Nullifiers) > db.MaxBallotsPerBatch:
 		errors.ErrVoteBatchTooLarge.Withf("%d nullifiers, the maximum is %d",
-			len(req.Nullifiers), db.MaxQuestionsPerProcess).Write(w)
+			len(req.Nullifiers), db.MaxBallotsPerBatch).Write(w)
 		return
 	}
 	for i, nullifier := range req.Nullifiers {
