@@ -952,6 +952,7 @@ func TestOrganizationUsers(t *testing.T) {
 		// Set the organization's subscription plan to the free plan and set the user counter to
 		// the maximum allowed by the plan, so a further invite must be rejected.
 		org.Subscription.PlanID = mockFreePlan.ID
+		c.Assert(testDB.SetOrganizationSubscription(orgAddress, &org.Subscription), qt.IsNil)
 		org.Counters.Users = 10
 		err = testDB.SetOrganization(org)
 		c.Assert(err, qt.IsNil)

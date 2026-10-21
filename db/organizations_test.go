@@ -102,6 +102,40 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(org.DefaultLang, qt.Equals, "es")
 	})
 
+	t.Run("SetOrganizationWritesSubscriptionOnlyOnCreate", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+
+		address := testOrgAddress
+		c.Assert(testDB.SetOrganization(&Organization{
+			Address:      address,
+			Subscription: OrganizationSubscription{PlanID: "plan-initial", Active: true},
+		}), qt.IsNil)
+		org, err := testDB.Organization(address)
+		c.Assert(err, qt.IsNil)
+		c.Assert(org.Subscription.PlanID, qt.Equals, "plan-initial")
+		c.Assert(org.Subscription.Active, qt.IsTrue)
+
+		// a whole-document write of an existing organization updates its other fields only
+		org.Website = "https://example.com"
+		org.Subscription.PlanID = "plan-stale"
+		org.Subscription.StripeSubscriptionID = "sub_stale"
+		c.Assert(testDB.SetOrganization(org), qt.IsNil)
+		org, err = testDB.Organization(address)
+		c.Assert(err, qt.IsNil)
+		c.Assert(org.Website, qt.Equals, "https://example.com")
+		c.Assert(org.Subscription.PlanID, qt.Equals, "plan-initial")
+		c.Assert(org.Subscription.StripeSubscriptionID, qt.Equals, "")
+
+		// the last payment date has its own writer
+		paidAt := time.Now().Truncate(time.Millisecond)
+		c.Assert(testDB.SetOrganizationLastPaymentDate(address, paidAt), qt.IsNil)
+		org, err = testDB.Organization(address)
+		c.Assert(err, qt.IsNil)
+		c.Assert(org.Subscription.LastPaymentDate.Equal(paidAt), qt.IsTrue)
+		c.Assert(org.Subscription.PlanID, qt.Equals, "plan-initial")
+		c.Assert(testDB.SetOrganizationLastPaymentDate(testAnotherOrgAddress, paidAt), qt.ErrorIs, ErrNotFound)
+	})
+
 	t.Run("DeleteOrganization", func(_ *testing.T) {
 		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
