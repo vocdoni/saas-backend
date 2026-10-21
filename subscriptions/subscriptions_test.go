@@ -597,10 +597,47 @@ func TestOrgAllowsVotingType(t *testing.T) {
 	c.Assert(subs.OrgAllowsVotingType(addr, db.VotingTypeSingleChoice), qt.IsNil) // allowed
 	c.Assert(subs.OrgAllowsVotingType(addr, db.VotingTypeRanked), qt.IsNil)       // allowed
 	c.Assert(subs.OrgAllowsVotingType(addr, db.VotingTypeCumulative), qt.IsNil)   // allowed
-	c.Assert(subs.OrgAllowsVotingType(addr, ""), qt.IsNil)                        // empty (unnamed protocol) skips
 	c.Assert(subs.OrgAllowsVotingType(addr, db.VotingTypeMultiChoice),            // plan disallows
 		qt.ErrorIs, errors.ErrVotingTypeNotAllowed)
 	c.Assert(subs.OrgAllowsVotingType(addr, "quadratic"), qt.ErrorIs, errors.ErrInvalidData) // unknown type name
+}
+
+// TestOrgAllowsVotingTypeUnnamed covers the hand-crafted protocol matching no named type (an empty
+// effective type): it can approximate any named type, so it is only allowed when the plan permits
+// every one of them, otherwise a near-canonical multichoice would walk past a plan without Multiple.
+func TestOrgAllowsVotingTypeUnnamed(t *testing.T) {
+	c := qt.New(t)
+	all := db.VotingTypes{Single: true, Multiple: true, Ranked: true, Cumulative: true}
+	for name, tc := range map[string]struct {
+		types   db.VotingTypes
+		allowed bool
+	}{
+		// Approval and Weighted are false here: neither is a named layout the shape could stand for
+		"every named type allowed": {types: all, allowed: true},
+		"no multiple":              {types: db.VotingTypes{Single: true, Ranked: true, Cumulative: true}},
+		"no single":                {types: db.VotingTypes{Multiple: true, Ranked: true, Cumulative: true}},
+		"no ranked":                {types: db.VotingTypes{Single: true, Multiple: true, Cumulative: true}},
+		"no cumulative":            {types: db.VotingTypes{Single: true, Multiple: true, Ranked: true}},
+		"nothing allowed":          {},
+	} {
+		c.Run(name, func(c *qt.C) {
+			addr := common.Address{0x03}
+			const planID = "plan-unnamed"
+			subs := &Subscriptions{db: &mockMongoStorage{
+				plans: map[string]*db.Plan{planID: {ID: planID, VotingTypes: tc.types}},
+				orgs: map[string]*db.Organization{addr.String(): {
+					Address:      addr,
+					Subscription: db.OrganizationSubscription{PlanID: planID, Active: true},
+				}},
+			}}
+			err := subs.OrgAllowsVotingType(addr, "")
+			if tc.allowed {
+				c.Assert(err, qt.IsNil)
+				return
+			}
+			c.Assert(err, qt.ErrorIs, errors.ErrVotingTypeNotAllowed)
+		})
+	}
 }
 
 // Mock implementation of the necessary db.MongoStorage methods for testing

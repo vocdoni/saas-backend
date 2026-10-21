@@ -100,7 +100,8 @@ func New(url, database string) (*MongoStorage, error) {
 		sb.WriteString(params)
 		url = sb.String()
 	}
-	log.Infow("connecting to mongodb", "url", url)
+	// the URL carries the credentials, so only the hosts and database are logged
+	log.Infow("connecting to mongodb", "hosts", strings.Join(cs.Hosts, ","), "database", ms.database)
 	// preparing connection
 	opts := options.Client()
 	opts.ApplyURI(url)

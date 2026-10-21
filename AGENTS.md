@@ -203,7 +203,7 @@ user's call.
 `./scripts/check-qt-patterns.sh`, a clean `go mod tidy` diff, and `go test -failfast -timeout=45m ./...`
 with coverage (a diff report is posted as a PR comment). It runs on pull requests and on pushes to
 `main` only, so in practice every push to `main` builds and pushes a Docker image, while its `-race`
-step and the `stage`/`release*`/`aragon` Docker conditions never fire. The branch flow is
+step and the `stage`/`release*` Docker conditions never fire. The branch flow is
 `main → stage → lts` (`lts` is production), and promotion PRs (head branch `main`) skip commit
 linting. `.github/workflows/swag.yml` regenerates `docs/swagger.yaml` on PRs (posting the diff as a
 comment) and, on pushes to `stage`, commits the regenerated spec and deploys the Swagger UI.
