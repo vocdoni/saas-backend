@@ -74,11 +74,23 @@ func TestUpdateUserInfo(t *testing.T) {
 	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, res2.Token,
 		&apicommon.UserVerification{Code: mailCode[1] + "x"}, usersMeEmailVerifyEndpoint)
 
+	// A password reset code pending for the old address...
+	requestAndAssertCode(http.StatusOK, t, http.MethodPost, "",
+		&apicommon.UserInfo{Email: me.Email}, usersRecoveryPasswordEndpoint)
+	dbUser, err := testDB.UserByEmail(me.Email)
+	c.Assert(err, qt.IsNil)
+	_, err = testDB.UserVerificationCode(dbUser, db.CodeTypePasswordReset)
+	c.Assert(err, qt.IsNil)
+
 	// Confirming the code switches the email and returns a fresh token.
 	res3 := requestAndParse[apicommon.LoginResponse](t, http.MethodPost, res2.Token,
 		&apicommon.UserVerification{Code: mailCode[1]}, usersMeEmailVerifyEndpoint)
 	me3 := requestAndParse[apicommon.UserInfo](t, http.MethodGet, res3.Token, nil, usersMeEndpoint)
 	c.Assert(me3.Email, qt.Equals, newEmail)
+
+	// ... is dropped by the switch: it was sealed to the old address and could no longer open
+	_, err = testDB.UserVerificationCode(dbUser, db.CodeTypePasswordReset)
+	c.Assert(err, qt.ErrorIs, db.ErrNotFound)
 
 	// The email switch revokes every pre-change session.
 	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodGet, res2.Token, nil, usersMeEndpoint)
