@@ -286,8 +286,9 @@ three days would only bury the events that can still succeed.
 ## Integrators (managed organizations)
 
 An integrator is an organization flagged `integrator` (`cmd/cli --setIntegrator`, or opted in at
-creation). It manages any number of organizations and has no quota of its own: the only limit on
-what it spends is its wallet balance. Its own organization holds no processes (403, 40174); to
+creation). It manages any number of organizations and has no quota of its own: what it spends is
+bounded by its wallet balance and, optionally, the spend cap it sets on each managed organization
+(below). Its own organization holds no processes (403, 40174); to
 run its own votes it creates a managed organization of itself.
 
 The migration that introduced the flag also flagged organizations on an active non-default

@@ -589,7 +589,7 @@ type ManagedOrganizationInfo struct {
 	OrganizationInfo
 	// SpendCapCents is the most the organization's processes may hold debited from the wallet at
 	// once, in EUR cents; null is unlimited.
-	SpendCapCents *pricing.Cents `json:"spendCapCents"`
+	SpendCapCents *pricing.Cents `json:"spendCapCents" extensions:"x-nullable"`
 	// SpentCents is what its processes hold debited now: refunds and failed-publish credit-backs
 	// take their amount off again.
 	SpentCents pricing.Cents `json:"spentCents"`
@@ -609,7 +609,7 @@ func ManagedOrganizationFromDB(org *db.Organization, spend db.ManagedOrgSpend) *
 type UpdateManagedOrganizationRequest struct {
 	// SpendCapCents caps what the organization's processes may hold debited from the
 	// integrator's wallet, in EUR cents; null (or absent) lifts the cap.
-	SpendCapCents *pricing.Cents `json:"spendCapCents"`
+	SpendCapCents *pricing.Cents `json:"spendCapCents" extensions:"x-nullable"`
 }
 
 // DeleteManagedOrganizationResponse is returned by DELETE

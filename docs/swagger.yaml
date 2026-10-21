@@ -676,6 +676,7 @@ definitions:
           SpendCapCents is the most the organization's processes may hold debited from the wallet at
           once, in EUR cents; null is unlimited.
         type: integer
+        x-nullable: true
       spentCents:
         description: |-
           SpentCents is what its processes hold debited now: refunds and failed-publish credit-backs
@@ -1614,6 +1615,7 @@ definitions:
           SpendCapCents caps what the organization's processes may hold debited from the
           integrator's wallet, in EUR cents; null (or absent) lifts the cap.
         type: integer
+        x-nullable: true
     type: object
   apicommon.UpdateOrganizationMemberGroupResponse:
     properties:

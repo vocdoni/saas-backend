@@ -512,7 +512,7 @@ func (a *API) managedOrgFromPath(
 	}
 	managed, err := a.db.Organization(common.HexToAddress(raw))
 	if err != nil {
-		if err == db.ErrNotFound {
+		if errors.Is(err, db.ErrNotFound) {
 			errors.ErrOrganizationNotFound.Write(w)
 			return nil, false
 		}

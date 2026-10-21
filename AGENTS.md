@@ -124,9 +124,10 @@ Component packages (each is a focused service composed in `main.go`):
   no-ops). The managed-org delete guard deliberately reads the chain *synchronously* rather than
   trusting the stored status.
 - **`subscriptions/`** — roles and the fixed pay-per-process restrictions, the same for every
-  organization (5 admins/managers, 50 000 members, 20 drafts, 15 questions per process, 90-day processes). Subscription
-  plans no longer limit anything; integrators are an `integrator` flag on the organization and
-  are bounded only by their wallet.
+  organization (5 admins/managers, 50 000 members, 20 drafts, 15 questions per process,
+  90-day processes). Subscription plans no longer limit anything; integrators are an `integrator`
+  flag on the organization and are bounded only by their wallet balance and the optional spend
+  cap they set per managed organization.
 - **`stripe/`** — Stripe client, checkout/portal sessions, and webhook handling for billing.
 - **`objectstorage/`** — S3-like object storage (images) backed by Mongo, with upload/download handlers.
 - **`errors/`** — typed API `Error` (code + HTTP status + optional data), JSON-serializable; handlers
