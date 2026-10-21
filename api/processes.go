@@ -986,11 +986,17 @@ func questionResultsFromElection(e *dvoteapi.Election) db.QuestionResults {
 // ponytail: ElectionMemos is an N+1 over the election's votes (page the list + a per-memo-vote fetch to
 // correlate the memo to a choice). Bounded to manager reads of open-value questions; add a short-TTL
 // cache if a manager polls a large open-value election hard.
-func (a *API) resolveQuestionMemos(q *db.VotingProcessQuestion) []string {
+func (a *API) resolveQuestionMemos(ctx context.Context, q *db.VotingProcessQuestion) []string {
 	selectsOpen := account.OpenChoiceMatcher(q.Type, q.Choices)
 	if selectsOpen == nil || len(q.UpstreamID) == 0 {
 		return nil
 	}
+	// the memos take one chain read per vote: hold a service-wide read slot for them, and give up
+	// (nil, like any other failure here) if the request is cancelled while waiting for one
+	if !a.electionReads.acquireSlot(ctx) {
+		return nil
+	}
+	defer a.electionReads.releaseSlot()
 	memos, err := a.account.ElectionMemos(q.UpstreamID, selectsOpen)
 	if err != nil {
 		log.Warnw("results: memos fetch failed",
@@ -1036,7 +1042,7 @@ func (a *API) resolveQuestionResults(ctx context.Context, q *db.VotingProcessQue
 	}
 	qr := questionResultsFromElection(election)
 	if withMemos {
-		qr.Memos = a.resolveQuestionMemos(q)
+		qr.Memos = a.resolveQuestionMemos(ctx, q)
 	}
 	return &qr
 }
@@ -1075,7 +1081,7 @@ func (a *API) electionResultsBatch(
 		}
 		qr := questionResultsFromElection(election)
 		if withMemos {
-			qr.Memos = a.resolveQuestionMemos(q)
+			qr.Memos = a.resolveQuestionMemos(ctx, q)
 		}
 		entries[i] = &apicommon.VotingProcessQuestionResults{
 			QuestionID:      q.ID.Hex(),
