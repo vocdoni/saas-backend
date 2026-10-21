@@ -73,7 +73,7 @@ func (ms *MongoStorage) Wallet(orgAddress common.Address) (*Wallet, error) {
 // WalletCredit adds money to a wallet: a top-up (Kind WalletEntryTopUp, the default; key: the checkout
 // session id, with the payment intent and the VAT-included amount a refund needs) or a
 // credit-back (WalletEntryCreditBack with the process, key: "refund:<process id hex>" for a
-// deleted draft).
+// deleted draft, "publishfail:<process id hex>:<attempt>" for a publish that failed for good).
 type WalletCredit struct {
 	OrgAddress        common.Address
 	AmountCents       pricing.Cents
@@ -165,26 +165,37 @@ func (ms *MongoStorage) applyWalletEntry(entry *WalletLedgerEntry) error {
 	return ms.appendWalletLedger(entry)
 }
 
-// WalletDebit takes AmountCents now towards a process price of PriceCents; (process, price)
-// is the idempotency key, so a retry at the same price charges nothing. ProcessOrgAddress is
-// the organization owning the process, recorded on the ledger.
+// WalletDebit takes AmountCents now towards a process price of PriceCents; (process, attempt,
+// price) is the idempotency key, so a retry at the same price charges nothing. Attempt is the
+// payment's WalletAttempt: a publish after a credit-back pays again under a new key.
+// ProcessOrgAddress is the organization owning the process, recorded on the ledger.
 type WalletDebit struct {
 	OrgAddress        common.Address
 	ProcessID         bson.ObjectID
 	ProcessOrgAddress common.Address
 	AmountCents       pricing.Cents
 	PriceCents        pricing.Cents
+	Attempt           int
 }
 
-// DebitWalletForProcess debits the payer's wallet at most once per (process, price), or
+// walletDebitKey is the idempotency key of a process debit. Attempt 0 keeps the "<process>:<price>"
+// shape of a first debit; later attempts insert the attempt, a third segment no attempt-0 key has.
+func walletDebitKey(processID bson.ObjectID, attempt int, priceCents pricing.Cents) string {
+	if attempt == 0 {
+		return fmt.Sprintf("%s:%d", processID.Hex(), priceCents)
+	}
+	return fmt.Sprintf("%s:%d:%d", processID.Hex(), attempt, priceCents)
+}
+
+// DebitWalletForProcess debits the payer's wallet at most once per (process, attempt, price), or
 // returns ErrInsufficientWalletBalance without touching it.
 func (ms *MongoStorage) DebitWalletForProcess(d WalletDebit) error {
 	if (d.OrgAddress.Cmp(common.Address{}) == 0) || d.AmountCents <= 0 ||
-		d.PriceCents < d.AmountCents || d.ProcessID == bson.NilObjectID {
+		d.PriceCents < d.AmountCents || d.ProcessID == bson.NilObjectID || d.Attempt < 0 {
 		return ErrInvalidData
 	}
 	orgAddress, amountCents := d.OrgAddress, d.AmountCents
-	idempotencyKey := fmt.Sprintf("%s:%d", d.ProcessID.Hex(), d.PriceCents)
+	idempotencyKey := walletDebitKey(d.ProcessID, d.Attempt, d.PriceCents)
 	applied, err := ms.walletKeyApplied(orgAddress, idempotencyKey)
 	if err != nil {
 		return err

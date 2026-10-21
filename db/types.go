@@ -895,7 +895,18 @@ type ProcessPayment struct {
 	// TopUpCents is what the pending top-up checkout charges (the shortfall, at least the
 	// minimum charge).
 	TopUpCents pricing.Cents `json:"-" bson:"topUpCents,omitempty"`
-	Currency   string        `json:"currency" bson:"currency"`
+	// WalletAttempt counts the times a failed publish credited this process's wallet debits back
+	// (RevertWalletProcessPayment). It is part of every wallet debit and credit-back key, so a
+	// publish after a credit-back is charged again instead of finding its old debit applied.
+	// Absent (0) until the first credit-back, whose debit keys carry no attempt.
+	WalletAttempt int `json:"-" bson:"walletAttempt,omitempty"`
+	// CreditBackCents is what a reverted wallet payment owes the payer's wallet (the price less
+	// any once-per-organization add-on still in use), credited to the payer's wallet under
+	// "publishfail:<process>:<WalletAttempt-1>". It stays on the failed payment, so whatever
+	// touches the payment next can make sure the credit landed even if the reverting call died
+	// before applying it.
+	CreditBackCents pricing.Cents `json:"-" bson:"creditBackCents,omitempty"`
+	Currency        string        `json:"currency" bson:"currency"`
 	// RefundWithheldCents is the refund a delete fixed before moving any money: the net amount it
 	// keeps back (the relied-on once-per-organization add-ons, or 0). Set once, so a retried delete
 	// repeats the same credit under the same key; nil until a delete starts. While it is set the

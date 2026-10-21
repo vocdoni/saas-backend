@@ -39,7 +39,7 @@ func (ms *MongoStorage) ProcessPayment(processID bson.ObjectID) (*ProcessPayment
 // SetProcessPaymentPending stores a new open checkout session. It applies only while there is
 // no payment or a pending/failed one, and only if the stored session is still replacesSessionID
 // (the one the caller expired; empty if it saw none), so two concurrent checkouts cannot both
-// win. Reports false otherwise.
+// win. It keeps the attempt of the row it replaces. Reports false otherwise.
 func (ms *MongoStorage) SetProcessPaymentPending(payment *ProcessPayment, replacesSessionID string) (bool, error) {
 	if payment == nil || payment.ProcessID == bson.NilObjectID ||
 		(payment.OrgAddress.Cmp(common.Address{}) == 0) || payment.AmountCents <= 0 {
@@ -55,10 +55,26 @@ func (ms *MongoStorage) SetProcessPaymentPending(payment *ProcessPayment, replac
 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
+	// a failed wallet payment may carry no session (stored absent): "" matches it
+	var replaces any = replacesSessionID
+	if replacesSessionID == "" {
+		replaces = bson.M{"$in": bson.A{"", nil}}
+	}
 	filter := bson.M{
 		"_id":               payment.ProcessID,
 		"status":            bson.M{"$in": bson.A{ProcessPaymentPending, ProcessPaymentFailed}},
-		"checkoutSessionId": replacesSessionID,
+		"checkoutSessionId": replaces,
+	}
+	// a replaced row may be a wallet payment a failed publish credited back (or a checkout opened
+	// after one): its attempt survives the replace, or the publish this checkout funds would find
+	// the credited-back attempt's debit key applied and charge nothing
+	prev, err := ms.ProcessPayment(payment.ProcessID)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return false, err
+	}
+	if err == nil {
+		payment.WalletAttempt = prev.WalletAttempt
+		filter["walletAttempt"] = walletAttemptMatch(prev.WalletAttempt)
 	}
 	res, err := ms.processPayments.ReplaceOne(ctx, filter, payment, options.Replace().SetUpsert(true))
 	if err != nil {
@@ -232,24 +248,36 @@ func (ms *MongoStorage) SetProcessPaymentEnvelope(
 		return false, ErrInvalidData
 	}
 	now := time.Now()
+	envelope := &ProcessPayment{
+		ProcessID:   processID,
+		OrgAddress:  orgAddress,
+		Status:      ProcessPaymentPaid,
+		AmountCents: amountCents,
+		Currency:    "eur",
+		PaidAt:      now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	filter := bson.M{"_id": processID, "$or": bson.A{
+		bson.M{"status": ProcessPaymentFailed},
+		bson.M{"status": ProcessPaymentPending, "consumed": true},
+	}}
+	// a failed payment may be a wallet payment a failed publish credited back, and a consumed
+	// checkout may have been opened after one: the attempt count has to survive the replace, or a
+	// later census charge at a price an earlier attempt paid would find that attempt's debit key
+	// applied and charge nothing
+	prev, err := ms.ProcessPayment(processID)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return false, err
+	}
+	if err == nil && (prev.Status == ProcessPaymentFailed || (prev.Status == ProcessPaymentPending && prev.Consumed)) {
+		envelope.WalletAttempt = prev.WalletAttempt
+		filter["walletAttempt"] = walletAttemptMatch(prev.WalletAttempt)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// with upsert, a payment the filter excludes collides on _id: that duplicate key is the refusal
-	res, err := ms.processPayments.ReplaceOne(ctx,
-		bson.M{"_id": processID, "$or": bson.A{
-			bson.M{"status": ProcessPaymentFailed},
-			bson.M{"status": ProcessPaymentPending, "consumed": true},
-		}},
-		&ProcessPayment{
-			ProcessID:   processID,
-			OrgAddress:  orgAddress,
-			Status:      ProcessPaymentPaid,
-			AmountCents: amountCents,
-			Currency:    "eur",
-			PaidAt:      now,
-			CreatedAt:   now,
-			UpdatedAt:   now,
-		}, options.Replace().SetUpsert(true))
+	res, err := ms.processPayments.ReplaceOne(ctx, filter, envelope, options.Replace().SetUpsert(true))
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			return false, nil
@@ -257,6 +285,54 @@ func (ms *MongoStorage) SetProcessPaymentEnvelope(
 		return false, fmt.Errorf("failed to set process payment envelope: %w", err)
 	}
 	return res.MatchedCount == 1 || res.UpsertedCount == 1, nil
+}
+
+// walletAttemptMatch matches a payment's WalletAttempt in a filter: 0 is stored as absent.
+func walletAttemptMatch(attempt int) any {
+	if attempt == 0 {
+		return bson.M{"$in": bson.A{0, nil}}
+	}
+	return attempt
+}
+
+// WalletPaymentRevert is the wallet payment a publish that failed for good gives back: the
+// payment as read (AmountCents at Attempt) and what it owes the payer's wallet.
+type WalletPaymentRevert struct {
+	ProcessID       bson.ObjectID
+	AmountCents     pricing.Cents
+	Attempt         int
+	CreditBackCents pricing.Cents
+}
+
+// RevertWalletProcessPayment turns the wallet payment of a publish that failed for good into a
+// failed one owing r.CreditBackCents to the payer's wallet, before that credit is made: the
+// draft is unpaid again, its WalletAttempt moves on so the next publish debits under keys no
+// earlier attempt applied, and the owed credit stays on the payment until the caller applies it
+// under the key of the attempt that paid. A compare-and-set on the wallet payment the caller read
+// (paid at AmountCents and Attempt, no refund plan): it reports false when the payment moved since.
+func (ms *MongoStorage) RevertWalletProcessPayment(r WalletPaymentRevert) (bool, error) {
+	if r.ProcessID == bson.NilObjectID || r.AmountCents <= 0 || r.Attempt < 0 ||
+		r.CreditBackCents < 0 || r.CreditBackCents > r.AmountCents {
+		return false, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.processPayments.UpdateOne(ctx,
+		bson.M{
+			"_id": r.ProcessID, "status": ProcessPaymentPaid, "amountCents": r.AmountCents,
+			"refundWithheldCents": bson.M{"$exists": false},
+			"walletAttempt":       walletAttemptMatch(r.Attempt),
+		},
+		bson.M{
+			"$set": bson.M{
+				"status": ProcessPaymentFailed, "creditBackCents": r.CreditBackCents, "updatedAt": time.Now(),
+			},
+			"$inc": bson.M{"walletAttempt": 1},
+		})
+	if err != nil {
+		return false, fmt.Errorf("failed to revert wallet process payment: %w", err)
+	}
+	return res.MatchedCount == 1, nil
 }
 
 // DeleteProcessPayment removes a pending or failed payment when its draft is deleted. It
