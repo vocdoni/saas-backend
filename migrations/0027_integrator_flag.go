@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ethereum/go-ethereum/common"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
@@ -21,9 +22,15 @@ func init() {
 //     so keying on it would flag every organization;
 //   - it already manages organizations, or holds API keys (only integrators can mint them).
 //
+// An organization is unmanaged when managedBy is missing, null or the zero address (an exported
+// database restored through ImportData persists the latter). The migration fails closed: it
+// errors out, before dropping the limits, if unmanaged orgs carried them yet none got flagged.
+//
 // Then the limits and their counters are removed from organizations and plans.
 func upIntegratorFlag(ctx context.Context, database *mongo.Database) error {
 	orgs := database.Collection("organizations")
+	// field missing, null, or the zero address
+	unmanaged := bson.M{"$in": bson.A{nil, common.Address{}}}
 
 	// the candidates of each of the last three rules, as lists of ids
 	distinct := []struct {
@@ -32,7 +39,7 @@ func upIntegratorFlag(ctx context.Context, database *mongo.Database) error {
 		out         bson.A
 	}{
 		{"plans", "_id", bson.M{"integratorLimits.maxManagedOrgs": bson.M{"$gt": 0}, "default": bson.M{"$ne": true}}, nil},
-		{"organizations", "managedBy", bson.M{"managedBy": bson.M{"$exists": true}}, nil},
+		{"organizations", "managedBy", bson.M{"managedBy": bson.M{"$nin": bson.A{nil, common.Address{}}}}, nil},
 		{"apiKeys", "orgAddress", bson.M{}, nil},
 	}
 	for i := range distinct {
@@ -42,7 +49,7 @@ func upIntegratorFlag(ctx context.Context, database *mongo.Database) error {
 		}
 	}
 	filter := bson.M{
-		"managedBy": bson.M{"$exists": false},
+		"managedBy": unmanaged,
 		"$or": bson.A{
 			bson.M{"integratorLimits.maxManagedOrgs": bson.M{"$gt": 0}},
 			bson.M{"subscription.planID": bson.M{"$in": distinct[0].out}, "subscription.active": true},
@@ -50,8 +57,20 @@ func upIntegratorFlag(ctx context.Context, database *mongo.Database) error {
 			bson.M{"_id": bson.M{"$in": distinct[2].out}},
 		},
 	}
-	if _, err := orgs.UpdateMany(ctx, filter, bson.M{"$set": bson.M{"integrator": true}}); err != nil {
+	res, err := orgs.UpdateMany(ctx, filter, bson.M{"$set": bson.M{"integrator": true}})
+	if err != nil {
 		return fmt.Errorf("failed to flag integrators: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		withLimits, err := orgs.CountDocuments(ctx, bson.M{
+			"managedBy": unmanaged, "integratorLimits.maxManagedOrgs": bson.M{"$gt": 0},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to count organizations with integrator limits: %w", err)
+		}
+		if withLimits > 0 {
+			return fmt.Errorf("no integrator flagged although %d organizations carry integrator limits", withLimits)
+		}
 	}
 	if _, err := orgs.UpdateMany(ctx, bson.M{}, bson.M{"$unset": bson.M{
 		"integratorLimits":          "",

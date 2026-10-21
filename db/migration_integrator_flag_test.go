@@ -31,8 +31,8 @@ func TestIntegratorFlagMigration(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 
 	override, onPlan, managing, keyHolder := common.Address{0x01}, common.Address{0x02}, common.Address{0x03}, common.Address{0x04}
-	onDefault, managed := common.Address{0x05}, common.Address{0x06}
-	for _, addr := range []common.Address{override, onPlan, managing, keyHolder, onDefault} {
+	onDefault, managed, zeroManaged := common.Address{0x05}, common.Address{0x06}, common.Address{0x07}
+	for _, addr := range []common.Address{override, onPlan, managing, keyHolder, onDefault, zeroManaged} {
 		c.Assert(testDB.SetOrganization(&Organization{Address: addr, CreatedAt: time.Now()}), qt.IsNil)
 	}
 	c.Assert(testDB.SetOrganization(&Organization{Address: managed, ManagedBy: managing, CreatedAt: time.Now()}), qt.IsNil)
@@ -42,6 +42,8 @@ func TestIntegratorFlagMigration(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 	}
 	set(override, bson.M{"integratorLimits": bson.M{"maxManagedOrgs": 2}, "counters.managedOrgs": 1})
+	// an imported database persists the zero address as managedBy
+	set(zeroManaged, bson.M{"integratorLimits": bson.M{"maxManagedOrgs": 2}, "managedBy": common.Address{}})
 	set(onPlan, bson.M{"subscription.planID": "prod_mig_integrator", "subscription.active": true})
 	set(onDefault, bson.M{"subscription.planID": "prod_mig_default", "subscription.active": true})
 	set(managed, bson.M{"subscription.planID": "prod_mig_integrator", "subscription.active": true})
@@ -53,7 +55,7 @@ func TestIntegratorFlagMigration(t *testing.T) {
 	c.Assert(mig.Up(ctx, database), qt.IsNil) // idempotent
 
 	for addr, want := range map[common.Address]bool{
-		override: true, onPlan: true, managing: true, keyHolder: true, onDefault: false, managed: false,
+		override: true, onPlan: true, managing: true, keyHolder: true, onDefault: false, managed: false, zeroManaged: true,
 	} {
 		org, err := testDB.Organization(addr)
 		c.Assert(err, qt.IsNil)
