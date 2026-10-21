@@ -201,9 +201,10 @@ func TestSetJob(t *testing.T) {
 // queues are in-memory, so a job still pending from a process that died has no worker left and
 // would stay pending forever. The sweep fails the jobs whose owner stopped heartbeating (never
 // replaying the transactions) and closes the pending entries of their batch vote jobs, while the
-// jobs of the sweeping process and of a sibling replica that keeps heartbeating are left alone —
-// a replica starting next to live ones must not fail their work. Jobs written before jobs had an
-// owner are judged by age; completed jobs and statusless import jobs are never touched.
+// jobs a live process keeps heartbeating, its own or a sibling's, are left alone — a replica
+// starting next to live ones must not fail their work. A job of the sweeping process that it no
+// longer heartbeats (nothing holds it) is swept too. Jobs written before jobs had an owner are
+// judged by age; completed jobs and statusless import jobs are never touched.
 func TestFailInterruptedTxJobs(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
@@ -240,6 +241,7 @@ func TestFailInterruptedTxJobs(t *testing.T) {
 	// pending jobs of the live replica and of the sweeping process itself
 	c.Assert(live.CreateTxJob("sibling-tx", JobTypeSetProcessStatus, org), qt.IsNil)
 	c.Assert(testDB.CreateTxJob("own-tx", JobTypeSetProcessStatus, org), qt.IsNil)
+	c.Assert(testDB.CreateTxJob("own-unheld-tx", JobTypeSetProcessStatus, org), qt.IsNil)
 
 	// nothing is stale yet: a fresh job of a stopped process is not swept before its heartbeat
 	// has had time to lapse
@@ -249,16 +251,28 @@ func TestFailInterruptedTxJobs(t *testing.T) {
 
 	// time passes: the live replica keeps heartbeating, the dead one does not
 	time.Sleep(2 * TxJobStaleAfter)
-	beats, err := live.HeartbeatTxJobs()
+	// a heartbeat only refreshes the given jobs of the calling process
+	beats, err := live.HeartbeatTxJobs([]string{"sibling-tx", "own-tx"})
 	c.Assert(err, qt.IsNil)
 	c.Assert(beats, qt.Equals, int64(1))
+	beats, err = testDB.HeartbeatTxJobs([]string{"own-tx"})
+	c.Assert(err, qt.IsNil)
+	c.Assert(beats, qt.Equals, int64(1))
+	beats, err = testDB.HeartbeatTxJobs(nil)
+	c.Assert(err, qt.IsNil)
+	c.Assert(beats, qt.Equals, int64(0))
 
 	n, err = testDB.FailInterruptedTxJobs()
 	c.Assert(err, qt.IsNil)
-	c.Assert(n, qt.Equals, int64(3)) // interrupted-tx, interrupted-batch, legacy-tx
+	c.Assert(n, qt.Equals, int64(4)) // interrupted-tx, interrupted-batch, legacy-tx, own-unheld-tx
+
+	// the sweeper's own job that nothing held anymore is failed too
+	job, err := testDB.Job("own-unheld-tx")
+	c.Assert(err, qt.IsNil)
+	c.Assert(job.Status, qt.Equals, JobStatusFailed)
 
 	// the dead replica's pending tx job is failed with the restart explanation
-	job, err := testDB.Job("interrupted-tx")
+	job, err = testDB.Job("interrupted-tx")
 	c.Assert(err, qt.IsNil)
 	c.Assert(job.Status, qt.Equals, JobStatusFailed)
 	c.Assert(job.Error, qt.Contains, "restart")

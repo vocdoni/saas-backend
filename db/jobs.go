@@ -215,15 +215,20 @@ func (ms *MongoStorage) RecordBatchVoteOutcome(jobID string, index int, voteID i
 // has to absorb the clock skew between replicas. A var so tests can shorten it.
 var TxJobStaleAfter = 2 * time.Minute
 
-// HeartbeatTxJobs refreshes the heartbeat of every transaction job this process still has
-// pending, vouching that its in-memory queue is alive and will finish them. A process calls it
-// periodically, well within TxJobStaleAfter. It returns how many jobs were refreshed.
-func (ms *MongoStorage) HeartbeatTxJobs() (int64, error) {
+// HeartbeatTxJobs refreshes the heartbeat of the given pending transaction jobs of this process,
+// vouching that a task or waiter in its memory will still finish them. Only the jobs the caller
+// actually holds are passed, so a job whose outcome write failed stops being refreshed and is
+// eventually swept by FailInterruptedTxJobs. A process calls it periodically, well within
+// TxJobStaleAfter. It returns how many jobs were refreshed.
+func (ms *MongoStorage) HeartbeatTxJobs(jobIDs []string) (int64, error) {
+	if len(jobIDs) == 0 {
+		return 0, nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	res, err := ms.jobs.UpdateMany(ctx,
-		bson.M{"status": JobStatusPending, "instance": ms.instanceID},
+		bson.M{"status": JobStatusPending, "instance": ms.instanceID, "jobId": bson.M{"$in": jobIDs}},
 		bson.M{"$set": bson.M{"heartbeatAt": time.Now()}},
 	)
 	if err != nil {
@@ -232,12 +237,12 @@ func (ms *MongoStorage) HeartbeatTxJobs() (int64, error) {
 	return res.ModifiedCount, nil
 }
 
-// FailInterruptedTxJobs marks failed every transaction job still pending whose owning process
-// stopped heartbeating it: the tx queues are in-memory, so such a job has no worker left to
-// finish it and would stay pending forever. Jobs of this process, and jobs another live replica
-// keeps heartbeating, are left alone — a replica starting up must not fail the work of the
-// replicas running next to it. Jobs written before jobs carried an owner (no heartbeat) are
-// judged by their age instead. The transactions themselves are never replayed — their outcome
+// FailInterruptedTxJobs marks failed every transaction job still pending that no process
+// heartbeats anymore: the tx queues are in-memory, so such a job has no worker left to finish it
+// (its process stopped, or its worker could not record the outcome) and would stay pending
+// forever. Jobs a live process keeps heartbeating, this one included, are left alone — a replica
+// starting up must not fail the work of the replicas running next to it. Jobs written before jobs
+// carried an owner (no heartbeat) are judged by their age instead. The transactions themselves are never replayed — their outcome
 // is unknown (some may have mined), so resubmitting could duplicate them; the status syncer
 // reconciles the stored question status against the chain instead. Import jobs carry no status
 // field and are untouched. It returns how many jobs were closed.
@@ -251,8 +256,7 @@ func (ms *MongoStorage) FailInterruptedTxJobs() (int64, error) {
 	cutoff := time.Now().Add(-TxJobStaleAfter)
 	orphaned := func() bson.M {
 		return bson.M{
-			"status":   JobStatusPending,
-			"instance": bson.M{"$ne": ms.instanceID},
+			"status": JobStatusPending,
 			"$or": bson.A{
 				bson.M{"heartbeatAt": bson.M{"$lt": cutoff}},
 				bson.M{"heartbeatAt": bson.M{"$exists": false}, "createdAt": bson.M{"$lt": cutoff}},
@@ -262,7 +266,7 @@ func (ms *MongoStorage) FailInterruptedTxJobs() (int64, error) {
 
 	// close the still-pending envelopes of batch vote jobs first, so their per-vote entries
 	// explain the failure too rather than staying pending inside a failed job.
-	interrupted := "interrupted by a service restart; the transaction outcome is unknown"
+	interrupted := "interrupted by a service restart or a lost outcome write; the transaction outcome is unknown"
 	batchFilter := orphaned()
 	batchFilter["type"] = JobTypeRelayVotes
 	_, err := ms.jobs.UpdateMany(ctx,

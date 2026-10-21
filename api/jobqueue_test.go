@@ -99,7 +99,10 @@ func TestPublishWorkerKeepsMinedUnpersisted(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "minedunpersist12")
 	orgAddress := testCreateOrganization(t, token)
-	oid := bson.NewObjectID()
+	oid, err := testDB.SetVotingProcess(&db.VotingProcess{
+		OrgAddress: orgAddress, Title: db.MultiLangString{"default": "mined unpersisted"},
+	})
+	c.Assert(err, qt.IsNil)
 
 	// a question id that does not exist yet: SetQuestionPublished fails like a DB outage would
 	q := db.VotingProcessQuestion{ID: bson.NewObjectID(), ProcessID: oid}
@@ -119,7 +122,7 @@ func TestPublishWorkerKeepsMinedUnpersisted(t *testing.T) {
 
 	// the DB recovers (the row now exists): the flush persists the original election id
 	stored := q
-	_, err := testDB.SetQuestion(&stored)
+	_, err = testDB.SetQuestion(&stored)
 	c.Assert(err, qt.IsNil)
 	c.Assert(pw.flushMinedUnpersisted(), qt.IsTrue)
 	c.Assert(pw.minedUnpersisted, qt.HasLen, 0)
@@ -127,6 +130,11 @@ func TestPublishWorkerKeepsMinedUnpersisted(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(got.UpstreamID.String(), qt.Equals, upstream.String())
 	c.Assert(pw.questions[0].UpstreamID.String(), qt.Equals, upstream.String())
+
+	// the process was flagged before the election id was stored
+	vp, err := testDB.VotingProcess(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(vp.HasMinedElections, qt.IsTrue)
 }
 
 // TestPublishWorkerStopsWithoutClaim pins that a publish worker that no longer owns the publish
@@ -146,16 +154,27 @@ func TestPublishWorkerStopsWithoutClaim(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(claimed, qt.IsTrue)
 
+	// the worker drew a managed slot from its integrator (here the org itself) for this attempt
+	c.Assert(testDB.AddOrganizationManagedProcesses(orgAddress, 1), qt.IsNil)
+
 	// the dispossessed worker has no chain client: reaching the submit path would panic, so a
 	// plain error proves it stopped first
 	pw := &publishWorker{
 		a:                &API{db: testDB},
 		vp:               &db.VotingProcess{ID: oid, OrgAddress: orgAddress},
 		owner:            "a-claim-that-was-reclaimed",
+		reserved:         true,
+		integratorAddr:   orgAddress,
 		minedUnpersisted: make(map[bson.ObjectID]internal.HexBytes),
 	}
 	_, err = pw.run()
 	c.Assert(err, qt.ErrorMatches, "publish claim lost.*")
+
+	// nothing was mined, so the slot is given back even though the claim is gone: whoever
+	// publishes next reserves its own
+	org, err := testDB.Organization(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(org.Counters.ManagedProcesses, qt.Equals, 0)
 
 	// the current owner's claim survived the dispossessed worker's rollback
 	vp, err := testDB.VotingProcess(oid)

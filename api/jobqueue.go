@@ -153,6 +153,59 @@ type txTask struct {
 type txQueue struct {
 	mu    sync.Mutex
 	tasks chan txTask
+	// held, when set, tracks the jobs of the queued and running tasks (see heldTxJobs).
+	held *heldTxJobs
+}
+
+// heldTxJobs counts, per job id, the tasks and waiters of this process that will still write
+// the job's outcome. Only those jobs are heartbeated, so a job nothing here will ever finish
+// (its final status write failed, say) stops being vouched for and is swept as interrupted.
+// A nil *heldTxJobs is a valid, empty registry.
+type heldTxJobs struct {
+	mu   sync.Mutex
+	jobs map[string]int
+}
+
+func newHeldTxJobs() *heldTxJobs {
+	return &heldTxJobs{jobs: make(map[string]int)}
+}
+
+// hold records one more holder of jobID.
+func (h *heldTxJobs) hold(jobID string) {
+	if h == nil || jobID == "" {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.jobs[jobID]++
+}
+
+// release drops one holder of jobID.
+func (h *heldTxJobs) release(jobID string) {
+	if h == nil || jobID == "" {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.jobs[jobID] <= 1 {
+		delete(h.jobs, jobID)
+		return
+	}
+	h.jobs[jobID]--
+}
+
+// ids returns the job ids currently held.
+func (h *heldTxJobs) ids() []string {
+	if h == nil {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	ids := make([]string, 0, len(h.jobs))
+	for id := range h.jobs {
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 // enqueueBatch hands a group of tasks to the queue all or nothing: it returns false,
@@ -169,6 +222,7 @@ func (q *txQueue) enqueueBatch(tasks []txTask) bool {
 		return false
 	}
 	for _, task := range tasks {
+		q.held.hold(task.jobID)
 		q.tasks <- task
 	}
 	return true
@@ -179,8 +233,9 @@ func (q *txQueue) enqueueBatch(tasks []txTask) bool {
 // `pending` until another process sees their heartbeat stop and marks them failed (see
 // superviseTxJobs).
 func (a *API) startTxQueues() {
-	a.orgTxQueue = &txQueue{tasks: make(chan txTask, orgTxQueueSize)}
-	a.relayTxQueue = &txQueue{tasks: make(chan txTask, relayTxQueueSize)}
+	a.heldTxJobs = newHeldTxJobs()
+	a.orgTxQueue = &txQueue{tasks: make(chan txTask, orgTxQueueSize), held: a.heldTxJobs}
+	a.relayTxQueue = &txQueue{tasks: make(chan txTask, relayTxQueueSize), held: a.heldTxJobs}
 	for range orgTxQueueWorkers {
 		go a.txWorker(a.orgTxQueue)
 	}
@@ -193,6 +248,7 @@ func (a *API) startTxQueues() {
 func (a *API) txWorker(q *txQueue) {
 	for task := range q.tasks {
 		a.runTxTask(task)
+		q.held.release(task.jobID)
 	}
 }
 
@@ -233,8 +289,8 @@ func (a *API) recordTxOutcome(task txTask, result *db.JobResult, err error) {
 var txJobHeartbeatInterval = 30 * time.Second
 
 // superviseTxJobs keeps the tx jobs of every replica honest about whether a worker still holds
-// them. Each tick it heartbeats this process's own pending jobs, then fails the pending jobs
-// whose owner stopped heartbeating: their queue was in-memory, so no worker will ever finish
+// them. Each tick it heartbeats the jobs this process still holds (see heldTxJobs), then fails
+// the pending jobs nobody heartbeats anymore: their queue was in-memory, so no worker will ever finish
 // them, and the transactions are never replayed (their outcome is unknown — the status syncer
 // reconciles stored statuses against the chain instead). It runs periodically rather than only
 // at startup because in a rolling deploy the replica that replaces a dead one usually starts
@@ -244,7 +300,7 @@ func (a *API) superviseTxJobs() {
 	ticker := time.NewTicker(txJobHeartbeatInterval)
 	defer ticker.Stop()
 	for {
-		if _, err := a.db.HeartbeatTxJobs(); err != nil {
+		if _, err := a.db.HeartbeatTxJobs(a.heldTxJobs.ids()); err != nil {
 			log.Warnw("could not heartbeat pending tx jobs", "error", err)
 		}
 		if n, err := a.db.FailInterruptedTxJobs(); err != nil {
