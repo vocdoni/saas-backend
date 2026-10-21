@@ -1164,7 +1164,7 @@ func (ms *MongoStorage) OrgMembersByField(
 		return nil, ErrInvalidData
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	filter := bson.M{

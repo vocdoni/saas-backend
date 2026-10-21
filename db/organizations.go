@@ -160,7 +160,7 @@ func (ms *MongoStorage) ReplaceCreatorEmail(oldEmail, newEmail string) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 	// update the creator email in the organizations where it is the creator. The organization
 	// signer is derived from signerSeed, falling back to the creator for rows the backfill
@@ -277,7 +277,7 @@ func (ms *MongoStorage) RemoveOrganizationFromAllUsers(address common.Address) e
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 	filter := bson.M{"organizations._id": address}
 	update := bson.M{
