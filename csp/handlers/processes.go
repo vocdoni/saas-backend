@@ -935,6 +935,7 @@ func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Reques
 //	@Param			request		body		handlers.CheckMembershipRequest	true	"Request with auth token"
 //	@Success		200			{object}	handlers.ProcessCheckResponse
 //	@Failure		400			{object}	errors.Error	"Malformed body or missing auth token"
+//	@Failure		401			{object}	errors.Error	"Auth token not verified or not issued for this process"
 //	@Failure		404			{object}	errors.Error	"Process or census not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/check [post]
