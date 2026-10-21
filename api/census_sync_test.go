@@ -742,6 +742,21 @@ func TestVotingProcessMutationsRefusedWhilePublishing(t *testing.T) {
 	c.Assert(testDB.ClearVotingProcessPublishing(oid, ""), qt.IsNil)
 	_, code = testRequest(t, http.MethodPut, token, edit, "processes", pid)
 	c.Assert(code, qt.Equals, http.StatusOK)
+
+	// the eligibility update takes the publish claim itself and gives it back when done
+	edited := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	_, code = testRequest(t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: []string{ids[0]}},
+		"processes", pid, "questions", edited.Questions[0].ID.Hex(), "census")
+	c.Assert(code, qt.Equals, http.StatusOK)
+	_, won, err = testDB.ClaimVotingProcessForPublish(oid, time.Time{})
+	c.Assert(err, qt.IsNil)
+	c.Assert(won, qt.IsTrue)
+	c.Assert(testDB.ClearVotingProcessPublishing(oid, ""), qt.IsNil)
+
+	// a draft flagged as having mined an election cannot be deleted, even with no stored election id
+	c.Assert(testDB.MarkVotingProcessMined(oid), qt.IsNil)
+	requestAndAssertError(errors.ErrProcessPartiallyPublished, t, http.MethodDelete, token, nil, "processes", pid)
 }
 
 func objectID(c *qt.C, hexID string) bson.ObjectID {

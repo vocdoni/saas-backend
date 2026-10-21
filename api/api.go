@@ -169,6 +169,7 @@ type API struct {
 	orgTxQueue    *txQueue
 	relayTxQueue  *txQueue
 	orgTxLocks    *orgTxMutex
+	heldTxJobs    *heldTxJobs
 	otpExpiry     time.Duration
 	otpCooldown   time.Duration
 	notifySync    bool

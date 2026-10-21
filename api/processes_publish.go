@@ -481,12 +481,6 @@ func (pw *publishWorker) renewClaim(stop <-chan struct{}) {
 // retry the write instead of resubmitting the (already existing) election.
 func (pw *publishWorker) persistPublished(q *db.VotingProcessQuestion, upstreamID internal.HexBytes) bool {
 	pw.minedUnpersisted[q.ID] = upstreamID
-	// flag the process before recording the election id, so no draft edit can replace the
-	// questions (and erase the id) once it is stored — whatever an edit in flight read earlier
-	if err := pw.a.db.MarkVotingProcessMined(pw.vp.ID); err != nil {
-		log.Warnw("could not flag voting process as having mined elections",
-			"processId", pw.vp.ID.Hex(), "error", err)
-	}
 	initialStatus := db.QuestionStatusReady
 	if pw.vp.InitialStatus == db.QuestionStatusPaused {
 		initialStatus = db.QuestionStatusPaused
@@ -495,6 +489,13 @@ func (pw *publishWorker) persistPublished(q *db.VotingProcessQuestion, upstreamI
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
 			time.Sleep(time.Duration(attempt) * 200 * time.Millisecond)
+		}
+		// flag the process before recording the election id, so no draft edit can replace the
+		// questions (and erase the id) once it is stored — whatever an edit in flight read
+		// earlier. Without the flag the id is not stored yet: the pair stays pending and both
+		// writes are retried.
+		if err = pw.a.db.MarkVotingProcessMined(pw.vp.ID); err != nil {
+			continue
 		}
 		if err = pw.a.db.SetQuestionPublished(q.ID, upstreamID, q.MetadataURL, initialStatus); err == nil {
 			q.UpstreamID = upstreamID
@@ -552,7 +553,7 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 		// a worker that no longer owns the publish claim must stop before submitting anything:
 		// someone else has taken the process over, and both submitting would mint duplicate
 		// elections. Renewing doubles as the check, and refreshes the claim on every round.
-		if owned, err := a.db.RenewVotingProcessPublishClaim(pw.vp.ID, pw.owner); err != nil || !owned {
+		if owned, err := pw.confirmClaim(); err != nil || !owned {
 			pw.abandon()
 			if err != nil {
 				return nil, fmt.Errorf("could not confirm the publish claim, stopping: %w", err)
@@ -654,10 +655,29 @@ func (pw *publishWorker) resolveStartDate() time.Time {
 	return time.Now()
 }
 
+// confirmClaim renews the publish claim and reports whether the worker still owns it, retrying
+// a storage error a few times so a transient failure is not taken for a lost claim. An error
+// that persists is returned.
+func (pw *publishWorker) confirmClaim() (bool, error) {
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+		}
+		var owned bool
+		if owned, err = pw.a.db.RenewVotingProcessPublishClaim(pw.vp.ID, pw.owner); err == nil {
+			return owned, nil
+		}
+	}
+	return false, err
+}
+
 // abandon rolls back a failed/aborted publish: it resets the not-yet-mined questions (so a later
 // publish resumes them), clears the publishing marker, and releases the managed-process
-// reservation only when nothing was mined this run. A partial-mine failure keeps the slot so the
-// resume (which skips a new reservation) consumes it, avoiding a leak or a double-reserve.
+// reservation only when nothing was mined. A partial-mine failure keeps the slot so the resume
+// (which skips a new reservation) consumes it, avoiding a leak or a double-reserve. The release
+// does not depend on still owning the claim: whoever claims the process next finds nothing mined
+// and reserves its own slot.
 func (pw *publishWorker) abandon() {
 	a := pw.a
 	// last chance to persist elections that mined but whose DB write kept failing: losing the
@@ -671,18 +691,18 @@ func (pw *publishWorker) abandon() {
 	}
 	// only roll back if this worker still owns the publish claim: a stale claim that got
 	// reclaimed means another publish is running and these resets would stomp its work.
-	if ok, err := a.db.RenewVotingProcessPublishClaim(pw.vp.ID, pw.owner); err != nil || !ok {
+	if ok, err := pw.confirmClaim(); err != nil || !ok {
 		log.Warnw("publish claim not owned at abandon, skipping rollback",
 			"processId", pw.vp.ID.Hex(), "error", err)
-		return
+	} else {
+		if e := a.db.ResetQuestionsPublish(pw.vp.ID); e != nil {
+			log.Warnw("could not reset questions after failed publish", "error", e)
+		}
+		if e := a.db.ClearVotingProcessPublishing(pw.vp.ID, pw.owner); e != nil {
+			log.Warnw("could not clear publishing state after failed publish", "error", e)
+		}
 	}
-	if e := a.db.ResetQuestionsPublish(pw.vp.ID); e != nil {
-		log.Warnw("could not reset questions after failed publish", "error", e)
-	}
-	if e := a.db.ClearVotingProcessPublishing(pw.vp.ID, pw.owner); e != nil {
-		log.Warnw("could not clear publishing state after failed publish", "error", e)
-	}
-	if pw.reserved && !anyMined(pw.questions) {
+	if pw.reserved && !anyMined(pw.questions) && len(pw.minedUnpersisted) == 0 {
 		if e := a.db.AddOrganizationManagedProcesses(pw.integratorAddr, -1); e != nil {
 			log.Warnw("could not roll back managed processes counter", "error", e)
 		}

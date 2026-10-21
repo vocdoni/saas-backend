@@ -82,7 +82,14 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	if anyMined(questions) {
+	current, err := a.db.VotingProcess(oid)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	// the flag is set before a mined election id is stored, so it also covers an election whose
+	// id never reached its question
+	if anyMined(questions) || current.HasMinedElections {
 		errors.ErrProcessPartiallyPublished.Write(w)
 		return
 	}
@@ -386,9 +393,29 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 	}
 	// while a publish worker holds the process, its questions all look like drafts: an eligibility
 	// write would take the draft path, skip the resize, and the worker would then mint an election
-	// sized from its older snapshot.
-	if refusePublishInProgress(w, vp) {
-		return
+	// sized from its older snapshot. So an unpublished process is changed under the claim a publish
+	// takes, as delete does, and the two exclude each other; checking the marker on the read above
+	// would let a publish claim the process right after. The questions are reloaded under the
+	// claim. A published process is never claimed again, so it needs none.
+	if !vp.Published {
+		owner, claimed, err := a.db.ClaimVotingProcessForPublish(oid, time.Time{})
+		if err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+		if !claimed {
+			errors.ErrPublishInProgress.Write(w)
+			return
+		}
+		defer func() {
+			if e := a.db.ClearVotingProcessPublishing(oid, owner); e != nil {
+				log.Warnw("could not release the eligibility update's claim", "processId", oid.Hex(), "error", e)
+			}
+		}()
+		if questions, err = a.db.QuestionsByProcess(oid); err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
 	}
 	question, ok := questionOfProcess(w, questions, chi.URLParam(r, "questionId"))
 	if !ok {
@@ -727,7 +754,9 @@ func (a *API) enqueueSetProcessCensus(orgAddress common.Address, targets []censu
 	// caller retries the resize, so it waits for the lock in the background instead of being
 	// dropped; the job stays pending meanwhile and is what the caller polls. The lock is always
 	// released once its holder's tx is done, so the wait ends.
+	a.heldTxJobs.hold(jobID)
 	go func() {
+		defer a.heldTxJobs.release(jobID)
 		if err := submit(a.orgTxLocks.lock(org.Address)); err != nil {
 			log.Warnw("could not enqueue a deferred census resize", "org", org.Address, "jobId", jobID, "error", err)
 		}
