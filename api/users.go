@@ -468,7 +468,8 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 //	@Description	effect immediately: a verification code is sent to the requested address and the
 //	@Description	email is switched only once the code is confirmed via POST /users/me/email/verify.
 //	@Description	Changing the email of an account with a password requires the current password in
-//	@Description	the password field; accounts without a password (OAuth-only) cannot change it.
+//	@Description	the password field; accounts without a password (OAuth-only) cannot change it, and
+//	@Description	neither can any account when the service runs without a mail service.
 //	@Description	A new change code can be requested once per OTP cooldown. The code is mailed to the
 //	@Description	new address with a link to the web app page /account/email/verify?code=<code>.
 //	@Tags			users
@@ -509,6 +510,11 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 		// so their email cannot be changed here.
 		if user.Password == "" {
 			errors.ErrNotSupported.With("accounts without a password cannot change their email").Write(w)
+			return
+		}
+		// without a mail service no code can reach the new address, so its ownership cannot be proven
+		if a.mail == nil {
+			errors.ErrNotSupported.With("email changes need the mail service").Write(w)
 			return
 		}
 		if userInfo.Password == "" {
@@ -716,6 +722,14 @@ func (a *API) updateUserEmailVerifyHandler(w http.ResponseWriter, r *http.Reques
 		log.Warnw("could not update user email", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)
 		return
+	}
+	// pending account-verification and password-reset codes are sealed to the old address and
+	// would no longer open; drop them so the owner can request new ones
+	for _, t := range []db.CodeType{db.CodeTypeVerifyAccount, db.CodeTypePasswordReset} {
+		if err := a.db.DeleteUserVerificationCode(user, t); err != nil {
+			log.Warnw("could not delete a pending verification code after an email change",
+				"userId", user.ID, "type", t, "error", err)
+		}
 	}
 	// keep the organizations the user created pointing at their current address. The signing key
 	// does not depend on it (it is derived from the immutable signer seed)
