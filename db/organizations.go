@@ -484,19 +484,6 @@ func (ms *MongoStorage) DeleteOrganizationMetaKeys(address common.Address, keysT
 
 // IncrementOrganizationUsersCounter atomically increments the users counter for the organization with the given address.
 func (ms *MongoStorage) IncrementOrganizationUsersCounter(address common.Address) error {
-	// we acquire a lock to check the counter limit without racing with other calls to increment this same counter.
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-
-	org, plan, err := ms.fetchOrganizationAndPlan(address)
-	if err != nil {
-		return fmt.Errorf("could not get organization: %v", err)
-	}
-
-	if org.Counters.Users >= plan.Organization.Users {
-		return fmt.Errorf("max users reached (%d >= %d)", org.Counters.Users, plan.Organization.Users)
-	}
-
 	return ms.addToOrganizationCounter(address, "users", 1)
 }
 
@@ -514,19 +501,6 @@ func (ms *MongoStorage) IncrementOrganizationProcessesCounter(address common.Add
 
 // IncrementOrganizationSubOrgsCounter atomically increments the suborgs counter for the organization with the given address.
 func (ms *MongoStorage) IncrementOrganizationSubOrgsCounter(address common.Address) error {
-	// we acquire a lock to check the counter limit without racing with other calls to increment this same counter.
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-
-	org, plan, err := ms.fetchOrganizationAndPlan(address)
-	if err != nil {
-		return fmt.Errorf("could not get organization: %v", err)
-	}
-
-	if org.Counters.SubOrgs >= plan.Organization.SubOrgs {
-		return fmt.Errorf("max suborgs reached (%d >= %d)", org.Counters.SubOrgs, plan.Organization.SubOrgs)
-	}
-
 	return ms.addToOrganizationCounter(address, "subOrgs", 1)
 }
 
@@ -606,21 +580,6 @@ func (ms *MongoStorage) SumManagedCounters(integratorAddr common.Address) (Manag
 		return ManagedCounters{}, nil
 	}
 	return results[0], nil
-}
-
-func (ms *MongoStorage) fetchOrganizationAndPlan(orgAddress common.Address) (*Organization, *Plan, error) {
-	org, err := ms.Organization(orgAddress)
-	if err != nil {
-		return nil, nil, fmt.Errorf("could not get organization: %v", err)
-	}
-	if org.Subscription.PlanID == "" {
-		return nil, nil, fmt.Errorf("organization has no subscription plan")
-	}
-	plan, err := ms.Plan(org.Subscription.PlanID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("could not get subscription plan: %v", err)
-	}
-	return org, plan, nil
 }
 
 // addToOrganizationCounter atomically increments (or decrements) a counter by delta.

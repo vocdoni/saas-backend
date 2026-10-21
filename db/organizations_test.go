@@ -369,3 +369,26 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(secondUser.Organizations[0].Address, qt.DeepEquals, secondOrgAddress)
 	})
 }
+
+// TestOrganizationCountersIgnorePlanLimits asserts the users and suborgs counters keep counting
+// past the subscribed plan's limits: no plan caps them anymore.
+func TestOrganizationCountersIgnorePlanLimits(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	plan := &Plan{ID: "prod_counters_limit", Organization: PlanLimits{Users: 1, SubOrgs: 1}}
+	err := testDB.SetPlan(plan)
+	c.Assert(err, qt.IsNil)
+	c.Assert(testDB.SetOrganization(&Organization{
+		Address:      testOrgAddress,
+		Subscription: OrganizationSubscription{PlanID: plan.ID, Active: true},
+	}), qt.IsNil)
+
+	for range 3 {
+		c.Assert(testDB.IncrementOrganizationUsersCounter(testOrgAddress), qt.IsNil)
+		c.Assert(testDB.IncrementOrganizationSubOrgsCounter(testOrgAddress), qt.IsNil)
+	}
+	org, err := testDB.Organization(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(org.Counters.Users, qt.Equals, 3)
+	c.Assert(org.Counters.SubOrgs, qt.Equals, 3)
+}
