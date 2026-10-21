@@ -14,7 +14,7 @@ import (
 // synced from Stripe rather than authored locally: the caller always holds the complete plan,
 // so the whole document is replaced (a full ReplaceOne upsert, not a partial update). This
 // matters because zero-valued fields are meaningful here — e.g. a free plan's monthlyPrice/
-// yearlyPrice of 0 must be persisted so selectors like FreeIntegratorPlan can match on them.
+// yearlyPrice of 0 must be persisted so a free plan's zero prices are persisted rather than dropped.
 // An empty ID is rejected.
 func (ms *MongoStorage) SetPlan(plan *Plan) error {
 	if plan.ID == "" {

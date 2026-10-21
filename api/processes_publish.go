@@ -89,7 +89,7 @@ type publishTarget struct {
 
 // publishPreflightProblems returns every reason a process would fail to publish that can be
 // determined synchronously (without building/funding a tx or touching the chain): the structural
-// checks, plus the plan/quota/permission denials that would otherwise only surface asynchronously
+// checks, plus the role/duration/integrator denials that would otherwise only surface asynchronously
 // as an opaque job failure. It is shared by GET .../check (reported as {valid,errors}) and by
 // publish (enforced before enqueueing). Funding and chain submission stay async.
 //
@@ -200,8 +200,8 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	// full synchronous publish-readiness gate (same as GET .../check): structural checks plus
-	// plan voting-type, census-size, process-count, duration, managed-quota and email/SMS/vote
-	// allowance. Anything predictable is rejected here rather than as an opaque async job failure;
+	// admin role, integrator top-level guard and the 90-day duration cap. Anything
+	// predictable is rejected here rather than as an opaque async job failure;
 	// only funding and chain submission are left to the worker.
 	target := publishTarget{vp: vp, questions: questions, census: census, user: user}
 	if problems, questionsMismatch := a.publishPreflightProblems(target); len(problems) > 0 {

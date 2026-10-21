@@ -25,7 +25,7 @@ type censusPropagation struct {
 // ordered so that a failure can only ever degrade in one direction:
 //
 //  1. resolve the target censuses     (read-only)
-//  2. plan quota and price paid       (per census) — a refusal here means no memberbase or census
+//  2. price paid                      (per census) — a refusal here means no memberbase or census
 //     write; the only write it may make is grandfathering a pre-payg process's payment, which
 //     is idempotent and records what any later check would record anyway
 //  3. chain signer preflight          (read-only) — a failure here means zero writes
@@ -99,9 +99,9 @@ func (a *API) propagateMembersToCensuses(
 }
 
 // preflightCensusGrowth runs the read-only checks that must pass before the memberbase write:
-// the plan's census quota for each target census, the price already paid for every process built
+// the price already paid for every process built
 // on it (pay-per-process), and restoring the organization's chain signer. All are refusals that
-// have to leave the memberbase and the censuses untouched, so an over-quota or underpaid request
+// have to leave the memberbase and the censuses untouched, so an underpaid request
 // changes nothing at all.
 //
 // The signer is not returned: enqueueSetProcessCensus restores its own. This only proves it can be.

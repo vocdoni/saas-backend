@@ -39,9 +39,8 @@ func validateDefaultLang(w http.ResponseWriter, lang string) bool {
 //	@Description
 //	@Description	Two optional opt-in fields support the chain-abstracted flow (both default false, preserving the legacy
 //	@Description	behavior): `provisionAccount` forges the organization's on-chain account eagerly at creation time
-//	@Description	(idempotent) instead of leaving it to the legacy SDK createAccount path; `integrator` subscribes the
-//	@Description	new organization to the free integrator plan so it becomes an integrator on the free tier with no
-//	@Description	checkout.
+//	@Description	(idempotent) instead of leaving it to the legacy SDK createAccount path; `integrator` flags the
+//	@Description	new organization as an integrator, so it may create managed organizations.
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -50,7 +49,7 @@ func validateDefaultLang(w http.ResponseWriter, lang string) bool {
 //	@Success		200		{object}	apicommon.OrganizationInfo
 //	@Failure		400		{object}	errors.Error	"Invalid input data"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"Parent org not found, or free integrator plan unavailable (integrator=true)"
+//	@Failure		404		{object}	errors.Error	"Parent org not found"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/organizations [post]
 func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) {

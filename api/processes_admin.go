@@ -286,7 +286,7 @@ func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Re
 //	@Description	and raise each affected on-chain election's maxCensusSize so the new members can vote. Members are
 //	@Description	added synchronously; the maxCensusSize update runs as an async job (poll GET /jobs/{jobId}).
 //	@Description	Questions with an eligibility subset keep their fixed size and are unaffected. Requires
-//	@Description	Manager/Admin role and is subject to the plan's census quota.
+//	@Description	Manager/Admin role.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json

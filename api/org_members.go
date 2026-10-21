@@ -165,8 +165,9 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 // addOrganizationMembersHandler godoc
 //
 //	@Summary		Add members to an organization
-//	@Description	Add multiple members to an organization. Requires Manager/Admin role and is subject to the
-//	@Description	plan's member quota. With `async=true` the import runs in the background and the response
+//	@Description	Add multiple members to an organization. Requires Manager/Admin role; the organization's
+//	@Description	memberbase is capped at 50 000 members (40145).
+//	@Description	With `async=true` the import runs in the background and the response
 //	@Description	carries a `jobId` to poll via GET /jobs/{jobId}; otherwise it
 //	@Description	completes synchronously. An empty members list is a no-op that returns added=0.
 //	@Description
@@ -181,7 +182,7 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 //	@Success		200			{object}	apicommon.AddMembersResponse	"Added count (sync) or jobId (async)"
 //	@Failure		400			{object}	errors.Error					"Invalid input data"
 //	@Failure		401			{object}	errors.Error					"Unauthorized"
-//	@Failure		403			{object}	errors.Error					"Plan member quota exceeded"
+//	@Failure		403			{object}	errors.Error					"Organization members limit exceeded"
 //	@Failure		500			{object}	errors.Error					"Internal server error"
 //	@Router			/organizations/{orgAddress}/members [post]
 func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Request) {

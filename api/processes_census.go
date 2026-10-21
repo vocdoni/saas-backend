@@ -31,8 +31,7 @@ func censusBuildError(err error) error {
 
 // resolveOrCreateDefaultCensus materializes the inline census spec of a voting process into
 // a db.Census (auth/2FA policy + participants) and returns it. The census type is inferred
-// from the 2FA fields (SetCensus does this). Census/vote quotas are enforced, mirroring
-// addCensusParticipantsHandler. The census is created unpublished; publishing happens at
+// from the 2FA fields (SetCensus does this). The census is created unpublished; publishing happens at
 // process publish time. Members missing the auth data the census requires are left out of it and
 // returned, as hex IDs, for the caller to report.
 func (a *API) resolveOrCreateDefaultCensus(

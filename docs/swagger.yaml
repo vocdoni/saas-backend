@@ -206,10 +206,9 @@ definitions:
           rules as Name.
       integrator:
         description: |-
-          Whether to subscribe the new organization to the free integrator plan at
-          creation time (opt-in). Used by the integrator portal so a newly created org
-          becomes an integrator on the free tier with no checkout. Default false uses
-          the regular default plan.
+          Whether the new organization is an integrator (opt-in, used by the integrator
+          portal): it may create managed organizations and pay for their processes from
+          its wallet.
         type: boolean
       logo:
         allOf:
@@ -323,10 +322,9 @@ definitions:
           rules as Name.
       integrator:
         description: |-
-          Whether to subscribe the new organization to the free integrator plan at
-          creation time (opt-in). Used by the integrator portal so a newly created org
-          becomes an integrator on the free tier with no checkout. Default false uses
-          the regular default plan.
+          Whether the new organization is an integrator (opt-in, used by the integrator
+          portal): it may create managed organizations and pay for their processes from
+          its wallet.
         type: boolean
       logo:
         allOf:
@@ -794,10 +792,9 @@ definitions:
           rules as Name.
       integrator:
         description: |-
-          Whether to subscribe the new organization to the free integrator plan at
-          creation time (opt-in). Used by the integrator portal so a newly created org
-          becomes an integrator on the free tier with no checkout. Default false uses
-          the regular default plan.
+          Whether the new organization is an integrator (opt-in, used by the integrator
+          portal): it may create managed organizations and pay for their processes from
+          its wallet.
         type: boolean
       logo:
         allOf:
@@ -1715,9 +1712,8 @@ definitions:
     properties:
       isIntegrator:
         description: |-
-          Whether this organization is enabled as an integrator. Computed from the
-          organization's integrator limits / active plan (see Subscriptions.IsIntegrator),
-          not stored. Populated by GET /users/me; omitted when false.
+          Whether this organization is enabled as an integrator (see
+          Subscriptions.IsIntegrator). Populated by GET /users/me; omitted when false.
         type: boolean
       organization:
         allOf:
@@ -2164,9 +2160,7 @@ definitions:
       maxProcesses:
         type: integer
       maxVotes:
-        description: |-
-          Max votes that may be relayed; 0 means unlimited. For managed orgs this is the
-          integrator's shared pool, summed across all its managed orgs.
+        description: Max votes that may be relayed; 0 means unlimited.
         type: integer
       subOrgs:
         type: integer
@@ -2880,7 +2874,7 @@ paths:
             $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
-      summary: Get integrator quota and usage
+      summary: Get integrator status and usage
       tags:
       - integrator
   /integrator/organizations:
@@ -3300,9 +3294,8 @@ paths:
 
         Two optional opt-in fields support the chain-abstracted flow (both default false, preserving the legacy
         behavior): `provisionAccount` forges the organization's on-chain account eagerly at creation time
-        (idempotent) instead of leaving it to the legacy SDK createAccount path; `integrator` subscribes the
-        new organization to the free integrator plan so it becomes an integrator on the free tier with no
-        checkout.
+        (idempotent) instead of leaving it to the legacy SDK createAccount path; `integrator` flags the
+        new organization as an integrator, so it may create managed organizations.
       parameters:
       - description: Organization info (+ optional provisionAccount / integrator)
         in: body
@@ -3326,7 +3319,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
-          description: Parent org not found, or free integrator plan unavailable (integrator=true)
+          description: Parent org not found
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -3872,8 +3865,9 @@ paths:
       consumes:
       - application/json
       description: |-
-        Add multiple members to an organization. Requires Manager/Admin role and is subject to the
-        plan's member quota. With `async=true` the import runs in the background and the response
+        Add multiple members to an organization. Requires Manager/Admin role; the organization's
+        memberbase is capped at 50 000 members (40145).
+        With `async=true` the import runs in the background and the response
         carries a `jobId` to poll via GET /jobs/{jobId}; otherwise it
         completes synchronously. An empty members list is a no-op that returns added=0.
 
@@ -3910,7 +3904,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "403":
-          description: Plan member quota exceeded
+          description: Organization members limit exceeded
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -5310,7 +5304,7 @@ paths:
         and raise each affected on-chain election's maxCensusSize so the new members can vote. Members are
         added synchronously; the maxCensusSize update runs as an async job (poll GET /jobs/{jobId}).
         Questions with an eligibility subset keep their fixed size and are unaffected. Requires
-        Manager/Admin role and is subject to the plan's census quota.
+        Manager/Admin role.
       parameters:
       - description: Process ID
         in: path

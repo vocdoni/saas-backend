@@ -247,7 +247,7 @@ func (a *API) managedOrganizationsHandler(w http.ResponseWriter, r *http.Request
 
 // integratorInfoHandler godoc
 //
-//	@Summary		Get integrator quota and usage
+//	@Summary		Get integrator status and usage
 //	@Description	Returns whether the caller's organization (resolved from the API key's org or the user
 //	@Description	session — no address in the URL) is enabled as an integrator, along with the usage summed
 //	@Description	across its managed organizations. The caller must be an admin or manager of the
