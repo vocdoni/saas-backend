@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
@@ -15,6 +14,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -659,6 +659,9 @@ func (a *API) electionMaxCensusSize(q *db.VotingProcessQuestion) (uint64, error)
 // so blindly submitting the census size would eventually fail the job; each election is read first
 // and only a genuine increase is sent.
 //
+// It never answers ErrOrgTxBusy: when the organization lock is held, the job is created anyway and
+// the resize waits for the lock in the background (see below).
+//
 // A failed election read does not fail the request. By the time this runs, the participant or
 // eligibility write it follows has already committed, so reporting failure would report it for work
 // that landed — the tx goes out anyway and a chain refusal surfaces on the job with its real reason.
@@ -693,54 +696,72 @@ func (a *API) enqueueSetProcessCensus(orgAddress common.Address, targets []censu
 	if err != nil {
 		return "", fmt.Errorf("could not restore organization signer: %w", err)
 	}
-	// the lock comes before the job is created, with a bounded wait: a busy organization
-	// answers a clear ErrOrgTxBusy (503) and leaves no orphaned pending job behind. The
-	// participant/eligibility write this follows has already committed, so there is no
-	// request body to replay — the caller simply retries the idempotent resize.
-	orgLock, err := a.orgTxLocks.lockCtx(context.Background(), org.Address)
-	if err != nil {
-		return "", err
-	}
 	jobID, err := apicommon.NewJobID()
 	if err != nil {
-		orgLock.Unlock()
 		return "", fmt.Errorf("could not create job id: %w", err)
 	}
 	if err := a.db.CreateTxJob(jobID, db.JobTypeSetProcessCensus, org.Address); err != nil {
-		orgLock.Unlock()
 		return "", fmt.Errorf("could not create tx job: %w", err)
 	}
-
-	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
-		defer orgLock.Unlock()
-		for i := range growing {
-			t := &growing[i]
-			tx, err := a.account.BuildSetProcessCensusTx(
-				orgSigner.Address(), t.question.UpstreamID,
-				t.census.Published.Root, t.census.Published.URI, t.size,
-			)
-			if err != nil {
-				return nil, err
+	submit := func(orgLock *orgTxLock) error {
+		if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
+			defer orgLock.Unlock()
+			return a.setProcessCensusSizes(orgSigner, growing)
+		}}) {
+			orgLock.Unlock()
+			if e := a.db.SetJobStatus(jobID, db.JobStatusFailed, nil, "tx queue full"); e != nil {
+				log.Warnw("could not mark job failed after full queue", "error", e)
 			}
-			fundedTx, _, err := a.account.FundTransaction(tx, orgSigner.Address())
-			if err != nil {
-				return nil, err
-			}
-			stx, err := a.account.SignTransaction(fundedTx, orgSigner)
-			if err != nil {
-				return nil, err
-			}
-			if _, err := a.account.SubmitSignedTx(stx); err != nil {
-				return nil, err
-			}
+			return errors.ErrTxQueueFull
 		}
-		return &db.JobResult{Status: string(db.JobStatusCompleted)}, nil
-	}}) {
-		orgLock.Unlock()
-		if e := a.db.SetJobStatus(jobID, db.JobStatusFailed, nil, "tx queue full"); e != nil {
-			log.Warnw("could not mark job failed after full queue", "error", e)
-		}
-		return "", errors.ErrTxQueueFull
+		return nil
 	}
+	if orgLock, ok := a.orgTxLocks.tryLock(org.Address); ok {
+		if err := submit(orgLock); err != nil {
+			return "", err
+		}
+		return jobID, nil
+	}
+	// The organization has a tx in flight, and a publish holds the lock through every mining
+	// round. The participant or eligibility write this follows has already committed and no
+	// caller retries the resize, so it waits for the lock in the background instead of being
+	// dropped; the job stays pending meanwhile and is what the caller polls. The lock is always
+	// released once its holder's tx is done, so the wait ends.
+	go func() {
+		if err := submit(a.orgTxLocks.lock(org.Address)); err != nil {
+			log.Warnw("could not enqueue a deferred census resize", "org", org.Address, "jobId", jobID, "error", err)
+		}
+	}()
 	return jobID, nil
+}
+
+// setProcessCensusSizes submits one SET_PROCESS_CENSUS tx per target, skipping the elections that
+// already have the room: a resize that waited for the organization lock may have been overtaken by
+// a larger one, and the chain refuses a shrink.
+func (a *API) setProcessCensusSizes(orgSigner *ethereum.SignKeys, targets []censusSizeTarget) (*db.JobResult, error) {
+	for i := range targets {
+		t := &targets[i]
+		if current, err := a.electionMaxCensusSize(&t.question); err == nil && t.size <= current {
+			continue
+		}
+		tx, err := a.account.BuildSetProcessCensusTx(
+			orgSigner.Address(), t.question.UpstreamID,
+			t.census.Published.Root, t.census.Published.URI, t.size,
+		)
+		if err != nil {
+			return nil, err
+		}
+		fundedTx, _, err := a.account.FundTransaction(tx, orgSigner.Address())
+		if err != nil {
+			return nil, err
+		}
+		stx, err := a.account.SignTransaction(fundedTx, orgSigner)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := a.account.SubmitSignedTx(stx); err != nil {
+			return nil, err
+		}
+	}
+	return &db.JobResult{Status: string(db.JobStatusCompleted)}, nil
 }

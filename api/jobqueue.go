@@ -64,6 +64,17 @@ func (o *orgTxMutex) lock(addr common.Address) *orgTxLock {
 	return &orgTxLock{ch: ch}
 }
 
+// tryLock acquires the lock for addr only if it is free right now.
+func (o *orgTxMutex) tryLock(addr common.Address) (*orgTxLock, bool) {
+	ch := o.channel(addr)
+	select {
+	case ch <- struct{}{}:
+		return &orgTxLock{ch: ch}, true
+	default:
+		return nil, false
+	}
+}
+
 // orgTxLockTimeout bounds how long a request waits for its organization's tx lock before
 // answering 503: a worker may legitimately hold the lock through tx mining, and a caller
 // is better served by a clear "busy, retry later" than by a request parked for minutes.

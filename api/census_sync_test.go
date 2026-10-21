@@ -1091,3 +1091,51 @@ func TestRemoveProcessCensusIsOrgScoped(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK,
 		qt.Commentf("another organization deleted this voter's CSP auth session"))
 }
+
+// TestResizeWaitsForBusyOrgLock pins that a census resize is not dropped while the organization
+// has a tx in flight: a publish holds the org lock through every mining round, so the resize job
+// is created at once, stays pending while the lock is held, and runs once it is released.
+func TestResizeWaitsForBusyOrgLock(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
+	ids := memberIDs(members)
+
+	pid, got := publishedProcess(t, token, orgAddress, ids)
+	restricted := got.Questions[1]
+
+	restore := orgTxLockTimeout
+	orgTxLockTimeout = 50 * time.Millisecond
+	defer func() { orgTxLockTimeout = restore }()
+	held := testAPI.orgTxLocks.lock(orgAddress)
+	released := false
+	defer func() {
+		if !released {
+			held.Unlock()
+		}
+	}()
+
+	upd := requestAndParseWithAssertCode[apicommon.UpdateQuestionCensusResponse](
+		http.StatusAccepted, t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: []string{}},
+		"processes", pid, "questions", restricted.ID.Hex(), "census",
+	)
+	c.Assert(upd.JobID, qt.Not(qt.Equals), "")
+
+	// well past the bounded wait, the job is still pending rather than dropped
+	time.Sleep(10 * orgTxLockTimeout)
+	pending, err := testDB.Job(upd.JobID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(pending.Status, qt.Equals, db.JobStatusPending)
+
+	held.Unlock()
+	released = true
+	job := pollJob(t, upd.JobID)
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("resize job error: %s", job.Errors))
+
+	elec, err := testAPI.account.Election(restricted.UpstreamID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(elec.Census.MaxCensusSize, qt.Equals, uint64(3))
+}
