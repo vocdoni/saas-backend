@@ -18,18 +18,22 @@ const (
 	// CSPCounterChallengeSends counts the OTP challenges sent (new tokens + resends) for one
 	// member on one voting process, per UTC day.
 	CSPCounterChallengeSends = "challengeSends"
-	// CSPCounterAuthFailures counts failed step-0 authentications for one claimed voter identity
-	// (the login fields a request submits, whether or not they match a census participant) on one
+	// CSPCounterAuthFailures counts failed step-0 authentications for one submission (the login
+	// and contact fields a request submits, whether or not they match a census participant) on one
 	// voting process, per UTC hour.
 	CSPCounterAuthFailures = "authFailures"
+	// CSPCounterVoterAuthFailures counts failed step-0 authentications for one claimed voter (the
+	// login fields a request submits, without the contact) on one voting process, per UTC hour. It
+	// is the coarser bound on guessing one voter's contact with ever-changing values.
+	CSPCounterVoterAuthFailures = "voterAuthFailures"
 )
 
 // CSPCounterWindow returns the length of the window a counter kind resets after. Failed
 // authentications use short hourly windows: anyone who knows a voter's login fields can spend
-// that voter's budget, and an hour bounds such a lockout while still capping contact guessing at
-// 24 windows a day. Challenge sends cost money per unit, so their budget is daily.
+// that voter's coarse budget, and an hour bounds such a lockout while still capping contact
+// guessing at 24 windows a day. Challenge sends cost money per unit, so their budget is daily.
 func CSPCounterWindow(kind string) time.Duration {
-	if kind == CSPCounterAuthFailures {
+	if kind == CSPCounterAuthFailures || kind == CSPCounterVoterAuthFailures {
 		return time.Hour
 	}
 	return 24 * time.Hour

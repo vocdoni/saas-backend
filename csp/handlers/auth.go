@@ -167,15 +167,18 @@ func determineContactMethod(
 	}
 }
 
-// authAttemptIdentity derives the key of the failed-attempt budget a step-0 request spends: the
-// census auth fields it submits, which name the voter it claims to be. The contact and 2FA data
-// are left out, so guessing them for one voter keeps spending that voter's budget. A census
-// identified by its 2FA fields alone has nothing else to key on, and uses them.
-func authAttemptIdentity(census *db.Census, member *db.OrgMember) []byte {
-	if len(census.AuthFields) > 0 {
-		return db.HashAuthTwoFaFields(*member, census.AuthFields, nil)
+// authAttemptKeys derives the keys of the failed-attempt budgets a step-0 request spends. The
+// submission key covers every login and contact field submitted, so failures with a wrong contact
+// never spend the budget of the voter's own submission. The voter key covers the login fields
+// alone, and is set only when the census has both login and contact fields: it is the coarser
+// bound on trying many contacts for one voter. A census with only one kind of field has nothing
+// coarser to key on and uses the submission key alone.
+func authAttemptKeys(census *db.Census, member *db.OrgMember) (submission, voter []byte) {
+	submission = db.HashAuthTwoFaFields(*member, census.AuthFields, census.TwoFaFields)
+	if len(census.AuthFields) > 0 && len(census.TwoFaFields) > 0 {
+		voter = db.HashAuthTwoFaFields(*member, census.AuthFields, nil)
 	}
-	return db.HashAuthTwoFaFields(*member, nil, census.TwoFaFields)
+	return submission, voter
 }
 
 // authFirstStep is the first step of the authentication process. It receives
@@ -192,10 +195,10 @@ func authAttemptIdentity(census *db.Census, member *db.OrgMember) []byte {
 // generated from the provided fields. An unknown participant and a found
 // participant whose contact data does not match both return the same
 // ErrCSPAuthFailed, so a caller cannot probe the census contents; every such
-// failure also spends the hourly failed-attempt budget of the submitted login
-// identity (see authAttemptIdentity), and once it is exhausted step 0 refuses
-// further attempts with that identity until the hour ends with
-// ErrVerificationMaxAttempts, whether or not it matches a participant. If found, it
+// failure also spends the hourly failed-attempt budgets of the submission and of
+// the claimed voter (see authAttemptKeys), and once one is exhausted step 0
+// refuses further such attempts until the hour ends with
+// ErrVerificationMaxAttempts, whether or not they match a participant. If found, it
 // determines the appropriate contact method (email, SMS, or none for auth-only
 // censuses) based on the census type and provided contact information. Finally,
 // it generates and returns an authentication token that will be used in the
@@ -272,12 +275,13 @@ func (c *CSPHandlers) authFirstStep(
 		return nil, errors.ErrInvalidUserData.Withf("missing required auth data")
 	}
 
-	// reserve one unit of the submitted identity's hourly failed-attempt budget before checking it,
-	// so concurrent attempts cannot all slip under the cap; it is given back unless the attempt
-	// fails on the submitted data. The identity is what the caller claims to be, not the participant
-	// it may match, so a submission matching nobody runs out exactly like one matching a participant
-	// (an exhausted budget answers 40017 with retryAfter, the seconds until the hour resets)
-	claim, err := c.csp.ClaimAuthAttempt(anchorID, authAttemptIdentity(census, inputMember))
+	// reserve one unit of the hourly failed-attempt budgets before checking the submission, so
+	// concurrent attempts cannot all slip under the cap; it is given back unless the attempt fails
+	// on the submitted data. The keys are what the caller submits, not the participant it may match,
+	// so a submission matching nobody runs out exactly like one matching a participant (an
+	// exhausted budget answers 40017 with retryAfter, the seconds until the hour resets)
+	submissionKey, voterKey := authAttemptKeys(census, inputMember)
+	claim, err := c.csp.ClaimAuthAttempt(anchorID, submissionKey, voterKey)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +303,10 @@ func (c *CSPHandlers) authFirstStep(
 	// Fetch the corresponding org member using the participant ID (which is the ObjectID hex string)
 	orgMember, err := c.mainDB.OrgMember(census.OrgAddress, censusParticipant.ParticipantID)
 	if err != nil {
-		return nil, errors.ErrCSPAuthFailed
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, errors.ErrCSPAuthFailed
+		}
+		return nil, errors.ErrGenericInternalServerError.WithErr(err)
 	}
 	uID := internal.HexBytesFromString(orgMember.ID.Hex())
 

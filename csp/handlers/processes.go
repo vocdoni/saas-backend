@@ -94,8 +94,10 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 //	@Description	a challenge solution.
 //	@Description	Step 0 returns the same error (40802) whether the login data matches no census participant
 //	@Description	or the contact data does not match an existing one. Failed attempts are capped per UTC hour
-//	@Description	for each submitted set of login fields on the process: once exhausted, step 0 answers 40017,
-//	@Description	even with the right contact data, until the hour ends; data.retryAfter gives the seconds left.
+//	@Description	on the process for each submitted set of login and contact fields, and, ten times higher,
+//	@Description	for each set of login fields across all contacts tried. Once either is exhausted, step 0
+//	@Description	answers 40017 until the hour ends (the voter cap even with the right contact data);
+//	@Description	data.retryAfter gives the seconds left.
 //	@Description	A member's challenge sends (new tokens + resends) are capped per UTC day, also answering
 //	@Description	40017 with data.retryAfter.
 //	@Tags			processes

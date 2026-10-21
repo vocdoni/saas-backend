@@ -300,37 +300,57 @@ func counterKey(uID, anchorID internal.HexBytes) []byte {
 	return key
 }
 
-// ClaimAuthAttempt reserves one unit of the current hour's failed step-0 authentication budget of
-// a claimed voter identity on the anchor process, before the attempt is checked. Reserving up
-// front, rather than counting failures afterwards, keeps concurrent attempts from all passing a
-// not-yet-reached check: at most the budget can ever be in flight or failed. The caller must hand
-// the claim to ReleaseAuthAttempt unless the attempt fails on the submitted login or contact data.
-// The counter is Mongo-backed, so it survives service restarts.
+// AuthAttemptClaim holds the failed-attempt units one step-0 attempt reserved with
+// ClaimAuthAttempt.
+type AuthAttemptClaim []db.CSPCounterClaim
+
+// ClaimAuthAttempt reserves, before a step-0 attempt is checked, one unit of the current hour's
+// failed-authentication budgets on the anchor process: the submission's (login plus contact
+// fields), capped at maxHourlyAuthFailures, and, when voter is not empty, the claimed voter's
+// (login fields alone), capped at VoterAuthFailuresFactor times that. Spending a voter's coarse
+// budget takes that many failed submissions, so whoever merely knows a voter's login fields can no
+// longer lock them out with a handful of junk-contact requests, while guessing one voter's contact
+// stays bounded. Reserving up front, rather than counting failures afterwards, keeps concurrent
+// attempts from all passing a not-yet-reached check. The caller must hand the claim to
+// ReleaseAuthAttempt unless the attempt fails on the submitted login or contact data. The counters
+// are Mongo-backed, so they survive service restarts.
 //
 // It returns an ErrVerificationMaxAttempts carrying retryAfter (seconds until the hour resets)
-// once the budget is spent, and an ErrInternalStorageError if the counter cannot be claimed.
-//
-// The identity is derived from the submitted login fields, not from the participant they may
-// match, so a submission that matches nobody runs out of budget exactly like one that matches a
-// participant: the refusal itself cannot tell a caller who is in the census.
-func (c *CSP) ClaimAuthAttempt(anchorID internal.HexBytes, identity []byte) (db.CSPCounterClaim, error) {
+// once either budget is spent, and an ErrInternalStorageError if a counter cannot be claimed.
+func (c *CSP) ClaimAuthAttempt(anchorID internal.HexBytes, submission, voter []byte) (AuthAttemptClaim, error) {
 	res, err := c.Storage.ClaimCSPCounter(db.CSPCounterAuthFailures,
-		counterKey(identity, anchorID), c.maxHourlyAuthFailures)
+		counterKey(submission, anchorID), c.maxHourlyAuthFailures)
 	if err != nil {
 		return nil, errors.ErrInternalStorageError.WithErr(fmt.Errorf("claiming auth attempt: %w", err))
 	}
 	if !res.Granted {
 		return nil, counterLimitError(res, "too many failed authentication attempts, try again later")
 	}
-	return res.Claim, nil
+	claim := AuthAttemptClaim{res.Claim}
+	if len(voter) == 0 {
+		return claim, nil
+	}
+	res, err = c.Storage.ClaimCSPCounter(db.CSPCounterVoterAuthFailures,
+		counterKey(voter, anchorID), c.maxHourlyAuthFailures*VoterAuthFailuresFactor)
+	if err != nil {
+		c.ReleaseAuthAttempt(claim)
+		return nil, errors.ErrInternalStorageError.WithErr(fmt.Errorf("claiming voter auth attempt: %w", err))
+	}
+	if !res.Granted {
+		c.ReleaseAuthAttempt(claim)
+		return nil, counterLimitError(res, "too many failed authentication attempts, try again later")
+	}
+	return append(claim, res.Claim), nil
 }
 
 // ReleaseAuthAttempt gives back a ClaimAuthAttempt reservation for an attempt that did not fail on
 // the submitted data. Storage errors are logged but not returned: at worst the identity loses one
 // unit of the current hour's budget.
-func (c *CSP) ReleaseAuthAttempt(claim db.CSPCounterClaim) {
-	if err := c.Storage.ReleaseCSPCounter(claim); err != nil {
-		log.Warnw("error releasing auth attempt", "error", err)
+func (c *CSP) ReleaseAuthAttempt(claim AuthAttemptClaim) {
+	for _, cl := range claim {
+		if err := c.Storage.ReleaseCSPCounter(cl); err != nil {
+			log.Warnw("error releasing auth attempt", "error", err)
+		}
 	}
 }
 

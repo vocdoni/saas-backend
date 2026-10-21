@@ -2,6 +2,7 @@ package csp
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -117,27 +118,45 @@ func TestAuthAttemptBudget(t *testing.T) {
 
 	// released attempts (the ones that did not fail on the submitted data) never run out
 	for range 3 * budget {
-		cl, err := csp.ClaimAuthAttempt(testAnchorID, identity)
+		cl, err := csp.ClaimAuthAttempt(testAnchorID, identity, nil)
 		c.Assert(err, qt.IsNil)
 		csp.ReleaseAuthAttempt(cl)
 	}
 
 	// kept attempts (failures) exhaust the identity's budget...
 	for range budget {
-		_, err := csp.ClaimAuthAttempt(testAnchorID, identity)
+		_, err := csp.ClaimAuthAttempt(testAnchorID, identity, nil)
 		c.Assert(err, qt.IsNil)
 	}
-	_, err = csp.ClaimAuthAttempt(testAnchorID, identity)
+	_, err = csp.ClaimAuthAttempt(testAnchorID, identity, nil)
 	c.Assert(err, qt.ErrorIs, errors.ErrVerificationMaxAttempts)
 	// ... for the rest of the current hour only
 	assertRetryAfter(c, err, time.Hour)
 
 	// ... and only that identity's, on that process: there is no process-wide budget that junk
 	// attempts could spend to lock every voter out
-	_, err = csp.ClaimAuthAttempt(testAnchorID, otherIdentity)
+	_, err = csp.ClaimAuthAttempt(testAnchorID, otherIdentity, nil)
 	c.Assert(err, qt.IsNil)
-	_, err = csp.ClaimAuthAttempt(otherAnchorID, identity)
+	_, err = csp.ClaimAuthAttempt(otherAnchorID, identity, nil)
 	c.Assert(err, qt.IsNil)
+
+	// the voter budget spans every submission of one voter: VoterAuthFailuresFactor times the
+	// submission budget, spread over different submissions, exhausts it...
+	voter := []byte("claimed-voter")
+	for i := range budget * VoterAuthFailuresFactor {
+		_, err := csp.ClaimAuthAttempt(testAnchorID, fmt.Appendf(nil, "submission-%d", i), voter)
+		c.Assert(err, qt.IsNil)
+	}
+	_, err = csp.ClaimAuthAttempt(testAnchorID, []byte("fresh-submission"), voter)
+	c.Assert(err, qt.ErrorIs, errors.ErrVerificationMaxAttempts)
+	assertRetryAfter(c, err, time.Hour)
+	// ... and a refusal by the voter budget gives the submission unit back
+	_, err = csp.ClaimAuthAttempt(testAnchorID, []byte("fresh-submission"), nil)
+	c.Assert(err, qt.IsNil)
+	_, err = csp.ClaimAuthAttempt(testAnchorID, []byte("fresh-submission"), nil)
+	c.Assert(err, qt.IsNil)
+	_, err = csp.ClaimAuthAttempt(testAnchorID, []byte("fresh-submission"), nil)
+	c.Assert(err, qt.ErrorIs, errors.ErrVerificationMaxAttempts)
 }
 
 // assertRetryAfter checks that err is an API error carrying retryAfter, a whole number of
