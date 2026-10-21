@@ -4779,8 +4779,10 @@ paths:
         a challenge solution.
         Step 0 returns the same error (40802) whether the login data matches no census participant
         or the contact data does not match an existing one. Failed attempts are capped per UTC hour
-        for each submitted set of login fields on the process: once exhausted, step 0 answers 40017,
-        even with the right contact data, until the hour ends; data.retryAfter gives the seconds left.
+        on the process for each submitted set of login and contact fields, and, ten times higher,
+        for each set of login fields across all contacts tried. Once either is exhausted, step 0
+        answers 40017 until the hour ends (the voter cap even with the right contact data);
+        data.retryAfter gives the seconds left.
         A member's challenge sends (new tokens + resends) are capped per UTC day, also answering
         40017 with data.retryAfter.
       parameters:
@@ -5136,6 +5138,10 @@ paths:
             $ref: '#/definitions/handlers.ProcessCheckResponse'
         "400":
           description: Malformed body or missing auth token
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Auth token not verified or not issued for this process
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
@@ -6110,7 +6116,8 @@ paths:
         effect immediately: a verification code is sent to the requested address and the
         email is switched only once the code is confirmed via POST /users/me/email/verify.
         Changing the email of an account with a password requires the current password in
-        the password field; accounts without a password (OAuth-only) cannot change it.
+        the password field; accounts without a password (OAuth-only) cannot change it, and
+        neither can any account when the service runs without a mail service.
         A new change code can be requested once per OTP cooldown. The code is mailed to the
         new address with a link to the web app page /account/email/verify?code=<code>.
       parameters:
