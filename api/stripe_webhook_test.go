@@ -265,6 +265,18 @@ func TestStripeWebhook(t *testing.T) {
 		}
 	})
 
+	t.Run("TrialingSubscriptionGrantsPlan", func(*testing.T) {
+		s := mockStripeSubscription(orgAddress, mockPremiumPlan.ID)
+		s.Status = stripeapi.SubscriptionStatusTrialing
+		liveSubs[s.ID] = s
+		c.Assert(service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionCreated, s)), qt.IsNil)
+		org, err := testDB.Organization(orgAddress)
+		c.Assert(err, qt.IsNil)
+		c.Assert(org.Subscription.PlanID, qt.Equals, mockPremiumPlan.ID)
+		c.Assert(org.Subscription.StripeSubscriptionID, qt.Equals, s.ID)
+		c.Assert(org.Subscription.Active, qt.IsTrue)
+	})
+
 	t.Run("StaleOrganizationWriteKeepsCancellation", func(*testing.T) {
 		s := mockStripeSubscription(orgAddress, mockEssentialPlan.ID)
 		liveSubs[s.ID] = s
