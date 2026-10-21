@@ -945,7 +945,21 @@ type Wallet struct {
 	OrgAddress   common.Address `json:"orgAddress" bson:"_id"`
 	BalanceCents pricing.Cents  `json:"balanceCents" bson:"balanceCents"`
 	AppliedKeys  []string       `json:"-" bson:"appliedKeys"`
-	UpdatedAt    time.Time      `json:"updatedAt" bson:"updatedAt"`
+	// OrgSpend is what each managed organization may spend and has spent from this wallet, keyed
+	// by the managed organization's lowercase hex address (see ManagedOrgSpend). It lives on the
+	// wallet so the cap is checked in the same conditional write as the balance.
+	OrgSpend  map[string]ManagedOrgSpend `json:"-" bson:"orgSpend,omitempty"`
+	UpdatedAt time.Time                  `json:"updatedAt" bson:"updatedAt"`
+}
+
+// ManagedOrgSpend is one managed organization's spending from its integrator's wallet. CapCents
+// is the most it may have debited at once, set by the integrator; nil is unlimited. SpentCents is
+// what its processes hold debited now: debits add to it, and credits returning a process's money
+// (a delete's refund, a failed publish's credit-back) take it off again, so withheld branding
+// stays counted.
+type ManagedOrgSpend struct {
+	CapCents   *pricing.Cents `json:"capCents" bson:"capCents,omitempty"`
+	SpentCents pricing.Cents  `json:"spentCents" bson:"spentCents"`
 }
 
 // Wallet ledger entry kinds.

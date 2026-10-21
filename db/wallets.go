@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -15,6 +17,64 @@ import (
 
 // ErrInsufficientWalletBalance is returned when a debit would make the balance negative.
 var ErrInsufficientWalletBalance = fmt.Errorf("insufficient wallet balance")
+
+// ErrManagedOrgSpendCapReached is returned when a debit would take a managed organization past
+// the spend cap its integrator set.
+var ErrManagedOrgSpendCapReached = fmt.Errorf("managed organization spend cap reached")
+
+// orgSpendField is the wallet document path of a managed organization's ManagedOrgSpend. A
+// lowercase hex address is a safe field name: no dots, no leading '$'.
+func orgSpendField(managedOrg common.Address) string {
+	return "orgSpend." + strings.ToLower(managedOrg.Hex())
+}
+
+// ManagedOrgSpend returns what the managed organization may spend and has spent from w.
+func (w *Wallet) ManagedOrgSpend(managedOrg common.Address) ManagedOrgSpend {
+	return w.OrgSpend[strings.ToLower(managedOrg.Hex())]
+}
+
+// withinSpendCap is the aggregation expression that holds when debiting amountCents keeps the
+// managed organization at or under its cap; with no cap set it always holds.
+func withinSpendCap(managedOrg common.Address, amountCents pricing.Cents) bson.M {
+	field := "$" + orgSpendField(managedOrg)
+	return bson.M{"$lte": bson.A{
+		bson.M{"$add": bson.A{bson.M{"$ifNull": bson.A{field + ".spentCents", 0}}, amountCents}},
+		bson.M{"$ifNull": bson.A{field + ".capCents", int64(math.MaxInt64)}},
+	}}
+}
+
+// SetManagedOrgSpendCap sets the most the managed organization may spend from the integrator's
+// wallet, or lifts the cap when capCents is nil. It creates the wallet when there is none yet, so
+// a cap can be set before the first top-up. What it already spent is untouched: a cap below it
+// only refuses further debits.
+func (ms *MongoStorage) SetManagedOrgSpendCap(integrator, managedOrg common.Address, capCents *pricing.Cents) error {
+	if (integrator.Cmp(common.Address{}) == 0) || (managedOrg.Cmp(common.Address{}) == 0) ||
+		(capCents != nil && *capCents < 0) {
+		return ErrInvalidData
+	}
+	field := orgSpendField(managedOrg) + ".capCents"
+	update := bson.M{
+		"$set":         bson.M{"updatedAt": time.Now()},
+		"$setOnInsert": bson.M{"balanceCents": pricing.Cents(0)},
+	}
+	if capCents == nil {
+		update["$unset"] = bson.M{field: ""}
+	} else {
+		update["$set"].(bson.M)[field] = *capCents
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	filter := bson.M{"_id": integrator}
+	_, err := ms.wallets.UpdateOne(ctx, filter, update, options.UpdateOne().SetUpsert(true))
+	if mongo.IsDuplicateKeyError(err) {
+		// a concurrent first write created the wallet: update it
+		_, err = ms.wallets.UpdateOne(ctx, filter, update)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to set managed organization spend cap: %w", err)
+	}
+	return nil
+}
 
 // Credits and debits are single conditional writes on the wallet document (balance and
 // idempotency key in one filter), so each applies at most once across replicas and replays.
@@ -81,8 +141,12 @@ type WalletCredit struct {
 	Kind              string
 	ProcessID         bson.ObjectID
 	ProcessOrgAddress common.Address
-	PaymentIntentID   string
-	GrossCents        pricing.Cents
+	// SpentBy is the managed organization whose process the credit returns money for; its
+	// spending goes down by the credit, freeing room under its cap. Zero for a top-up, and for a
+	// credit-back to a payer that is the process's own organization (no cap applies).
+	SpentBy         common.Address
+	PaymentIntentID string
+	GrossCents      pricing.Cents
 }
 
 // CreditWallet adds a credit (Kind defaults to WalletEntryTopUp), creating the wallet on first
@@ -104,7 +168,7 @@ func (ms *MongoStorage) CreditWallet(c WalletCredit) error {
 		ProcessOrgAddress: c.ProcessOrgAddress,
 		PaymentIntentID:   c.PaymentIntentID,
 		GrossCents:        c.GrossCents,
-	})
+	}, c.SpentBy)
 }
 
 // WalletRefund is a Stripe refund of a top-up, debited from the wallet the top-up credited.
@@ -127,12 +191,15 @@ func (ms *MongoStorage) DebitWalletForRefund(r WalletRefund) error {
 		AmountCents:    -r.AmountCents,
 		Kind:           WalletEntryRefund,
 		IdempotencyKey: "striperefund:" + r.RefundID,
-	})
+	}, common.Address{})
 }
 
 // applyWalletEntry applies entry.AmountCents (signed) to the wallet with no balance check,
 // creating the wallet on first use, then appends the entry. An already applied key is a no-op.
-func (ms *MongoStorage) applyWalletEntry(entry *WalletLedgerEntry) error {
+// A non-zero spentBy is the managed organization whose spending the entry moves the opposite way
+// (a credit-back returns room under its cap); a refund debit passes the zero address and touches
+// no cap.
+func (ms *MongoStorage) applyWalletEntry(entry *WalletLedgerEntry, spentBy common.Address) error {
 	orgAddress, idempotencyKey := entry.OrgAddress, entry.IdempotencyKey
 	if (orgAddress.Cmp(common.Address{}) == 0) || entry.AmountCents == 0 || idempotencyKey == "" {
 		return ErrInvalidData
@@ -147,8 +214,12 @@ func (ms *MongoStorage) applyWalletEntry(entry *WalletLedgerEntry) error {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	filter := bson.M{"_id": orgAddress, "appliedKeys": bson.M{"$ne": idempotencyKey}}
+	inc := bson.M{"balanceCents": entry.AmountCents}
+	if spentBy != (common.Address{}) {
+		inc[orgSpendField(spentBy)+".spentCents"] = -entry.AmountCents
+	}
 	update := bson.M{
-		"$inc":  bson.M{"balanceCents": entry.AmountCents},
+		"$inc":  inc,
 		"$push": appliedKeysPush(idempotencyKey),
 		"$set":  bson.M{"updatedAt": time.Now()},
 	}
@@ -176,6 +247,10 @@ type WalletDebit struct {
 	AmountCents       pricing.Cents
 	PriceCents        pricing.Cents
 	Attempt           int
+	// ManagedOrg is the managed organization the process belongs to: the debit counts towards
+	// its spending and is refused past its cap. Zero skips the cap (a standard organization
+	// paying from its own wallet). ProcessOrgAddress is set either way, for the history.
+	ManagedOrg common.Address
 }
 
 // walletDebitKey is the idempotency key of a process debit. Attempt 0 keeps the "<process>:<price>"
@@ -188,7 +263,9 @@ func walletDebitKey(processID bson.ObjectID, attempt int, priceCents pricing.Cen
 }
 
 // DebitWalletForProcess debits the payer's wallet at most once per (process, attempt, price), or
-// returns ErrInsufficientWalletBalance without touching it.
+// returns ErrInsufficientWalletBalance or ErrManagedOrgSpendCapReached without touching it. The
+// balance, the managed organization's cap and the idempotency key are one filter, so the cap holds
+// under concurrent debits exactly as the balance does.
 func (ms *MongoStorage) DebitWalletForProcess(d WalletDebit) error {
 	if (d.OrgAddress.Cmp(common.Address{}) == 0) || d.AmountCents <= 0 ||
 		d.PriceCents < d.AmountCents || d.ProcessID == bson.NilObjectID || d.Attempt < 0 {
@@ -210,8 +287,13 @@ func (ms *MongoStorage) DebitWalletForProcess(d WalletDebit) error {
 		"balanceCents": bson.M{"$gte": amountCents},
 		"appliedKeys":  bson.M{"$ne": idempotencyKey},
 	}
+	inc := bson.M{"balanceCents": -amountCents}
+	if d.ManagedOrg != (common.Address{}) {
+		filter["$expr"] = withinSpendCap(d.ManagedOrg, amountCents)
+		inc[orgSpendField(d.ManagedOrg)+".spentCents"] = amountCents
+	}
 	update := bson.M{
-		"$inc":  bson.M{"balanceCents": -amountCents},
+		"$inc":  inc,
 		"$push": appliedKeysPush(idempotencyKey),
 		"$set":  bson.M{"updatedAt": time.Now()},
 	}
@@ -220,12 +302,23 @@ func (ms *MongoStorage) DebitWalletForProcess(d WalletDebit) error {
 		return fmt.Errorf("failed to debit wallet: %w", err)
 	}
 	if res.MatchedCount == 0 {
-		// short balance, or already debited
+		// already debited, over the cap, or short balance
 		n, err := ms.wallets.CountDocuments(ctx, bson.M{"_id": orgAddress, "appliedKeys": idempotencyKey})
 		if err != nil {
 			return fmt.Errorf("failed to check wallet debit: %w", err)
 		}
 		if n == 0 {
+			if d.ManagedOrg != (common.Address{}) {
+				over, err := ms.wallets.CountDocuments(ctx, bson.M{
+					"_id": orgAddress, "$expr": bson.M{"$not": bson.A{withinSpendCap(d.ManagedOrg, amountCents)}},
+				})
+				if err != nil {
+					return fmt.Errorf("failed to check managed organization spend cap: %w", err)
+				}
+				if over > 0 {
+					return ErrManagedOrgSpendCapReached
+				}
+			}
 			return ErrInsufficientWalletBalance
 		}
 		// already debited by an earlier attempt: the retry keeps the debit
