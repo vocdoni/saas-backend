@@ -302,7 +302,32 @@ wallet routes answer 403, 40181); the integrator tops up its own wallet. The int
 history names, in `processOrgAddress`, the managed organization each `payment` was for. The
 one payment route a managed organization does use is `POST /processes/{id}/census/checkout`,
 which debits the integrator's wallet at once (see below); it is also the only payment route
-callable with an API key, because integrators drive census growth with their keys.
+callable with an API key, because integrators drive census growth with their keys. With an API
+key an integrator also reads a draft's price (`GET /processes/{processId}/price`,
+`voting:write`) and sets a managed organization's spend cap (`PUT`, `managed:write`).
+
+### Spend cap per managed organization
+
+The spend cap applies to managed debits only: a standard organization paying from its own
+wallet has none, and its debits and credit-backs never touch `orgSpend`.
+
+- **Cap**: `PUT /integrator/organizations/{orgAddress}` with `{"spendCapCents": n}` (EUR cents,
+  VAT excluded; `null` = unlimited, the default). Callable with an integrator Admin JWT or a
+  `managed:write` API key. The target must be managed by the caller's integrator (404
+  otherwise), and a negative cap is 400. The cap is stored on the integrator's wallet document as
+  `orgSpend.<lowercase managed address>.capCents`, so it is one more condition in the debit's
+  filter (`$expr`) next to the balance and the idempotency key: concurrent debits cannot pass it,
+  and the check and the charge are one atomic write. A debit past the cap is refused before
+  anything is charged with **402 (40180)**, data `{capCents, spentCents, requiredCents}`; as for
+  40175, the once-per-organization add-on claims taken for that attempt are released. The same
+  applies to census headroom bought from the wallet. A cap below what is already spent only
+  refuses further debits; it does not claw anything back.
+- **Spent**: `orgSpend.<managed address>.spentCents` is what that organization's processes hold
+  debited from the wallet. Each managed debit adds its amount; a deleted draft's credit-back and
+  a failed publish's credit-back take their credited amount off again, so an add-on withheld
+  from a credit-back stays counted.
+- **Listing**: `GET /integrator/organizations` items and the `PUT` response carry
+  `spendCapCents` (`null` = unlimited) and `spentCents` alongside the organization's fields.
 
 ## Once-per-organization add-ons are claimed, not just checked
 
@@ -482,6 +507,7 @@ up.
 | 40175 | 402 | the integrator wallet does not cover a managed organization's debit (`requiredCents`/`availableCents` in data) |
 | 40176 | 422 | census above 50 000 — custom quote only, refused on every payment path |
 | 40177 | 409 | a top-up checkout is open (publish), the draft is already paid (`/checkout`), a checkout is completing, or the payment changed or is being refunded |
+| 40180 | 402 | a managed organization's spend cap would be passed (`capCents`, `spentCents`, `requiredCents` in data) |
 | 40181 | 403 | a managed organization has no wallet (wallet routes, `/checkout`) |
 | 40174 | 403 | an integrator's own organization cannot own processes |
 | 40179 | 400 | the organization already has 5 admins/managers (pending invitations included) |
@@ -496,7 +522,8 @@ up.
   `walletAttempt` (how many times a failed publish credited the wallet payment back; part of the
   debit and credit-back keys) and `creditBackCents` (what a reverted wallet payment still owes
   its payer). No card state: no payment intent, charge amounts, refund id or quote hash.
-- `wallets` — one document per payer (`_id` = organization address).
+- `wallets` — one document per payer (`_id` = organization address). An integrator's per-managed-org
+  spend caps and spending live in the optional `orgSpend` map (absent means unlimited, 0).
 - `walletLedger` — append-only, unique index on `idempotencyKey` and a sparse index on
   `paymentIntentId` (a top-up's, which a Stripe refund names); rows carry `kind`, the signed
   `amountCents`, `processId`/`processOrgAddress`, and a top-up's `grossCents`.
