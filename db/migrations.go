@@ -93,12 +93,8 @@ func (ms *MongoStorage) RunMigrationsUp() error {
 
 	// there is work to do: take the cross-instance lock so two replicas cannot
 	// apply migrations concurrently
-	holderBytes := make([]byte, 16)
-	if _, err := rand.Read(holderBytes); err != nil {
-		return fmt.Errorf("failed to generate migration lock holder id: %w", err)
-	}
-	holder := hex.EncodeToString(holderBytes)
-	if err := ms.acquireMigrationLock(ctx, holder); err != nil {
+	holder, err := ms.lockMigrations(ctx)
+	if err != nil {
 		return err
 	}
 	defer ms.releaseMigrationLock(holder)
@@ -142,12 +138,33 @@ func (ms *MongoStorage) RunMigrationsUp() error {
 	return nil
 }
 
-// RunMigrationsDown rolls back database migrations
+// lockMigrations takes the cross-instance migration lock under a fresh holder id and returns
+// that id, which the caller hands to releaseMigrationLock.
+func (ms *MongoStorage) lockMigrations(ctx context.Context) (string, error) {
+	holderBytes := make([]byte, 16)
+	if _, err := rand.Read(holderBytes); err != nil {
+		return "", fmt.Errorf("failed to generate migration lock holder id: %w", err)
+	}
+	holder := hex.EncodeToString(holderBytes)
+	if err := ms.acquireMigrationLock(ctx, holder); err != nil {
+		return "", err
+	}
+	return holder, nil
+}
+
+// RunMigrationsDown rolls back database migrations. It takes the same cross-instance lock as
+// RunMigrationsUp, so a rollback never runs alongside a replica applying migrations.
 func (ms *MongoStorage) RunMigrationsDown(steps int) error {
 	log.Infow("rolling back database migrations", "steps", steps)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
+
+	holder, err := ms.lockMigrations(ctx)
+	if err != nil {
+		return err
+	}
+	defer ms.releaseMigrationLock(holder)
 
 	lastMigration, err := lastAppliedMigration(ctx, ms.migrations)
 	if err != nil {
