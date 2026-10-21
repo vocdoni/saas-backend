@@ -34,13 +34,19 @@ const MaxChallengeResends = 3
 const DefaultMaxDailyChallengeSends = 10
 
 // DefaultMaxHourlyAuthFailures is the default cap on failed step-0 authentications for one
-// claimed voter identity (the submitted login fields) on one voting process per UTC hour. Once
-// reached, that identity cannot authenticate on that process until the next hour. That bounds
-// guessing one voter's contact or 2FA data (to 240 guesses a day at the default), while whoever
-// knows a voter's login fields and spends their budget only locks them out until the hour ends,
-// and has to keep sending to keep them out. There is deliberately no process-wide cap: anyone
-// could spend it with junk requests and lock every voter out of the election.
+// submission (the submitted login and contact fields) on one voting process per UTC hour. Once
+// reached, that submission is refused on that process until the next hour. The claimed voter (the
+// login fields alone) gets VoterAuthFailuresFactor times this budget across every contact tried,
+// which bounds guessing one voter's contact (to 2400 guesses a day at the default) without letting
+// whoever knows a voter's login fields lock them out cheaply: it takes that many failures in the
+// hour, and the voter's own submission with the right contact keeps its separate budget until then.
+// There is deliberately no process-wide cap: anyone could spend it with junk requests and lock
+// every voter out of the election.
 const DefaultMaxHourlyAuthFailures = 10
+
+// VoterAuthFailuresFactor multiplies MaxHourlyAuthFailures into the hourly failure budget of one
+// claimed voter across all the contacts submitted with their login fields.
+const VoterAuthFailuresFactor = 10
 
 // Config struct contains the configuration for the CSP service. It includes
 // the database name, the MongoDB client, the notification cooldown time, the
@@ -57,8 +63,9 @@ type Config struct {
 	// one voting process per UTC day. Zero uses DefaultMaxDailyChallengeSends; a negative value
 	// disables the cap.
 	MaxDailyChallengeSends int
-	// MaxHourlyAuthFailures caps the failed step-0 authentications of one claimed voter identity
-	// on one voting process per UTC hour. Zero uses DefaultMaxHourlyAuthFailures; a negative value
+	// MaxHourlyAuthFailures caps the failed step-0 authentications of one submission (login plus
+	// contact fields) on one voting process per UTC hour; one claimed voter gets
+	// VoterAuthFailuresFactor times it. Zero uses DefaultMaxHourlyAuthFailures; a negative value
 	// disables the cap.
 	MaxHourlyAuthFailures int
 	// NotificationTTL is how long a CSP OTP challenge remains valid. After

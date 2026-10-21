@@ -18,9 +18,9 @@ func init() {
 // explicit so the down migration drops it deterministically.
 const cspCountersTTLIndexName = "expiresat_1"
 
-// upCSPCountersTTLIndex adds a TTL index on the daily CSP counters (challenge sends and failed
-// step-0 authentications), so expired days are garbage collected instead of accumulating one
-// document per member per day forever.
+// upCSPCountersTTLIndex adds a TTL index on the CSP counters (daily challenge sends and hourly
+// failed step-0 authentications), so expired windows are garbage collected instead of
+// accumulating one document per identity per window forever.
 func upCSPCountersTTLIndex(ctx context.Context, database *mongo.Database) error {
 	model := mongo.IndexModel{
 		Keys:    bson.D{{Key: "expiresat", Value: 1}},
