@@ -189,7 +189,7 @@ func (ms *MongoStorage) DeleteVotingProcess(id bson.ObjectID) error {
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 	if _, err := ms.processesQuestions.DeleteMany(ctx, bson.M{"processId": id}); err != nil { //nolint:goconst
 		return fmt.Errorf("failed to delete voting process questions: %w", err)
@@ -337,7 +337,7 @@ type StalePublishClaim struct {
 // each claim with ReleaseStalePublishClaim and resets the questions (see the startup
 // reconciliation).
 func (ms *MongoStorage) StaleVotingProcesses() ([]StalePublishClaim, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 	cutoff := time.Now().Add(-PublishStaleAfter)
 	cur, err := ms.votingProcesses.Find(ctx,
