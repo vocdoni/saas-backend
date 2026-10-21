@@ -108,6 +108,10 @@ Component packages (each is a focused service composed in `main.go`):
   (HTTP), `csp/notifications/` (challenge queue). Signing key derives from the service `RootKey`.
 - **`account/`** — wraps the Vocdoni blockchain account: signs transactions, funds accounts via
   faucet, computes election prices. This is the "remote signer" core.
+- **`chainclient/`** — thin HTTP client and wire DTOs for the vocdoni-node endpoints the service
+  calls, plus inlined chain helpers (nullifier, faucet package, tx cost names). Non-test code must
+  not import `go.vocdoni.io/dvote/{api,apiclient,vochain}` (they link cometbft/IPFS/ZK into the
+  binary); equivalence tests in `chainclient/` pin the helpers to the node originals.
 - **`notifications/`** — `NotificationService` interface with `smtp/` (email) and `twilio/` (SMS)
   implementations, plus `mailtemplates/` (HTML/text email templates, loaded with `mailtemplates.Load()`).
   `FailoverService` composes multiple services and delivers via the first that succeeds; the service
@@ -200,7 +204,7 @@ user's call.
 ## CI
 
 `.github/workflows/main.yml` gates PRs on: `golangci-lint` (v2.12.2, `only-new-issues`),
-`./scripts/check-qt-patterns.sh`, a clean `go mod tidy` diff, and `go test -failfast -timeout=30m ./...`
+`./scripts/check-qt-patterns.sh`, a clean `go mod tidy` diff, and `go test -failfast -timeout=45m ./...`
 with coverage (a diff report is posted as a PR comment). It runs on pull requests and on pushes to
 `main` only, so in practice every push to `main` builds and pushes a Docker image, while its `-race`
 step and the `stage`/`release*` Docker conditions never fire. The branch flow is

@@ -14,10 +14,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/chainclient"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
-	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -144,6 +144,7 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		StartDate:     start,
 		EndDate:       end,
 		InitialStatus: initialStatus,
+		AddOns:        req.AddOns,
 		CensusID:      census.ID,
 	}
 	vpID, err := a.db.SetVotingProcess(vp)
@@ -412,6 +413,13 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization").Write(w)
 		return
 	}
+	// after the role check, so a non-member reads 401 rather than learning from a 409
+	// whether someone is paying for this process. Only a processing payment freezes the
+	// priced inputs; editing a paid draft is how a draft stranded by publish preflight is
+	// repaired, and every publish path re-prices what the edit produced.
+	if a.refusePaymentLocked(w, oid) || a.refuseBrandingAfterPayment(w, vp, req.AddOns) {
+		return
+	}
 	if len(req.Questions) == 0 || len(req.Questions) > db.MaxQuestionsPerProcess {
 		errors.ErrMalformedBody.Withf("questions must be between 1 and %d", db.MaxQuestionsPerProcess).Write(w)
 		return
@@ -452,6 +460,7 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	vp.Title, vp.Description, vp.Header, vp.StreamURI = req.Title, req.Description, req.Header, req.StreamURI
 	vp.StartDate, vp.EndDate, vp.CensusID = start, end, census.ID
 	vp.InitialStatus = initialStatus
+	vp.AddOns = req.AddOns
 	// a stale marker got us past the guard above: editing the draft releases it rather than
 	// writing it back, matching what ClaimVotingProcessForPublish would reclaim anyway. A marker
 	// that went live *after* that guard read is a different matter — the write's own precondition
@@ -751,7 +760,18 @@ func (a *API) validateVotingProcessHandler(w http.ResponseWriter, r *http.Reques
 	census, _ := a.db.Census(vp.CensusID.Hex())
 	// the dry-run reports every problem the same way: a mismatched question set is just one more
 	// entry in errors, so the mismatch flag publish acts on is irrelevant here.
-	problems, _ := a.publishPreflightProblems(vp, questions, census, user)
+	problems, _ := a.publishPreflightProblems(publishTarget{vp: vp, questions: questions, census: census, user: user})
+	// an unpaid price is one more reason a publish would be refused; a quote error is
+	// not reported here (a broken census already surfaces above)
+	if !vp.Published {
+		due, err := a.paymentDueForPublish(vp)
+		if err == nil && due != nil {
+			problems = append(problems,
+				fmt.Sprintf("publication requires payment of %d eur cents", due.TotalCents))
+		} else if errors.Is(err, errors.ErrPaymentSessionConflict) {
+			problems = append(problems, err.Error())
+		}
+	}
 	apicommon.HTTPWriteJSON(w, &apicommon.VotingProcessValidateResponse{
 		Valid:  len(problems) == 0,
 		Errors: problems,
@@ -911,7 +931,7 @@ func (a *API) censusTotalWeight(census *db.Census) int64 {
 // verbatim (one row per ballot field), so both single-choice (one row of value buckets) and
 // multi-choice (one row per choice) questions are represented losslessly; it stays nil until the
 // tally publishes.
-func questionResultsFromElection(e *dvoteapi.Election) db.QuestionResults {
+func questionResultsFromElection(e *chainclient.Election) db.QuestionResults {
 	qr := db.QuestionResults{
 		VoteCount:    e.VoteCount,
 		FinalResults: e.FinalResults,
@@ -1240,7 +1260,8 @@ func questionSetProblem(vp *db.VotingProcess, questions []db.VotingProcessQuesti
 
 // writeSubscriptionError writes a typed API error verbatim, falling back to 500.
 func writeSubscriptionError(w http.ResponseWriter, err error) {
-	if apiErr, ok := err.(errors.Error); ok {
+	var apiErr errors.Error
+	if errors.As(err, &apiErr) {
 		apiErr.Write(w)
 		return
 	}

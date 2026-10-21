@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/chainclient"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/db"
@@ -17,7 +18,6 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/log"
-	"go.vocdoni.io/dvote/vochain/state"
 )
 
 // parseProcessID parses the {processId} URL param (a voting-process Mongo ObjectID) and
@@ -188,7 +188,8 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 		census, org, &AuthRequest{Email: req.Email, Phone: req.Phone}, member,
 	)
 	if err != nil {
-		if apiErr, ok := err.(errors.Error); ok {
+		var apiErr errors.Error
+		if errors.As(err, &apiErr) {
 			apiErr.Write(w)
 		} else {
 			errors.ErrUnauthorized.WithErr(err).Write(w)
@@ -1013,7 +1014,8 @@ func orgNameAndLogo(org *db.Organization) (name, logo string) {
 
 // writeResendError maps a ResendChallenge error to the proper HTTP error.
 func writeResendError(w http.ResponseWriter, err error) {
-	if apiErr, ok := err.(errors.Error); ok {
+	var apiErr errors.Error
+	if errors.As(err, &apiErr) {
 		apiErr.Write(w)
 		return
 	}
@@ -1101,7 +1103,7 @@ func (c *CSPHandlers) ProcessSignInfoHandler(w http.ResponseWriter, r *http.Requ
 		// no server-side nullifier to report either; the voter derives its own from its address.
 		if cspProc.UsedAddress != nil {
 			entry.Address = cspProc.UsedAddress
-			entry.Nullifier = state.GenerateNullifier(common.BytesToAddress(cspProc.UsedAddress), q.UpstreamID)
+			entry.Nullifier = chainclient.GenerateNullifier(common.BytesToAddress(cspProc.UsedAddress), q.UpstreamID)
 		}
 		resp.Consumed = append(resp.Consumed, entry)
 	}

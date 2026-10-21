@@ -70,6 +70,7 @@ import (
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/chainclient"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
@@ -77,8 +78,6 @@ import (
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/objectstorage"
 	"github.com/vocdoni/saas-backend/subscriptions"
-	dvoteapi "go.vocdoni.io/dvote/api"
-	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -93,7 +92,6 @@ type Config struct {
 	Secret      string
 	Chain       string
 	DB          *db.MongoStorage
-	Client      *apiclient.HTTPclient
 	Account     *account.Account
 	MailService notifications.NotificationService
 	SMSService  notifications.NotificationService
@@ -149,7 +147,6 @@ type API struct {
 	host            string
 	port            int
 	router          *chi.Mux
-	client          *apiclient.HTTPclient
 	account         *account.Account
 	mail            notifications.NotificationService
 	sms             notifications.NotificationService
@@ -165,16 +162,24 @@ type API struct {
 	oauthServiceURL string
 	originSecret    string
 	stripeHandlers  *StripeHandlers
-	txQueue         chan txTask
-	txQueueMu       sync.Mutex
-	orgTxLocks      *orgTxMutex
-	otpExpiry       time.Duration
-	otpCooldown     time.Duration
-	notifySync      bool
-	statusSyncer    StatusEnqueuer
-	electionCache   *lru.Cache[string, *dvoteapi.Election]
+	// paymentGW is the seam to Stripe's one-time checkout used by pay-per-process
+	// billing; nil when the Stripe service is unavailable. Tests install a fake.
+	paymentGW  paymentGateway
+	txQueue    chan txTask
+	txQueueMu  sync.Mutex
+	orgTxLocks *orgTxMutex
+	// walletLocks serializes charges against one integrator's prepaid wallet
+	walletLocks *orgTxMutex
+	// censusGrowthLocks makes the pay-per-process growth check and the census write it
+	// allows one step per organization, so parallel growth cannot pass the same check
+	censusGrowthLocks *orgTxMutex
+	otpExpiry         time.Duration
+	otpCooldown       time.Duration
+	notifySync        bool
+	statusSyncer      StatusEnqueuer
+	electionCache     *lru.Cache[string, *chainclient.Election]
 	// liveElectionCache holds not-yet-final legacy elections for legacyLiveElectionTTL.
-	liveElectionCache *expirable.LRU[string, *dvoteapi.Election]
+	liveElectionCache *expirable.LRU[string, *chainclient.Election]
 	// legacyProjectionCache holds fully-final legacy records already projected onto /processes.
 	legacyProjectionCache *lru.Cache[string, *apicommon.VotingProcessResponse]
 }
@@ -243,8 +248,8 @@ func New(ctx context.Context, conf *Config) *API {
 	}
 
 	// lru.New only fails on a non-positive size, and the size is a positive constant.
-	electionCache, _ := lru.New[string, *dvoteapi.Election](legacyElectionCacheSize)
-	liveElectionCache := expirable.NewLRU[string, *dvoteapi.Election](legacyElectionCacheSize, nil, legacyLiveElectionTTL)
+	electionCache, _ := lru.New[string, *chainclient.Election](legacyElectionCacheSize)
+	liveElectionCache := expirable.NewLRU[string, *chainclient.Election](legacyElectionCacheSize, nil, legacyLiveElectionTTL)
 	legacyProjectionCache, _ := lru.New[string, *apicommon.VotingProcessResponse](legacyElectionCacheSize)
 
 	a := &API{
@@ -253,7 +258,6 @@ func New(ctx context.Context, conf *Config) *API {
 		auth:                  jwtauth.New("HS256", []byte(conf.Secret), nil),
 		host:                  conf.Host,
 		port:                  conf.Port,
-		client:                conf.Client,
 		account:               conf.Account,
 		mail:                  conf.MailService,
 		sms:                   conf.SMSService,
@@ -268,6 +272,8 @@ func New(ctx context.Context, conf *Config) *API {
 		oauthServiceURL:       conf.OAuthServiceURL,
 		originSecret:          conf.OriginSecret,
 		orgTxLocks:            newOrgTxMutex(),
+		walletLocks:           newOrgTxMutex(),
+		censusGrowthLocks:     newOrgTxMutex(),
 		otpExpiry:             otpExpiry,
 		otpCooldown:           otpCooldown,
 		notifySync:            conf.NotificationsSyncDelivery,
@@ -419,6 +425,8 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, managedOrganizationsEndpoint, a.managedOrganizationsHandler)
 		handle(r, http.MethodDelete, managedOrganizationEndpoint, a.deleteManagedOrganizationHandler)
 		handle(r, http.MethodGet, integratorEndpoint, a.integratorInfoHandler)
+		handle(r, http.MethodGet, walletEndpoint, a.walletHandler)
+		handle(r, http.MethodPost, walletTopUpEndpoint, a.createWalletTopUpHandler)
 		handle(r, http.MethodPost, integratorOrgAPIKeysEndpoint, a.createAPIKeyHandler)
 		handle(r, http.MethodGet, integratorOrgAPIKeysEndpoint, a.apiKeysHandler)
 		handle(r, http.MethodDelete, integratorOrgAPIKeyEndpoint, a.revokeAPIKeyHandler)
@@ -434,6 +442,12 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPut, processesEndpoint, a.updateVotingProcessHandler)
 		handle(r, http.MethodGet, processesValidateEndpoint, a.validateVotingProcessHandler)
 		handle(r, http.MethodPost, processesPublishEndpoint, a.publishVotingProcessHandler)
+		handle(r, http.MethodGet, processesPriceEndpoint, a.processPriceHandler)
+		handle(r, http.MethodPost, processesCheckoutEndpoint, a.createProcessCheckoutHandler)
+		handle(r, http.MethodGet, processesCheckoutEndpoint, a.processCheckoutStatusHandler)
+		handle(r, http.MethodDelete, processesCheckoutEndpoint, a.cancelProcessCheckoutHandler)
+		handle(r, http.MethodPost, processesCensusCheckoutEndpoint, a.createProcessCensusCheckoutHandler)
+		handle(r, http.MethodGet, organizationPaymentsEndpoint, a.organizationProcessPaymentsHandler)
 		handle(r, http.MethodPut, processesQuestionsStatusEndpoint, a.setVotingProcessQuestionsStatusHandler)
 		handle(r, http.MethodPut, processesQuestionStatusEndpoint, a.setVotingProcessQuestionStatusHandler)
 		handle(r, http.MethodDelete, processesEndpoint, a.deleteVotingProcessHandler)
@@ -467,7 +481,12 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, organizationTypesEndpoint, a.organizationsTypesHandler)
 		handle(r, http.MethodGet, organizationLanguagesEndpoint, a.organizationsLanguagesHandler)
 		handle(r, http.MethodGet, plansEndpoint, a.plansHandler)
-		handle(r, http.MethodPost, subscriptionsWebhook, a.stripeHandlers.HandleWebhook)
+		handle(r, http.MethodGet, pricingEndpoint, a.pricingHandler)
+		// late-bound: a method value would capture a.stripeHandlers as it is at
+		// router-build time (nil when Stripe init failed or a test installs it later)
+		handle(r, http.MethodPost, subscriptionsWebhook, func(w http.ResponseWriter, r *http.Request) {
+			a.stripeHandlers.HandleWebhook(w, r)
+		})
 		handle(r, http.MethodGet, objectStorageDownloadTypedEndpoint, a.objectStorage.DownloadImageInlineHandler)
 		handle(r, http.MethodGet, jobStatusEndpoint, a.jobStatusHandler)
 		handle(r, http.MethodPost, voteEndpoint, a.relayVoteHandler)

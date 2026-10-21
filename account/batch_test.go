@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	qt "github.com/frankban/quicktest"
-	dvoteapi "go.vocdoni.io/dvote/api"
+	"github.com/vocdoni/saas-backend/chainclient"
 	dvotetypes "go.vocdoni.io/dvote/types"
 )
 
@@ -15,13 +15,13 @@ import (
 func TestMapBatchResults(t *testing.T) {
 	c := qt.New(t)
 
-	res := &dvoteapi.TransactionBatchResult{
-		Submitted: []dvoteapi.TransactionBatchItem{
+	res := &chainclient.TransactionBatchResult{
+		Submitted: []chainclient.TransactionBatchItem{
 			{ProcessID: dvotetypes.HexBytes{0x01}, Hash: dvotetypes.HexBytes{0xaa}},
 			{ProcessID: dvotetypes.HexBytes{0x02}, Hash: dvotetypes.HexBytes{0xbb}},
 		},
-		Failed:  []dvoteapi.TransactionBatchItem{{Error: "bad nonce"}},
-		Pending: []dvoteapi.TransactionBatchItem{{}, {}},
+		Failed:  []chainclient.TransactionBatchItem{{Error: "bad nonce"}},
+		Pending: []chainclient.TransactionBatchItem{{}, {}},
 	}
 
 	out := mapBatchResults(res)
@@ -41,8 +41,8 @@ func TestMapBatchResults(t *testing.T) {
 	c.Assert(out[2].Err, qt.Equals, "bad nonce")
 
 	// all-submitted (happy path) preserves order and length
-	allOK := &dvoteapi.TransactionBatchResult{
-		Submitted: []dvoteapi.TransactionBatchItem{
+	allOK := &chainclient.TransactionBatchResult{
+		Submitted: []chainclient.TransactionBatchItem{
 			{ProcessID: dvotetypes.HexBytes{0x0a}},
 			{ProcessID: dvotetypes.HexBytes{0x0b}},
 			{ProcessID: dvotetypes.HexBytes{0x0c}},

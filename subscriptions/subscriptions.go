@@ -220,9 +220,6 @@ func (p *Subscriptions) OrgCanCreateVotingProcessDraft(orgAddress common.Address
 	if err != nil {
 		return errors.ErrOrganizationNotFound.WithErr(err)
 	}
-	if org.ManagedBy == (common.Address{}) && p.IsIntegrator(org) {
-		return errors.ErrIntegratorTopLevelOrgCannotOwnProcess
-	}
 	_, plan, err := p.limitsOwner(org)
 	if err != nil {
 		return err

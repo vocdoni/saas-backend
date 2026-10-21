@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/vocdoni/saas-backend/account"
+	"github.com/vocdoni/saas-backend/chainclient"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
-	vocdoniapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -252,7 +252,7 @@ func (s *Syncer) process(t *task) {
 // election. It is a no-op for elections that ran to their scheduled end (ManuallyEnded=false),
 // for a zero EndDate, and for questions that already have endedAt set (SetQuestionEndedAt is
 // idempotent, but skipping the call avoids a matched-count=0 write on the common path).
-func (s *Syncer) maybeRecordEndedAt(upstreamID internal.HexBytes, hexID string, election *vocdoniapi.Election) {
+func (s *Syncer) maybeRecordEndedAt(upstreamID internal.HexBytes, hexID string, election *chainclient.Election) {
 	if !election.ManuallyEnded || election.EndDate.IsZero() {
 		return
 	}

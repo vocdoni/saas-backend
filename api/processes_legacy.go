@@ -17,11 +17,11 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/chainclient"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
-	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -408,7 +408,7 @@ func (src *legacyProcessSource) cacheKey() string {
 // legacyElection returns an on-chain election, cached so the public list does not fan out to the
 // Vochain on every anonymous hit: final ones for good, the rest for legacyLiveElectionTTL. ENDED is
 // not final — it still moves to RESULTS when the tally is published — so it only gets the TTL.
-func (a *API) legacyElection(electionID internal.HexBytes) (*dvoteapi.Election, error) {
+func (a *API) legacyElection(electionID internal.HexBytes) (*chainclient.Election, error) {
 	key := electionID.String()
 	if cached, ok := a.electionCache.Get(key); ok {
 		return cached, nil
@@ -432,7 +432,7 @@ func (a *API) legacyElection(electionID internal.HexBytes) (*dvoteapi.Election, 
 // kept questions (no metadata fetch at all), the election's own metadata otherwise. Params without
 // questions are not content, so such a row is projected from the chain like a bundle-backed one.
 func (a *API) legacyContentOf(
-	ctx context.Context, election *dvoteapi.Election, params *db.ElectionParams,
+	ctx context.Context, election *chainclient.Election, params *db.ElectionParams,
 ) legacyContent {
 	if params != nil && len(params.Questions) > 0 {
 		typeMetadata := params.TypeMetadata
@@ -472,7 +472,7 @@ func (a *API) legacyContentOf(
 // legacyElectionMetadata decodes an election's metadata document into the typed shape (a JSON
 // round-trip, as Election.Metadata is typed any — the same decode as processInfoHandler). Returns
 // nil when the document cannot be resolved or decoded.
-func (a *API) legacyElectionMetadata(ctx context.Context, election *dvoteapi.Election) *dvoteapi.ElectionMetadata {
+func (a *API) legacyElectionMetadata(ctx context.Context, election *chainclient.Election) *chainclient.ElectionMetadata {
 	doc := a.legacyMetadataDocument(ctx, election)
 	if doc == nil {
 		return nil
@@ -481,7 +481,7 @@ func (a *API) legacyElectionMetadata(ctx context.Context, election *dvoteapi.Ele
 	if err != nil {
 		return nil
 	}
-	meta := &dvoteapi.ElectionMetadata{}
+	meta := &chainclient.ElectionMetadata{}
 	if err := json.Unmarshal(raw, meta); err != nil {
 		log.Warnw("legacy processes: election metadata decode failed",
 			"election", election.ElectionID.String(), "error", err)
@@ -490,13 +490,9 @@ func (a *API) legacyElectionMetadata(ctx context.Context, election *dvoteapi.Ele
 	return meta
 }
 
-// legacyMetadataDocument resolves the metadata document an election points at. The node inlines it
-// only for ipfs://, so any other reference is resolved as resolveProcessMetadata does: our own
+// legacyMetadataDocument resolves the metadata document an election points at: our own
 // object storage locally, http(s) externally. A bundle-backed election has no other content.
-func (a *API) legacyMetadataDocument(ctx context.Context, election *dvoteapi.Election) any {
-	if inlined, ok := election.Metadata.(map[string]any); ok && len(inlined) > 0 {
-		return inlined
-	}
+func (a *API) legacyMetadataDocument(ctx context.Context, election *chainclient.Election) any {
 	name, isLocal := a.objectStorage.LocalName(election.MetadataURL)
 	switch {
 	case isLocal:
@@ -514,14 +510,13 @@ func (a *API) legacyMetadataDocument(ctx context.Context, election *dvoteapi.Ele
 	case strings.HasPrefix(election.MetadataURL, "http://"), strings.HasPrefix(election.MetadataURL, "https://"):
 		return fetchExternalMetadata(ctx, election.MetadataURL)
 	default:
-		// an ipfs:// reference with nothing inlined, or none at all: no document to read.
 		return nil
 	}
 }
 
 // legacyMetaQuestions converts on-chain metadata questions into the db shape — the inverse of
 // account.BuildElectionMetadata. The types are the same maps, so no field is lost or invented.
-func legacyMetaQuestions(metaQuestions []dvoteapi.Question) []db.Question {
+func legacyMetaQuestions(metaQuestions []chainclient.Question) []db.Question {
 	out := make([]db.Question, 0, len(metaQuestions))
 	for _, q := range metaQuestions {
 		question := db.Question{
@@ -545,7 +540,7 @@ func legacyMetaQuestions(metaQuestions []dvoteapi.Question) []db.Question {
 // ballot parameters the chain ran wherever the election's ballot describes a single question, plus a
 // named type only when those parameters are exactly one (account.QuestionTypeFromBallotProtocol).
 func legacyElectionQuestions(
-	processID bson.ObjectID, election *dvoteapi.Election, content legacyContent,
+	processID bson.ObjectID, election *chainclient.Election, content legacyContent,
 ) []db.VotingProcessQuestion {
 	tally := questionResultsFromElection(election)
 	protocol := legacyBallotProtocol(election, len(content.questions))
@@ -588,7 +583,7 @@ func legacyElectionQuestions(
 // legacyBallotProtocol returns the on-chain ballot parameters of one projected question, or nil when the
 // election's ballot describes no single question. It is the inverse of the publish-time map in
 // account.(*Account).BuildNewProcessTx, reading the ballot description rather than the published tally.
-func legacyBallotProtocol(election *dvoteapi.Election, questions int) *db.BallotProtocol {
+func legacyBallotProtocol(election *chainclient.Election, questions int) *db.BallotProtocol {
 	// TallyMode and VoteMode are wrappers over an embedded protobuf pointer: reading a field panics
 	// when it is nil.
 	if questions == 0 || election.TallyMode.ProcessVoteOptions == nil {
@@ -761,7 +756,7 @@ func legacyQuestionID(electionID internal.HexBytes, order int) bson.ObjectID {
 // a single question owns the whole matrix, a one-field-per-question ballot gives question i row i.
 // Any other shape has no defined mapping, so the counts are reported without the matrix.
 func legacyQuestionResults(
-	election *dvoteapi.Election, tally db.QuestionResults, i, n int,
+	election *chainclient.Election, tally db.QuestionResults, i, n int,
 ) *db.QuestionResults {
 	results := tally
 	switch {

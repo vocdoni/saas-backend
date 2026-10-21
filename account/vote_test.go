@@ -10,18 +10,17 @@ import (
 	"testing"
 
 	qt "github.com/frankban/quicktest"
-	"go.vocdoni.io/dvote/api"
-	"go.vocdoni.io/dvote/apiclient"
+	"github.com/vocdoni/saas-backend/chainclient"
 )
 
 // TestVoteByNullifier exercises the three answers a node can give — a vote, a 404, and any
 // other status — against a fake node, since the containerized chain cannot be made to fail
-// on demand. The failure case uses 500, not 503: apiclient retries 503 waiting for a block.
+// on demand. The failure case uses 500, not 503: the client retries 503 waiting for a block.
 func TestVoteByNullifier(t *testing.T) {
 	c := qt.New(t)
 
 	known := []byte(strings.Repeat("k", 32))
-	knownVote := &api.Vote{
+	knownVote := &chainclient.Vote{
 		ElectionID:  []byte(strings.Repeat("e", 32)),
 		TxHash:      []byte(strings.Repeat("t", 32)),
 		BlockHeight: 42,
@@ -37,15 +36,13 @@ func TestVoteByNullifier(t *testing.T) {
 			}
 		case "/votes/" + hex.EncodeToString(broken):
 			http.Error(w, "boom", http.StatusInternalServerError)
-		default: // including the /chain/info probe apiclient.New makes
+		default: // including the /chain/info probe chainclient.New makes
 			http.Error(w, "not found", http.StatusNotFound)
 		}
 	}))
 	defer srv.Close()
 
-	// the trailing slash matters: apiclient joins paths onto the base URL's path, and an
-	// empty base path would yield a request line without a leading slash (a 400 from net/http)
-	client, err := apiclient.New(srv.URL + "/")
+	client, err := chainclient.New(srv.URL)
 	c.Assert(err, qt.IsNil)
 	a := &Account{client: client}
 

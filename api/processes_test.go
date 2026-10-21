@@ -13,11 +13,11 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/chainclient"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
-	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/types"
 )
 
@@ -569,12 +569,12 @@ func TestQuestionResultsFromElection(t *testing.T) {
 	bi := func(n uint64) *types.BigInt { return new(types.BigInt).SetUint64(n) }
 
 	// multi-choice: one row per choice, each [notSelected, selected].
-	multi := questionResultsFromElection(&dvoteapi.Election{
-		ElectionSummary: dvoteapi.ElectionSummary{
+	multi := questionResultsFromElection(&chainclient.Election{
+		ElectionSummary: chainclient.ElectionSummary{
 			VoteCount: 3, FinalResults: true,
 			Results: [][]*types.BigInt{{bi(1), bi(2)}, {bi(1), bi(2)}, {bi(2), bi(1)}},
 		},
-		Census: &dvoteapi.ElectionCensus{MaxCensusSize: 5},
+		Census: &chainclient.ElectionCensus{MaxCensusSize: 5},
 	})
 	c.Assert(multi.VoteCount, qt.Equals, uint64(3))
 	c.Assert(multi.FinalResults, qt.IsTrue)
@@ -582,14 +582,14 @@ func TestQuestionResultsFromElection(t *testing.T) {
 	c.Assert(multi.Results, qt.DeepEquals, [][]string{{"1", "2"}, {"1", "2"}, {"2", "1"}})
 
 	// single-choice: one row of value buckets; nil census is tolerated (maxVoters 0).
-	single := questionResultsFromElection(&dvoteapi.Election{
-		ElectionSummary: dvoteapi.ElectionSummary{Results: [][]*types.BigInt{{bi(4), bi(6)}}},
+	single := questionResultsFromElection(&chainclient.Election{
+		ElectionSummary: chainclient.ElectionSummary{Results: [][]*types.BigInt{{bi(4), bi(6)}}},
 	})
 	c.Assert(single.Results, qt.DeepEquals, [][]string{{"4", "6"}})
 	c.Assert(single.MaxVoters, qt.Equals, uint64(0))
 
 	// no tally published yet: results absent.
-	c.Assert(questionResultsFromElection(&dvoteapi.Election{}).Results, qt.IsNil)
+	c.Assert(questionResultsFromElection(&chainclient.Election{}).Results, qt.IsNil)
 }
 
 // TestVotingProcessResults verifies the public per-question results endpoint: a draft has no

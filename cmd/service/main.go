@@ -24,7 +24,6 @@ import (
 	"github.com/vocdoni/saas-backend/objectstorage"
 	"github.com/vocdoni/saas-backend/statussync"
 	"github.com/vocdoni/saas-backend/subscriptions"
-	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -127,11 +126,6 @@ func main() {
 		log.Fatalf("could not create the MongoDB database: %v", err)
 	}
 	defer database.Close()
-	// create the remote API client
-	apiClient, err := apiclient.New(apiEndpoint)
-	if err != nil {
-		log.Fatalf("could not create the remote API client: %v", err)
-	}
 	privKey := viper.GetString("privateKey")
 	fullTransparentMode := viper.GetBool("fullTransparentMode")
 	// check the required parameters
@@ -147,14 +141,13 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Infow("API client created", "endpoint", apiEndpoint, "chainID", apiClient.ChainID())
+	log.Infow("API client created", "endpoint", apiEndpoint, "chainID", acc.ChainID())
 	// init the API configuration
 	apiConf := &api.Config{
 		Host:                host,
 		Port:                port,
 		Secret:              secret,
 		DB:                  database,
-		Client:              apiClient,
 		Account:             acc,
 		WebAppURL:           webURL,
 		ServerURL:           server,

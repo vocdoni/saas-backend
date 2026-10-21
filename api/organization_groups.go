@@ -341,6 +341,9 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 			addedMembers = append(addedMembers, id)
 		}
 	}
+	// the growth check and the census write it allows are one step (censusGrowthLocks)
+	growthLock := a.censusGrowthLocks.lock(org.Address)
+	defer growthLock.Unlock()
 	if err := a.preflightCensusGrowth(org, group.CensusIDs, len(addedMembers)); err != nil {
 		writeSubscriptionError(w, err)
 		return

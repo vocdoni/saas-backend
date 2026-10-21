@@ -77,6 +77,27 @@ func TestVotingProcessCRUD(t *testing.T) {
 	c.Assert(n, qt.Equals, int64(0))
 }
 
+func TestVotingProcessesByIDs(t *testing.T) {
+	c := qt.New(t)
+	org := common.Address{0x13}
+	setupVotingProcessOrg(c, org)
+	id, err := testDB.SetVotingProcess(&VotingProcess{
+		OrgAddress: org, Title: MultiLangString{"default": "listed"}, Published: true,
+	})
+	c.Assert(err, qt.IsNil)
+
+	missing := bson.NewObjectID()
+	found, err := testDB.VotingProcessesByIDs([]bson.ObjectID{id, missing})
+	c.Assert(err, qt.IsNil)
+	c.Assert(found, qt.HasLen, 1)
+	c.Assert(found[id].Title, qt.DeepEquals, MultiLangString{"default": "listed"})
+	c.Assert(found[id].Published, qt.IsTrue)
+
+	found, err = testDB.VotingProcessesByIDs(nil)
+	c.Assert(err, qt.IsNil)
+	c.Assert(found, qt.HasLen, 0)
+}
+
 func TestClaimVotingProcessForPublish(t *testing.T) {
 	c := qt.New(t)
 	org := common.Address{0x12}

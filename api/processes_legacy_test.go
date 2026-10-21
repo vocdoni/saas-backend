@@ -6,27 +6,52 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/chainclient"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
-	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/types"
 	"go.vocdoni.io/proto/build/go/models"
 )
+
+// legacyMetaStore and legacyMetaSrv back the per-test metadata registry.
+// The server is started lazily on first use and serves metadata keyed by path.
+var (
+	legacyMetaStore    sync.Map // path → *map[string]any
+	legacyMetaCounter  atomic.Uint64
+	legacyMetaSrv      *httptest.Server
+	legacyMetaSrvOnce  sync.Once
+)
+
+func legacyMetaServer() *httptest.Server {
+	legacyMetaSrvOnce.Do(func() {
+		legacyMetaSrv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if v, ok := legacyMetaStore.Load(r.URL.Path); ok {
+				_ = json.NewEncoder(w).Encode(*(v.(*map[string]any)))
+			} else {
+				http.NotFound(w, r)
+			}
+		}))
+	})
+	return legacyMetaSrv
+}
 
 // explorerElectionID is the on-chain election of the record that motivated the legacy projection:
 // minted outside the draft flow, registered into a process bundle, with no row of its own.
 const explorerElectionID = "6b342d99f2187f3debbb14afcde7f41407f6cf87d4e7667f787c030000000000"
 
-// legacyTestElection builds an election as the node returns it: metadata inlined as the untyped
-// document the projection decodes, and maxCount set to the ballot's field count (one per result row),
-// which describes the election itself and not its tally.
-func legacyTestElection(results [][]uint64, questions []map[string]any) *dvoteapi.Election {
+// legacyTestElection builds a test election with metadata served via a local HTTP server, and
+// maxCount set to the ballot's field count (one per result row), which describes the election
+// itself and not its tally.
+func legacyTestElection(results [][]uint64, questions []map[string]any) *chainclient.Election {
 	rows := make([][]*types.BigInt, 0, len(results))
 	for _, row := range results {
 		values := make([]*types.BigInt, 0, len(row))
@@ -35,26 +60,30 @@ func legacyTestElection(results [][]uint64, questions []map[string]any) *dvoteap
 		}
 		rows = append(rows, values)
 	}
-	return &dvoteapi.Election{
-		ElectionSummary: dvoteapi.ElectionSummary{
+	meta := map[string]any{
+		"title":       map[string]any{"default": "Assemblea Straordinaria"},
+		"description": map[string]any{"default": "convocazione"},
+		"media":       map[string]any{"header": "https://example.org/header.png"},
+		"questions":   questions,
+	}
+	path := "/" + strconv.FormatUint(legacyMetaCounter.Add(1), 10)
+	legacyMetaStore.Store(path, &meta)
+	e := &chainclient.Election{
+		ElectionSummary: chainclient.ElectionSummary{
 			ElectionID:   types.HexStringToHexBytes(explorerElectionID),
 			Status:       "RESULTS",
 			VoteCount:    8,
 			FinalResults: true,
 			Results:      rows,
 		},
-		Census:   &dvoteapi.ElectionCensus{MaxCensusSize: 13},
-		VoteMode: dvoteapi.VoteMode{EnvelopeType: &models.EnvelopeType{EncryptedVotes: true}},
-		TallyMode: dvoteapi.TallyMode{
+		Census:   &chainclient.ElectionCensus{MaxCensusSize: 13},
+		VoteMode: chainclient.VoteMode{EnvelopeType: &models.EnvelopeType{EncryptedVotes: true}},
+		TallyMode: chainclient.TallyMode{
 			ProcessVoteOptions: &models.ProcessVoteOptions{MaxCount: uint32(len(results)), MaxValue: 1},
 		},
-		Metadata: map[string]any{
-			"title":       map[string]any{"default": "Assemblea Straordinaria"},
-			"description": map[string]any{"default": "convocazione"},
-			"media":       map[string]any{"header": "https://example.org/header.png"},
-			"questions":   questions,
-		},
+		MetadataURL: legacyMetaServer().URL + path,
 	}
+	return e
 }
 
 // legacyTestQuestion is one metadata question with the two choices of the real record.
@@ -169,9 +198,12 @@ func legacyTestChoices(title string, n int) map[string]any {
 
 // legacyTestElectionType stamps a metadata "type" block on a fixture election: the declared name is a
 // claim the chain never saw, so the projection only passes it through once the ballot corroborates it.
-func legacyTestElectionType(election *dvoteapi.Election, name string, properties map[string]any) {
-	if meta, ok := election.Metadata.(map[string]any); ok {
-		meta["type"] = map[string]any{"name": name, "properties": properties}
+func legacyTestElectionType(election *chainclient.Election, name string, properties map[string]any) {
+	srv := legacyMetaServer()
+	path := strings.TrimPrefix(election.MetadataURL, srv.URL)
+	if v, ok := legacyMetaStore.Load(path); ok {
+		meta := v.(*map[string]any)
+		(*meta)["type"] = map[string]any{"name": name, "properties": properties}
 	}
 }
 
@@ -354,9 +386,9 @@ func TestLegacyProjectionTypeContradictsChoices(t *testing.T) {
 // projected from those, so its content needs no on-chain metadata at all.
 func TestLegacyProjectionStoredParams(t *testing.T) {
 	c := qt.New(t)
-	// no Metadata on the election: whatever the projection reports has to come from the params.
-	election := &dvoteapi.Election{
-		ElectionSummary: dvoteapi.ElectionSummary{
+	// no MetadataURL on the election: whatever the projection reports has to come from the params.
+	election := &chainclient.Election{
+		ElectionSummary: chainclient.ElectionSummary{
 			ElectionID: types.HexStringToHexBytes(explorerElectionID),
 			Status:     "ENDED",
 			VoteCount:  2,
@@ -386,22 +418,13 @@ func TestLegacyProjectionStoredParams(t *testing.T) {
 	c.Assert(questions[0].Results.MaxVoters, qt.Equals, uint64(0))
 }
 
-// TestLegacyProjectionExternalMetadata checks the bundle-only case the projection exists for: the
-// node inlines the metadata only for ipfs://, so an election pointing at an http(s) document must
-// still resolve its questions, or the record projects to nothing and stays invisible.
+// TestLegacyProjectionExternalMetadata checks the bundle-only case the projection exists for: an
+// election whose metadata is only available via its MetadataURL must still resolve its questions,
+// or the record projects to nothing and stays invisible.
 func TestLegacyProjectionExternalMetadata(t *testing.T) {
 	c := qt.New(t)
 	allowLoopbackMetadata(t)
 	election := legacyTestElection([][]uint64{{8, 0}}, []map[string]any{legacyTestQuestion("Statuto")})
-	doc, err := json.Marshal(election.Metadata)
-	c.Assert(err, qt.IsNil)
-	election.Metadata = nil // nothing inlined: the reference is all the projection has
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write(doc)
-	}))
-	defer server.Close()
-	election.MetadataURL = server.URL + "/metadata.json"
 
 	content := testAPI.legacyContentOf(context.Background(), election, nil)
 	c.Assert(content.title, qt.DeepEquals, db.MultiLangString{"default": "Assemblea Straordinaria"})
@@ -409,8 +432,7 @@ func TestLegacyProjectionExternalMetadata(t *testing.T) {
 	c.Assert(content.questions[0].Title, qt.DeepEquals, db.MultiLangString{"default": "Statuto"})
 
 	// an unreachable reference resolves to no content rather than to a wrong one.
-	election.MetadataURL = server.URL + "/missing.json"
-	server.Close()
+	election.MetadataURL = legacyMetaServer().URL + "/nonexistent"
 	c.Assert(testAPI.legacyContentOf(context.Background(), election, nil).questions, qt.HasLen, 0)
 }
 
@@ -428,7 +450,7 @@ func TestLegacyProcessIDShape(t *testing.T) {
 // legacyTestSource registers election under a fresh id in the election caches, as a chain read
 // would, and returns a source spanning it. The election id is not on the test chain, so any read
 // that misses the caches fails.
-func legacyTestSource(election *dvoteapi.Election) *legacyProcessSource {
+func legacyTestSource(election *chainclient.Election) *legacyProcessSource {
 	election.ElectionID = types.HexStringToHexBytes(fmt.Sprintf("%064x", bson.NewObjectID()))
 	if election.Status == "RESULTS" {
 		testAPI.electionCache.Add(election.ElectionID.String(), election)
@@ -470,7 +492,7 @@ func TestLegacyProjectionCache(t *testing.T) {
 
 	// a final election whose content did not resolve is not frozen either.
 	unresolved := legacyTestElection([][]uint64{{8, 0}}, nil)
-	unresolved.Metadata = nil
+	unresolved.MetadataURL = "" // no resolvable URL: content must not be cached as empty
 	unresolvedSrc := legacyTestSource(unresolved)
 	resp, err = testAPI.projectLegacyProcess(ctx, unresolvedSrc)
 	c.Assert(err, qt.IsNil)

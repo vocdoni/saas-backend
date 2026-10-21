@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	stripeapi "github.com/stripe/stripe-go/v82"
+	stripeapi "github.com/stripe/stripe-go/v87"
 	"github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/dvote/log"
 )
@@ -32,6 +32,12 @@ type InvoiceInfo struct {
 	OrgAddress  common.Address
 }
 
+// errPermanentEvent marks a webhook event that can never succeed: the metadata Stripe
+// delivered is immutable, so every one of its retries — Stripe retries for about three
+// days — would fail identically, burying real incidents in the endpoint's failure queue.
+// Wrap it and HandleWebhookEvent logs the event and answers Stripe with a 200 instead.
+var errPermanentEvent = fmt.Errorf("permanently invalid webhook event")
+
 // HandleWebhookEvent processes a webhook event with idempotency
 func (s *Service) HandleWebhookEvent(payload []byte, signatureHeader string) error {
 	// Validate and parse the event
@@ -48,7 +54,13 @@ func (s *Service) HandleWebhookEvent(payload []byte, signatureHeader string) err
 
 	// Process the event based on its type
 	if err := s.HandleEvent(event); err != nil {
-		return err
+		if !errors.Is(err, errPermanentEvent) {
+			return err
+		}
+		// terminal: a retry cannot fix it, so drop it here — and fall through to Store,
+		// so a retry that arrives anyway short-circuits on the event id
+		log.Errorw(err, fmt.Sprintf("stripe webhook: dropping permanently invalid event %s (%s)",
+			event.ID, event.Type))
 	}
 
 	// Mark event as processed if successful
@@ -70,6 +82,16 @@ func (s *Service) HandleEvent(event *stripeapi.Event) error {
 		return s.handleProductUpsert(event)
 	case stripeapi.EventTypeProductDeleted:
 		return s.handleProductDelete(event)
+	case stripeapi.EventTypeCheckoutSessionCompleted,
+		stripeapi.EventTypeCheckoutSessionAsyncPaymentSucceeded:
+		return s.handleCheckoutSessionResult(event)
+	case stripeapi.EventTypeCheckoutSessionAsyncPaymentFailed,
+		stripeapi.EventTypeCheckoutSessionExpired:
+		return s.handleCheckoutSessionFailed(event)
+	// refund.updated covers every refund; charge.refund.updated is its legacy form, emitted only for
+	// some payment methods, still accepted for an endpoint subscribed to it (handling is idempotent)
+	case stripeapi.EventTypeRefundUpdated, stripeapi.EventTypeChargeRefundUpdated:
+		return s.handleRefundUpdated(event)
 	default:
 		log.Debugf("stripe webhook: received unhandled event type %s (id %s)", event.Type, event.ID)
 		return nil
@@ -122,6 +144,16 @@ func (s *Service) handleSubscriptionCreateOrUpdate(subscriptionInfo *Subscriptio
 	org.Subscription.StartDate = subscriptionInfo.StartDate
 	org.Subscription.RenewalDate = subscriptionInfo.EndDate
 	org.Subscription.Active = (subscriptionInfo.Status == stripeapi.SubscriptionStatusActive)
+	// webhook payloads carry the customer as a bare ID, so its email and metadata are
+	// only known after fetching it; best-effort, the subscription is saved regardless
+	if subscriptionInfo.Customer.Metadata == nil {
+		if customer, err := s.client.GetCustomer(subscriptionInfo.Customer.ID); err != nil {
+			log.Warnw("stripe webhook: could not fetch customer",
+				"customer", subscriptionInfo.Customer.ID, "error", err)
+		} else {
+			subscriptionInfo.Customer = customer
+		}
+	}
 	org.Subscription.Email = subscriptionInfo.Customer.Email
 
 	// Save subscription
@@ -130,11 +162,15 @@ func (s *Service) handleSubscriptionCreateOrUpdate(subscriptionInfo *Subscriptio
 			subscriptionInfo.ID, plan.ID, subscriptionInfo.Status, subscriptionInfo.OrgAddress, err)
 	}
 
-	// Update if needed customer metadata with organization address
-	if subscriptionInfo.Customer.Metadata["address"] != "" {
-		return fmt.Errorf("customer metadata address mismatch")
-	}
-	if err := s.client.UpdateCustomerMetadata(
+	// Stamp the organization address on the customer so future checkouts can find it.
+	// Skip when already set: every subscription update re-fires this handler, and failing
+	// here after the successful save above would make Stripe retry the event forever.
+	if existing := subscriptionInfo.Customer.Metadata["address"]; existing != "" {
+		if existing != subscriptionInfo.OrgAddress.String() {
+			log.Warnw("stripe webhook: customer metadata address mismatch",
+				"customer", subscriptionInfo.Customer.ID, "existing", existing, "org", subscriptionInfo.OrgAddress)
+		}
+	} else if err := s.client.UpdateCustomerMetadata(
 		subscriptionInfo.Customer.ID,
 		map[string]string{"address": subscriptionInfo.OrgAddress.String()},
 	); err != nil {
@@ -178,6 +214,9 @@ func (s *Service) handleInvoicePayment(event *stripeapi.Event) error {
 	invoiceInfo, err := parseInvoiceFromEvent(event)
 	if err != nil {
 		return fmt.Errorf("failed to parse invoice from event: %w", err)
+	}
+	if invoiceInfo == nil {
+		return nil
 	}
 
 	// Use per-organization locking
@@ -306,25 +345,27 @@ func parseSubscriptionFromEvent(event *stripeapi.Event) (*SubscriptionInfo, erro
 	}
 
 	if subscription.Items.Data[0].Price.Type == stripeapi.PriceTypeRecurring {
-		subscriptionInfo.BillingPeriod = db.BillingPeriod((subscription.Items.Data[0].Price.Recurring.Interval))
+		subscriptionInfo.BillingPeriod = db.BillingPeriod(subscription.Items.Data[0].Price.Recurring.Interval)
 	}
 
 	return subscriptionInfo, nil
 }
 
-// parseInvoiceFromEvent extracts invoice information from a webhook event
+// parseInvoiceFromEvent extracts invoice information from a webhook event, or nil for an invoice
+// that is not a subscription's.
 func parseInvoiceFromEvent(event *stripeapi.Event) (*InvoiceInfo, error) {
 	var invoice stripeapi.Invoice
 	if err := json.Unmarshal(event.Data.Raw, &invoice); err != nil {
 		return nil, fmt.Errorf("failed to parse invoice from event: %v", err)
 	}
 
-	if invoice.EffectiveAt == 0 {
-		return nil, fmt.Errorf("invoice missing effective date")
+	// not a subscription invoice (e.g. the receipt of a one-time payment): nothing to record
+	if invoice.Parent == nil || invoice.Parent.SubscriptionDetails == nil {
+		return nil, nil
 	}
 
-	if invoice.Parent.SubscriptionDetails == nil {
-		return nil, fmt.Errorf("invoice missing subscription details")
+	if invoice.EffectiveAt == 0 {
+		return nil, fmt.Errorf("invoice missing effective date")
 	}
 	orgAddress := common.HexToAddress(invoice.Parent.SubscriptionDetails.Metadata["address"])
 	if orgAddress.Cmp(common.Address{}) == 0 {
