@@ -188,7 +188,8 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 		census, org, &AuthRequest{Email: req.Email, Phone: req.Phone}, member,
 	)
 	if err != nil {
-		if apiErr, ok := err.(errors.Error); ok {
+		var apiErr errors.Error
+		if errors.As(err, &apiErr) {
 			apiErr.Write(w)
 		} else {
 			errors.ErrUnauthorized.WithErr(err).Write(w)
@@ -1013,7 +1014,8 @@ func orgNameAndLogo(org *db.Organization) (name, logo string) {
 
 // writeResendError maps a ResendChallenge error to the proper HTTP error.
 func writeResendError(w http.ResponseWriter, err error) {
-	if apiErr, ok := err.(errors.Error); ok {
+	var apiErr errors.Error
+	if errors.As(err, &apiErr) {
 		apiErr.Write(w)
 		return
 	}

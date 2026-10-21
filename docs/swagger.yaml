@@ -402,6 +402,13 @@ definitions:
     type: object
   apicommon.CreateVotingProcessRequest:
     properties:
+      addOns:
+        allOf:
+        - $ref: '#/definitions/db.ProcessAddOns'
+        description: |-
+          AddOns are the paid per-process options (signed results certificate, custom URL,
+          branding). The 2FA add-ons are not here: they derive from census.twoFaFields.
+          They change the process price, so editing them invalidates an open checkout session.
       census:
         $ref: '#/definitions/apicommon.CensusSpec'
       description:
@@ -967,6 +974,34 @@ definitions:
         description: Meta information of the organization
         type: object
     type: object
+  apicommon.OrganizationProcessPayment:
+    properties:
+      amountCents:
+        type: integer
+      createdAt:
+        type: string
+      currency:
+        type: string
+      paidAt:
+        type: string
+      processId:
+        type: string
+      published:
+        type: boolean
+      status:
+        $ref: '#/definitions/db.ProcessPaymentStatus'
+      title:
+        $ref: '#/definitions/db.MultiLangString'
+    type: object
+  apicommon.OrganizationProcessPaymentsResponse:
+    properties:
+      pagination:
+        $ref: '#/definitions/apicommon.Pagination'
+      payments:
+        items:
+          $ref: '#/definitions/apicommon.OrganizationProcessPayment'
+        type: array
+    type: object
   apicommon.OrganizationRole:
     properties:
       name:
@@ -1053,6 +1088,64 @@ definitions:
       totalItems:
         type: integer
     type: object
+  apicommon.ProcessCensusCheckoutRequest:
+    properties:
+      censusSize:
+        description: CensusSize is the census size to buy room for; it must exceed
+          what is already paid.
+        type: integer
+      locale:
+        type: string
+      returnURL:
+        description: ReturnURL is where Stripe redirects after checkout; the session
+          id is appended.
+        type: string
+    type: object
+  apicommon.ProcessCensusGrowthQuote:
+    properties:
+      censusSize:
+        description: CensusSize is the projected size the quote was computed for.
+        type: integer
+      currency:
+        type: string
+      dueCents:
+        type: integer
+      lines:
+        items:
+          $ref: '#/definitions/pricing.QuoteLine'
+        type: array
+      paidCents:
+        description: PaidCents is the envelope already bought, DueCents the difference
+          to TotalCents.
+        type: integer
+      processId:
+        description: |-
+          ProcessID is the process whose envelope is exceeded. A memberbase change can reach the
+          census of several processes, so it names the one to buy headroom for.
+        type: string
+      totalCents:
+        type: integer
+    type: object
+  apicommon.ProcessCheckoutRequest:
+    properties:
+      locale:
+        type: string
+      returnURL:
+        description: ReturnURL is where Stripe redirects after checkout; the session
+          id is appended.
+        type: string
+    type: object
+  apicommon.ProcessCheckoutResponse:
+    properties:
+      amountCents:
+        type: integer
+      clientSecret:
+        type: string
+      currency:
+        type: string
+      sessionId:
+        type: string
+    type: object
   apicommon.ProcessParticipantEntry:
     properties:
       email:
@@ -1087,6 +1180,52 @@ definitions:
         items:
           $ref: '#/definitions/apicommon.ProcessParticipantEntry'
         type: array
+    type: object
+  apicommon.ProcessPaymentStatusResponse:
+    properties:
+      amountCents:
+        type: integer
+      currency:
+        type: string
+      paidAt:
+        type: string
+      sessionPaymentStatus:
+        description: |-
+          SessionPaymentStatus is the live Stripe payment state of that session (paid,
+          unpaid, no_payment_required).
+        type: string
+      sessionStatus:
+        description: |-
+          SessionStatus is the live Stripe session state (open, complete, expired) when a
+          checkout session exists; empty for wallet-paid processes.
+        type: string
+      status:
+        $ref: '#/definitions/db.ProcessPaymentStatus'
+    type: object
+  apicommon.ProcessPriceResponse:
+    properties:
+      currency:
+        type: string
+      lines:
+        items:
+          $ref: '#/definitions/pricing.QuoteLine'
+        type: array
+      paymentStatus:
+        allOf:
+        - $ref: '#/definitions/db.ProcessPaymentStatus'
+        description: |-
+          PaymentStatus is the process's current payment state (pending, processing, failed,
+          paid); empty when no payment exists yet.
+      quoteRecommended:
+        description: 'QuoteRecommended: census above 15 000 voters — suggest requesting
+          a custom quote.'
+        type: boolean
+      quoteRequired:
+        description: 'QuoteRequired: census above 50 000 voters — self-service checkout
+          is blocked.'
+        type: boolean
+      totalCents:
+        type: integer
     type: object
   apicommon.PublicQuestionResponse:
     properties:
@@ -1128,7 +1267,26 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
+      metadataHash:
+        description: |-
+          MetadataHash is the SHA-256 of the exact bytes served at MetadataURL, as committed on chain.
+          A vote must attest it in its envelope (metadataHash) or it is rejected.
+        example: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+        format: hex
+        type: string
+      metadataURL:
+        description: MetadataURL serves the ElectionMetadata document the question's
+          election points to on chain.
+        type: string
       parentProcessId:
+        type: string
+      parentUpstreamId:
+        description: |-
+          ParentUpstreamID is the on-chain id of the process's parent election this question's election
+          is linked to. A vote must also attest the parent's current metadata hash (the process's
+          metadataHash, from GET /processes/{processId}).
+        example: deadbeef
+        format: hex
         type: string
       results:
         allOf:
@@ -1730,6 +1888,10 @@ definitions:
         $ref: '#/definitions/db.MultiLangString'
       metadata:
         additionalProperties: {}
+        description: |-
+          Metadata is the question's free-form display info, published in its election document:
+          each entry of metadata.choices ({value, description, image, ...}) becomes the meta of the
+          choice with that value (without the value), and every other key the question's meta.
         type: object
       secretUntilTheEnd:
         type: boolean
@@ -1777,6 +1939,10 @@ definitions:
     type: object
   apicommon.VotingProcessResponse:
     properties:
+      addOns:
+        allOf:
+        - $ref: '#/definitions/db.ProcessAddOns'
+        description: AddOns echoes the paid per-process options selected on the draft.
       census:
         $ref: '#/definitions/apicommon.CensusSpec'
       chainId:
@@ -1812,6 +1978,17 @@ definitions:
           Legacy marks a process projected read-only from the deprecated /process generation or from a
           process bundle: not editable through /processes, and its questions may share one upstreamId.
         type: boolean
+      metadataHash:
+        description: |-
+          MetadataHash is the SHA-256 of the exact bytes served at MetadataURL, as committed on chain by
+          the parent election.
+        example: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+        format: hex
+        type: string
+      metadataURL:
+        description: MetadataURL serves the ElectionMetadata document the parent election
+          points to on chain.
+        type: string
       orgAddress:
         example: a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
         format: hex
@@ -1834,6 +2011,15 @@ definitions:
           PUT to make the update conditional on nothing else having written in between (see
           CreateVotingProcessRequest.UpdatedAt).
         type: string
+      upstreamId:
+        description: |-
+          UpstreamID is the on-chain id of the process's metadata-only parent election, published before
+          the question elections, which are linked to it. Its metadata document holds the process title,
+          description and media. It is never voted on, but every vote attests its metadataHash. Absent
+          until published, and for processes published without one.
+        example: deadbeef
+        format: hex
+        type: string
     type: object
   apicommon.VotingProcessResultsResponse:
     properties:
@@ -1852,6 +2038,28 @@ definitions:
         type: array
       valid:
         type: boolean
+    type: object
+  apicommon.WalletResponse:
+    properties:
+      balanceCents:
+        type: integer
+      currency:
+        type: string
+      ledger:
+        items:
+          $ref: '#/definitions/db.WalletLedgerEntry'
+        type: array
+      pagination:
+        $ref: '#/definitions/apicommon.Pagination'
+    type: object
+  apicommon.WalletTopUpRequest:
+    properties:
+      amountCents:
+        type: integer
+      locale:
+        type: string
+      returnURL:
+        type: string
     type: object
   db.BallotProtocol:
     properties:
@@ -2045,6 +2253,29 @@ definitions:
       teamMembers:
         type: integer
     type: object
+  db.ProcessAddOns:
+    properties:
+      branding:
+        type: boolean
+      customUrl:
+        type: boolean
+      signedCertificate:
+        type: boolean
+    type: object
+  db.ProcessPaymentStatus:
+    enum:
+    - pending
+    - processing
+    - failed
+    - paid
+    - refunded
+    type: string
+    x-enum-varnames:
+    - ProcessPaymentPending
+    - ProcessPaymentProcessing
+    - ProcessPaymentFailed
+    - ProcessPaymentPaid
+    - ProcessPaymentRefunded
   db.QuestionResults:
     properties:
       finalResults:
@@ -2149,7 +2380,26 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
+      metadataHash:
+        description: |-
+          MetadataHash is the SHA-256 of the exact bytes served at MetadataURL, committed on chain at
+          publish. Every vote envelope must attest it (VoteEnvelope.metadataHash) or the chain rejects it.
+        example: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+        format: hex
+        type: string
+      metadataURL:
+        description: MetadataURL serves the ElectionMetadata document this question's
+          election points to on chain.
+        type: string
       parentProcessId:
+        type: string
+      parentUpstreamId:
+        description: |-
+          ParentUpstreamID is the on-chain id of the process's parent election this question's election
+          was published under (the process's upstreamId). A vote must also attest the parent's current
+          metadata hash (the process's metadataHash).
+        example: deadbeef
+        format: hex
         type: string
       results:
         allOf:
@@ -2193,6 +2443,23 @@ definitions:
       weighted:
         type: boolean
     type: object
+  db.WalletLedgerEntry:
+    properties:
+      amountCents:
+        type: integer
+      createdAt:
+        type: string
+      id:
+        type: string
+      kind:
+        type: string
+      orgAddress:
+        items:
+          type: integer
+        type: array
+      processId:
+        type: string
+    type: object
   errors.Error:
     properties:
       code:
@@ -2212,6 +2479,11 @@ definitions:
   github_com_vocdoni_saas-backend_stripe.CheckoutSessionStatus:
     properties:
       customer_email:
+        type: string
+      payment_status:
+        description: |-
+          PaymentStatus is the payment outcome of the session, in every mode: "paid",
+          "unpaid" or "no_payment_required" (e.g. a subscription that starts with a trial).
         type: string
       status:
         type: string
@@ -2480,6 +2752,15 @@ definitions:
       weight:
         example: 2a
         format: hex
+        type: string
+    type: object
+  pricing.QuoteLine:
+    properties:
+      amountCents:
+        type: integer
+      description:
+        type: string
+      kind:
         type: string
     type: object
 host: localhost:8080
@@ -3990,6 +4271,63 @@ paths:
       summary: Update organization meta information
       tags:
       - organizations
+  /organizations/{orgAddress}/payments:
+    get:
+      description: |-
+        The organization's process payments as stored, filtered by status — by default the
+        ones still open (pending, processing), which is how the drafts whose checkout
+        blocks publication are found. No live Stripe state is read: poll
+        GET /processes/{processId}/checkout for that. A payment whose process was deleted
+        (refunded) is listed with an empty title. Requires Manager/Admin of the organization.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: 'Comma-separated statuses (default: pending,processing)'
+        in: query
+        name: status
+        type: string
+      - description: 'Order by creation time (default: desc)'
+        enum:
+        - asc
+        - desc
+        in: query
+        name: sortOrder
+        type: string
+      - description: 'Page number (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - description: 'Number of items per page (default: 10)'
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.OrganizationProcessPaymentsResponse'
+        "400":
+          description: Invalid status, sortOrder or pagination
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: List the process payments of an organization
+      tags:
+      - organizations
   /organizations/{orgAddress}/subscription:
     get:
       consumes:
@@ -4502,6 +4840,55 @@ paths:
       summary: Get all subscription plans
       tags:
       - plans
+  /pricing:
+    get:
+      description: |-
+        Public calculator over the published pricing formula: pass the inputs, get the
+        same breakdown GET /processes/{processId}/price returns for a draft. EUR cents,
+        VAT excluded (Stripe Tax adds VAT at checkout). No organization context: branding
+        is charged as requested and legacy plan credits are not applied. Above 15 000
+        voters a custom quote is recommended; above 50 000 the flag is informational here —
+        self-service checkout enforces the block.
+      parameters:
+      - description: Eligible voters (census size), at least 1
+        in: query
+        name: voters
+        required: true
+        type: integer
+      - description: Email 2FA add-on
+        in: query
+        name: emailTwoFA
+        type: boolean
+      - description: SMS 2FA add-on
+        in: query
+        name: smsTwoFA
+        type: boolean
+      - description: Signed results certificate add-on
+        in: query
+        name: signedCertificate
+        type: boolean
+      - description: Custom URL add-on
+        in: query
+        name: customUrl
+        type: boolean
+      - description: Branding / white label add-on
+        in: query
+        name: branding
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessPriceResponse'
+        "400":
+          description: Missing or invalid voters
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Compute a pay-per-process price
+      tags:
+      - processes
   /processes:
     get:
       description: |-
@@ -4625,6 +5012,13 @@ paths:
         published process has on-chain elections and cannot be deleted. Requires
         Manager/Admin role of the organization that owns the process.
 
+        A paid draft is refunded before it is deleted, the way it was paid: a card payment
+        is refunded (VAT included) and a managed organization's payment is credited back to
+        its integrator wallet. The payment record is kept as the audit trail, and the
+        organization's branding add-on is released so its next process can buy it. A draft
+        whose payment is still processing, or whose checkout was just completed, is refused:
+        retry once it settles.
+
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Process ID
@@ -4648,11 +5042,11 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Process already published
+          description: Process already published, or its payment is in flight
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
-          description: Internal server error
+          description: Internal server error, or the payment could not be refunded
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -5059,6 +5453,10 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
+        "402":
+          description: The census would grow beyond the price paid; buy the difference
+          schema:
+            $ref: '#/definitions/apicommon.ProcessCensusGrowthQuote'
         "404":
           description: Process not found
           schema:
@@ -5074,6 +5472,75 @@ paths:
       security:
       - BearerAuth: []
       summary: Add members to a published process's census
+      tags:
+      - processes
+  /processes/{processId}/census/checkout:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Opens a one-time Stripe checkout for the difference between what the process
+        already paid and what its census would cost at censusSize, so a census that
+        outgrew its price can be grown (or a paid draft republished) instead of being
+        stuck behind a 402. Add-ons are priced exactly as the original payment priced
+        them, so the branding add-on is never charged twice. The paid amount is raised
+        when the payment is verified by webhook — never before, so the census stays
+        refused until the money lands. A managed organization pays from its integrator
+        wallet instead: the difference is debited synchronously and the response carries
+        no checkout session, so the census can grow immediately. 400 when the process has
+        no completed payment, or when the target does not cost more than was already
+        paid. Requires Admin role.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Census headroom to buy
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.ProcessCensusCheckoutRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessCheckoutResponse'
+        "400":
+          description: No completed payment, or nothing left to buy
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "402":
+          description: Integrator wallet does not cover the difference
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: API key used to buy an unmanaged organization's headroom by
+            card
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "422":
+          description: Census size requires a custom quote
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Buy census headroom for a paid process
       tags:
       - processes
   /processes/{processId}/check:
@@ -5117,6 +5584,143 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Check a voter's status for a voting process
+      tags:
+      - processes
+  /processes/{processId}/checkout:
+    delete:
+      description: |-
+        Expires the draft's open Stripe checkout session so it can no longer be paid, and
+        returns the payment to failed — which also releases a branding add-on the checkout
+        claimed. It is how a draft that became free while a checkout was open is published
+        (publish refuses it with 409 while the session is payable); a priced draft can
+        simply start a new checkout. Idempotent: an already failed payment answers 200.
+        409 (40177) when the checkout was completed or the payment is processing or paid —
+        money is in flight or taken, so it is not cancelled here. Requires Admin role.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessPaymentStatusResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found, or it has no payment
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Checkout completed or changed, payment processing or paid,
+            or draft busy
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Stripe could not verify or expire the session
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Cancel the open checkout of a voting process
+      tags:
+      - processes
+    get:
+      description: |-
+        The stored payment state (pending, processing, failed, paid) combined with the
+        live Stripe session state when a checkout session exists. Payment truth comes
+        from webhooks — this endpoint is for polling the outcome, it never fulfills.
+        Requires Manager/Admin of the organization.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessPaymentStatusResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found, or it has no payment
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get the payment status of a voting process
+      tags:
+      - processes
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Opens a one-time Stripe checkout session for the draft's server-calculated price
+        (VAT added by Stripe Tax at checkout) and returns its client secret. An open
+        session for the same price is reused; an obsolete one (the draft changed) is
+        expired and replaced. 409 (40177) while a payment is processing or completed —
+        a process is never charged twice. 422 (40176) above 50 000 voters (quote-only).
+        Free processes have nothing to pay: publish directly. Managed organizations pay
+        from their integrator's wallet at publish time, not through checkout.
+        Requires Admin role.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Checkout parameters
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.ProcessCheckoutRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessCheckoutResponse'
+        "400":
+          description: Free process, empty census or managed organization
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Payment processing or completed, or the draft is busy
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "422":
+          description: Census size requires a custom quote
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Start (or resume) the checkout of a voting process
       tags:
       - processes
   /processes/{processId}/participants:
@@ -5206,16 +5810,62 @@ paths:
       summary: Get a voting process participant
       tags:
       - processes
+  /processes/{processId}/price:
+    get:
+      description: |-
+        Server-side price of the draft in EUR cents, VAT excluded: base price from the
+        census size plus the selected add-ons, with the current payment status. Prices
+        above 15 000 voters recommend a custom quote; above 50 000 self-service checkout
+        is unavailable. Requires Manager/Admin of the organization.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessPriceResponse'
+        "400":
+          description: Census is empty or invalid
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get the price of a voting process
+      tags:
+      - processes
   /processes/{processId}/publish:
     post:
       consumes:
       - application/json
       description: |-
-        Publish a voting process: one on-chain election per question, submitted as a batch.
-        Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
+        Publish a voting process: first the process's parent election, then one on-chain
+        election per question, submitted as a batch and each linked to the parent. The
+        parent is metadata-only: it carries the process title, description and media and
+        commits the hash of that document, is never voted on, and is exposed as the
+        process's upstreamId, metadataURL and metadataHash (each question's
+        parentUpstreamId names it). The process is published only once every election is
+        confirmed; a publish that failed part way resumes with the missing elections when
+        retried. Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
         GET /jobs/{jobId}. Idempotent once published.
         409 (40172) means the stored questions do not match the process and the draft has to be
         saved again before it can be published.
+        402 (40178) means the process is priced and unpaid — the current quote travels in the
+        error data; start checkout via POST /processes/{processId}/checkout. For a managed
+        organization, 402 (40175) means its integrator's wallet does not cover the price.
       parameters:
       - description: Process ID
         in: path
@@ -5241,13 +5891,22 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
+        "402":
+          description: Payment required (quote in data), or insufficient integrator
+            wallet balance
+          schema:
+            $ref: '#/definitions/errors.Error'
         "404":
           description: Not Found
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Publish in progress, or the stored questions do not match the
-            process
+          description: Publish in progress, questions out of sync, or payment still
+            processing
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "422":
+          description: 'Managed organization: census size requires a custom quote'
           schema:
             $ref: '#/definitions/errors.Error'
         "503":
@@ -5375,6 +6034,9 @@ paths:
     put:
       consumes:
       - application/json
+      description: |-
+        The process's parent election follows the process: once every question is at the
+        target status, the same job changes the parent too.
       parameters:
       - description: Process ID
         in: path
@@ -5408,6 +6070,10 @@ paths:
     put:
       consumes:
       - application/json
+      description: |-
+        An empty question list targets every published question. The process's parent
+        election follows the process: once every question is at the target status, the
+        same job changes the parent too.
       parameters:
       - description: Process ID
         in: path
@@ -6317,7 +6983,9 @@ paths:
         envelope; the target process is taken from that envelope, so no process id is
         passed in the path. Public endpoint: no authentication is required. The request is
         checked synchronously — the body must decode to a Vote envelope (else 400) for a
-        process the backend knows (else 404) — then enqueued for submission on a background
+        process the backend knows (else 404) attesting the metadata hash the election
+        currently commits to and, as parentMetadataHash, the one its process's parent
+        election commits to (else 409) — then enqueued for submission on a background
         worker; the call returns 202 with a job id. The chain's acceptance or rejection of
         the vote (proof, nullifier, election state) is decided when the worker submits it and
         reported on the job: poll GET /jobs/{jobId} for the voteID on success, or a failure.
@@ -6341,6 +7009,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "404":
           description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: 'Ballot metadata changed: reload the process and vote again'
           schema:
             $ref: '#/definitions/errors.Error'
         "413":
@@ -6370,9 +7042,11 @@ paths:
         endpoint closes that window. Public endpoint: no authentication is required.
         The whole batch is checked synchronously and is accepted or rejected as a unit —
         every payload must decode to a Vote envelope (else 400) for a process the backend
-        knows (else 404), all of them must belong to the same organization (else 400), and
-        the queue must have room for all of them (else 503). A rejected batch enqueues
-        nothing. At most 100 votes per call.
+        knows (else 404), each must attest the metadata hash its election currently commits
+        to and, as parentMetadataHash, the one of its process's parent election (else 409:
+        the ballot changed and the voter must reload it), all of them must
+        belong to the same organization (else 400), and the queue must have room for all of
+        them (else 503). A rejected batch enqueues nothing. At most 100 votes per call.
         The call returns 202 with a single job id covering the batch. Poll
         GET /jobs/{jobId}: its result carries one entry per vote, index-aligned with the
         request, each with the process id and the nullifier — both known before submission,
@@ -6398,6 +7072,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "404":
           description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: 'Ballot metadata changed: reload the process and vote again'
           schema:
             $ref: '#/definitions/errors.Error'
         "413":
@@ -6459,6 +7137,92 @@ paths:
       summary: Verify vote nullifiers against the Vochain
       tags:
       - vote
+  /wallet:
+    get:
+      description: |-
+        Prepaid EUR balance and paged ledger (top-ups and per-process debits, newest
+        first) of the caller's integrator organization, resolved from the authenticated
+        principal (path-less, like the other integrator endpoints).
+
+        Also callable with a scoped API key (scope: `quota:read`).
+      parameters:
+      - description: Page number, starting at 1
+        in: query
+        name: page
+        type: string
+      - description: Items per page
+        in: query
+        name: limit
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.WalletResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Not an integrator
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get the integrator wallet
+      tags:
+      - integrator
+  /wallet/topup:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Opens a one-time Stripe checkout session that credits the caller's integrator
+        wallet once the payment is verified by webhook — never before. The amount is
+        EUR cents, VAT excluded (Stripe Tax adds VAT at checkout). Requires a user
+        session whose user is an Admin of the integrator organization; deliberately not
+        callable with an API key.
+      parameters:
+      - description: Top-up parameters
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.WalletTopUpRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessCheckoutResponse'
+        "400":
+          description: Amount out of bounds
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Not an integrator
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Top up the integrator wallet
+      tags:
+      - integrator
 schemes:
 - http
 - https

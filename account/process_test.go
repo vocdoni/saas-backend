@@ -1,11 +1,14 @@
 package account
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/db"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/proto/build/go/models"
 )
 
@@ -186,4 +189,134 @@ func TestNormalizeInitialStatus(t *testing.T) {
 
 	_, err := NormalizeInitialStatus("ENDED")
 	c.Assert(err, qt.ErrorMatches, `initialStatus must be READY or PAUSED, got .*`)
+}
+
+// TestBuildElectionMetadataNoQuestions checks that a document without questions (a process's
+// parent election) writes "questions": [] rather than dropping the key, and no meta block.
+func TestBuildElectionMetadataNoQuestions(t *testing.T) {
+	c := qt.New(t)
+	data, err := BuildElectionMetadata(&db.ElectionParams{Title: db.MultiLangString{"default": "Assembly"}})
+	c.Assert(err, qt.IsNil)
+	var raw map[string]any
+	c.Assert(json.Unmarshal(data, &raw), qt.IsNil)
+	c.Assert(raw["questions"], qt.DeepEquals, []any{})
+	_, hasMeta := raw["meta"]
+	c.Assert(hasMeta, qt.IsFalse)
+}
+
+// TestQuestionDisplayMeta checks that a question's free-form metadata is split into its own meta
+// (every key but choices) and each choice's entry minus its value, whether it was decoded from
+// JSON or from Mongo, and that both reach the document.
+func TestQuestionDisplayMeta(t *testing.T) {
+	c := qt.New(t)
+	metadata := map[string]any{
+		"note": "n",
+		"choices": bson.A{
+			bson.M{"value": int32(1), "description": map[string]any{"default": "B"}, "image": "https://img.example/b.png"},
+			map[string]any{"value": float64(0), "image": map[string]any{"default": "https://img.example/a.png"}},
+			map[string]any{"description": "no value, dropped"},
+			map[string]any{"value": float64(2)},
+		},
+	}
+	questionMeta, choicesMeta := QuestionDisplayMeta(metadata)
+	c.Assert(questionMeta, qt.DeepEquals, map[string]any{"note": "n"})
+	c.Assert(choicesMeta, qt.DeepEquals, map[uint32]map[string]any{
+		0: {"image": map[string]any{"default": "https://img.example/a.png"}},
+		1: {"description": map[string]any{"default": "B"}, "image": "https://img.example/b.png"},
+	})
+	c.Assert(ChoiceImageURLs(choicesMeta[1]), qt.DeepEquals, []string{"https://img.example/b.png"})
+	c.Assert(ChoiceImageURLs(map[string]any{
+		"image": map[string]any{"default": "https://img.example/d.png", "thumbnail": "https://img.example/t.png"},
+	}), qt.DeepEquals, []string{"https://img.example/d.png", "https://img.example/t.png"})
+
+	params := &db.ElectionParams{Questions: []db.Question{{
+		Title:       db.MultiLangString{"default": "q"},
+		Choices:     []db.Choice{{Value: 0}, {Value: 1}, {Value: 2}},
+		Meta:        questionMeta,
+		ChoicesMeta: choicesMeta,
+	}}}
+	data, err := BuildElectionMetadata(params)
+	c.Assert(err, qt.IsNil)
+	got := &api.ElectionMetadata{}
+	c.Assert(json.Unmarshal(data, got), qt.IsNil)
+	c.Assert(got.Questions[0].Meta, qt.DeepEquals, map[string]any{"note": "n"})
+	c.Assert(got.Questions[0].Choices[0].Meta, qt.DeepEquals, map[string]any{
+		"image": map[string]any{"default": "https://img.example/a.png"},
+	})
+	c.Assert(got.Questions[0].Choices[1].Meta, qt.DeepEquals, map[string]any{
+		"description": map[string]any{"default": "B"}, "image": "https://img.example/b.png",
+	})
+	c.Assert(got.Questions[0].Choices[2].Meta, qt.IsNil)
+}
+
+// TestBuildNewProcessTxParent covers the two halves of a process's on-chain link: a parent built
+// metadata-only (no vote options, envelope or census, so the chain refuses votes on it) and a
+// question election pointing at it through parentProcessId.
+func TestBuildNewProcessTxParent(t *testing.T) {
+	a := &Account{} // client is not touched when Nonce is set
+	nonce := uint32(0)
+	parentID := make([]byte, 32)
+	parentID[0] = 0x0a
+	newParams := func() *NewProcessParams {
+		return &NewProcessParams{
+			Params: &db.ElectionParams{
+				EndDate:       time.Now().Add(time.Hour),
+				MaxCensusSize: 10,
+				VoteType:      db.VoteType{MaxCount: 1, MaxValue: 1},
+				ElectionType:  db.ElectionType{Autostart: true, Interruptible: true},
+			},
+			CensusRoot:   []byte{0x01},
+			CensusURI:    "https://example.invalid",
+			MetadataURL:  "https://example.invalid/meta.json",
+			MetadataHash: []byte{0x02},
+			Nonce:        &nonce,
+		}
+	}
+
+	t.Run("metadata-only parent", func(t *testing.T) {
+		c := qt.New(t)
+		p := newParams()
+		p.MetadataOnly = true
+		p.Params.MaxCensusSize = 0
+		tx, err := a.BuildNewProcessTx(p)
+		c.Assert(err, qt.IsNil)
+		proc := tx.GetNewProcess().GetProcess()
+		c.Assert(proc.GetVoteOptions(), qt.IsNil)
+		c.Assert(proc.GetEnvelopeType(), qt.IsNil)
+		c.Assert(proc.GetCensusOrigin(), qt.Equals, models.CensusOrigin(0))
+		c.Assert(proc.GetCensusRoot(), qt.HasLen, 0)
+		c.Assert(proc.GetCensusURI(), qt.Equals, "")
+		c.Assert(proc.GetMaxCensusSize(), qt.Equals, uint64(0))
+		c.Assert(proc.GetParentProcessId(), qt.HasLen, 0)
+		c.Assert(proc.GetMode().GetAutoStart(), qt.IsTrue)
+		c.Assert(proc.GetMetadata(), qt.Equals, p.MetadataURL)
+		c.Assert(proc.GetMetadataHash(), qt.DeepEquals, p.MetadataHash)
+		c.Assert(proc.GetStatus(), qt.Equals, models.ProcessStatus_READY)
+	})
+
+	t.Run("metadata-only parent needs metadata and no parent", func(t *testing.T) {
+		c := qt.New(t)
+		p := newParams()
+		p.MetadataOnly, p.MetadataHash = true, nil
+		_, err := a.BuildNewProcessTx(p)
+		c.Assert(err, qt.ErrorMatches, `.*requires a metadata URL and hash`)
+		p = newParams()
+		p.MetadataOnly, p.ParentProcessID = true, parentID
+		_, err = a.BuildNewProcessTx(p)
+		c.Assert(err, qt.ErrorMatches, `.*cannot have a parent`)
+	})
+
+	t.Run("question election links its parent", func(t *testing.T) {
+		c := qt.New(t)
+		p := newParams()
+		p.ParentProcessID = parentID
+		tx, err := a.BuildNewProcessTx(p)
+		c.Assert(err, qt.IsNil)
+		proc := tx.GetNewProcess().GetProcess()
+		c.Assert(proc.GetParentProcessId(), qt.DeepEquals, parentID)
+		c.Assert(proc.GetVoteOptions(), qt.Not(qt.IsNil))
+		c.Assert(proc.GetEnvelopeType(), qt.Not(qt.IsNil))
+		c.Assert(proc.GetMaxCensusSize(), qt.Equals, uint64(10))
+		c.Assert(proc.GetCensusOrigin(), qt.Equals, models.CensusOrigin_OFF_CHAIN_CA)
+	})
 }

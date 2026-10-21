@@ -868,3 +868,78 @@ func calculateParticipantHashesBson(census Census, member OrgMember) bson.M {
 	}
 	return hashes
 }
+
+// CountNewCensusParticipants reports how many of memberIDs would join the census: members of its
+// organization that are not participants yet, ignoring repeats within the list — the rows
+// AddCensusParticipantsByMemberIDs would insert, so a caller can project how far the census would
+// grow before growing it. An id naming no member of the organization is not growth: the add
+// rejects it with its own per-member error, and counting it would refuse a typo as unpaid growth.
+// A member missing login data is still counted, though the add skips it: telling needs the whole
+// member document, so this errs toward refusing.
+func (ms *MongoStorage) CountNewCensusParticipants(census *Census, memberIDs []string) (int64, error) {
+	if census == nil || census.ID.IsZero() {
+		return 0, ErrInvalidData
+	}
+	seen := make(map[bson.ObjectID]struct{}, len(memberIDs))
+	oids := make([]bson.ObjectID, 0, len(memberIDs))
+	for _, id := range memberIDs {
+		oid, err := bson.ObjectIDFromHex(id)
+		if err != nil {
+			continue // not a member id at all: the add reports it
+		}
+		if _, dup := seen[oid]; dup {
+			continue
+		}
+		seen[oid] = struct{}{}
+		oids = append(oids, oid)
+	}
+	if len(oids) == 0 {
+		return 0, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	cursor, err := ms.orgMembers.Find(ctx, bson.M{"_id": bson.M{"$in": oids}, "orgAddress": census.OrgAddress},
+		options.Find().SetProjection(bson.M{"_id": 1}))
+	if err != nil {
+		return 0, fmt.Errorf("failed to resolve census growth members: %w", err)
+	}
+	var members []struct {
+		ID bson.ObjectID `bson:"_id"`
+	}
+	if err := cursor.All(ctx, &members); err != nil {
+		return 0, fmt.Errorf("failed to decode census growth members: %w", err)
+	}
+	if len(members) == 0 {
+		return 0, nil
+	}
+	// participantID holds the member's hex id (see the OrgMember lookup in
+	// AddCensusParticipantsByMemberIDs)
+	valid := make([]string, len(members))
+	for i, m := range members {
+		valid[i] = m.ID.Hex()
+	}
+	cursor, err = ms.censusParticipants.Find(ctx, bson.M{"censusId": census.ID.Hex(), "participantID": bson.M{"$in": valid}},
+		options.Find().SetProjection(bson.M{"participantID": 1}))
+	if err != nil {
+		return 0, fmt.Errorf("failed to find existing census participants: %w", err)
+	}
+	var existing []struct {
+		ParticipantID string `bson:"participantID"`
+	}
+	if err := cursor.All(ctx, &existing); err != nil {
+		return 0, fmt.Errorf("failed to decode existing census participants: %w", err)
+	}
+	// a set difference, not a subtraction of counts: only members still in the organization count
+	in := make(map[string]struct{}, len(existing))
+	for _, p := range existing {
+		in[p.ParticipantID] = struct{}{}
+	}
+	var growth int64
+	for _, id := range valid {
+		if _, ok := in[id]; !ok {
+			growth++
+		}
+	}
+	return growth, nil
+}

@@ -47,6 +47,7 @@ const (
 	ParamLimit     = "limit"
 	ParamSortBy    = "sortBy"
 	ParamSortOrder = "sortOrder"
+	ParamStatus    = "status"
 )
 
 var (

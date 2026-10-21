@@ -7,6 +7,7 @@ import (
 
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/pricing"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -58,7 +59,10 @@ type VotingProcessQuestionRequest struct {
 	BallotProtocol    *db.BallotProtocol   `json:"ballotProtocol,omitempty"`
 	SecretUntilTheEnd bool                 `json:"secretUntilTheEnd"`
 	Eligibility       *EligibilitySpec     `json:"census,omitempty"`
-	Metadata          map[string]any       `json:"metadata,omitempty"`
+	// Metadata is the question's free-form display info, published in its election document:
+	// each entry of metadata.choices ({value, description, image, ...}) becomes the meta of the
+	// choice with that value (without the value), and every other key the question's meta.
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // CreateVotingProcessRequest is the body of POST /processes (also used by PUT to update a
@@ -79,6 +83,10 @@ type CreateVotingProcessRequest struct {
 	// vochain whitelist for NewProcess); anything else is rejected with 400. Persisted on
 	// the draft and applied at publish time.
 	InitialStatus string `json:"initialStatus,omitempty" example:"PAUSED"`
+	// AddOns are the paid per-process options (signed results certificate, custom URL,
+	// branding). The 2FA add-ons are not here: they derive from census.twoFaFields.
+	// They change the process price, so editing them invalidates an open checkout session.
+	AddOns db.ProcessAddOns `json:"addOns,omitzero"`
 	// UpdatedAt, on a PUT, is the updatedAt the client last read. The update then applies only if
 	// the process has not been written since, and is rejected with 409 otherwise, so two clients
 	// editing the same draft cannot silently overwrite each other. Optional: omitting it keeps the
@@ -151,6 +159,16 @@ type VotingProcessResponse struct {
 	StartDate   string                     `json:"startDate,omitempty"`
 	EndDate     string                     `json:"endDate,omitempty"`
 	Questions   []db.VotingProcessQuestion `json:"questions"`
+	// UpstreamID is the on-chain id of the process's metadata-only parent election, published before
+	// the question elections, which are linked to it. Its metadata document holds the process title,
+	// description and media. It is never voted on, but every vote attests its metadataHash. Absent
+	// until published, and for processes published without one.
+	UpstreamID internal.HexBytes `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	// MetadataURL serves the ElectionMetadata document the parent election points to on chain.
+	MetadataURL string `json:"metadataURL,omitempty"`
+	// MetadataHash is the SHA-256 of the exact bytes served at MetadataURL, as committed on chain by
+	// the parent election.
+	MetadataHash internal.HexBytes `json:"metadataHash,omitempty" swaggertype:"string" format:"hex" example:"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"` //nolint:lll
 	// InitialStatus echoes the draft's initialStatus: the on-chain status every question's
 	// election was (or will be) published with. Empty/absent means READY (the default);
 	// "PAUSED" means every question was published PAUSED. Publish-time only — it does not
@@ -171,6 +189,120 @@ type VotingProcessResponse struct {
 	// Formatted as "2006-01-02T15:04:05Z". Absent when the process ran to its scheduled end, or while
 	// any published question is still open or has no recorded endedAt yet.
 	EndedAt string `json:"endedAt,omitempty"`
+	// AddOns echoes the paid per-process options selected on the draft.
+	AddOns db.ProcessAddOns `json:"addOns,omitzero"`
+}
+
+// ProcessPriceResponse is the server-side quote of a voting process, in EUR cents, VAT
+// excluded (Stripe Tax adds VAT at checkout).
+type ProcessPriceResponse struct {
+	Lines      []pricing.QuoteLine `json:"lines"`
+	TotalCents pricing.Cents       `json:"totalCents"`
+	Currency   string              `json:"currency"`
+	// QuoteRecommended: census above 15 000 voters — suggest requesting a custom quote.
+	QuoteRecommended bool `json:"quoteRecommended"`
+	// QuoteRequired: census above 50 000 voters — self-service checkout is blocked.
+	QuoteRequired bool `json:"quoteRequired"`
+	// PaymentStatus is the process's current payment state (pending, processing, failed,
+	// paid); empty when no payment exists yet.
+	PaymentStatus db.ProcessPaymentStatus `json:"paymentStatus,omitempty"`
+}
+
+// ProcessCheckoutRequest starts (or resumes) the one-time checkout of a voting process.
+type ProcessCheckoutRequest struct {
+	// ReturnURL is where Stripe redirects after checkout; the session id is appended.
+	ReturnURL string `json:"returnURL"`
+	Locale    string `json:"locale,omitempty"`
+}
+
+// ProcessCheckoutResponse carries the embedded checkout credentials for the process
+// purchase. AmountCents is the net total the session was created for.
+type ProcessCheckoutResponse struct {
+	ClientSecret string        `json:"clientSecret"`
+	SessionID    string        `json:"sessionId"`
+	AmountCents  pricing.Cents `json:"amountCents"`
+	Currency     string        `json:"currency"`
+}
+
+// ProcessCensusGrowthQuote is the 402 payload of a census that would grow a published
+// process past the price it was paid for: the projected quote at the requested size, what is
+// already covered, and the difference the organization has to buy. Raise the envelope with
+// POST /processes/{processId}/census/checkout (by card, or from the integrator wallet for a
+// managed organization), then retry the request that was refused.
+type ProcessCensusGrowthQuote struct {
+	// ProcessID is the process whose envelope is exceeded. A memberbase change can reach the
+	// census of several processes, so it names the one to buy headroom for.
+	ProcessID  string              `json:"processId"`
+	Lines      []pricing.QuoteLine `json:"lines"`
+	TotalCents pricing.Cents       `json:"totalCents"`
+	// PaidCents is the envelope already bought, DueCents the difference to TotalCents.
+	PaidCents pricing.Cents `json:"paidCents"`
+	DueCents  pricing.Cents `json:"dueCents"`
+	// CensusSize is the projected size the quote was computed for.
+	CensusSize int64  `json:"censusSize"`
+	Currency   string `json:"currency"`
+}
+
+// ProcessCensusCheckoutRequest buys census headroom for a paid process: a one-time checkout
+// for the difference between what the process paid and what CensusSize would cost.
+type ProcessCensusCheckoutRequest struct {
+	// CensusSize is the census size to buy room for; it must exceed what is already paid.
+	CensusSize int64 `json:"censusSize"`
+	// ReturnURL is where Stripe redirects after checkout; the session id is appended.
+	ReturnURL string `json:"returnURL"`
+	Locale    string `json:"locale,omitempty"`
+}
+
+// WalletResponse is an integrator's prepaid wallet: EUR balance plus its paged ledger,
+// newest first.
+type WalletResponse struct {
+	BalanceCents pricing.Cents          `json:"balanceCents"`
+	Currency     string                 `json:"currency"`
+	Ledger       []db.WalletLedgerEntry `json:"ledger"`
+	Pagination   *Pagination            `json:"pagination"`
+}
+
+// WalletTopUpRequest starts a one-time checkout that credits the integrator wallet once
+// the payment is webhook-verified. AmountCents is EUR cents, VAT excluded.
+type WalletTopUpRequest struct {
+	AmountCents pricing.Cents `json:"amountCents"`
+	ReturnURL   string        `json:"returnURL"`
+	Locale      string        `json:"locale,omitempty"`
+}
+
+// OrganizationProcessPayment is one process payment of an organization, as stored: no live
+// Stripe state (GET /processes/{processId}/checkout has it). Title is empty and Published
+// false when the process no longer exists — a refunded payment outlives its deleted draft.
+type OrganizationProcessPayment struct {
+	ProcessID   string                  `json:"processId"`
+	Title       db.MultiLangString      `json:"title,omitempty"`
+	Published   bool                    `json:"published"`
+	Status      db.ProcessPaymentStatus `json:"status"`
+	AmountCents pricing.Cents           `json:"amountCents"`
+	Currency    string                  `json:"currency"`
+	CreatedAt   string                  `json:"createdAt"`
+	PaidAt      string                  `json:"paidAt,omitempty"`
+}
+
+// OrganizationProcessPaymentsResponse is a page of an organization's process payments.
+type OrganizationProcessPaymentsResponse struct {
+	Payments   []OrganizationProcessPayment `json:"payments"`
+	Pagination *Pagination                  `json:"pagination"`
+}
+
+// ProcessPaymentStatusResponse reports the payment state of a voting process, combining
+// the stored payment with the live checkout session state when one is open.
+type ProcessPaymentStatusResponse struct {
+	Status      db.ProcessPaymentStatus `json:"status"`
+	AmountCents pricing.Cents           `json:"amountCents"`
+	Currency    string                  `json:"currency"`
+	PaidAt      string                  `json:"paidAt,omitempty"`
+	// SessionStatus is the live Stripe session state (open, complete, expired) when a
+	// checkout session exists; empty for wallet-paid processes.
+	SessionStatus string `json:"sessionStatus,omitempty"`
+	// SessionPaymentStatus is the live Stripe payment state of that session (paid,
+	// unpaid, no_payment_required).
+	SessionPaymentStatus string `json:"sessionPaymentStatus,omitempty"`
 }
 
 // VotingProcessListResponse is the paginated list of voting processes.
@@ -254,7 +386,16 @@ type PublicQuestionResponse struct {
 	Metadata          map[string]any       `json:"metadata,omitempty"`
 	UpstreamID        internal.HexBytes    `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	Status            string               `json:"status,omitempty"`
-	Census            CensusSpec           `json:"census"`
+	// MetadataURL serves the ElectionMetadata document the question's election points to on chain.
+	MetadataURL string `json:"metadataURL,omitempty"`
+	// MetadataHash is the SHA-256 of the exact bytes served at MetadataURL, as committed on chain.
+	// A vote must attest it in its envelope (metadataHash) or it is rejected.
+	MetadataHash internal.HexBytes `json:"metadataHash,omitempty" swaggertype:"string" format:"hex" example:"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"` //nolint:lll
+	// ParentUpstreamID is the on-chain id of the process's parent election this question's election
+	// is linked to. A vote must also attest the parent's current metadata hash (the process's
+	// metadataHash, from GET /processes/{processId}).
+	ParentUpstreamID internal.HexBytes `json:"parentUpstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Census           CensusSpec        `json:"census"`
 	// EncryptionKeys are the on-chain vote-encryption public keys (only for secretUntilTheEnd
 	// questions). Because of omitempty the field is absent (not an empty array) until the keykeepers
 	// publish the keys, so clients treat its absence as "not yet published" and poll. Voters seal
@@ -294,6 +435,9 @@ func PublicQuestionResponseFromDB(q *db.VotingProcessQuestion, census *db.Census
 		Metadata:          q.Metadata,
 		UpstreamID:        q.UpstreamID,
 		Status:            q.Status,
+		MetadataURL:       q.MetadataURL,
+		MetadataHash:      q.MetadataHash,
+		ParentUpstreamID:  q.ParentUpstreamID,
 		EncryptionKeys:    q.EncryptionKeys,
 		Results:           q.Results,
 	}
@@ -325,7 +469,11 @@ func VotingProcessResponseFromDB(
 		Header:        vp.Header,
 		StreamURI:     vp.StreamURI,
 		Questions:     questions,
+		UpstreamID:    vp.UpstreamID,
+		MetadataURL:   vp.MetadataURL,
+		MetadataHash:  vp.MetadataHash,
 		InitialStatus: vp.InitialStatus,
+		AddOns:        vp.AddOns,
 		ChainID:       chainID,
 	}
 	if !vp.StartDate.IsZero() {

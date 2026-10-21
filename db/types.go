@@ -11,6 +11,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/pricing"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -86,15 +87,20 @@ type Organization struct {
 	// DefaultLang is the language of the notifications sent on behalf of the organization
 	// (see apicommon.NotificationLang). Every organization has one, defaulting to "en".
 	// It can be changed but not cleared, dynamicUpdateDocument skipping zero-valued fields.
-	DefaultLang     string                   `json:"defaultLang,omitempty" bson:"defaultLang,omitempty"`
-	Communications  bool                     `json:"communications" bson:"communications"`
-	TokensPurchased uint64                   `json:"tokensPurchased" bson:"tokensPurchased"`
-	TokensRemaining uint64                   `json:"tokensRemaining" bson:"tokensRemaining"`
-	Parent          common.Address           `json:"parent" bson:"parent"`
-	Meta            map[string]any           `json:"meta" bson:"meta"`
-	Subscription    OrganizationSubscription `json:"subscription" bson:"subscription"`
-	Counters        OrganizationCounters     `json:"counters" bson:"counters"`
-	ManagedBy       common.Address           `json:"managedBy,omitempty" bson:"managedBy,omitempty"`
+	DefaultLang    string `json:"defaultLang,omitempty" bson:"defaultLang,omitempty"`
+	Communications bool   `json:"communications" bson:"communications"`
+	// BrandingPaidAt is when the once-per-organization branding add-on was paid; zero means unpaid.
+	BrandingPaidAt time.Time `json:"brandingPaidAt,omitzero" bson:"brandingPaidAt,omitempty"`
+	// BrandingClaimedBy is the one process allowed to charge branding before it is paid, so two
+	// drafts are not both charged (ClaimOrganizationBranding). omitempty: claim filters match
+	// on absence. Never written by SetOrganization.
+	BrandingClaimedBy bson.ObjectID            `json:"-" bson:"brandingClaimedBy,omitempty"`
+	BrandingClaimedAt time.Time                `json:"-" bson:"brandingClaimedAt,omitempty"`
+	Parent            common.Address           `json:"parent" bson:"parent"`
+	Meta              map[string]any           `json:"meta" bson:"meta"`
+	Subscription      OrganizationSubscription `json:"subscription" bson:"subscription"`
+	Counters          OrganizationCounters     `json:"counters" bson:"counters"`
+	ManagedBy         common.Address           `json:"managedBy,omitempty" bson:"managedBy,omitempty"`
 	// IntegratorLimits, when set, is a per-organization override that both enables
 	// integrator status (manual/admin path) and caps its managed resources. When unset,
 	// integrator status and limits derive from the active subscription plan instead.
@@ -603,6 +609,12 @@ type Question struct {
 	Title       MultiLangString `json:"title" bson:"title"`
 	Description MultiLangString `json:"description,omitempty" bson:"description,omitempty"`
 	Choices     []Choice        `json:"choices" bson:"choices"`
+	// Meta is the question's display info beyond its text, written into the metadata document as
+	// questions[i].meta. Publish-time only, never persisted.
+	Meta map[string]any `json:"-" bson:"-"`
+	// ChoicesMeta is each choice's display info (description, image...) keyed by choice value,
+	// written into the metadata document as that choice's meta. Publish-time only, never persisted.
+	ChoicesMeta map[uint32]map[string]any `json:"-" bson:"-"`
 }
 
 // VoteType describes how votes are counted and validated.
@@ -759,8 +771,8 @@ type VotingProcess struct {
 	StreamURI   string          `json:"streamUri,omitempty" bson:"streamUri,omitempty"`
 	StartDate   time.Time       `json:"startDate,omitempty" bson:"startDate,omitempty"`
 	EndDate     time.Time       `json:"endDate,omitempty" bson:"endDate,omitempty"`
-	// InitialStatus is the on-chain status every question's election is published with.
-	// Empty (default) means READY; "PAUSED" publishes every question's election in the
+	// InitialStatus is the on-chain status every election of the process (each question's and
+	// the parent) is published with. Empty (default) means READY; "PAUSED" publishes them in the
 	// PAUSED state, so voting only opens after an admin sets each question to READY via
 	// SET_PROCESS_STATUS. Only "" / "READY" / "PAUSED" are accepted. Publish-time only:
 	// after publish, each question's status evolves independently and this field is not
@@ -768,6 +780,8 @@ type VotingProcess struct {
 	InitialStatus string          `json:"initialStatus,omitempty" bson:"initialStatus,omitempty"`
 	CensusID      bson.ObjectID   `json:"-" bson:"censusId"`    // internal ref to a db.Census
 	QuestionIDs   []bson.ObjectID `json:"-" bson:"questionIds"` // ordered question references
+	// AddOns are the paid per-process options; 2FA add-ons derive from the census instead.
+	AddOns ProcessAddOns `json:"addOns,omitzero" bson:"addOns,omitempty"`
 	// Publishing is the transient claim a publish worker holds on this process (see
 	// ClaimVotingProcessForPublish). It is a struct field rather than only a raw $set so that
 	// SetVotingProcess's ReplaceOne stops wiping a live claim, and so handlers can refuse to
@@ -777,8 +791,23 @@ type VotingProcess struct {
 	// and the stale sweep on it being old, so a zero date persisted as a value would make every
 	// draft ever created look like a crashed publish.
 	Publishing time.Time `json:"-" bson:"publishing,omitempty"`
-	CreatedAt  time.Time `json:"createdAt" bson:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt" bson:"updatedAt"`
+	// UpstreamID is the on-chain id of the process's parent election, published after every
+	// question election is confirmed. It carries the process-level metadata (title, description,
+	// media and the list of question elections) and is never voted on: the CSP signs only for
+	// question elections and the relay resolves votes by question. Absent until published.
+	UpstreamID internal.HexBytes `json:"upstreamId,omitempty" bson:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"` //nolint:lll
+	// MetadataURL serves the ElectionMetadata document the parent election points to on chain.
+	MetadataURL string `json:"metadataURL,omitempty" bson:"metadataURL,omitempty"`
+	// MetadataHash is the SHA-256 of the exact bytes served at MetadataURL, committed on chain by
+	// the parent election.
+	MetadataHash internal.HexBytes `json:"metadataHash,omitempty" bson:"metadataHash,omitempty" swaggertype:"string" format:"hex" example:"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"` //nolint:lll
+	// UpstreamStatus is the stored on-chain status of the parent election, which follows the
+	// process: it moves once every question election has reached the same status.
+	UpstreamStatus string `json:"-" bson:"upstreamStatus,omitempty"`
+	// UpstreamSyncedAt is when the status syncer last reconciled UpstreamStatus with the chain.
+	UpstreamSyncedAt time.Time `json:"-" bson:"upstreamSyncedAt,omitempty"`
+	CreatedAt        time.Time `json:"createdAt" bson:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt" bson:"updatedAt"`
 }
 
 // PublishInProgress reports whether a publish worker currently holds this process. A marker older
@@ -786,6 +815,120 @@ type VotingProcess struct {
 // so a worker that crashed cannot block edits forever.
 func (vp *VotingProcess) PublishInProgress() bool {
 	return !vp.Publishing.IsZero() && time.Since(vp.Publishing) < PublishStaleAfter
+}
+
+// ProcessAddOns are the paid per-process options of the pay-per-process pricing model.
+type ProcessAddOns struct {
+	SignedCertificate bool `json:"signedCertificate,omitempty" bson:"signedCertificate,omitempty"`
+	CustomURL         bool `json:"customUrl,omitempty" bson:"customUrl,omitempty"`
+	Branding          bool `json:"branding,omitempty" bson:"branding,omitempty"`
+}
+
+// ProcessCharge is what a card checkout took: the payment intent to refund against, and the
+// amounts before and after VAT.
+type ProcessCharge struct {
+	PaymentIntentID string
+	SubtotalCents   pricing.Cents
+	TotalCents      pricing.Cents
+}
+
+// ProcessPaymentStatus is the lifecycle state of a voting process payment.
+type ProcessPaymentStatus string
+
+// Process payment statuses. A process with no payment document is free or not quoted yet.
+const (
+	// ProcessPaymentPending: a checkout session is open for the process.
+	ProcessPaymentPending ProcessPaymentStatus = "pending"
+	// ProcessPaymentProcessing: checkout completed with a delayed payment method; outcome unknown.
+	ProcessPaymentProcessing ProcessPaymentStatus = "processing"
+	// ProcessPaymentFailed: the payment failed; the process is payable again.
+	ProcessPaymentFailed ProcessPaymentStatus = "failed"
+	// ProcessPaymentPaid: verified by webhook or debited from a wallet. Only a refund leaves it.
+	ProcessPaymentPaid ProcessPaymentStatus = "paid"
+	// ProcessPaymentRefunded: returned on draft delete. Terminal; kept as the audit record.
+	ProcessPaymentRefunded ProcessPaymentStatus = "refunded"
+)
+
+// IsValid reports whether s is one of the declared process payment statuses.
+func (s ProcessPaymentStatus) IsValid() bool {
+	switch s {
+	case ProcessPaymentPending, ProcessPaymentProcessing, ProcessPaymentFailed, ProcessPaymentPaid,
+		ProcessPaymentRefunded:
+		return true
+	default:
+		return false
+	}
+}
+
+// ProcessPayment is the payment state of a voting process, keyed by process id. It lives in its
+// own collection so a draft save (a full replace) cannot wipe it.
+type ProcessPayment struct {
+	ProcessID  bson.ObjectID        `json:"-" bson:"_id"`
+	OrgAddress common.Address       `json:"-" bson:"orgAddress"`
+	Status     ProcessPaymentStatus `json:"status" bson:"status"`
+	// CheckoutSessionID is the Stripe checkout session; empty when wallet-paid.
+	CheckoutSessionID string `json:"-" bson:"checkoutSessionId,omitempty"`
+	// QuoteHash is pricing.QuoteHash of what the session was opened for.
+	QuoteHash string `json:"-" bson:"quoteHash,omitempty"`
+	// AmountCents is the net total in EUR cents, VAT excluded.
+	AmountCents pricing.Cents `json:"amountCents" bson:"amountCents"`
+	Currency    string        `json:"currency" bson:"currency"`
+	// PaymentIntentID is what a card refund is issued against; empty when wallet-paid.
+	PaymentIntentID string `json:"-" bson:"paymentIntentId,omitempty"`
+	// ChargeSubtotalCents and ChargeTotalCents are the first card charge before and after VAT;
+	// their ratio gives the VAT a partial refund withholds.
+	ChargeSubtotalCents pricing.Cents `json:"-" bson:"chargeSubtotalCents,omitempty"`
+	ChargeTotalCents    pricing.Cents `json:"-" bson:"chargeTotalCents,omitempty"`
+	// RefundID is the Stripe refund id, or the wallet credit's idempotency key.
+	RefundID string `json:"-" bson:"refundId,omitempty"`
+	// RefundWithheldCents is the refund a delete fixed before moving any money: the net amount it
+	// keeps back (the relied-on branding add-on, or 0). Set once, so a retried delete repeats the
+	// same refunds under the same keys; nil until a delete starts. While it is set the payment is
+	// locked: nothing may raise it, and the draft can only be deleted.
+	RefundWithheldCents *pricing.Cents `json:"-" bson:"refundWithheldCents,omitempty"`
+	// RequestedBy is the checkout user's email; fulfillment publishes as this user.
+	RequestedBy string `json:"-" bson:"requestedBy,omitempty"`
+	// Branding is whether this payment charged the branding add-on, so fulfillment stamps
+	// Organization.BrandingPaidAt.
+	Branding bool `json:"-" bson:"branding,omitempty"`
+	// TopUpSessions are the (bounded) sessions that already raised AmountCents, so a replayed
+	// top-up webhook raises nothing.
+	TopUpSessions []string `json:"-" bson:"topUpSessions,omitempty"`
+	// TopUpIntents are the card top-up charges, refunded along with PaymentIntentID.
+	TopUpIntents []string  `json:"-" bson:"topUpIntents,omitempty"`
+	PaidAt       time.Time `json:"paidAt,omitzero" bson:"paidAt,omitempty"`
+	CreatedAt    time.Time `json:"-" bson:"createdAt"`
+	UpdatedAt    time.Time `json:"-" bson:"updatedAt"`
+}
+
+// Wallet is an integrator's prepaid EUR balance. AppliedKeys is a bounded window of recent
+// idempotency keys (session id for a top-up, "<process>:<price>" for a debit) that makes each
+// write atomic; walletLedger is the permanent record.
+type Wallet struct {
+	OrgAddress   common.Address `json:"orgAddress" bson:"_id"`
+	BalanceCents pricing.Cents  `json:"balanceCents" bson:"balanceCents"`
+	AppliedKeys  []string       `json:"-" bson:"appliedKeys"`
+	UpdatedAt    time.Time      `json:"updatedAt" bson:"updatedAt"`
+}
+
+// Wallet ledger entry kinds.
+const (
+	WalletEntryTopUp = "topup"
+	WalletEntryDebit = "debit"
+	// WalletEntryRefund is money returned for a deleted process, kept apart from top-ups.
+	WalletEntryRefund = "refund"
+)
+
+// WalletLedgerEntry is one append-only wallet balance change (negative for debits).
+// IdempotencyKey is unique, so a replay is not recorded twice.
+type WalletLedgerEntry struct {
+	ID             bson.ObjectID  `json:"id" bson:"_id"`
+	OrgAddress     common.Address `json:"orgAddress" bson:"orgAddress"`
+	AmountCents    pricing.Cents  `json:"amountCents" bson:"amountCents"`
+	Kind           string         `json:"kind" bson:"kind"`
+	IdempotencyKey string         `json:"-" bson:"idempotencyKey"`
+	ProcessID      bson.ObjectID  `json:"processId,omitempty" bson:"processId,omitempty"`
+	CreatedAt      time.Time      `json:"createdAt" bson:"createdAt"`
 }
 
 // VotingProcessQuestion is one question of a VotingProcess. Each question maps to
@@ -810,9 +953,17 @@ type VotingProcessQuestion struct {
 	EligibleMemberIDs []string          `json:"eligibleMemberIds,omitempty" bson:"eligibleMemberIds"`
 	Metadata          map[string]any    `json:"metadata,omitempty" bson:"metadata,omitempty"`
 	UpstreamID        internal.HexBytes `json:"upstreamId,omitempty" bson:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
-	MetadataURL       string            `json:"-" bson:"metadataURL,omitempty"`
-	Status            string            `json:"status,omitempty" bson:"status,omitempty"`
-	SyncedAt          time.Time         `json:"-" bson:"syncedAt,omitempty"`
+	// MetadataURL serves the ElectionMetadata document this question's election points to on chain.
+	MetadataURL string `json:"metadataURL,omitempty" bson:"metadataURL,omitempty"`
+	// MetadataHash is the SHA-256 of the exact bytes served at MetadataURL, committed on chain at
+	// publish. Every vote envelope must attest it (VoteEnvelope.metadataHash) or the chain rejects it.
+	MetadataHash internal.HexBytes `json:"metadataHash,omitempty" bson:"metadataHash,omitempty" swaggertype:"string" format:"hex" example:"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"`
+	// ParentUpstreamID is the on-chain id of the process's parent election this question's election
+	// was published under (the process's upstreamId). A vote must also attest the parent's current
+	// metadata hash (the process's metadataHash).
+	ParentUpstreamID internal.HexBytes `json:"parentUpstreamId,omitempty" bson:"parentUpstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"` //nolint:lll
+	Status           string            `json:"status,omitempty" bson:"status,omitempty"`
+	SyncedAt         time.Time         `json:"-" bson:"syncedAt,omitempty"`
 	// EndedAt is the actual on-chain moment this question's election stopped accepting votes,
 	// set only when the vote was ended early (before its scheduled end, i.e. ManuallyEnded on
 	// the chain). Absent while the vote is open or when it ran to its scheduled end. Recorded by

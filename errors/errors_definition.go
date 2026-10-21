@@ -76,6 +76,10 @@ var (
 	ErrDuplicateConflict           = Error{Code: 40901, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("resource already exists")}
 	ErrUpdateWouldCreateDuplicates = Error{Code: 40902, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("update would create duplicates")}
 	ErrPublishInProgress           = Error{Code: 40903, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("process publish already in progress")}
+	// ErrVoteMetadataChanged: a relayed vote attests a metadata hash other than the one the election
+	// currently commits to, so the voter was shown a different ballot than the one on chain (which
+	// would reject the vote). The client must reload the process and cast the vote again.
+	ErrVoteMetadataChanged = Error{Code: 40904, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("ballot metadata changed, reload the process and vote again"), LogLevel: "info"}
 
 	// TODO: most of theses errors should be unauthorized
 	// Subscription errors (400)
@@ -114,9 +118,16 @@ var (
 	// is deliberate: the CSP records consumption when it issues the signature, not when the ballot
 	// reaches the chain, so this means "already signed for" and must never be reported as "voted".
 	ErrCensusMemberAlreadySignedFor = Error{Code: 40173, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("member has already been signed for in an ongoing process")}
-	// An integrator's top-level organization is a management shell for its managed orgs; running elections
-	// there would bypass the shared MaxManagedProcesses/MaxVotes/MaxSMS/MaxEmails pool.
-	ErrIntegratorTopLevelOrgCannotOwnProcess = Error{Code: 40174, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("integrator top-level organizations cannot own elections; use a managed organization")}
+	// ErrPaymentRequired carries the current quote in data so the client can start checkout.
+	ErrPaymentRequired = Error{Code: 40178, HTTPstatus: http.StatusPaymentRequired, Err: fmt.Errorf("process publication requires payment")}
+	// ErrInsufficientWalletBalance: the integrator wallet cannot cover the debit; data carries
+	// requiredCents and availableCents when the balance could be read.
+	ErrInsufficientWalletBalance = Error{Code: 40175, HTTPstatus: http.StatusPaymentRequired, Err: fmt.Errorf("insufficient integrator wallet balance")}
+	// ErrQuoteRequired: the census is above the self-service limit; a custom quote is the only path.
+	ErrQuoteRequired = Error{Code: 40176, HTTPstatus: http.StatusUnprocessableEntity, Err: fmt.Errorf("census size requires a custom quote, self-service checkout is unavailable")}
+	// ErrPaymentSessionConflict: the process's payment is in a state the request cannot act on
+	// (processing, completed, or changed while being read); retry once it settles.
+	ErrPaymentSessionConflict = Error{Code: 40177, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("a payment for this process is already processing or completed")}
 
 	// CSP errors (408)
 	ErrZeroWeightVoter = Error{Code: 40801, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("voter weight cannot be zero")}

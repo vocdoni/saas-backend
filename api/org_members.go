@@ -233,6 +233,17 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// the growth check and the census write it allows are one step (censusGrowthLocks), so the
+	// lock is held until the imported members are propagated — by the goroutine, when async.
+	// ponytail: an import holds the organization's census growth for its whole run; a lock per
+	// census, if imports get long enough to stall other census changes.
+	growthLock := a.censusGrowthLocks.lock(org.Address)
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			growthLock.Unlock()
+		}
+	}()
 	// the imported members join the auto "All members" group, so they join the censuses built from
 	// it. Quota and signer are checked first: an over-quota import must not create the members
 	// either. A failure to resolve those censuses is a real lookup error — abort before creating
@@ -293,7 +304,9 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 	// request values to outlive it
 	mailCtx := context.WithoutCancel(r.Context())
 
+	handedOff = true
 	go func() {
+		defer growthLock.Unlock()
 		var lastProgress *db.BulkOrgMembersJob
 		for p := range progressChan {
 			lastProgress = p
@@ -399,6 +412,9 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 			isUpdate = true
 		}
 	}
+	// the growth check and the census write it allows are one step (censusGrowthLocks)
+	growthLock := a.censusGrowthLocks.lock(org.Address)
+	defer growthLock.Unlock()
 	// resolved before the write: a failure here is a real lookup error, and creating the member
 	// anyway would leave a silent non-voter — no quota consumed, no propagation — behind a 200.
 	autoCensuses, err := a.autoGroupCensuses(org.Address)

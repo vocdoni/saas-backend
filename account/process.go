@@ -26,6 +26,14 @@ const electionMetadataVersion = "1.0"
 // DefaultElectionType is the metadata type used when ElectionParams.TypeMetadata is nil.
 const DefaultElectionType = "single-choice-multiquestion"
 
+// electionDocument is the JSON shape of a stored ElectionMetadata document. It shadows Questions
+// without omitempty so a document without questions (a process's parent election) still writes
+// "questions": [] rather than dropping the key.
+type electionDocument struct {
+	*api.ElectionMetadata
+	Questions []api.Question `json:"questions"`
+}
+
 // BuildElectionMetadata maps the high-level ElectionParams into an on-chain
 // ElectionMetadata document and returns its JSON encoding. The returned bytes are
 // stored content-addressed; their public URL becomes the on-chain process metadata.
@@ -54,15 +62,23 @@ func BuildElectionMetadata(params *db.ElectionParams) ([]byte, error) {
 			Description: api.LanguageString(q.Description),
 			Choices:     make([]api.ChoiceMetadata, 0, len(q.Choices)),
 		}
+		// a nil map stored in an any would marshal as null rather than be omitted
+		if len(q.Meta) > 0 {
+			question.Meta = q.Meta
+		}
 		for _, ch := range q.Choices {
-			question.Choices = append(question.Choices, api.ChoiceMetadata{
+			choice := api.ChoiceMetadata{
 				Title: api.LanguageString(ch.Title),
 				Value: ch.Value,
-			})
+			}
+			if meta := q.ChoicesMeta[ch.Value]; len(meta) > 0 {
+				choice.Meta = meta
+			}
+			question.Choices = append(question.Choices, choice)
 		}
 		meta.Questions = append(meta.Questions, question)
 	}
-	data, err := json.Marshal(meta)
+	data, err := json.Marshal(&electionDocument{ElectionMetadata: meta, Questions: meta.Questions})
 	if err != nil {
 		return nil, fmt.Errorf("could not marshal election metadata: %w", err)
 	}
@@ -81,6 +97,9 @@ type NewProcessParams struct {
 	// which stays false — the Vochain routes both CA origins to the CSP verifier regardless of it.
 	Anonymous   bool
 	MetadataURL string // public https URL of the stored ElectionMetadata JSON
+	// MetadataHash is the SHA-256 of the exact bytes served at MetadataURL. The chain commits it
+	// on the process and rejects any vote whose envelope does not attest the same hash.
+	MetadataHash []byte
 	// Nonce, when set, is used as the tx account nonce instead of reading the current
 	// on-chain nonce. Batch publishing sets explicit consecutive nonces so N txs can be
 	// signed and submitted together; single publishes leave it nil to read the nonce.
@@ -90,6 +109,15 @@ type NewProcessParams struct {
 	// whitelist for NewProcess. PAUSED→READY has no interruptible requirement on the
 	// vochain, so a paused election can always be resumed regardless of Mode.Interruptible.
 	InitialStatus models.ProcessStatus
+	// ParentProcessID is the on-chain id of the metadata-only parent election a question election
+	// belongs to, set as Process.parentProcessId: the chain then requires every vote on it to also
+	// attest the parent's current metadata hash (VoteEnvelope.parentMetadataHash).
+	ParentProcessID []byte
+	// MetadataOnly builds a process's parent election as a metadata-only process: no vote options,
+	// envelope type or census (CensusRoot, CensusURI, Anonymous and the vote/census params are
+	// ignored), only the metadata URI and hash, dates, mode and status. The chain refuses votes on
+	// it and charges it no census.
+	MetadataOnly bool
 }
 
 // ParseInitialStatus turns a wire-level initialStatus string (as carried by the HTTP API and
@@ -186,7 +214,15 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 		return nil, fmt.Errorf("nil new process params")
 	}
 	ep := p.Params
-	if ep.MaxCensusSize == 0 {
+	if p.MetadataOnly {
+		// the chain allows a single level: a parent is metadata-only and has no parent itself
+		if len(p.ParentProcessID) > 0 {
+			return nil, fmt.Errorf("a metadata-only process cannot have a parent")
+		}
+		if p.MetadataURL == "" || len(p.MetadataHash) == 0 {
+			return nil, fmt.Errorf("a metadata-only process requires a metadata URL and hash")
+		}
+	} else if ep.MaxCensusSize == 0 {
 		return nil, fmt.Errorf("maxCensusSize must be greater than zero")
 	}
 	initialStatus, err := resolveInitialStatus(p.InitialStatus)
@@ -217,37 +253,41 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 
 	metadataURL := p.MetadataURL
 	process := &models.Process{
-		EntityId:      p.OrgAddress.Bytes(),
-		Status:        initialStatus,
-		StartTime:     startTime,
-		Duration:      duration,
-		CensusOrigin:  censusOrigin,
-		CensusRoot:    p.CensusRoot,
-		MaxCensusSize: ep.MaxCensusSize,
-		Metadata:      &metadataURL,
-		EnvelopeType: &models.EnvelopeType{
-			Serial:         false,
-			Anonymous:      ep.ElectionType.Anonymous,
-			EncryptedVotes: ep.ElectionType.SecretUntilTheEnd,
-			UniqueValues:   ep.VoteType.UniqueChoices,
-			CostFromWeight: ep.VoteType.CostFromWeight,
-		},
-		VoteOptions: &models.ProcessVoteOptions{
-			MaxCount:          ep.VoteType.MaxCount,
-			MaxValue:          ep.VoteType.MaxValue,
-			MaxVoteOverwrites: ep.VoteType.MaxVoteOverwrites,
-			MaxTotalCost:      ep.VoteType.MaxTotalCost,
-			CostExponent:      ep.VoteType.CostExponent,
-		},
+		EntityId:     p.OrgAddress.Bytes(),
+		Status:       initialStatus,
+		StartTime:    startTime,
+		Duration:     duration,
+		Metadata:     &metadataURL,
+		MetadataHash: p.MetadataHash,
 		Mode: &models.ProcessMode{
 			AutoStart:     ep.ElectionType.Autostart,
 			Interruptible: ep.ElectionType.Interruptible,
 			DynamicCensus: ep.ElectionType.DynamicCensus,
 		},
 	}
-	if p.CensusURI != "" {
-		censusURI := p.CensusURI
-		process.CensusURI = &censusURI
+	if !p.MetadataOnly {
+		process.ParentProcessId = p.ParentProcessID
+		process.CensusOrigin = censusOrigin
+		process.CensusRoot = p.CensusRoot
+		process.MaxCensusSize = ep.MaxCensusSize
+		process.EnvelopeType = &models.EnvelopeType{
+			Serial:         false,
+			Anonymous:      ep.ElectionType.Anonymous,
+			EncryptedVotes: ep.ElectionType.SecretUntilTheEnd,
+			UniqueValues:   ep.VoteType.UniqueChoices,
+			CostFromWeight: ep.VoteType.CostFromWeight,
+		}
+		process.VoteOptions = &models.ProcessVoteOptions{
+			MaxCount:          ep.VoteType.MaxCount,
+			MaxValue:          ep.VoteType.MaxValue,
+			MaxVoteOverwrites: ep.VoteType.MaxVoteOverwrites,
+			MaxTotalCost:      ep.VoteType.MaxTotalCost,
+			CostExponent:      ep.VoteType.CostExponent,
+		}
+		if p.CensusURI != "" {
+			censusURI := p.CensusURI
+			process.CensusURI = &censusURI
+		}
 	}
 	return &models.Tx{
 		Payload: &models.Tx_NewProcess{

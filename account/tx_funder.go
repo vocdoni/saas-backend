@@ -95,13 +95,15 @@ func (a *Account) handleNewProcessTx(tx *models.Tx, targetAddr common.Address) (
 		return nil, nil, err
 	}
 
-	// Add election price
+	// Add election price, computed like the chain does: a metadata-only process has no envelope
+	// type or vote options, so the getters (nil-safe) price it as an election with no census.
+	p := txNewProcess.Process
 	amount += a.ElectionPriceCalc.Price(&electionprice.ElectionParameters{
-		MaxCensusSize:           txNewProcess.Process.MaxCensusSize,
-		ElectionDurationSeconds: txNewProcess.Process.Duration,
-		EncryptedVotes:          txNewProcess.Process.EnvelopeType.EncryptedVotes,
-		AnonymousVotes:          txNewProcess.Process.EnvelopeType.Anonymous,
-		MaxVoteOverwrite:        txNewProcess.Process.VoteOptions.MaxVoteOverwrites,
+		MaxCensusSize:           p.GetMaxCensusSize(),
+		ElectionDurationSeconds: p.GetDuration(),
+		EncryptedVotes:          p.GetEnvelopeType().GetEncryptedVotes(),
+		AnonymousVotes:          p.GetEnvelopeType().GetAnonymous(),
+		MaxVoteOverwrite:        p.GetVoteOptions().GetMaxVoteOverwrites(),
 	})
 
 	// Create faucet package
