@@ -354,7 +354,7 @@ func (a *API) projectLegacyProcess(
 	// chain miss must not be frozen into the cached record.
 	cacheable := true
 	for _, electionID := range src.elections {
-		election, err := a.legacyElection(electionID)
+		election, err := a.legacyElection(ctx, electionID)
 		if err != nil {
 			return nil, err
 		}
@@ -407,8 +407,10 @@ func (src *legacyProcessSource) cacheKey() string {
 
 // legacyElection returns an on-chain election, cached so the public list does not fan out to the
 // Vochain on every anonymous hit: final ones for good, the rest for legacyLiveElectionTTL. ENDED is
-// not final — it still moves to RESULTS when the tally is published — so it only gets the TTL.
-func (a *API) legacyElection(electionID internal.HexBytes) (*dvoteapi.Election, error) {
+// not final — it still moves to RESULTS when the tally is published — so it only gets the TTL. A
+// miss is fetched through a.electionReads, so concurrent misses share one chain read and take a
+// service-wide read slot.
+func (a *API) legacyElection(ctx context.Context, electionID internal.HexBytes) (*dvoteapi.Election, error) {
 	key := electionID.String()
 	if cached, ok := a.electionCache.Get(key); ok {
 		return cached, nil
@@ -416,7 +418,7 @@ func (a *API) legacyElection(electionID internal.HexBytes) (*dvoteapi.Election, 
 	if cached, ok := a.liveElectionCache.Get(key); ok {
 		return cached, nil
 	}
-	election, err := a.account.Election(electionID)
+	election, err := a.electionReads.election(ctx, electionID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s: %w", errLegacyChainUnavailable, key, err)
 	}
