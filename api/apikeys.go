@@ -57,6 +57,10 @@ var apiKeyAllowlist = map[string]string{
 	"GET " + managedOrganizationsEndpoint:   ScopeManagedRead,
 	"POST " + managedOrganizationsEndpoint:  ScopeManagedWrite,
 	"DELETE " + managedOrganizationEndpoint: ScopeManagedWrite,
+	"PUT " + managedOrganizationEndpoint:    ScopeManagedWrite,
+	// what the integrator's processes cost, readable with the scope of the write it explains
+	// (publish)
+	"GET " + processesPriceEndpoint: ScopeVotingWrite,
 
 	// members & groups (of managed organizations)
 	"GET " + organizationMembersEndpoint:          ScopeMembersWrite,

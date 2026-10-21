@@ -86,6 +86,13 @@ func TestRequiredScopeForRoute(t *testing.T) {
 	scope, ok = requiredScopeForRoute("GET", processesParticipantsEndpoint) // list voted participants of a voting process
 	c.Assert(ok, qt.IsTrue)
 	c.Assert(scope, qt.Equals, ScopeVotingWrite)
+	// the spend cap is a managed-organization write; the price is key-readable
+	scope, ok = requiredScopeForRoute("PUT", managedOrganizationEndpoint)
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(scope, qt.Equals, ScopeManagedWrite)
+	scope, ok = requiredScopeForRoute("GET", processesPriceEndpoint)
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(scope, qt.Equals, ScopeVotingWrite)
 	// every allowlisted scope is a valid, assignable scope
 	for route, sc := range apiKeyAllowlist {
 		c.Assert(IsValidAPIKeyScope(sc), qt.IsTrue, qt.Commentf("route %q maps to unknown scope %q", route, sc))

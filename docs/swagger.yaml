@@ -5928,6 +5928,8 @@ paths:
         quote is recommended; above 50 000 the process is quote-only: no price (empty
         lines, totalCents 0, quoteRequired true), and publish and checkout answer 422
         (40176). Requires Manager/Admin of the organization.
+
+        Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Process ID
         in: path

@@ -288,6 +288,8 @@ func (*API) pricingHandler(w http.ResponseWriter, r *http.Request) {
 //	@Description	quote is recommended; above 50 000 the process is quote-only: no price (empty
 //	@Description	lines, totalCents 0, quoteRequired true), and publish and checkout answer 422
 //	@Description	(40176). Requires Manager/Admin of the organization.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
 //	@Produce		json
 //	@Security		BearerAuth
