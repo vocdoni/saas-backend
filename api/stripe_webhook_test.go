@@ -265,6 +265,31 @@ func TestStripeWebhook(t *testing.T) {
 		}
 	})
 
+	t.Run("StaleOrganizationWriteKeepsCancellation", func(*testing.T) {
+		s := mockStripeSubscription(orgAddress, mockEssentialPlan.ID)
+		liveSubs[s.ID] = s
+		c.Assert(service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionCreated, s)), qt.IsNil)
+
+		// an API write that read the organization before the cancellation lands after it
+		stale, err := testDB.Organization(orgAddress)
+		c.Assert(err, qt.IsNil)
+		c.Assert(stale.Subscription.StripeSubscriptionID, qt.Equals, s.ID)
+
+		s.Status = stripeapi.SubscriptionStatusCanceled
+		c.Assert(service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionDeleted, s)), qt.IsNil)
+
+		stale.Website = "https://stale.example.com"
+		c.Assert(testDB.SetOrganization(stale), qt.IsNil)
+
+		defaultPlan, err := testDB.DefaultPlan()
+		c.Assert(err, qt.IsNil)
+		org, err := testDB.Organization(orgAddress)
+		c.Assert(err, qt.IsNil)
+		c.Assert(org.Website, qt.Equals, stale.Website)
+		c.Assert(org.Subscription.PlanID, qt.Equals, defaultPlan.ID)
+		c.Assert(org.Subscription.StripeSubscriptionID, qt.Equals, "")
+	})
+
 	t.Run("SubscriptionErrors", func(*testing.T) {
 		{
 			s := mockStripeSubscription(orgAddress, mockEssentialPlan.ID)
@@ -302,6 +327,17 @@ func TestStripeWebhook(t *testing.T) {
 		{
 			org, err := testDB.Organization(orgAddress)
 			c.Assert(err, qt.IsNil)
+			c.Assert(org.Subscription.LastPaymentDate.Unix(), qt.Equals, date.Unix())
+		}
+
+		// a later subscription event leaves the payment date alone
+		{
+			s := mockStripeSubscription(orgAddress, mockEssentialPlan.ID)
+			liveSubs[s.ID] = s
+			c.Assert(service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionUpdated, s)), qt.IsNil)
+			org, err := testDB.Organization(orgAddress)
+			c.Assert(err, qt.IsNil)
+			c.Assert(org.Subscription.StripeSubscriptionID, qt.Equals, s.ID)
 			c.Assert(org.Subscription.LastPaymentDate.Unix(), qt.Equals, date.Unix())
 		}
 	})

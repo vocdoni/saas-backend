@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -77,6 +78,12 @@ func (ms *MongoStorage) OrganizationWithParent(address common.Address) (org *Org
 // If the organization already exists, it updates the fields that have changed.
 // If the organization doesn't exist, it creates it. If an error occurs, it
 // returns the error.
+//
+// The subscription is only written when the organization is created. Callers
+// read-modify-write the whole organization, so a write of an existing one would
+// put back the subscription it read, undoing any change the billing webhooks made
+// in between. Subscription changes go through SetOrganizationSubscription,
+// UpdateOrganizationSubscription and SetOrganizationLastPaymentDate.
 func (ms *MongoStorage) SetOrganization(org *Organization) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
@@ -92,6 +99,12 @@ func (ms *MongoStorage) SetOrganization(org *Organization) error {
 	updateDoc, err := dynamicUpdateDocument(org, nil)
 	if err != nil {
 		return err
+	}
+	if set, ok := updateDoc["$set"].(bson.M); ok {
+		if subscription, ok := set["subscription"]; ok {
+			delete(set, "subscription")
+			updateDoc["$setOnInsert"] = bson.M{"subscription": subscription}
+		}
 	}
 	// set upsert to true to create the document if it doesn't exist
 	opts := options.UpdateOne().SetUpsert(true)
@@ -271,6 +284,47 @@ func (ms *MongoStorage) SetOrganizationSubscription(address common.Address, orgS
 	// update the organization in the database
 	if _, err := ms.organizations.UpdateOne(ctx, filter, updateDoc); err != nil {
 		return err
+	}
+	return nil
+}
+
+// UpdateOrganizationSubscription sets every field of the organization's subscription
+// except lastPaymentDate, which has its own writer (SetOrganizationLastPaymentDate), so
+// the subscription and payment webhooks never overwrite each other's field.
+func (ms *MongoStorage) UpdateOrganizationSubscription(address common.Address, sub *OrganizationSubscription) error {
+	if _, err := ms.Plan(sub.PlanID); err != nil {
+		return ErrInvalidData
+	}
+	return ms.updateOrganizationFields(address, bson.M{
+		"subscription.planID":               sub.PlanID,
+		"subscription.stripeSubscriptionID": sub.StripeSubscriptionID,
+		"subscription.billingPeriod":        sub.BillingPeriod,
+		"subscription.startDate":            sub.StartDate,
+		"subscription.renewalDate":          sub.RenewalDate,
+		"subscription.active":               sub.Active,
+		"subscription.email":                sub.Email,
+	})
+}
+
+// SetOrganizationLastPaymentDate sets only the last payment date of the organization's
+// subscription.
+func (ms *MongoStorage) SetOrganizationLastPaymentDate(address common.Address, date time.Time) error {
+	return ms.updateOrganizationFields(address, bson.M{"subscription.lastPaymentDate": date})
+}
+
+// updateOrganizationFields $sets the given fields of an existing organization, returning
+// ErrNotFound if there is no organization with that address.
+func (ms *MongoStorage) updateOrganizationFields(address common.Address, fields bson.M) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.organizations.UpdateOne(ctx, bson.M{"_id": address}, bson.M{"$set": fields})
+	if err != nil {
+		return err
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
 	}
 	return nil
 }

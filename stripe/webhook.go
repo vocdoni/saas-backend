@@ -182,16 +182,17 @@ func (s *Service) handleSubscriptionCreateOrUpdate(subscriptionInfo *Subscriptio
 			subscriptionInfo.ProductID, subscriptionInfo.ID, err)
 	}
 
-	org.Subscription.PlanID = plan.ID
-	org.Subscription.StripeSubscriptionID = subscriptionInfo.ID
-	org.Subscription.BillingPeriod = db.BillingPeriod(subscriptionInfo.BillingPeriod)
-	org.Subscription.StartDate = subscriptionInfo.StartDate
-	org.Subscription.RenewalDate = subscriptionInfo.EndDate
-	org.Subscription.Active = (subscriptionInfo.Status == stripeapi.SubscriptionStatusActive)
-	org.Subscription.Email = subscriptionInfo.Customer.Email
-
-	// Save subscription
-	if err := s.db.SetOrganization(org); err != nil {
+	// only the subscription fields this event owns: lastPaymentDate is the invoice
+	// webhook's, and the rest of the organization is the API's
+	if err := s.db.UpdateOrganizationSubscription(org.Address, &db.OrganizationSubscription{
+		PlanID:               plan.ID,
+		StripeSubscriptionID: subscriptionInfo.ID,
+		BillingPeriod:        subscriptionInfo.BillingPeriod,
+		StartDate:            subscriptionInfo.StartDate,
+		RenewalDate:          subscriptionInfo.EndDate,
+		Active:               true,
+		Email:                subscriptionInfo.Customer.Email,
+	}); err != nil {
 		return fmt.Errorf("failed to save subscription %s (planID=%s, status=%s) for organization %s: %v",
 			subscriptionInfo.ID, plan.ID, subscriptionInfo.Status, subscriptionInfo.OrgAddress, err)
 	}
@@ -224,16 +225,15 @@ func (s *Service) handleSubscriptionCancellation(subscriptionID string, org *db.
 		return fmt.Errorf("default plan not found: %v", err)
 	}
 
-	// Create subscription with default plan
+	// Switch to the default plan, keeping the last payment date (it decides trial eligibility)
 	orgSubscription := &db.OrganizationSubscription{
 		PlanID:               defaultPlan.ID,
 		StripeSubscriptionID: "",
 		StartDate:            time.Now(),
-		LastPaymentDate:      org.Subscription.LastPaymentDate,
 		Active:               true,
 	}
 
-	if err := s.db.SetOrganizationSubscription(org.Address, orgSubscription); err != nil {
+	if err := s.db.UpdateOrganizationSubscription(org.Address, orgSubscription); err != nil {
 		return fmt.Errorf("failed to cancel subscription %s for organization %s: %v",
 			subscriptionID, org.Address, err)
 	}
@@ -254,17 +254,14 @@ func (s *Service) handleInvoicePayment(event *stripeapi.Event) error {
 	unlock := s.lockManager.LockOrganization(invoiceInfo.OrgAddress)
 	defer unlock()
 
-	// Get organization
-	org, err := s.db.Organization(invoiceInfo.OrgAddress)
-	if err != nil || org == nil {
-		return fmt.Errorf("organization %s not found for payment %s: %v",
+	// Update last payment date
+	err = s.db.SetOrganizationLastPaymentDate(invoiceInfo.OrgAddress, invoiceInfo.PaymentTime)
+	if errors.Is(err, db.ErrNotFound) {
+		return fmt.Errorf("organization %s not found for payment %s: %w",
 			invoiceInfo.OrgAddress, invoiceInfo.ID, err)
 	}
-
-	// Update last payment date
-	org.Subscription.LastPaymentDate = invoiceInfo.PaymentTime
-	if err := s.db.SetOrganization(org); err != nil {
-		return fmt.Errorf("failed to update payment date for organization %s: %v",
+	if err != nil {
+		return fmt.Errorf("failed to update payment date for organization %s: %w",
 			invoiceInfo.OrgAddress, err)
 	}
 
