@@ -1,6 +1,6 @@
 # CSP key per election: design
 
-Status: draft (soft transition)   Class: architectural
+Status: approved 2026-10-22 (controller, owner-authorized autonomous mode)   Class: architectural
 Epic: vocdoni/saas-backend#769 (label `epic-csp-key-per-election`)
 Owner decisions (2026-10-22):
 - D1. The chain side is vochain-sequencer (not vocdoni-node).
