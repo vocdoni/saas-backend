@@ -67,21 +67,81 @@ func TestWriteKeepsClientMessagesOn5xx(t *testing.T) {
 	c.Assert(body["data"], qt.DeepEquals, map[string]any{"retryAfter": float64(5)})
 }
 
+// captureLog runs fn with the global logger at level and returns what it logged.
+// The logger is restored to its previous configuration when the test ends.
+func captureLog(t *testing.T, level string, fn func()) string {
+	t.Helper()
+	prev := *log.Logger()
+	t.Cleanup(func() { *log.Logger() = prev })
+
+	logFile := filepath.Join(t.TempDir(), "api.log")
+	f, err := os.Create(logFile)
+	qt.Assert(t, err, qt.IsNil)
+	t.Cleanup(func() { _ = f.Close() })
+
+	// log.Init writes to os.Stdout, so point it at the file while it runs
+	stdout := os.Stdout
+	os.Stdout = f
+	log.Init(level, "stdout", nil)
+	os.Stdout = stdout
+
+	fn()
+	out, err := os.ReadFile(logFile)
+	qt.Assert(t, err, qt.IsNil)
+	return string(out)
+}
+
 func TestWriteLogs4xxAtTheirLevel(t *testing.T) {
 	c := qt.New(t)
-	logFile := filepath.Join(t.TempDir(), "api.log")
-	log.Init(log.LogLevelInfo, logFile, nil)
-	t.Cleanup(func() { log.Init(log.LogLevelDebug, "stdout", nil) })
+	out := captureLog(t, log.LogLevelInfo, func() {
+		testBadInputErr.With("tagged warn").WithLogLevel("warn").Write(httptest.NewRecorder())
+		testBadInputErr.With("tagged info").WithLogLevel("info").Write(httptest.NewRecorder())
+		testBadInputErr.With("untagged").Write(httptest.NewRecorder())
+	})
+	c.Assert(out, qt.Contains, "malformed body: tagged warn")
+	c.Assert(out, qt.Contains, "malformed body: tagged info")
+	c.Assert(out, qt.Not(qt.Contains), "malformed body: untagged")
+}
 
-	testBadInputErr.With("tagged warn").WithLogLevel("warn").Write(httptest.NewRecorder())
-	testBadInputErr.With("tagged info").WithLogLevel("info").Write(httptest.NewRecorder())
-	testBadInputErr.With("untagged").Write(httptest.NewRecorder())
+func TestWriteLogs5xxAtTheirLevel(t *testing.T) {
+	c := qt.New(t)
+	tagged := testInternalErr.With("tagged warn").WithLogLevel("warn")
+	untagged := testInternalErr.With("untagged")
 
-	out, err := os.ReadFile(logFile)
-	c.Assert(err, qt.IsNil)
-	c.Assert(string(out), qt.Contains, "malformed body: tagged warn")
-	c.Assert(string(out), qt.Contains, "malformed body: tagged info")
-	c.Assert(string(out), qt.Not(qt.Contains), "malformed body: untagged")
+	// at warn the warn-tagged 5xx is logged, and the untagged one (error) too
+	out := captureLog(t, log.LogLevelWarn, func() {
+		tagged.Write(httptest.NewRecorder())
+		untagged.Write(httptest.NewRecorder())
+	})
+	c.Assert(out, qt.Contains, "tagged warn")
+	c.Assert(out, qt.Contains, "untagged")
+
+	// at error the warn-tagged 5xx is dropped, the untagged one is still logged
+	out = captureLog(t, log.LogLevelError, func() {
+		tagged.Write(httptest.NewRecorder())
+		untagged.Write(httptest.NewRecorder())
+	})
+	c.Assert(out, qt.Not(qt.Contains), "tagged warn")
+	c.Assert(out, qt.Contains, "untagged")
+}
+
+func TestWithKeepsFields(t *testing.T) {
+	c := qt.New(t)
+	internal := fmt.Errorf("server selection error: mongo-0.internal:27017")
+	data := map[string]any{"retryAfter": 5}
+
+	e := testBadInputErr.WithData(data).With("tagged")
+	c.Assert(e.Data, qt.DeepEquals, data)
+
+	e = testInternalErr.WithData(data).WithErr(internal)
+	c.Assert(e.Data, qt.DeepEquals, data)
+	_, body := writtenBody(t, e)
+	c.Assert(body["data"], qt.DeepEquals, map[string]any{"retryAfter": float64(5)})
+
+	e = testInternalErr.WithLogLevel("warn").Withf("count %d", 3).With("tagged").WithErr(internal)
+	c.Assert(e.LogLevel, qt.Equals, "warn")
+	c.Assert(e.HTTPstatus, qt.Equals, http.StatusInternalServerError)
+	c.Assert(e.Code, qt.Equals, testInternalErr.Code)
 }
 
 func TestWriteKeepsDetailOn4xx(t *testing.T) {
