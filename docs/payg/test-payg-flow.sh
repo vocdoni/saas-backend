@@ -72,9 +72,9 @@ PID=$(curl -sf "$API/processes" -H "$AUTH" -d '{
 
 step "3. quote"
 PUB=$(curl -sf "$API/pricing?voters=2&signedCertificate=true" | jq -r .totalCents)
-[ "$PUB" = 4900 ] && ok "GET /pricing -> 4900 cents (public calculator)" || no "public pricing (got $PUB)"
+[ "$PUB" = 3900 ] && ok "GET /pricing -> 3900 cents (public calculator)" || no "public pricing (got $PUB)"
 DQ=$(curl -sf "$API/processes/$PID/price" -H "$AUTH" | jq -r .totalCents)
-[ "$DQ" = 4900 ] && ok "GET /processes/{id}/price -> 4900 cents" || no "draft quote (got $DQ)"
+[ "$DQ" = 3900 ] && ok "GET /processes/{id}/price -> 3900 cents" || no "draft quote (got $DQ)"
 
 step "4. publication is gated while unpaid"
 GATE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API/processes/$PID/publish" -H "$AUTH")

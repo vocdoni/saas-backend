@@ -3,7 +3,7 @@
 How the SaaS backend charges for voting processes: each process is priced individually
 from its eligible voters and selected add-ons, paid through a one-time Stripe Checkout
 session (or an integrator's prepaid wallet), and **publication is the fulfillment of a
-verified payment**. Drafts are free; small processes are free; a browser redirect is
+verified payment**. Drafts are free; small processes without add-ons are free; a browser redirect is
 never proof of payment.
 
 Spec: [VocdoniApp new pricing model](https://hackmd.io/@vocdoni/vocdoni-app-new-pricing-model-feature).
@@ -20,40 +20,61 @@ Code map: `pricing/` (the formula), `db/process_payments.go` + `db/wallets.go` (
 SignedCert, CustomURL, Branding, Payer}`. All amounts are **EUR cents, VAT excluded** —
 Stripe Tax adds VAT at checkout from the billing details the customer enters.
 
-Base price per eligible voter count `v`, rounded to the nearest €5 (`R5`):
+The base price is **graduated**: up to 25 eligible voters it is free; above that every voter
+is priced, starting from the first band, and each rate applies only to the voters inside its
+band (`basePriceCents`, one `switch` falling through from the top band down).
 
-| Voters | Formula |
-|---|---|
-| 1–25 | free |
-| 26–800 | `R5(1.5·v^0.824)` |
-| 801–5 000 | `R5(33·v^0.36)` |
-| 5 001–15 000 | `R5(0.142·v)` |
-| >15 000 | `R5(2130 + 0.11·(v−15000))` |
+| Voters | Per voter | Cumulative at the top of the band |
+|---|---|---|
+| 1–25 | free (whole census) | €0 |
+| 1–100 | €0.660 | €66 |
+| 101–500 | €0.430 | €238 |
+| 501–1 000 | €0.240 | €358 |
+| 1 001–5 000 | €0.125 | €858 |
+| 5 001–15 000 | €0.100 | €1 858 |
+| 15 001–50 000 | €0.090 | €5 008 |
+| above 50 000 | quote only | — |
 
-Add-ons: SMS 2FA €0.05/voter, email 2FA free for standard organizations and €0.01/voter for
-integrators (both derive from the census
-`twoFaFields`, not a separate flag), signed results certificate €39/process, custom URL
-€89/process, branding €149 **once per organization** — the line is suppressed once
-`Organization.BrandingPaidAt` is stamped, and while another process holds the claim
-described in [Branding is claimed, not just checked](#branding-is-claimed-not-just-checked).
+The rates are exact in hundredths of a cent (€0.125 = 1 250), so the bands are summed exactly
+as integers and rounded **half-up to the cent once**, at the end (1 001 voters → €358.125 →
+€358.13).
 
-Worked examples (pinned in `pricing/pricing_test.go`): 25 voters → free; 26 → €20; 600 → €290;
-10 000 → €1 420; 10 000 + email 2FA + certificate → €1 459 (€1 559 for an integrator).
+Add-ons are charged at **any** census size, a free base price included: SMS 2FA €0.05/voter;
+email 2FA free for standard organizations and €0.01/voter for integrators (both derive from
+the census `twoFaFields`, not a separate flag); signed results certificate €39/process;
+custom URL €99 and branding €149, both **once per organization** — each line is suppressed
+once the organization's `<addOn>PaidAt` is stamped, and while another process holds that
+add-on's claim, as described in
+[Once-per-organization add-ons are claimed, not just checked](#once-per-organization-add-ons-are-claimed-not-just-checked).
 
-Two deliberate refinements over the spec text:
+**Minimum charge.** A priced total strictly between €0 and €1 is raised to €1
+(`pricing.MinimumChargeCents`) by an extra `minimumCharge` line, so the lines still sum to the
+total; it applies to card and wallet payers alike (Stripe cannot charge a card less than
+€0.50). A total of €0 stays free. A card census-headroom checkout follows the same rule: it
+charges `max(dueCents, €1)` while the envelope is raised to the target price only
+([Buying census headroom](#buying-census-headroom)).
 
-- **Free tier zeroes per-voter add-ons.** At ≤25 voters 2FA is free like the base price,
-  and such test-sized processes are already exempt from process counters
-  (`db.TestMaxCensusSize`). Flat add-ons (certificate, custom URL,
-  branding) stay billable at any census size.
+Worked examples (pinned in `pricing/pricing_test.go` and `api/pricing_test.go`): 25 voters →
+free; 26 → €17.16; 40 → €26.40; 600 → €262; 1 200 → €383; 3 000 → €608; 10 000 → €1 358;
+10 000 + SMS 2FA + certificate → €1 897; 900 + SMS 2FA + certificate → €418; 10 voters + SMS
+2FA → €0.50, charged €1 (minimum); 50 000 → €5 008; 10 000 + email 2FA → €1 358 standard,
+€1 458 for an integrator.
+
 - **Payer-type policy.** The payer type (`PayerStandard` / `PayerIntegrator`, the latter for a
-  managed organization) selects the policy. The base-price brackets are identical today; email
-  2FA is free for standard organizations and billed per voter to integrators. Integrator pricing
-  can diverge further without touching the payment flow.
+  managed organization) selects the policy. The bands are identical; email 2FA is free for
+  standard organizations and billed per voter to integrators. Integrator pricing can diverge
+  further without touching the payment flow.
 
 Thresholds: above 15 000 voters the price response sets `quoteRecommended` (the app
-should suggest a custom quote); above 50 000, `quoteRequired` — self-service checkout, and
-a managed organization's wallet-paid publish, are refused (422, code 40176) and sales handles it.
+should suggest a custom quote) and still carries a price that can be paid. Above 50 000 the
+process is **quote-only**: the quote has no price at all — `lines: []`, `totalCents: 0`,
+`quoteRequired: true`, add-ons not priced either — and a zero total there is never "free".
+Every payment path refuses it with **422** (40176) before it could read the zero as free or
+as already covered: the publish gate (card and managed organizations alike, so the
+`validation` dry-run lists it too), process checkout, census-headroom checkout (card and
+wallet), the managed wallet debit and wallet charge, and the census growth guard. A paid
+process whose census crossed 50 000 after payment is left paid by webhook fulfillment (the
+webhook answers 200, not a retry loop) for sales to publish manually.
 
 `pricing.QuoteHash` fingerprints the priced inputs + total. It is stored with the
 payment and is how an open checkout session is detected as **obsolete** after a draft
@@ -79,8 +100,9 @@ documents and must never be able to wipe a live session id or a paid state.
 
 - `pending`: a checkout session is open. Draft edits are allowed; the session is expired
   and replaced at the next checkout if the price changed. A session Stripe expires on its
-  own (`checkout.session.expired`) moves the payment to `failed`, which matters for
-  branding: an abandoned checkout must not hold the organization's claim forever.
+  own (`checkout.session.expired`) moves the payment to `failed`, which matters for the
+  once-per-organization add-ons: an abandoned checkout must not hold the organization's claims
+  forever.
 - `processing`: checkout completed with a delayed payment method (e.g. SEPA debit) and
   the outcome is unknown. No new charge may start; the draft is locked.
 - `failed`: the payment failed; the process is payable again with a fresh session.
@@ -105,7 +127,7 @@ duplicate webhook resolves to a lost CAS instead of a second side effect.
 ## Checkout flow (standard organizations)
 
 0. `GET /pricing?voters=…&emailTwoFA=…` — the public calculator over the same formula
-   (no auth, no draft needed; for the pricing page). Branding is charged as requested
+   (no auth, no draft needed; for the pricing page). Branding and the custom URL are charged as requested
    and credits are not applied — it has no organization context.
 1. `GET /processes/{id}/price` — the server-side quote for a draft (line breakdown,
    flags, current payment status). The price shown to the user before payment is always
@@ -209,45 +231,55 @@ do use is `POST /processes/{id}/census/checkout`, which debits the wallet instea
 a session (see below); it is also the only checkout route callable with an API key, because
 integrators drive census growth with their keys.
 
-## Branding is claimed, not just checked
+## Once-per-organization add-ons are claimed, not just checked
 
-Branding is the one add-on that can only be sold once per organization, so two processes
-paying at the same time must not both be charged for it — and neither may quietly lose it.
-The claim is a conditional write on the **organization** document
-(`brandingClaimedBy` + `brandingClaimedAt`, `db.ClaimOrganizationBranding`), taken at the
-two moments money moves: opening a card checkout, and debiting the integrator wallet.
+Branding and the custom URL are the add-ons sold only once per organization, so two processes
+paying at the same time must not both be charged for one — and neither may quietly lose it.
+Both run on one mechanism keyed by `db.OrgAddOn` (`"branding"`, `"customUrl"`: the bson name
+of the add-on in `addOns` and in the payment, and the prefix of the organization fields
+`<addOn>PaidAt`, `<addOn>ClaimedBy`, `<addOn>ClaimedAt` — `brandingPaidAt`…,
+`customUrlPaidAt`…). Each add-on has its own claim and stamp, so claiming, stamping or
+releasing one never touches the other. The claim is a conditional write on the
+**organization** document (`db.ClaimOrganizationAddOn`), taken for every priced, unstamped
+add-on at the two moments money moves: opening a card checkout, and debiting the integrator
+wallet.
 
-Read paths (`GET .../price`, the publish gate) only *read* the claim, so quoting never takes
-one. A caller that loses the claim has `Branding` dropped from its input and the quote
-recomputed **before** it is charged. Validity is re-derived from the claimant's payment, so
-the claim self-heals: once it is older than `db.BrandingClaimStaleAfter` (2 minutes), it is
-releasable when that payment is absent, `failed`, `refunded`, or no longer carries branding
-(the draft was re-priced without it). A fresh claim is never taken over — the cutoff is part
-of the claim's filter — and every paying attempt refreshes its own claim before storing its
-payment, so a sibling cannot read a half-written retry and steal the add-on. The cost is
-that an abandoned branded checkout frees branding for the organization only after two
-minutes. An attempt refused before any money moves — a quote-required price, a wallet that
-does not cover it, a Stripe or payment-state failure at checkout — does not wait for that: it
-gives back the claim it just took (`db.ReleaseOrganizationBrandingClaim`, pinned to the exact
-claim it wrote, so a concurrent retry's refresh is kept), never one its draft held before.
-A pending checkout dropped on purpose — cancelled with `DELETE /processes/{id}/checkout`, or
-deleted with its draft — gives its claim back too, pinned to the claim read before dropping it.
-Cancel and checkout both take the draft's publish claim, so a cancel never releases the claim of
-a session that a concurrent checkout of the same draft is storing.
-Fulfillment stamps `brandingPaidAt`; a refund releases both the stamp and the claim.
-A process that paid for branding keeps it in its own price after the stamp, so its census
-growth is never re-quoted without the €149 it already paid.
+Read paths (`GET .../price`, the publish gate) only *read* the claims, so quoting never takes
+one. A caller that loses a claim has that add-on dropped from its input and the quote
+recomputed **before** it is charged; the add-ons it did claim stay. Validity is re-derived
+from the claimant's payment, so a claim self-heals: once it is older than
+`db.OrgAddOnClaimStaleAfter` (2 minutes), it is releasable when that payment is absent,
+`failed`, `refunded`, or no longer charges that add-on (the draft was re-priced without it).
+A fresh claim is never taken over — the cutoff is part of the claim's filter — and every
+paying attempt refreshes its own claims before storing its payment, so a sibling cannot read a
+half-written retry and steal an add-on. The cost is that an abandoned checkout frees its
+add-ons for the organization only after two minutes. An attempt refused before any money
+moves — a quote-required price, a wallet that does not cover it, a Stripe or payment-state
+failure at checkout — does not wait for that: it gives back the claims it just took
+(`db.ReleaseOrganizationAddOnClaim`, pinned to the exact claim it wrote, so a concurrent
+retry's refresh is kept), never one its draft held before. A pending checkout dropped on
+purpose — cancelled with `DELETE /processes/{id}/checkout`, or deleted with its draft — gives
+its claims back too, pinned to the claims read before dropping it. Cancel and checkout both
+take the draft's publish claim, so a cancel never releases the claims of a session that a
+concurrent checkout of the same draft is storing.
+Fulfillment (card webhook or wallet charge) stamps `<addOn>PaidAt` for each add-on the payment
+charged (`db.SetOrganizationAddOnPaid`); a refund releases both the stamp and the claim
+(`db.ReleaseOrganizationAddOn`). A process that paid for an add-on keeps it in its own price
+after the stamp (the payment records `branding` / `customUrl`), so its census growth is never
+re-quoted without the €149 or €99 it already paid.
 
-The reverse holds too: a process paid **without** branding stays priced without it, even once
-the claim that kept it out frees up, since nothing sells the add-on to an already-paid process.
-An edit turning branding on for such a draft is refused (409, code 40177) unless the
-organization has already paid branding, in which case it changes no price.
+The reverse holds too: a process paid **without** one of them stays priced without it, even
+once the claim that kept it out frees up, since nothing sells an add-on to an already-paid
+process. An edit turning branding or the custom URL on for such a draft is refused (409, code
+40177, "the draft is paid without …, which cannot be added after payment") unless the
+organization has already paid that add-on, in which case it changes no price.
 
 ## Buying census headroom
 
 `ProcessPayment.AmountCents` is the envelope: a published paid process may grow its census
-as long as the **projected price at the new size still fits inside it**. Because the base
-price rounds to €5, a handful of extra voters usually costs nothing. A process that
+as long as the **projected price at the new size still fits inside it**. On graduated bands
+every voter above the free tier is priced, so growth past the census that was paid for costs
+the difference unless headroom was bought beforehand. A process that
 published for free (inside the free tier) records a €0 `paid` payment at publish, so its
 envelope is €0 and growing it out of the free tier is sold like any other growth. A process
 published before pay-per-process has no payment at all: its first growth check grandfathers it
@@ -264,7 +296,9 @@ Growth past that price answers **402** with a `ProcessCensusGrowthQuote`
 refusal, and `POST /processes/{processId}/census/checkout {censusSize, returnURL, locale}`
 sells exactly that difference:
 
-- **Card payer** — a `mode: payment` session for `dueCents`, carrying the target amount in
+- **Card payer** — a `mode: payment` session for `dueCents` (at least the €1 minimum charge:
+  one voter in a lower band costs only €0.09–€0.66, and Stripe cannot charge a card that
+  little; the envelope is still raised to the target price only), carrying the target amount in
   `process_topup_cents` and the amount it was priced from in `process_topup_from_cents`
   metadata. The envelope is raised by the **webhook** (`RaiseProcessPaymentAmount`, a
   compare-and-set on that base, keyed on the session id keeping the last 50), never by the
@@ -299,13 +333,16 @@ mirroring how it was paid:
   included) to the integrator wallet under `refund:<process id>`.
 
 Before any money moves, the delete fixes a **refund plan** on the payment
-(`refundWithheldCents`: what it keeps back, 0 unless the branding is relied on — see below),
+(`refundWithheldCents`: what it keeps back, 0 unless an add-on is relied on — see below — and
+`refundWithheldAddOns`: which add-ons that is, written in the same update),
 conditional on the payment still being `paid` at the amount the delete read; a top-up that
 landed in between makes it answer **409** with nothing moved. A wallet-paid draft plans under
 the integrator's wallet lock, which a wallet charge of headroom holds from its debit to its
 record, so the debit is never left between a refunded envelope and a refused record. A retried
 delete reuses the plan, so it refunds the same intents under the same keys and amounts even if a sibling started or
-stopped relying on the branding meanwhile. A planned payment is locked: census headroom and
+stopped relying on an add-on meanwhile. A plan fixed before the custom URL was once per
+organization stored only the cents; read back with cents above 0 and no add-on list it means
+branding, the only add-on it could withhold. A planned payment is locked: census headroom and
 publish refuse it with **409**, a wallet charge refuses it, and a card top-up that lands later
 raises nothing and is refunded on arrival (below). So a delete that failed half-way leaves a
 draft that can only be deleted again. The one exception is a refund Stripe refuses for good (a
@@ -316,8 +353,9 @@ the plan stays and the failure is logged for manual reconciliation. A checkout t
 claim as delete and publish until its pending payment is stored, so a delete cannot drop the
 draft between the checkout's read and its write and leave a payable payment for nothing.
 
-Then the organization's branding claim and `brandingPaidAt` are released (so its next process
-is quoted branding again) — before the payment is marked, so a release that fails fails the
+Then every once-per-organization add-on the payment charged and the plan does not withhold has
+its organization claim and `<addOn>PaidAt` stamp released (so the organization's next process
+is quoted it again) — before the payment is marked, so a release that fails fails the
 delete and a retry runs it again — the payment becomes `refunded`, its document is **kept** as
 the audit trail, and only then is the draft removed. If the money cannot go
 back, nothing is written and the draft stays: deleting a process whose payment we still hold
@@ -330,20 +368,22 @@ both are retryable once they settle. A `pending` session that is still open is e
 first; if Stripe cannot confirm it expired, the delete fails closed rather than leave a
 payable session for a process that no longer exists.
 
-**Branding already relied on.** The branding add-on is paid once per organization, so a
-sibling process may already carry branding for free on the strength of this payment — it is
-published, or its own payment is `paid`, `processing` or `pending`. A pending checkout counts
-because it was priced without branding and its payment pins that price: once paid it would
-publish branded with nobody having paid the €149. A sibling checkout that reads the stamp
-before the release but stores its payment after the check (a window as wide as the refund
-call) still slips through; closing it would take a re-check on both sides. Then the €149 is in use and does not
-come back: the organization keeps `brandingPaidAt` (the sibling is not re-priced) and the
-refund withholds it. A wallet payment is credited `amountCents − 14 900`. A card payment's
-first intent is refunded `total − round(14 900 × total / subtotal)`, using the
+**Add-ons already relied on.** Branding and the custom URL are paid once per organization, so
+a sibling process may already carry one of them for free on the strength of this payment — it
+is published, or its own payment is `paid`, `processing` or `pending`
+(`db.OrganizationAddOnReliedOn`, per add-on). A pending checkout counts because it was priced
+without the add-on and its payment pins that price: once paid it would publish with it and
+nobody having paid for it. A sibling checkout that reads the stamp before the release but stores
+its payment after the check (a window as wide as the refund call) still slips through; closing
+it would take a re-check on both sides. Each relied-on add-on is in use and does not come back:
+the organization keeps its `<addOn>PaidAt` (the sibling is not re-priced) and the refund
+withholds its list price (€149 branding, €99 custom URL), while an add-on nobody relies on is
+released and refunded with the rest. A wallet payment is credited `amountCents − withheld`. A
+card payment's first intent is refunded `total − round(withheld × total / subtotal)`, using the
 `chargeTotalCents`/`chargeSubtotalCents` recorded at fulfillment so the withheld part carries
 the same VAT the customer paid; the partial refund's key gains the amount
 (`refund:<process id>:<payment intent>:<amount>`), because Stripe refuses a reused key with
-different parameters. Census top-ups carry no branding and are always refunded in full.
+different parameters. Census top-ups carry no add-on and are always refunded in full.
 
 A census top-up paid **after** its draft was deleted — or one that raised nothing because
 another top-up moved the envelope off the amount it was priced from — bought nothing, so the
@@ -365,7 +405,7 @@ process metadata (a subscription's) is ignored.
 |---|---|---|
 | 40178 | 402 | publication requires payment (quote in data) |
 | 40175 | 402 | insufficient integrator wallet balance (required/available in data) |
-| 40176 | 422 | census above 50 000 — custom quote only |
+| 40176 | 422 | census above 50 000 — custom quote only, refused on every payment path |
 | 40177 | 409 | a payment is already processing or completed, or a session is completing |
 | 40178 | 402 | census growth beyond the paid price (`ProcessCensusGrowthQuote` in data) |
 
@@ -375,10 +415,13 @@ process metadata (a subscription's) is ignored.
 - `wallets` — one document per integrator (`_id` = org address).
 - `walletLedger` — append-only, unique index on `idempotencyKey`.
 - `votingProcesses` gains `addOns`; `organizations` gains `brandingPaidAt`,
-  `brandingClaimedBy` and `brandingClaimedAt`.
+  `brandingClaimedBy` and `brandingClaimedAt`, and `customUrlPaidAt`, `customUrlClaimedBy` and
+  `customUrlClaimedAt` (the once-per-organization custom URL, no migration: absent means unpaid).
 - `processPayments` also records `paymentIntentId` (what a refund is issued against),
   `chargeSubtotalCents`/`chargeTotalCents` (the first charge net and gross of VAT, to withhold
-  relied-on branding), `refundWithheldCents` (a delete's refund plan), `refundId`, `topUpSessions`
+  relied-on add-ons), `branding`/`customUrl` (which once-per-organization add-ons the payment
+  charged), `refundWithheldCents` and `refundWithheldAddOns` (a delete's refund plan), `refundId`,
+  `topUpSessions`
   (the census-headroom sessions already applied, last 50) and
   `topUpIntents` (their payment intents, never truncated — each is a charge a delete must
   refund).
@@ -425,7 +468,9 @@ Three layers, from hermetic to manual:
 
 - Census growth of a **published unpaid-tier** process is governed by plan quotas; a paid
   one is governed by its envelope, which `census/checkout` can raise.
-- Custom URL is priced per process but the underlying subdomain remains org-level.
+- Payments recorded before the custom URL became once per organization priced it per process
+  and do not record `customUrl`: they neither stamp the organization nor withhold or release it
+  on refund (accepted, stage data only).
 - Chargebacks are out of scope: a disputed payment is not reverted automatically. A refund
   Stripe reports as failed after the draft was deleted needs a human — the error log is the
   only signal, by design.

@@ -149,8 +149,8 @@ PID=$(curl -s $API/processes -H "$AUTH" -d '{
 ## 4. Quote and gate
 
 ```bash
-curl -s "$API/pricing?voters=2&signedCertificate=true" | jq          # public calculator: 4900
-curl -s $API/processes/$PID/price -H "$AUTH" | jq                    # the draft's quote: 4900
+curl -s "$API/pricing?voters=2&signedCertificate=true" | jq          # public calculator: 3900
+curl -s $API/processes/$PID/price -H "$AUTH" | jq                    # the draft's quote: 3900
 curl -s -X POST $API/processes/$PID/publish -H "$AUTH" | jq          # 402: publication requires payment
 ```
 
@@ -246,15 +246,19 @@ never what marks anything paid.
   gate re-prices whatever the edit produced, so an edit can only repair the draft. What is
   refused (409) is editing or deleting while a payment is `processing`, or deleting one
   whose Stripe session you just completed but whose webhook has not landed.
-- **Census headroom**: after publishing, `PUT /processes/{id}/census` with a few extra
-  members goes through (€5 rounding absorbs it); add enough to cross the next €5 step and
-  it answers 402 with `{totalCents, paidCents, dueCents, censusSize}`. Buy the difference
-  with `POST /processes/{id}/census/checkout -d '{"censusSize":<target>,"returnURL":"http://localhost:8000/checkout.html"}'`,
-  pay it with a test card, and the same `PUT` then lands. For a managed organization the
+- **Census headroom**: after publishing, `PUT /processes/{id}/census` with members that keep
+  the census inside the free tier (25) costs nothing more; past it every voter is priced
+  (€0.66 each in the first band), so the `PUT` answers 402 with
+  `{totalCents, paidCents, dueCents, censusSize}`. Buy the difference
+  with `POST /processes/{id}/census/checkout -d '{"censusSize":<target>,"returnURL":"http://localhost:8000/checkout.html"}'`
+  (a difference under €1 is charged the €1 minimum; the envelope still rises to the target
+  price only), pay it with a test card, and the same `PUT` then lands. For a managed organization the
   same call debits the integrator wallet instead and takes effect immediately.
 - **Refund on delete**: `DELETE /processes/{id}` on a paid *draft* refunds it first — the
   Stripe dashboard shows the refund with VAT included, the payment row survives as
-  `refunded`, and a branded organization can be charged for branding again afterwards. A
+  `refunded`, and an organization that paid branding or the custom URL with it can be charged
+  for them again afterwards (unless another process relies on one: then that add-on's price is
+  withheld from the refund and the organization keeps it). A
   wallet-paid draft credits the integrator wallet instead, visible as a `refund` row in
   `GET /wallet`. Note that a paid process normally publishes itself straight away, so a
   paid draft only exists when that automatic publication failed preflight (the org hitting

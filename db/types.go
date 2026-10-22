@@ -99,7 +99,7 @@ type Organization struct {
 	// BrandingPaidAt is when the once-per-organization branding add-on was paid; zero means unpaid.
 	BrandingPaidAt time.Time `json:"brandingPaidAt,omitzero" bson:"brandingPaidAt,omitempty"`
 	// BrandingClaimedBy is the one process allowed to charge branding before it is paid, so two
-	// drafts are not both charged (ClaimOrganizationBranding). omitempty: claim filters match
+	// drafts are not both charged (ClaimOrganizationAddOn). omitempty: claim filters match
 	// on absence. Never written by SetOrganization.
 	BrandingClaimedBy bson.ObjectID            `json:"-" bson:"brandingClaimedBy,omitempty"`
 	BrandingClaimedAt time.Time                `json:"-" bson:"brandingClaimedAt,omitempty"`
