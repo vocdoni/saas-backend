@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	stderrors "errors"
 	"net/http"
 
@@ -439,18 +440,23 @@ func voteNullifier(signedTx *models.SignedTx, vote *models.VoteEnvelope, pid int
 	return internal.HexBytes(state.GenerateNullifier(addr, pid))
 }
 
-// submitRelayVote builds the worker closure that relays one envelope: submit, wait for it
-// to be mined, and meter it. The returned voteID is the vote nullifier as assigned on chain.
+// submitRelayVote builds the worker closure that relays one envelope: submit (retrying
+// transient transport errors), wait for it to be mined, and meter it. The returned voteID is
+// the vote nullifier as assigned on chain.
 func (a *API) submitRelayVote(vote *parsedVote) func() (*db.JobResult, error) {
 	return func() (*db.JobResult, error) {
-		voteID, err := a.account.SubmitSignedTx(vote.payload)
+		voteID, relayedBefore, err := a.account.SubmitVote(context.Background(), vote.payload, vote.nullifier)
 		if err != nil {
 			return nil, err
 		}
 		// meter the relayed vote for billing/quota; best-effort, never fail the relay on a
-		// counter error. The quota itself is enforced at election publish, not here.
-		if err := a.db.IncrementOrganizationSentVotesCounter(vote.org); err != nil {
-			log.Errorw(err, "failed to increment org sent votes counter")
+		// counter error. The quota itself is enforced at election publish, not here. A vote
+		// this relay did not land itself (a re-relay of an envelope already on chain or in the
+		// mempool) is not metered again.
+		if !relayedBefore {
+			if err := a.db.IncrementOrganizationSentVotesCounter(vote.org); err != nil {
+				log.Errorw(err, "failed to increment org sent votes counter")
+			}
 		}
 		return &db.JobResult{
 			ProcessID: vote.processID,

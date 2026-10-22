@@ -380,3 +380,31 @@ func TestRelayVotesRejectsBatch(t *testing.T) {
 		})
 	}
 }
+
+// TestRelayVoteReRelay relays the same signed envelope twice: the second relay must not fail
+// (the vote is already on chain under its nullifier) and must not be metered again.
+func TestRelayVoteReRelay(t *testing.T) {
+	c := qt.New(t)
+	f := setupRelayVoting(t, 1)
+	processID := f.processIDs[0]
+	stx := testSignVoteTx(t, f.voter, processID, f.proofFor(t, processID), []byte("[\"1\"]"), nil)
+	relay := func() apicommon.JobResponse {
+		return enqueueAndPollJob(t, http.MethodPost, "", &apicommon.RelayVoteRequest{TxPayload: stx}, "vote")
+	}
+
+	first := relay()
+	c.Assert(first.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", first.Errors))
+	votes, err := f.client.ElectionVoteCount(processID.Bytes())
+	c.Assert(err, qt.IsNil)
+
+	again := relay()
+	c.Assert(again.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", again.Errors))
+	c.Assert(again.Result.VoteID, qt.DeepEquals, first.Result.VoteID)
+	votesAfter, err := f.client.ElectionVoteCount(processID.Bytes())
+	c.Assert(err, qt.IsNil)
+	c.Assert(votesAfter, qt.Equals, votes)
+
+	org, err := testDB.Organization(f.orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(org.Counters.SentVotes, qt.Equals, 1)
+}
