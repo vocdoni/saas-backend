@@ -1,17 +1,20 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
@@ -112,8 +115,12 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 //	@Summary		List voted participants of a voting process
 //	@Description	Manager/Admin lookup of organization members by a single field (email, phone,
 //	@Description	memberNumber, nationalId), intersected with the process census, reporting each
-//	@Description	matched member's per-question voted status. For `phone` pass the plaintext number;
-//	@Description	it is hashed server-side. Requires Manager/Admin of the owning organization.
+//	@Description	matched member's per-question vote status: hasSigned when the CSP signed the member's
+//	@Description	ballot (the vote may not be on chain), hasVoted only when the vote is on chain. In an
+//	@Description	anonymous (blind) census hasVoted is always false and hasSigned is the only signal. When
+//	@Description	the chain cannot be asked about a signed question the call fails with 500. For `phone`
+//	@Description	pass the plaintext number; it is hashed server-side. Requires Manager/Admin of the
+//	@Description	owning organization.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
@@ -126,7 +133,7 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 //	@Failure		400			{object}	errors.Error	"Invalid input data"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		404			{object}	errors.Error	"Process not found"
-//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		500			{object}	errors.Error	"Internal server error or blockchain request failed"
 //	@Failure		503			{object}	errors.Error	"Server busy hashing the phone, retry after Retry-After (50302)"
 //	@Router			/processes/{processId}/participants [get]
 func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Request) {
@@ -198,19 +205,26 @@ func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Re
 	for _, p := range participants {
 		participantIDs = append(participantIDs, p.ParticipantID)
 	}
-	// per-question voted status: each question is its own on-chain election, keyed by upstreamId.
-	votedByQuestion := make(map[string]map[string]bool, len(questions))
+	// per-question status: each question is its own on-chain election, keyed by upstreamId. One
+	// query fetches the CSP rows of every (question, matched member) pair; a missing pair is
+	// "not signed".
+	upstreamIDs := make([]internal.HexBytes, 0, len(questions))
 	for i := range questions {
-		q := &questions[i]
-		if len(q.UpstreamID) == 0 {
-			continue // question not yet on chain
+		if len(questions[i].UpstreamID) > 0 { // a question not yet on chain has no CSP rows
+			upstreamIDs = append(upstreamIDs, questions[i].UpstreamID)
 		}
-		voted, err := a.db.MembersWithUsedCSPProcess(q.UpstreamID, participantIDs)
-		if err != nil {
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
-		}
-		votedByQuestion[q.ID.Hex()] = voted
+	}
+	rows, err := a.db.CSPProcessesByMembers(upstreamIDs, participantIDs)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	statuses, err := a.resolveVoteStatuses(r.Context(), rows)
+	if err != nil {
+		// a vote the chain could not be asked about is not a hasVoted=false
+		log.Warnw("vote status lookup failed", "processId", oid.Hex(), "error", err)
+		errors.ErrVochainRequestFailed.Write(w)
+		return
 	}
 	for _, p := range participants {
 		m, exists := membersByID[p.ParticipantID]
@@ -229,15 +243,46 @@ func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Re
 			if len(q.UpstreamID) == 0 {
 				continue
 			}
+			st := statuses[voteStatusKey(m.ID.Hex(), q.UpstreamID.String())]
 			entry.Questions = append(entry.Questions, apicommon.ProcessParticipantQuestionVote{
 				QuestionID: q.ID.Hex(),
 				UpstreamID: q.UpstreamID,
-				HasVoted:   votedByQuestion[q.ID.Hex()][m.ID.Hex()],
+				HasSigned:  st.signed,
+				HasVoted:   st.voted,
 			})
 		}
 		resp.Participants = append(resp.Participants, entry)
 	}
 	apicommon.HTTPWriteJSON(w, resp)
+}
+
+// voteStatus is a member's resolved status on one election (see handlers.ResolveVoteStatus).
+type voteStatus struct{ signed, voted bool }
+
+// voteStatusKey keys a voteStatus by member id hex and election (upstream) id hex.
+func voteStatusKey(memberID, upstreamID string) string { return memberID + "/" + upstreamID }
+
+// resolveVoteStatuses resolves every CSP row concurrently (one goroutine per row; only uncached,
+// non-blind rows reach the chain, through the semaphore-bounded lookup). Any failed lookup fails
+// the whole call.
+func (a *API) resolveVoteStatuses(ctx context.Context, rows []db.CSPProcess) (map[string]voteStatus, error) {
+	results := make([]voteStatus, len(rows))
+	errs := make([]error, len(rows))
+	var wg sync.WaitGroup
+	for i := range rows {
+		wg.Go(func() {
+			results[i].signed, results[i].voted, errs[i] = handlers.ResolveVoteStatus(ctx, a.db, a.voteOnChain, &rows[i])
+		})
+	}
+	wg.Wait()
+	if err := stderrors.Join(errs...); err != nil {
+		return nil, err
+	}
+	statuses := make(map[string]voteStatus, len(rows))
+	for i := range rows {
+		statuses[voteStatusKey(rows[i].UserID.String(), rows[i].ProcessID.String())] = results[i]
+	}
+	return statuses, nil
 }
 
 // updateVotingProcessCensusHandler godoc

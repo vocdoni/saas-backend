@@ -212,24 +212,47 @@ func TestProcessCSP(t *testing.T) {
 	c.Assert(bytes.Equal(signInfo.Consumed[0].Address, voter.Address().Bytes()), qt.IsTrue)
 	c.Assert(signInfo.Consumed[0].Nullifier, qt.Not(qt.HasLen), 0)
 
-	// participants (manager): member 0 matched by email, voted only the open election
-	pc := requestAndParse[apicommon.ProcessParticipantsResponse](t, http.MethodGet, token, nil,
-		"processes", pid, "participants?field="+string(db.OrgMemberLookupFieldEmail)+"&value="+members[0].Email)
-	c.Assert(pc.Participants, qt.HasLen, 1)
-	c.Assert(pc.Participants[0].MemberID, qt.Equals, members[0].ID)
-	votedOpen := false
-	for _, qv := range pc.Participants[0].Questions {
-		if bytes.Equal(qv.UpstreamID, openElection) {
-			c.Assert(qv.HasVoted, qt.IsTrue)
-			votedOpen = true
-		} else {
-			c.Assert(qv.HasVoted, qt.IsFalse)
+	// participants (manager): member 0 matched by email. Per question: (hasSigned, hasVoted).
+	participantsPath := "participants?field=" + string(db.OrgMemberLookupFieldEmail) + "&value=" + members[0].Email
+	assertParticipant := func(openSigned, openVoted bool) {
+		t.Helper()
+		pc := requestAndParse[apicommon.ProcessParticipantsResponse](t, http.MethodGet, token, nil,
+			"processes", pid, participantsPath)
+		c.Assert(pc.Participants, qt.HasLen, 1)
+		c.Assert(pc.Participants[0].MemberID, qt.Equals, members[0].ID)
+		c.Assert(pc.Participants[0].Questions, qt.HasLen, 2)
+		for _, qv := range pc.Participants[0].Questions {
+			if bytes.Equal(qv.UpstreamID, openElection) {
+				c.Assert(qv.HasSigned, qt.Equals, openSigned)
+				c.Assert(qv.HasVoted, qt.Equals, openVoted)
+			} else {
+				c.Assert(qv.HasSigned, qt.IsFalse)
+				c.Assert(qv.HasVoted, qt.IsFalse)
+			}
 		}
 	}
-	c.Assert(votedOpen, qt.IsTrue)
+	// signed but not relayed: the CSP signature is not a vote
+	assertParticipant(true, false)
+
+	// AC5b: a signed row the chain cannot be asked about fails the call, never reads as not voted
+	failVoteLookup(signInfo.Consumed[0].Nullifier)
+	requestAndAssertError(errors.ErrVochainRequestFailed, t, http.MethodGet, token, nil,
+		"processes", pid, participantsPath)
+	unfailVoteLookup(signInfo.Consumed[0].Nullifier)
+
+	// once the vote is mined, hasVoted flips to true (and stays, now from the cached flag)
+	testCastVote(t, testNewVocdoniClient(t), &voter, openElection,
+		testGenerateVoteProof(openElection, voter.Address().Bytes(), sign0.Signature, 1), []byte("[\"1\"]"))
+	assertParticipant(true, true)
+	check0 = requestAndParse[handlers.ProcessCheckResponse](t, http.MethodPost, "",
+		&handlers.CheckMembershipRequest{AuthToken: tok0}, "processes", pid, "check")
+	for _, q := range check0.Questions {
+		voted := bytes.Equal(q.UpstreamID, openElection)
+		c.Assert(q.HasSigned, qt.Equals, voted)
+		c.Assert(q.HasVoted, qt.Equals, voted)
+	}
 	// the participant lookup is Manager/Admin only
-	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodGet, "", nil,
-		"processes", pid, "participants?field="+string(db.OrgMemberLookupFieldEmail)+"&value="+members[0].Email)
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodGet, "", nil, "processes", pid, participantsPath)
 
 	// --- second member: authenticates but is not eligible for the restricted question ---
 	tok1 := authProcessCSP(t, pid, authReq(1))

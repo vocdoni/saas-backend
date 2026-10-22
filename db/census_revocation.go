@@ -150,8 +150,7 @@ func (ms *MongoStorage) OngoingQuestionsByCensuses(censusIDs []string) ([]Voting
 // direction for a guard, but it means the answer must never be reported to a user as "already
 // voted".
 //
-// MembersWithUsedCSPProcess answers the same question one round trip per id and is kept for the
-// participants endpoint.
+// CSPProcessesByMembers returns the rows themselves, for callers that need more than the flag.
 func (ms *MongoStorage) MembersWithUsedCSPProcesses(
 	processIDs []internal.HexBytes,
 	memberIDs []string,

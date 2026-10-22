@@ -446,6 +446,12 @@ func TestMain(m *testing.M) {
 // VoteOnChainLookup). Keyed per nullifier so parallel tests do not see each other's failures.
 var failingVoteLookups sync.Map
 
+// failVoteLookup makes every on-chain lookup of the given nullifier fail until unfailVoteLookup.
+func failVoteLookup(nullifier []byte) { failingVoteLookups.Store(string(nullifier), struct{}{}) }
+
+// unfailVoteLookup undoes failVoteLookup.
+func unfailVoteLookup(nullifier []byte) { failingVoteLookups.Delete(string(nullifier)) }
+
 // request sends a request to the API service and returns the response body and status code.
 // The body is expected to be a JSON object or null.
 // If jwt is not empty, it will be sent as a Bearer token.
