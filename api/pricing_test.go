@@ -20,7 +20,9 @@ func TestPublicPricing(t *testing.T) {
 
 	// spec examples, unauthenticated
 	c.Assert(price("?voters=600").TotalCents, qt.Equals, pricing.Cents(29_000))
-	c.Assert(price("?voters=10000&emailTwoFA=true").TotalCents, qt.Equals, pricing.Cents(152_000))
+	// the public calculator prices a standard organization: email 2FA is free, SMS is €0.05 per voter
+	c.Assert(price("?voters=10000&emailTwoFA=true").TotalCents, qt.Equals, pricing.Cents(142_000))
+	c.Assert(price("?voters=10000&smsTwoFA=true").TotalCents, qt.Equals, pricing.Cents(192_000))
 	c.Assert(price("?voters=25").TotalCents, qt.Equals, pricing.Cents(0))
 	c.Assert(price("?voters=26").TotalCents, qt.Equals, pricing.Cents(2_000))
 	// flat add-ons bill even in the free tier; per-voter ones do not

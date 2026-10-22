@@ -4777,11 +4777,11 @@ paths:
         name: voters
         required: true
         type: integer
-      - description: Email 2FA add-on
+      - description: Email 2FA add-on (free for standard organizations)
         in: query
         name: emailTwoFA
         type: boolean
-      - description: SMS 2FA add-on
+      - description: SMS 2FA add-on (€0.05 per voter)
         in: query
         name: smsTwoFA
         type: boolean

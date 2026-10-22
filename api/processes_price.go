@@ -190,8 +190,8 @@ func (a *API) releaseDroppedCheckoutClaim(vp *db.VotingProcess, org *db.Organiza
 //	@Tags			processes
 //	@Produce		json
 //	@Param			voters				query		int		true	"Eligible voters (census size), at least 1"
-//	@Param			emailTwoFA			query		bool	false	"Email 2FA add-on"
-//	@Param			smsTwoFA			query		bool	false	"SMS 2FA add-on"
+//	@Param			emailTwoFA			query		bool	false	"Email 2FA add-on (free for standard organizations)"
+//	@Param			smsTwoFA			query		bool	false	"SMS 2FA add-on (€0.05 per voter)"
 //	@Param			signedCertificate	query		bool	false	"Signed results certificate add-on"
 //	@Param			customUrl			query		bool	false	"Custom URL add-on"
 //	@Param			branding			query		bool	false	"Branding / white label add-on"
