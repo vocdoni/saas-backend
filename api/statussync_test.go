@@ -8,6 +8,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/csp/signers/electionkey"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/statussync"
@@ -29,7 +30,7 @@ func newSyncTestElection(
 			EntityId:      orgAddress.Bytes(),
 			Duration:      600,
 			Status:        models.ProcessStatus_READY,
-			CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA,
+			CensusOrigin:  electionkey.OriginECDSA,
 			CensusRoot:    censusRoot,
 			MaxCensusSize: 10,
 			EnvelopeType:  &models.EnvelopeType{Anonymous: false, CostFromWeight: false},

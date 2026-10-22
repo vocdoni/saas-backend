@@ -23,6 +23,8 @@ import (
 type Account struct {
 	client *apiclient.HTTPclient
 	signer *ethereum.SignKeys
+	// endpoint is the Vochain API base URL, for the requests apiclient cannot build (query strings).
+	endpoint string
 
 	PubKey            internal.HexBytes `swaggertype:"string" format:"hex" example:"deadbeef"`
 	TxCosts           map[models.TxType]uint64
@@ -72,6 +74,7 @@ func New(privateKey string, apiEndpoint string) (*Account, error) {
 	return &Account{
 		client:            apiClient,
 		signer:            &signer,
+		endpoint:          apiEndpoint,
 		PubKey:            internal.HexBytes(signer.PublicKey()),
 		TxCosts:           txCosts,
 		ElectionPriceCalc: electionPriceCalc,

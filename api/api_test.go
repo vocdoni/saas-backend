@@ -313,12 +313,24 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	defer testDB.Close()
-	// start an in-process voconed chain (built from the pinned dvote dep, so it always
-	// includes the batch-transaction endpoint the /processes publish path relies on)
-	voconed, err := test.SharedVoconed()
+	// build the vochain-sequencer voconed pinned by test/sequencer and start the chain the API
+	// publishes on
+	binDir, err := os.MkdirTemp("", "voconed-bin-*")
 	if err != nil {
 		panic(err)
 	}
+	defer func() { _ = os.RemoveAll(binDir) }()
+	voconedBin, err := test.BuildVoconed(ctx, binDir)
+	if err != nil {
+		panic(err)
+	}
+	voconed, err := test.StartVoconed(test.VoconedConfig{
+		Binary: voconedBin, ChainID: "test-vocone",
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer voconed.Close()
 	// set the test API endpoint global variable
 	testAPIEndpoint = voconed.Endpoint
 	// start test mail server
@@ -723,21 +735,24 @@ func fetchCSPUserWeight(t *testing.T, pid string, authToken internal.HexBytes) i
 	return weightResp.Weight
 }
 
-// testCSPSign signs a payload with the CSP for the question election processID of the voting
-// process pid, using the given auth token. It returns the signature.
+// testCSPSign signs a payload with the CSP for the OFF_CHAIN_CA_V3_ECDSA question election
+// processID of the voting process pid, using the given auth token. It returns the signature.
 func testCSPSign(t *testing.T, pid string, authToken, processID, payload internal.HexBytes) internal.HexBytes {
 	t.Helper()
-	c := qt.New(t)
+	return testCSPSignProof(t, pid, &handlers.SignRequest{
+		AuthToken: authToken, ProcessID: processID, Payload: hex.EncodeToString(payload),
+	}, models.ProofCA_ECDSA)
+}
 
-	// Sign with the verified token
-	signReq := &handlers.SignRequest{
-		AuthToken: authToken,
-		ProcessID: processID,
-		Payload:   hex.EncodeToString(payload),
-	}
+// testCSPSignProof sends signReq to the sign endpoint of the voting process pid, asserts the
+// response names wantType as the proof type, and returns the signature.
+func testCSPSignProof(t *testing.T, pid string, signReq *handlers.SignRequest, wantType models.ProofCA_Type,
+) internal.HexBytes {
+	t.Helper()
+	c := qt.New(t)
 	signResp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", signReq, "processes", pid, "sign")
 	c.Assert(signResp.Signature, qt.Not(qt.Equals), "", qt.Commentf("signature is empty"))
-
+	c.Assert(signResp.ProofType, qt.Equals, wantType.String())
 	t.Logf("Received signature: %s", signResp.Signature.String())
 	return signResp.Signature
 }
@@ -748,7 +763,7 @@ func testAuthenthicateAndVote(t *testing.T, vocdoniClient *apiclient.HTTPclient,
 	t.Helper()
 	c := qt.New(t)
 
-	votesBefore, err := vocdoniClient.ElectionVoteCount(processID.Bytes())
+	votesBefore, err := electionVoteCount(vocdoniClient, processID)
 	c.Assert(err, qt.IsNil)
 
 	// Create the voting address for the first user
@@ -785,7 +800,7 @@ func testAuthenthicateAndVote(t *testing.T, vocdoniClient *apiclient.HTTPclient,
 	t.Logf("Vote cast successfully with nullifier: %x", nullifier)
 
 	// Verify the vote was counted
-	votesAfter, err := vocdoniClient.ElectionVoteCount(processID.Bytes())
+	votesAfter, err := electionVoteCount(vocdoniClient, processID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(votesAfter, qt.Equals, votesBefore+1, qt.Commentf("expected 1 more vote, got %d", votesAfter))
 }
@@ -824,13 +839,23 @@ func postProcessAuth1(t *testing.T, pid string, request *handlers.AuthChallengeR
 	return resp.AuthToken
 }
 
-// testGenerateVoteProof generates a vote proof with the given signature, process ID, and voter address.
-// It returns the proof.
+// electionVoteCount returns the number of votes the chain has indexed for an election, as reported
+// by GET /elections/{electionId}.
+func electionVoteCount(client *apiclient.HTTPclient, electionID internal.HexBytes) (uint64, error) {
+	election, err := client.Election(electionID.Bytes())
+	if err != nil {
+		return 0, err
+	}
+	return election.VoteCount, nil
+}
+
+// testGenerateVoteProof generates the OFF_CHAIN_CA_V3_ECDSA vote proof of a CSP signature for the
+// given election and voter address. It returns the proof.
 func testGenerateVoteProof(processID, voterAddr, signature internal.HexBytes, weight uint64) *models.Proof {
 	return &models.Proof{
 		Payload: &models.Proof_Ca{
 			Ca: &models.ProofCA{
-				Type:      models.ProofCA_ECDSA_PIDSALTED,
+				Type:      models.ProofCA_ECDSA,
 				Signature: signature,
 				Bundle: &models.CAbundle{
 					ProcessId:  processID,

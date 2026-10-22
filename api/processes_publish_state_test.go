@@ -35,7 +35,9 @@ func TestPartiallyPublishedDraftIsImmutable(t *testing.T) {
 
 	// simulate a publish that mined the first question's election and then failed
 	upstream := internal.HexBytes(randomProcessID())
-	c.Assert(testDB.SetQuestionPublished(questions[0].ID, upstream, "url", db.QuestionStatusReady), qt.IsNil)
+	c.Assert(testDB.SetQuestionPublished(db.QuestionPublishedParams{
+		ID: questions[0].ID, UpstreamID: upstream, MetadataURL: "url", Status: db.QuestionStatusReady,
+	}), qt.IsNil)
 
 	// a draft update is refused: it would replace the questions and erase the mined id
 	edit := newVotingProcessRequest(orgAddress, ids)
@@ -80,9 +82,10 @@ func TestStatusChangeNoOpAndPerQuestionOutcomes(t *testing.T) {
 	// mark both questions published directly; the upstream ids are fake, so any transition that
 	// actually reaches the chain is rejected there — exactly what the mixed batch below needs.
 	for i := range questions {
-		c.Assert(testDB.SetQuestionPublished(
-			questions[i].ID, internal.HexBytes(randomProcessID()), "url", db.QuestionStatusReady,
-		), qt.IsNil)
+		c.Assert(testDB.SetQuestionPublished(db.QuestionPublishedParams{
+			ID: questions[i].ID, UpstreamID: internal.HexBytes(randomProcessID()), MetadataURL: "url",
+			Status: db.QuestionStatusReady,
+		}), qt.IsNil)
 	}
 
 	// everything already READY: asking for READY is a completed job of no-ops, chain untouched

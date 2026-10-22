@@ -45,9 +45,6 @@ filippo.io/bigmod v0.1.1-0.20260103110540-f8a47775ebe5 h1:JA0fFr+kxpqTdxR9LOBiTW
 filippo.io/bigmod v0.1.1-0.20260103110540-f8a47775ebe5/go.mod h1:OjOXDNlClLblvXdwgFFOQFJEocLhhtai8vGLy0JCZlI=
 filippo.io/keygen v1.0.0 h1:u0/Fhxlgz3uPv+XxhfgTq3BJt5VesIPM5ue/OuG7qjQ=
 filippo.io/keygen v1.0.0/go.mod h1:9nnw1SlYHYuPSo/3wjQzNjSbeHlq2NsKo5iEtfJPWP0=
-git.sr.ht/~sircmpwn/getopt v0.0.0-20191230200459-23622cc906b3/go.mod h1:wMEGFFFNuPos7vHmWXfszqImLppbc0wEhh6JBfJIUgw=
-git.sr.ht/~sircmpwn/go-bare v0.0.0-20210406120253-ab86bc2846d9 h1:Ahny8Ud1LjVMMAlt8utUFKhhxJtwBAualvsbc/Sk7cE=
-git.sr.ht/~sircmpwn/go-bare v0.0.0-20210406120253-ab86bc2846d9/go.mod h1:BVJwbDfVjCjoFiKrhkei6NdGcZYpkDkdyCdg1ukytRA=
 github.com/766b/chi-prometheus v0.0.0-20211217152057-87afa9aa2ca8 h1:hK1G69lDhhrGqJbRA5i1rmT2KI/W77MSdr7hEGHqWdQ=
 github.com/766b/chi-prometheus v0.0.0-20211217152057-87afa9aa2ca8/go.mod h1:X/LhbmoBoRu8TxoGIOIraVNhfz3hhikJoaelrOuhdPY=
 github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6 h1:He8afgbRMd7mFxO99hRNu+6tazq8nFF9lIwo9JFroBk=
