@@ -37,6 +37,8 @@ var (
 	ErrManagedQuotaReached = fmt.Errorf("integrator managed quota reached")
 	// ErrMaxSubOrgsReached is returned when the organization's plan allows no more suborganizations.
 	ErrMaxSubOrgsReached = fmt.Errorf("max suborganizations reached")
+	// ErrMaxUsersReached is returned when the organization's plan allows no more users.
+	ErrMaxUsersReached = fmt.Errorf("max users reached")
 )
 
 // errorsAsStrings converts a slice of errors to a slice of strings

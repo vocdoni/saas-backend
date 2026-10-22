@@ -448,7 +448,7 @@ func (ms *MongoStorage) IncrementOrganizationUsersCounter(address common.Address
 	}
 
 	if org.Counters.Users >= plan.Organization.Users {
-		return fmt.Errorf("max users reached (%d >= %d)", org.Counters.Users, plan.Organization.Users)
+		return fmt.Errorf("%w (%d >= %d)", ErrMaxUsersReached, org.Counters.Users, plan.Organization.Users)
 	}
 
 	return ms.addToOrganizationCounter(address, "users", 1)

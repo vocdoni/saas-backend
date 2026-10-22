@@ -146,6 +146,10 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 
 	// all pre-checks OK, now update the org users counter
 	if err := a.db.IncrementOrganizationUsersCounter(org.Address); err != nil {
+		if errors.Is(err, db.ErrMaxUsersReached) {
+			errors.ErrMaxUsersReached.Write(w)
+			return
+		}
 		errors.ErrGenericInternalServerError.Withf("increment users: %v", err).Write(w)
 		return
 	}
