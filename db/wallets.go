@@ -194,7 +194,8 @@ func (ms *MongoStorage) WalletLedger(
 		return 0, nil, ErrInvalidData
 	}
 	return paginatedDocuments[WalletLedgerEntry](ms.walletLedger, page, limit,
-		bson.M{"orgAddress": orgAddress}, options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}))
+		// _id breaks createdAt ties: two rows written in the same millisecond keep insertion order
+		bson.M{"orgAddress": orgAddress}, options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}}))
 }
 
 // appendWalletLedger inserts one audit row; a replayed key is dropped by the unique index.
