@@ -59,12 +59,18 @@ func (a *API) refusePaymentLocked(w http.ResponseWriter, oid bson.ObjectID, also
 	return false
 }
 
-// refuseBrandingAfterPayment refuses an edit that turns the branding add-on on for a draft
-// already paid without it, writing the refusal. A paid process's branding is fixed by its
-// payment (processQuote), and there is no endpoint that sells the €149 afterwards. Free
-// branding — the organization already paid it — changes no price and is let through.
-func (a *API) refuseBrandingAfterPayment(w http.ResponseWriter, vp *db.VotingProcess, addOns db.ProcessAddOns) bool {
-	if !addOns.Branding || vp.AddOns.Branding {
+// refuseOrgAddOnsAfterPayment refuses an edit that turns a once-per-organization add-on on for a
+// draft already paid without it, writing the refusal. A paid process's once-per-organization
+// add-ons are fixed by its payment (processQuote), and there is no endpoint that sells one
+// afterwards. An add-on the organization already paid changes no price and is let through.
+func (a *API) refuseOrgAddOnsAfterPayment(w http.ResponseWriter, vp *db.VotingProcess, addOns db.ProcessAddOns) bool {
+	var added []db.OrgAddOn
+	for _, addOn := range db.OrgAddOns {
+		if addOns.Has(addOn) && !vp.AddOns.Has(addOn) {
+			added = append(added, addOn)
+		}
+	}
+	if len(added) == 0 {
 		return false
 	}
 	payment, err := a.db.ProcessPayment(vp.ID)
@@ -75,7 +81,7 @@ func (a *API) refuseBrandingAfterPayment(w http.ResponseWriter, vp *db.VotingPro
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return true
 	}
-	if payment.Status != db.ProcessPaymentPaid || payment.Branding {
+	if payment.Status != db.ProcessPaymentPaid {
 		return false
 	}
 	org, err := a.db.Organization(vp.OrgAddress)
@@ -83,12 +89,14 @@ func (a *API) refuseBrandingAfterPayment(w http.ResponseWriter, vp *db.VotingPro
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return true
 	}
-	if !org.BrandingPaidAt.IsZero() {
-		return false
+	for _, addOn := range added {
+		if !payment.Charged(addOn) && org.AddOnPaidAt(addOn).IsZero() {
+			errors.ErrPaymentSessionConflict.
+				Withf("the draft is paid without %s, which cannot be added after payment", addOn).Write(w)
+			return true
+		}
 	}
-	errors.ErrPaymentSessionConflict.
-		Withf("the draft is paid without branding, which cannot be added after payment").Write(w)
-	return true
+	return false
 }
 
 // createProcessCheckoutHandler godoc
@@ -149,7 +157,7 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 	}
 	// Checkout takes the claim publish, cancel and delete take, until its pending payment is
 	// stored. A draft being published is priced already; a cancel landing between the claim
-	// refresh below and that write would release the branding claim of the session it stores; a
+	// refresh below and that write would release the add-on claims of the session it stores; a
 	// delete would drop the draft and leave a payable payment behind for a process that is gone.
 	// Winning the claim proves the draft is still an unpublished draft, so it is re-read under it.
 	claimed, err := a.db.ClaimVotingProcessForPublish(oid)
@@ -184,20 +192,20 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 		writeSubscriptionError(w, err)
 		return
 	}
-	// win the branding claim before the session is priced, so the amount the customer is
+	// win the add-on claims before the session is priced, so the amount the customer is
 	// asked to pay is the amount this process is entitled to charge
-	quote, claimedAt, err := a.claimBrandingForPayment(vp, org, &input)
+	quote, claims, err := a.claimOrgAddOnsForPayment(vp, org, &input)
 	if err != nil {
-		a.releaseRefusedBrandingClaim(vp, claimedAt)
+		a.releaseRefusedOrgAddOnClaims(vp, claims)
 		writeSubscriptionError(w, err)
 		return
 	}
-	// every refusal below leaves no payment behind the claim, so it is given back; only a
-	// session the stored payment references keeps it
+	// every refusal below leaves no payment behind the claims, so they are given back; only a
+	// session the stored payment references keeps them
 	kept := false
 	defer func() {
 		if !kept {
-			a.releaseRefusedBrandingClaim(vp, claimedAt)
+			a.releaseRefusedOrgAddOnClaims(vp, claims)
 		}
 	}()
 	if quote.QuoteRequired {
@@ -298,6 +306,7 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 		Currency:          "eur",
 		RequestedBy:       user.Email,
 		Branding:          input.Branding,
+		CustomURL:         input.CustomURL,
 	}, previousSessionID)
 	if err != nil || !stored {
 		// the session exists but nothing references it: expire it so it can never be
@@ -389,7 +398,7 @@ func (a *API) processCheckoutStatusHandler(w http.ResponseWriter, r *http.Reques
 //
 //	@Summary		Cancel the open checkout of a voting process
 //	@Description	Expires the draft's open Stripe checkout session so it can no longer be paid, and
-//	@Description	returns the payment to failed — which also releases a branding add-on the checkout
+//	@Description	returns the payment to failed — which also releases the add-on claims the checkout
 //	@Description	claimed. It is how a draft that became free while a checkout was open is published
 //	@Description	(publish refuses it with 409 while the session is payable); a priced draft can
 //	@Description	simply start a new checkout. Idempotent: an already failed payment answers 200.
@@ -437,7 +446,7 @@ func (a *API) cancelProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 		// already cancelled, or expired on its own
 	case db.ProcessPaymentPending:
 		// cancel takes the claim checkout takes, so a checkout of this draft cannot store a new
-		// session — and take the branding claim for it — between the reads below and the release
+		// session — and take the add-on claims for it — between the reads below and the release
 		claimed, err := a.db.ClaimVotingProcessForPublish(oid)
 		if err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)

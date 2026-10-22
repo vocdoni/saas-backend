@@ -23,7 +23,7 @@ func TestSetOrganizationBrandingPaid(t *testing.T) {
 
 	// first payment stamps it
 	first := time.Now().UTC().Truncate(time.Millisecond)
-	set, err := testDB.SetOrganizationBrandingPaid(testOrgAddress, first)
+	set, err := testDB.SetOrganizationAddOnPaid(testOrgAddress, OrgAddOnBranding, first)
 	c.Assert(err, qt.IsNil)
 	c.Assert(set, qt.IsTrue)
 	org, err = testDB.Organization(testOrgAddress)
@@ -32,7 +32,7 @@ func TestSetOrganizationBrandingPaid(t *testing.T) {
 
 	// a second payment does not re-stamp (reports false) and does not move the timestamp
 	stamped := org.BrandingPaidAt
-	set, err = testDB.SetOrganizationBrandingPaid(testOrgAddress, time.Now().Add(time.Hour))
+	set, err = testDB.SetOrganizationAddOnPaid(testOrgAddress, OrgAddOnBranding, time.Now().Add(time.Hour))
 	c.Assert(err, qt.IsNil)
 	c.Assert(set, qt.IsFalse)
 	org, err = testDB.Organization(testOrgAddress)
@@ -40,7 +40,7 @@ func TestSetOrganizationBrandingPaid(t *testing.T) {
 	c.Assert(org.BrandingPaidAt.Equal(stamped), qt.IsTrue)
 
 	// invalid inputs are rejected
-	_, err = testDB.SetOrganizationBrandingPaid(testAnotherOrgAddress, time.Time{})
+	_, err = testDB.SetOrganizationAddOnPaid(testAnotherOrgAddress, OrgAddOnBranding, time.Time{})
 	c.Assert(err, qt.ErrorIs, ErrInvalidData)
 }
 
@@ -61,7 +61,7 @@ func TestClaimOrganizationBrandingConcurrent(t *testing.T) {
 		wg.Go(func() {
 			// every claimant observed an unclaimed organization, as they all read it before
 			// any of them wrote
-			won[i], errs[i] = testDB.ClaimOrganizationBranding(testOrgAddress, ids[i], bson.NilObjectID)
+			won[i], errs[i] = claimAddOn(OrgAddOnBranding, ids[i], bson.NilObjectID)
 		})
 	}
 	wg.Wait()
@@ -82,7 +82,7 @@ func TestClaimOrganizationBrandingConcurrent(t *testing.T) {
 	winner := org.BrandingClaimedBy
 	c.Assert(winner, qt.Not(qt.Equals), bson.NilObjectID)
 	c.Assert(org.BrandingClaimedAt.IsZero(), qt.IsFalse)
-	again, err := testDB.ClaimOrganizationBranding(testOrgAddress, winner, bson.NilObjectID)
+	again, err := claimAddOn(OrgAddOnBranding, winner, bson.NilObjectID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(again.IsZero(), qt.IsFalse)
 }
@@ -95,44 +95,44 @@ func TestClaimOrganizationBrandingTakeover(t *testing.T) {
 	c.Assert(testDB.SetOrganization(&Organization{Address: testOrgAddress}), qt.IsNil)
 
 	first, second, third := bson.NewObjectID(), bson.NewObjectID(), bson.NewObjectID()
-	won, err := testDB.ClaimOrganizationBranding(testOrgAddress, first, bson.NilObjectID)
+	won, err := claimAddOn(OrgAddOnBranding, first, bson.NilObjectID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(won.IsZero(), qt.IsFalse)
 
 	// a caller that observed no claim at all cannot take over a claimed one
-	won, err = testDB.ClaimOrganizationBranding(testOrgAddress, second, bson.NilObjectID)
+	won, err = claimAddOn(OrgAddOnBranding, second, bson.NilObjectID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(won.IsZero(), qt.IsTrue)
 
 	// a fresh claim is not taken over even by a caller that observed it: its claimant may be
 	// between refreshing the claim and storing the payment that backs it
-	won, err = testDB.ClaimOrganizationBranding(testOrgAddress, second, first)
+	won, err = claimAddOn(OrgAddOnBranding, second, first)
 	c.Assert(err, qt.IsNil)
 	c.Assert(won.IsZero(), qt.IsTrue)
 
 	// once stale, second takes over first's claim, which it observed and judged releasable
-	restore := BrandingClaimStaleAfter
-	BrandingClaimStaleAfter = -time.Minute
-	defer func() { BrandingClaimStaleAfter = restore }()
-	won, err = testDB.ClaimOrganizationBranding(testOrgAddress, second, first)
+	restore := OrgAddOnClaimStaleAfter
+	OrgAddOnClaimStaleAfter = -time.Minute
+	defer func() { OrgAddOnClaimStaleAfter = restore }()
+	won, err = claimAddOn(OrgAddOnBranding, second, first)
 	c.Assert(err, qt.IsNil)
 	c.Assert(won.IsZero(), qt.IsFalse)
 
 	// third observed the same releasable claim but lost the race to second: its CAS no
 	// longer matches, which is what stops both from being charged
-	won, err = testDB.ClaimOrganizationBranding(testOrgAddress, third, first)
+	won, err = claimAddOn(OrgAddOnBranding, third, first)
 	c.Assert(err, qt.IsNil)
 	c.Assert(won.IsZero(), qt.IsTrue)
 
 	// once the organization has paid branding, nothing can claim it again
-	stamped, err := testDB.SetOrganizationBrandingPaid(testOrgAddress, time.Now())
+	stamped, err := testDB.SetOrganizationAddOnPaid(testOrgAddress, OrgAddOnBranding, time.Now())
 	c.Assert(err, qt.IsNil)
 	c.Assert(stamped, qt.IsTrue)
-	won, err = testDB.ClaimOrganizationBranding(testOrgAddress, second, second)
+	won, err = claimAddOn(OrgAddOnBranding, second, second)
 	c.Assert(err, qt.IsNil)
 	c.Assert(won.IsZero(), qt.IsTrue)
 
-	_, err = testDB.ClaimOrganizationBranding(testOrgAddress, bson.NilObjectID, bson.NilObjectID)
+	_, err = claimAddOn(OrgAddOnBranding, bson.NilObjectID, bson.NilObjectID)
 	c.Assert(err, qt.ErrorIs, ErrInvalidData)
 }
 
@@ -148,34 +148,34 @@ func TestReleaseOrganizationBrandingClaim(t *testing.T) {
 		return org.BrandingClaimedBy
 	}
 
-	first, err := testDB.ClaimOrganizationBranding(testOrgAddress, claimant, bson.NilObjectID)
+	first, err := claimAddOn(OrgAddOnBranding, claimant, bson.NilObjectID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(first.IsZero(), qt.IsFalse)
 	time.Sleep(2 * time.Millisecond)
-	refreshed, err := testDB.ClaimOrganizationBranding(testOrgAddress, claimant, claimant)
+	refreshed, err := claimAddOn(OrgAddOnBranding, claimant, claimant)
 	c.Assert(err, qt.IsNil)
 	c.Assert(refreshed.After(first), qt.IsTrue)
 
 	// the first attempt's release no longer matches: the refresh belongs to another attempt
-	c.Assert(testDB.ReleaseOrganizationBrandingClaim(testOrgAddress, claimant, first), qt.IsNil)
+	c.Assert(releaseAddOnClaim(OrgAddOnBranding, claimant, first), qt.IsNil)
 	c.Assert(claimedBy(), qt.Equals, claimant)
 	// nor does another process's
-	c.Assert(testDB.ReleaseOrganizationBrandingClaim(testOrgAddress, bson.NewObjectID(), refreshed), qt.IsNil)
+	c.Assert(releaseAddOnClaim(OrgAddOnBranding, bson.NewObjectID(), refreshed), qt.IsNil)
 	c.Assert(claimedBy(), qt.Equals, claimant)
 	// the attempt that wrote it releases it, and the add-on is claimable again
-	c.Assert(testDB.ReleaseOrganizationBrandingClaim(testOrgAddress, claimant, refreshed), qt.IsNil)
+	c.Assert(releaseAddOnClaim(OrgAddOnBranding, claimant, refreshed), qt.IsNil)
 	c.Assert(claimedBy(), qt.Equals, bson.NilObjectID)
 
 	// a paid add-on is never released by an abandoned attempt
-	claimedAt, err := testDB.ClaimOrganizationBranding(testOrgAddress, claimant, bson.NilObjectID)
+	claimedAt, err := claimAddOn(OrgAddOnBranding, claimant, bson.NilObjectID)
 	c.Assert(err, qt.IsNil)
-	stamped, err := testDB.SetOrganizationBrandingPaid(testOrgAddress, time.Now())
+	stamped, err := testDB.SetOrganizationAddOnPaid(testOrgAddress, OrgAddOnBranding, time.Now())
 	c.Assert(err, qt.IsNil)
 	c.Assert(stamped, qt.IsTrue)
-	c.Assert(testDB.ReleaseOrganizationBrandingClaim(testOrgAddress, claimant, claimedAt), qt.IsNil)
+	c.Assert(releaseAddOnClaim(OrgAddOnBranding, claimant, claimedAt), qt.IsNil)
 	c.Assert(claimedBy(), qt.Equals, claimant)
 
-	err = testDB.ReleaseOrganizationBrandingClaim(testOrgAddress, claimant, time.Time{})
+	err = releaseAddOnClaim(OrgAddOnBranding, claimant, time.Time{})
 	c.Assert(err, qt.ErrorIs, ErrInvalidData)
 }
 
@@ -186,20 +186,20 @@ func TestReleaseOrganizationBranding(t *testing.T) {
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 	c.Assert(testDB.SetOrganization(&Organization{Address: testOrgAddress}), qt.IsNil)
 	payer, other := bson.NewObjectID(), bson.NewObjectID()
-	_, err := testDB.ClaimOrganizationBranding(testOrgAddress, payer, bson.NilObjectID)
+	_, err := claimAddOn(OrgAddOnBranding, payer, bson.NilObjectID)
 	c.Assert(err, qt.IsNil)
-	stamped, err := testDB.SetOrganizationBrandingPaid(testOrgAddress, time.Now())
+	stamped, err := testDB.SetOrganizationAddOnPaid(testOrgAddress, OrgAddOnBranding, time.Now())
 	c.Assert(err, qt.IsNil)
 	c.Assert(stamped, qt.IsTrue)
 
 	// another process's release leaves the payer's branding alone
-	c.Assert(testDB.ReleaseOrganizationBranding(testOrgAddress, other), qt.IsNil)
+	c.Assert(testDB.ReleaseOrganizationAddOn(testOrgAddress, OrgAddOnBranding, other), qt.IsNil)
 	org, err := testDB.Organization(testOrgAddress)
 	c.Assert(err, qt.IsNil)
 	c.Assert(org.BrandingPaidAt.IsZero(), qt.IsFalse)
 
 	for range 2 { // the second run is a retry's: a no-op
-		c.Assert(testDB.ReleaseOrganizationBranding(testOrgAddress, payer), qt.IsNil)
+		c.Assert(testDB.ReleaseOrganizationAddOn(testOrgAddress, OrgAddOnBranding, payer), qt.IsNil)
 		org, err = testDB.Organization(testOrgAddress)
 		c.Assert(err, qt.IsNil)
 		c.Assert(org.BrandingPaidAt.IsZero(), qt.IsTrue)
@@ -215,14 +215,14 @@ func TestSetOrganizationKeepsBrandingState(t *testing.T) {
 	c.Assert(testDB.SetOrganization(&Organization{Address: testOrgAddress}), qt.IsNil)
 
 	processID := bson.NewObjectID()
-	claimedAt, err := testDB.ClaimOrganizationBranding(testOrgAddress, processID, bson.NilObjectID)
+	claimedAt, err := claimAddOn(OrgAddOnBranding, processID, bson.NilObjectID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(claimedAt.IsZero(), qt.IsFalse)
 	stale, err := testDB.Organization(testOrgAddress)
 	c.Assert(err, qt.IsNil)
 	c.Assert(stale.BrandingClaimedBy, qt.Equals, processID)
 
-	c.Assert(testDB.ReleaseOrganizationBrandingClaim(testOrgAddress, processID, claimedAt), qt.IsNil)
+	c.Assert(releaseAddOnClaim(OrgAddOnBranding, processID, claimedAt), qt.IsNil)
 	stale.Website = "https://example.org"
 	c.Assert(testDB.SetOrganization(stale), qt.IsNil)
 
@@ -231,4 +231,57 @@ func TestSetOrganizationKeepsBrandingState(t *testing.T) {
 	c.Assert(org.Website, qt.Equals, "https://example.org")
 	c.Assert(org.BrandingClaimedBy, qt.Equals, bson.NilObjectID)
 	c.Assert(org.BrandingClaimedAt.IsZero(), qt.IsTrue)
+}
+
+// claimAddOn claims addOn of testOrgAddress for processID, taking over observed if stale.
+func claimAddOn(addOn OrgAddOn, processID, observed bson.ObjectID) (time.Time, error) {
+	return testDB.ClaimOrganizationAddOn(OrgAddOnClaim{
+		OrgAddress: testOrgAddress, AddOn: addOn, ProcessID: processID, Observed: observed,
+	})
+}
+
+// releaseAddOnClaim releases processID's claim on addOn of testOrgAddress taken at claimedAt.
+func releaseAddOnClaim(addOn OrgAddOn, processID bson.ObjectID, claimedAt time.Time) error {
+	return testDB.ReleaseOrganizationAddOnClaim(OrgAddOnClaim{
+		OrgAddress: testOrgAddress, AddOn: addOn, ProcessID: processID, ClaimedAt: claimedAt,
+	})
+}
+
+// TestOrgAddOnsAreIndependent: each once-per-organization add-on has its own claim and stamp, so
+// claiming, stamping or releasing one never touches the other; an unknown add-on is refused.
+func TestOrgAddOnsAreIndependent(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	c.Assert(testDB.SetOrganization(&Organization{Address: testOrgAddress}), qt.IsNil)
+	brandingHolder, urlHolder := bson.NewObjectID(), bson.NewObjectID()
+
+	claimedAt, err := claimAddOn(OrgAddOnBranding, brandingHolder, bson.NilObjectID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(claimedAt.IsZero(), qt.IsFalse)
+	claimedAt, err = claimAddOn(OrgAddOnCustomURL, urlHolder, bson.NilObjectID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(claimedAt.IsZero(), qt.IsFalse)
+	stamped, err := testDB.SetOrganizationAddOnPaid(testOrgAddress, OrgAddOnCustomURL, time.Now())
+	c.Assert(err, qt.IsNil)
+	c.Assert(stamped, qt.IsTrue)
+
+	org, err := testDB.Organization(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	brandingClaimant, _ := org.AddOnClaim(OrgAddOnBranding)
+	urlClaimant, _ := org.AddOnClaim(OrgAddOnCustomURL)
+	c.Assert(brandingClaimant, qt.Equals, brandingHolder)
+	c.Assert(urlClaimant, qt.Equals, urlHolder)
+	c.Assert(org.AddOnPaidAt(OrgAddOnCustomURL).IsZero(), qt.IsFalse)
+	c.Assert(org.AddOnPaidAt(OrgAddOnBranding).IsZero(), qt.IsTrue)
+
+	// releasing the custom URL leaves branding's claim alone
+	c.Assert(testDB.ReleaseOrganizationAddOn(testOrgAddress, OrgAddOnCustomURL, urlHolder), qt.IsNil)
+	org, err = testDB.Organization(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(org.CustomURLPaidAt.IsZero(), qt.IsTrue)
+	c.Assert(org.CustomURLClaimedBy, qt.Equals, bson.NilObjectID)
+	c.Assert(org.BrandingClaimedBy, qt.Equals, brandingHolder)
+
+	_, err = claimAddOn("signedCertificate", bson.NewObjectID(), bson.NilObjectID)
+	c.Assert(err, qt.ErrorIs, ErrInvalidData)
 }

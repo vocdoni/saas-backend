@@ -300,21 +300,23 @@ func TestProcessPaymentRefundPlan(t *testing.T) {
 	c.Assert(ok, qt.IsTrue)
 
 	// planned against an envelope that moved: nothing is fixed
-	ok, err = testDB.PlanProcessPaymentRefund(processID, 20_000, 0)
+	ok, err = testDB.PlanProcessPaymentRefund(processID, 20_000, RefundWithholding{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsFalse)
 
-	ok, err = testDB.PlanProcessPaymentRefund(processID, 29_000, 14_900)
+	withheld := RefundWithholding{Cents: 14_900, AddOns: []OrgAddOn{OrgAddOnBranding}}
+	ok, err = testDB.PlanProcessPaymentRefund(processID, 29_000, withheld)
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
 	// set once: a second plan does not replace the first
-	ok, err = testDB.PlanProcessPaymentRefund(processID, 29_000, 0)
+	ok, err = testDB.PlanProcessPaymentRefund(processID, 29_000, RefundWithholding{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsFalse)
 	payment, err := testDB.ProcessPayment(processID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.RefundWithheldCents, qt.Not(qt.IsNil))
 	c.Assert(*payment.RefundWithheldCents, qt.Equals, pricing.Cents(14_900))
+	c.Assert(payment.RefundWithheldAddOns, qt.DeepEquals, []OrgAddOn{OrgAddOnBranding})
 
 	ok, err = testDB.RaiseProcessPaymentAmount(ProcessTopUp{
 		ProcessID: processID, FromCents: 29_000, ToCents: 40_000, SessionID: "cs_topup",
@@ -340,6 +342,7 @@ func TestProcessPaymentRefundPlan(t *testing.T) {
 	payment, err = testDB.ProcessPayment(processID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.RefundWithheldCents, qt.IsNil)
+	c.Assert(payment.RefundWithheldAddOns, qt.IsNil)
 }
 
 // TestOrganizationBrandingReliedOnPendingSibling: a branded draft whose checkout is open counts as
@@ -357,7 +360,7 @@ func TestOrganizationBrandingReliedOnPendingSibling(t *testing.T) {
 	}
 	paid, sibling := branded(), branded()
 
-	relied, err := testDB.OrganizationBrandingReliedOn(org, paid)
+	relied, err := testDB.OrganizationAddOnReliedOn(org, OrgAddOnBranding, paid)
 	c.Assert(err, qt.IsNil)
 	c.Assert(relied, qt.IsFalse) // a branded draft nobody is paying for relies on nothing
 
@@ -366,7 +369,7 @@ func TestOrganizationBrandingReliedOnPendingSibling(t *testing.T) {
 	stored, err := testDB.SetProcessPaymentPending(pending, "")
 	c.Assert(err, qt.IsNil)
 	c.Assert(stored, qt.IsTrue)
-	relied, err = testDB.OrganizationBrandingReliedOn(org, paid)
+	relied, err = testDB.OrganizationAddOnReliedOn(org, OrgAddOnBranding, paid)
 	c.Assert(err, qt.IsNil)
 	c.Assert(relied, qt.IsTrue)
 }

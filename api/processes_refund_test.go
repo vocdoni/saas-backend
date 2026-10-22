@@ -134,7 +134,7 @@ func TestDeletePaidDraftRefunds(t *testing.T) {
 	won, err := testDB.MarkProcessPaymentPaid(oid, checkout.SessionID, db.ProcessCharge{PaymentIntentID: "pi_test_refund"})
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue)
-	stamped, err := testDB.SetOrganizationBrandingPaid(orgAddress, time.Now())
+	stamped, err := testDB.SetOrganizationAddOnPaid(orgAddress, db.OrgAddOnBranding, time.Now())
 	c.Assert(err, qt.IsNil)
 	c.Assert(stamped, qt.IsTrue)
 
@@ -212,7 +212,7 @@ func TestDeletePaidDraftWithholdsReliedOnBranding(t *testing.T) {
 	})
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue)
-	stamped, err := testDB.SetOrganizationBrandingPaid(orgAddress, time.Now())
+	stamped, err := testDB.SetOrganizationAddOnPaid(orgAddress, db.OrgAddOnBranding, time.Now())
 	c.Assert(err, qt.IsNil)
 	c.Assert(stamped, qt.IsTrue)
 
@@ -259,7 +259,7 @@ func TestDeletePaidDraftWithholdsBrandingOfPendingCheckout(t *testing.T) {
 	})
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue)
-	stamped, err := testDB.SetOrganizationBrandingPaid(orgAddress, time.Now())
+	stamped, err := testDB.SetOrganizationAddOnPaid(orgAddress, db.OrgAddOnBranding, time.Now())
 	c.Assert(err, qt.IsNil)
 	c.Assert(stamped, qt.IsTrue)
 
@@ -308,7 +308,7 @@ func TestDeletePaidDraftRetryKeepsRefundPlan(t *testing.T) {
 	})
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue)
-	stamped, err := testDB.SetOrganizationBrandingPaid(orgAddress, time.Now())
+	stamped, err := testDB.SetOrganizationAddOnPaid(orgAddress, db.OrgAddOnBranding, time.Now())
 	c.Assert(err, qt.IsNil)
 	c.Assert(stamped, qt.IsTrue)
 	raised, err := testDB.RaiseProcessPaymentAmount(db.ProcessTopUp{
@@ -444,11 +444,11 @@ func TestDeleteRetryReleasesBranding(t *testing.T) {
 	won, err := testDB.MarkProcessPaymentPaid(oid, checkout.SessionID, db.ProcessCharge{PaymentIntentID: "pi_test_release"})
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue)
-	stamped, err := testDB.SetOrganizationBrandingPaid(orgAddress, time.Now())
+	stamped, err := testDB.SetOrganizationAddOnPaid(orgAddress, db.OrgAddOnBranding, time.Now())
 	c.Assert(err, qt.IsNil)
 	c.Assert(stamped, qt.IsTrue)
 	// what a failed first attempt leaves: the plan fixed, the payment still paid
-	planned, err := testDB.PlanProcessPaymentRefund(oid, checkout.AmountCents, 0)
+	planned, err := testDB.PlanProcessPaymentRefund(oid, checkout.AmountCents, db.RefundWithholding{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(planned, qt.IsTrue)
 

@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/db"
@@ -15,14 +16,15 @@ import (
 
 // refundPaidProcess returns a paid draft's money the way it arrived and records that it did:
 // the payment row survives as the audit trail of a process that no longer exists, which is
-// why the caller must not delete it. The organization's branding add-on is released with the
-// refund, so its next draft is quoted — and charged — for what the deleted one paid. Unless
-// another process already rides on that branding: then the branding is withheld from the
-// refund and stays the organization's, since the add-on it bought is in use.
+// why the caller must not delete it. The once-per-organization add-ons it charged (branding,
+// custom URL) are released with the refund, so the organization's next draft is quoted — and
+// charged — for what the deleted one paid. Except each add-on another process already rides on:
+// it is withheld from the refund and stays the organization's, since the add-on it bought is in
+// use.
 //
 // What to withhold is fixed on the payment before any money moves (PlanProcessPaymentRefund),
 // and a retry reuses it: recomputing it could flip once a sibling started or stopped relying
-// on the branding, and the retry would then refund under other keys than the money that
+// on an add-on, and the retry would then refund under other keys than the money that
 // already went back. The plan also locks the payment, so no census growth records mid-refund;
 // a wallet-paid one is planned under the integrator's wallet lock too, because a wallet charge
 // of census headroom debits before it records: planned between the two, the refund would leave
@@ -33,15 +35,14 @@ import (
 // money is still with us is the one outcome this must never produce.
 //
 // ponytail: a sibling's checkout that read the stamp before the release but stores its pending
-// payment after the reliance check (a window as wide as the refund call) is priced without
-// branding the organization no longer holds, and its payment pins that price. Closing it takes a
+// payment after the reliance check (a window as wide as the refund call) is priced without an
+// add-on the organization no longer holds, and its payment pins that price. Closing it takes a
 // re-check on both sides (checkout after storing, delete after releasing), if it shows up.
 func (a *API) refundPaidProcess(w http.ResponseWriter, vp *db.VotingProcess, payment *db.ProcessPayment) bool {
 	plan, ok := a.planPaidProcessRefund(w, vp, payment)
 	if !ok {
 		return false
 	}
-	keepBranding := plan.withheldCents > 0
 	refundID, err := a.returnProcessPayment(vp, payment, plan)
 	if err != nil {
 		if a.dropRefusedRefundPlan(vp, payment, plan, err) {
@@ -53,15 +54,13 @@ func (a *API) refundPaidProcess(w http.ResponseWriter, vp *db.VotingProcess, pay
 		return false
 	}
 	// released before the payment is marked refunded: a failure then leaves the delete to retry
-	// (the refund is reused, the release is idempotent) instead of an organization keeping branding
-	// it got its money back for
-	if payment.Branding && !keepBranding {
-		if err := a.db.ReleaseOrganizationBranding(vp.OrgAddress, vp.ID); err != nil {
-			errors.ErrGenericInternalServerError.
-				Withf("the payment was refunded but its branding add-on could not be released; retry the delete").
-				WithErr(err).Write(w)
-			return false
-		}
+	// (the refund is reused, the release is idempotent) instead of an organization keeping an
+	// add-on it got its money back for
+	if err := a.releaseOrgAddOnsNotWithheld(vp, payment, plan.withheld.AddOns); err != nil {
+		errors.ErrGenericInternalServerError.
+			Withf("the payment was refunded but its add-ons could not be released; retry the delete").
+			WithErr(err).Write(w)
+		return false
 	}
 	marked, err := a.db.MarkProcessPaymentRefunded(vp.ID, refundID, payment.AmountCents)
 	if err != nil {
@@ -78,19 +77,57 @@ func (a *API) refundPaidProcess(w http.ResponseWriter, vp *db.VotingProcess, pay
 		return false
 	}
 	log.Infow("paid draft refunded", "processId", vp.ID.Hex(), "amountCents", payment.AmountCents,
-		"refundId", refundID, "wallet", payment.CheckoutSessionID == "", "brandingWithheld", keepBranding)
+		"refundId", refundID, "wallet", payment.CheckoutSessionID == "", "withheldAddOns", plan.withheld.AddOns)
 	return true
 }
 
 // processRefundPlan is what a delete's refund does with a paid process's money.
 type processRefundPlan struct {
-	withheldCents pricing.Cents  // net kept back: the relied-on branding add-on, or nothing
-	integrator    common.Address // the wallet a wallet-paid refund credits; zero for a card payment
+	withheld   db.RefundWithholding // net kept back: the relied-on add-ons, or nothing
+	integrator common.Address       // the wallet a wallet-paid refund credits; zero for a card payment
+}
+
+// reliedOnOrgAddOns is what giving vp's payment back must withhold: each once-per-organization
+// add-on the payment charged that another process of the organization relies on, at its list
+// price. A delete's refund and a failed managed publish's credit-back both withhold it.
+func (a *API) reliedOnOrgAddOns(vp *db.VotingProcess, payment *db.ProcessPayment) (db.RefundWithholding, error) {
+	var withheld db.RefundWithholding
+	for _, addOn := range db.OrgAddOns {
+		if !payment.Charged(addOn) {
+			continue
+		}
+		reliedOn, err := a.db.OrganizationAddOnReliedOn(vp.OrgAddress, addOn, vp.ID)
+		if err != nil {
+			return db.RefundWithholding{}, fmt.Errorf("failed to check %s reliance: %w", addOn, err)
+		}
+		if reliedOn {
+			withheld.Cents += orgAddOnCents(addOn)
+			withheld.AddOns = append(withheld.AddOns, addOn)
+		}
+	}
+	return withheld, nil
+}
+
+// releaseOrgAddOnsNotWithheld gives back to the organization every once-per-organization add-on
+// payment charged except the withheld ones, so its next process is charged for them again.
+// Idempotent: each release is pinned to vp holding the claim.
+func (a *API) releaseOrgAddOnsNotWithheld(
+	vp *db.VotingProcess, payment *db.ProcessPayment, withheld []db.OrgAddOn,
+) error {
+	for _, addOn := range db.OrgAddOns {
+		if !payment.Charged(addOn) || slices.Contains(withheld, addOn) {
+			continue
+		}
+		if err := a.db.ReleaseOrganizationAddOn(vp.OrgAddress, addOn, vp.ID); err != nil {
+			return fmt.Errorf("failed to release %s: %w", addOn, err)
+		}
+	}
+	return nil
 }
 
 // planPaidProcessRefund returns the refund's plan: the one an earlier attempt fixed, or a new
-// one — withholding the branding add-on when another process relies on it, else nothing — fixed
-// on the payment before the caller moves money. Reports false with the response written.
+// one — withholding the add-ons another process relies on, else nothing — fixed on the payment
+// before the caller moves money. Reports false with the response written.
 func (a *API) planPaidProcessRefund(
 	w http.ResponseWriter, vp *db.VotingProcess, payment *db.ProcessPayment,
 ) (processRefundPlan, bool) {
@@ -104,7 +141,11 @@ func (a *API) planPaidProcessRefund(
 		plan.integrator = org.ManagedBy
 	}
 	if payment.RefundWithheldCents != nil {
-		plan.withheldCents = *payment.RefundWithheldCents
+		plan.withheld = db.RefundWithholding{Cents: *payment.RefundWithheldCents, AddOns: payment.RefundWithheldAddOns}
+		if plan.withheld.Cents > 0 && len(plan.withheld.AddOns) == 0 {
+			// a plan fixed before the custom URL was once per organization withheld branding only
+			plan.withheld.AddOns = []db.OrgAddOn{db.OrgAddOnBranding}
+		}
 		return plan, true
 	}
 	if plan.integrator != (common.Address{}) {
@@ -114,17 +155,13 @@ func (a *API) planPaidProcessRefund(
 		walletLock := a.walletLocks.lock(plan.integrator)
 		defer walletLock.Unlock()
 	}
-	if payment.Branding {
-		reliedOn, err := a.db.OrganizationBrandingReliedOn(vp.OrgAddress, vp.ID)
-		if err != nil {
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return plan, false
-		}
-		if reliedOn {
-			plan.withheldCents = pricing.BrandingCents
-		}
+	withheld, err := a.reliedOnOrgAddOns(vp, payment)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return plan, false
 	}
-	planned, err := a.db.PlanProcessPaymentRefund(vp.ID, payment.AmountCents, plan.withheldCents)
+	plan.withheld = withheld
+	planned, err := a.db.PlanProcessPaymentRefund(vp.ID, payment.AmountCents, plan.withheld)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return plan, false
@@ -155,7 +192,7 @@ func (a *API) dropRefusedRefundPlan(
 			" needs manual reconciliation", vp.ID.Hex()))
 		return false
 	}
-	dropped, dropErr := a.db.DropProcessPaymentRefundPlan(vp.ID, payment.AmountCents, plan.withheldCents)
+	dropped, dropErr := a.db.DropProcessPaymentRefundPlan(vp.ID, payment.AmountCents, plan.withheld.Cents)
 	if dropErr != nil || !dropped {
 		log.Errorw(fmt.Errorf("refund refused (%w), plan not dropped: %v", err, dropErr),
 			fmt.Sprintf("process %s stays delete-only; needs manual reconciliation", vp.ID.Hex()))
@@ -194,7 +231,7 @@ func (a *API) refuseRefundedDraft(processID bson.ObjectID) error {
 // The wallet credit covers AmountCents, which already includes wallet-paid census growth; the
 // refund plan keeps it from growing further, so one key per process is enough.
 //
-// plan.withheldCents is a net amount kept back (the relied-on branding add-on): taken from a
+// plan.withheld.Cents is a net amount kept back (the relied-on add-ons): taken from a
 // wallet credit as is, and from a card refund grossed up by the first charge's own VAT ratio.
 //
 // Nothing is written to the response: an error is an errors.Error carrying its HTTP status,
@@ -202,7 +239,7 @@ func (a *API) refuseRefundedDraft(processID bson.ObjectID) error {
 func (a *API) returnProcessPayment(
 	vp *db.VotingProcess, payment *db.ProcessPayment, plan processRefundPlan,
 ) (string, error) {
-	withheldCents := plan.withheldCents
+	withheldCents := plan.withheld.Cents
 	idempotencyKey := "refund:" + vp.ID.Hex()
 	if payment.CheckoutSessionID == "" {
 		// paid from the integrator wallet: the money goes back where it came from, so the
@@ -212,7 +249,7 @@ func (a *API) returnProcessPayment(
 		}
 		amount := payment.AmountCents - withheldCents
 		if amount <= 0 {
-			return idempotencyKey, nil // the branding was all it paid for, and it stays
+			return idempotencyKey, nil // the withheld add-ons were all it paid for, and they stay
 		}
 		if err := a.db.CreditWallet(db.WalletCredit{
 			OrgAddress:     plan.integrator,
@@ -232,7 +269,7 @@ func (a *API) returnProcessPayment(
 	var firstAmount pricing.Cents // zero refunds the whole intent
 	if withheldCents > 0 {
 		if payment.ChargeSubtotalCents <= 0 {
-			return "", fmt.Errorf("process %s has no recorded charge to withhold branding from", vp.ID.Hex())
+			return "", fmt.Errorf("process %s has no recorded charge to withhold add-ons from", vp.ID.Hex())
 		}
 		// the withheld net grossed up by the first charge's VAT ratio, rounded half up
 		withheld := (withheldCents*payment.ChargeTotalCents + payment.ChargeSubtotalCents/2) /
@@ -241,10 +278,10 @@ func (a *API) returnProcessPayment(
 	}
 	var refundID string
 	for i, intent := range append([]string{payment.PaymentIntentID}, payment.TopUpIntents...) {
-		amount := pricing.Cents(0) // top-ups never carry branding, so they come back whole
+		amount := pricing.Cents(0) // top-ups never carry add-ons, so they come back whole
 		if i == 0 && withheldCents > 0 {
 			if firstAmount <= 0 {
-				refundID = "withheld:" + intent // the branding was all it paid for, and it stays
+				refundID = "withheld:" + intent // the withheld add-ons were all it paid for, and they stay
 				continue
 			}
 			amount = firstAmount

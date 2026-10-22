@@ -16,15 +16,16 @@ import (
 )
 
 // quoteProcessAtCensusSize prices a paid process as if its census held size members. It
-// prices the branding add-on as the payment priced it, not as the draft reads now:
-// BrandingPaidAt is stamped at fulfillment, so a fresh quote drops branding right after the
-// payment that charged it — comparing that against the paid amount would hand the €149 back
-// as free census growth.
+// prices the once-per-organization add-ons as the payment priced them, not as the draft reads
+// now: the organization is stamped at fulfillment, so a fresh quote drops them right after the
+// payment that charged them — comparing that against the paid amount would hand their price
+// back as free census growth.
 func quoteProcessAtCensusSize(p processCensusProjection, size int64) (pricing.Quote, error) {
 	grown := *p.census
 	grown.Size = size
 	input := processQuoteInput(p.vp, &grown, p.org)
 	input.Branding = p.payment.Branding
+	input.CustomURL = p.payment.CustomURL
 	quote, err := pricing.Compute(input)
 	if err != nil {
 		return pricing.Quote{}, errors.ErrMalformedBody.WithErr(err)
@@ -84,9 +85,9 @@ func (a *API) paidProcessProjection(
 // envelope it would have paid for its census as it stands: that much stays free, growth past
 // it is charged like any other. It runs on the first growth check, which every census growth
 // path goes through before writing, so the census it prices is the one the process was
-// published with. Branding is left out, as the growth quote leaves out an unpaid add-on. A
-// quote-only census gets a €0 envelope, which only records that it was published:
-// censusGrowthPaymentError refuses every growth check of it.
+// published with. The once-per-organization add-ons are left out, as the growth quote leaves
+// out an unpaid add-on. A quote-only census gets a €0 envelope, which only records that it was
+// published: censusGrowthPaymentError refuses every growth check of it.
 func (a *API) grandfatherProcessPayment(
 	vp *db.VotingProcess, census *db.Census, org *db.Organization,
 ) (*db.ProcessPayment, error) {
@@ -187,7 +188,7 @@ func (a *API) censusGrowthPaymentError(g censusGrowth) error {
 //	@Description	already paid and what its census would cost at censusSize, so a census that
 //	@Description	outgrew its price can be grown (or a paid draft republished) instead of being
 //	@Description	stuck behind a 402. Add-ons are priced exactly as the original payment priced
-//	@Description	them, so the branding add-on is never charged twice. The paid amount is raised
+//	@Description	them, so a once-per-organization add-on (branding, custom URL) is never charged twice. The paid amount is raised
 //	@Description	when the payment is verified by webhook — never before, so the census stays
 //	@Description	refused until the money lands. A managed organization pays from its integrator
 //	@Description	wallet instead: the difference is debited synchronously and the response carries
@@ -284,7 +285,7 @@ func (a *API) createProcessCensusCheckoutHandler(w http.ResponseWriter, r *http.
 	if p.org.ManagedBy != (common.Address{}) {
 		// what was actually debited: a concurrent purchase may have covered part or all of it
 		debited, err := a.chargeManagedProcessWallet(managedProcessCharge{
-			vp: vp, org: p.org, quote: quote, branding: p.payment.Branding,
+			vp: vp, org: p.org, quote: quote, branding: p.payment.Branding, customURL: p.payment.CustomURL,
 		})
 		if err != nil {
 			writeSubscriptionError(w, err)

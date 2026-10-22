@@ -96,11 +96,11 @@ func (a *API) debitManagedProcessWallet(vp *db.VotingProcess, org *db.Organizati
 	if err != nil {
 		return err
 	}
-	// win the branding claim before the debit: two managed publishes racing here would
-	// otherwise both price branding in and both be charged for it
-	quote, claimedAt, err := a.claimBrandingForPayment(vp, org, &input)
+	// win the add-on claims before the debit: two managed publishes racing here would
+	// otherwise both price a once-per-organization add-on in and both be charged for it
+	quote, claims, err := a.claimOrgAddOnsForPayment(vp, org, &input)
 	if err != nil {
-		a.releaseRefusedBrandingClaim(vp, claimedAt)
+		a.releaseRefusedOrgAddOnClaims(vp, claims)
 		return err
 	}
 	// a quote-only total is not free: chargeManagedProcessWallet refuses it
@@ -108,24 +108,25 @@ func (a *API) debitManagedProcessWallet(vp *db.VotingProcess, org *db.Organizati
 		return nil
 	}
 	_, err = a.chargeManagedProcessWallet(managedProcessCharge{
-		vp: vp, org: org, quote: quote, branding: input.Branding,
+		vp: vp, org: org, quote: quote, branding: input.Branding, customURL: input.CustomURL,
 	})
-	// refused before the debit, nothing backs the claim; any later failure keeps it, since
+	// refused before the debit, nothing backs the claims; any later failure keeps them, since
 	// the debit it follows may already be applied
 	if errors.Is(err, errors.ErrInsufficientWalletBalance) || errors.Is(err, errors.ErrQuoteRequired) {
-		a.releaseRefusedBrandingClaim(vp, claimedAt)
+		a.releaseRefusedOrgAddOnClaims(vp, claims)
 	}
 	return err
 }
 
 // managedProcessCharge is one charge of a managed organization's process against its
 // integrator's prepaid wallet: quote is the full price the process must end up having paid,
-// and branding whether quote prices the once-per-organization add-on in.
+// and branding and customURL whether quote prices each once-per-organization add-on in.
 type managedProcessCharge struct {
-	vp       *db.VotingProcess
-	org      *db.Organization
-	quote    pricing.Quote
-	branding bool
+	vp        *db.VotingProcess
+	org       *db.Organization
+	quote     pricing.Quote
+	branding  bool
+	customURL bool
 }
 
 // chargeManagedProcessWallet debits the integrator wallet for whatever of c.quote is not
@@ -196,6 +197,7 @@ func (a *API) chargeManagedProcessWallet(c managedProcessCharge) (pricing.Cents,
 		AmountCents: c.quote.TotalCents,
 		Currency:    "eur",
 		Branding:    c.branding,
+		CustomURL:   c.customURL,
 	}
 	if paid != nil {
 		// keep the record's history across a top-up
@@ -214,13 +216,15 @@ func (a *API) chargeManagedProcessWallet(c managedProcessCharge) (pricing.Cents,
 		return 0, errors.ErrPaymentSessionConflict.Withf(
 			"the payment of process %s changed while the wallet paid for it; retry", c.vp.ID.Hex())
 	}
-	// stamp the once-per-organization branding add-on as paid when the debited quote
-	// carried it, so the org's next process is not charged branding again (conditional
-	// in the DB: only the first payment sets it).
-	if c.branding {
-		if _, err := a.db.SetOrganizationBrandingPaid(c.vp.OrgAddress, time.Now()); err != nil {
-			log.Warnw("could not stamp organization branding-paid",
-				"processId", c.vp.ID.Hex(), "orgAddress", c.vp.OrgAddress.String(), "error", err)
+	// stamp each once-per-organization add-on the debited quote carried as paid, so the org's
+	// next process is not charged it again (conditional in the DB: only the first payment sets it)
+	for _, addOn := range db.OrgAddOns {
+		if !walletPayment.Charged(addOn) {
+			continue
+		}
+		if _, err := a.db.SetOrganizationAddOnPaid(c.vp.OrgAddress, addOn, time.Now()); err != nil {
+			log.Warnw("could not stamp organization add-on paid", "processId", c.vp.ID.Hex(),
+				"orgAddress", c.vp.OrgAddress.String(), "addOn", addOn, "error", err)
 		}
 	}
 	return dueCents, nil

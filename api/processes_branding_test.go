@@ -79,12 +79,12 @@ func TestBrandingChargedOncePerOrganization(t *testing.T) {
 }
 
 // staleBrandingClaims makes every branding claim stale for the rest of the test, standing in
-// for the db.BrandingClaimStaleAfter window passing.
+// for the db.OrgAddOnClaimStaleAfter window passing.
 func staleBrandingClaims(t *testing.T) {
 	t.Helper()
-	restore := db.BrandingClaimStaleAfter
-	db.BrandingClaimStaleAfter = -time.Minute
-	t.Cleanup(func() { db.BrandingClaimStaleAfter = restore })
+	restore := db.OrgAddOnClaimStaleAfter
+	db.OrgAddOnClaimStaleAfter = -time.Minute
+	t.Cleanup(func() { db.OrgAddOnClaimStaleAfter = restore })
 }
 
 // TestBrandingClaimReleasedWhenClaimantDropsIt: a draft that claimed branding and then checked

@@ -417,7 +417,7 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	// whether someone is paying for this process. Only a processing payment freezes the
 	// priced inputs; editing a paid draft is how a draft stranded by publish preflight is
 	// repaired, and every publish path re-prices what the edit produced.
-	if a.refusePaymentLocked(w, oid) || a.refuseBrandingAfterPayment(w, vp, req.AddOns) {
+	if a.refusePaymentLocked(w, oid) || a.refuseOrgAddOnsAfterPayment(w, vp, req.AddOns) {
 		return
 	}
 	if len(req.Questions) == 0 || len(req.Questions) > db.MaxQuestionsPerProcess {

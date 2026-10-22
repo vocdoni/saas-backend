@@ -234,8 +234,8 @@ func (s *Service) handleCheckoutSessionResult(event *stripeapi.Event) error {
 // checkout.session.async_payment_failed (a delayed payment did not clear) and
 // checkout.session.expired (the customer abandoned it and Stripe closed the session). Both
 // return the process payment to the payable (failed) state, which is also what releases the
-// branding claim the checkout took — without this an abandoned branded checkout would hold
-// the organization's once-only add-on forever. A wallet top-up needs nothing (no balance was
+// add-on claims the checkout took — without this an abandoned checkout would hold the
+// organization's once-per-organization add-ons forever. A wallet top-up needs nothing (no balance was
 // credited).
 func (s *Service) handleCheckoutSessionFailed(event *stripeapi.Event) error {
 	session, err := parseCheckoutSessionFromEvent(event)
@@ -375,21 +375,24 @@ func netPaidCents(session *stripeapi.CheckoutSession) pricing.Cents {
 }
 
 // afterProcessPaid runs the side effects of a paid process payment: stamp the
-// once-per-organization branding add-on (conditional in the DB, so only the first payment
-// sets it) and hand the process to publication. Idempotent, so it is safe on a webhook
+// once-per-organization add-ons it charged (conditional in the DB, so only the first payment
+// sets each) and hand the process to publication. Idempotent, so it is safe on a webhook
 // replay of a payment already recorded as paid — which is how a failure here is retried:
 // it is returned, the webhook answers 500, and Stripe redelivers the event.
 func (s *Service) afterProcessPaid(processID bson.ObjectID) error {
-	// the payment record, not the draft, says whether branding was charged: a draft may
-	// select branding and still be quoted without it, because another process holds the
-	// organization's claim on the add-on.
+	// the payment record, not the draft, says which add-ons were charged: a draft may select
+	// one and still be quoted without it, because another process holds the organization's
+	// claim on the add-on.
 	payment, err := s.db.ProcessPayment(processID)
 	if err != nil {
 		return fmt.Errorf("failed to get paid process payment: %w", err)
 	}
-	if payment.Branding {
-		if _, err := s.db.SetOrganizationBrandingPaid(payment.OrgAddress, time.Now()); err != nil {
-			return fmt.Errorf("failed to stamp organization branding-paid: %w", err)
+	for _, addOn := range db.OrgAddOns {
+		if !payment.Charged(addOn) {
+			continue
+		}
+		if _, err := s.db.SetOrganizationAddOnPaid(payment.OrgAddress, addOn, time.Now()); err != nil {
+			return fmt.Errorf("failed to stamp organization %s paid: %w", addOn, err)
 		}
 	}
 	if s.OnProcessPaid != nil {

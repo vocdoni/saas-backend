@@ -94,12 +94,14 @@ func (ms *MongoStorage) SetOrganization(org *Organization) error {
 	if err != nil {
 		return err
 	}
-	// the branding fields are written only by their conditional methods: a stale read written
-	// back would resurrect a released claim or a refunded add-on
+	// the once-per-organization add-on fields are written only by their conditional methods: a
+	// stale read written back would resurrect a released claim or a refunded add-on
 	if set, ok := updateDoc["$set"].(bson.M); ok {
-		delete(set, "brandingPaidAt")
-		delete(set, "brandingClaimedBy")
-		delete(set, "brandingClaimedAt")
+		for _, addOn := range OrgAddOns {
+			delete(set, addOn.paidAtField())
+			delete(set, addOn.claimedByField())
+			delete(set, addOn.claimedAtField())
+		}
 	}
 	// set upsert to true to create the document if it doesn't exist
 	opts := options.UpdateOne().SetUpsert(true)
@@ -283,108 +285,118 @@ func (ms *MongoStorage) SetOrganizationSubscription(address common.Address, orgS
 	return nil
 }
 
-// BrandingClaimStaleAfter is how long a claim its payment no longer backs is still respected.
+// OrgAddOnClaimStaleAfter is how long a claim its payment no longer backs is still respected.
 // Paying attempts refresh the claim first, so an older one is abandoned. A var for tests.
-var BrandingClaimStaleAfter = 2 * time.Minute
+var OrgAddOnClaimStaleAfter = 2 * time.Minute
 
-// ClaimOrganizationBranding takes the once-per-organization branding claim for processID and
-// returns the stored claim time, or zero when another process holds it (re-price without
-// branding). observedClaimant is the stale claim the caller judged releasable (zero if none);
-// it is in the filter, so a claim taken or refreshed meanwhile is never overwritten. A paid
-// organization is never claimed again.
-func (ms *MongoStorage) ClaimOrganizationBranding(
-	orgAddress common.Address, processID, observedClaimant bson.ObjectID,
-) (time.Time, error) {
-	if (orgAddress.Cmp(common.Address{}) == 0) || processID == bson.NilObjectID {
+// OrgAddOnClaim names one process's claim on a once-per-organization add-on.
+type OrgAddOnClaim struct {
+	OrgAddress common.Address
+	AddOn      OrgAddOn
+	ProcessID  bson.ObjectID
+	// Observed is the stale claimant ClaimOrganizationAddOn may take over (zero if none).
+	Observed bson.ObjectID
+	// ClaimedAt pins ReleaseOrganizationAddOnClaim to the exact claim that was taken.
+	ClaimedAt time.Time
+}
+
+// ClaimOrganizationAddOn takes the organization's claim on c.AddOn for c.ProcessID and returns
+// the stored claim time, or zero when another process holds it (re-price without the add-on).
+// c.Observed is the stale claim the caller judged releasable (zero if none); it is in the filter,
+// so a claim taken or refreshed meanwhile is never overwritten. A paid add-on is never claimed
+// again.
+func (ms *MongoStorage) ClaimOrganizationAddOn(c OrgAddOnClaim) (time.Time, error) {
+	if (c.OrgAddress.Cmp(common.Address{}) == 0) || c.ProcessID == bson.NilObjectID || !c.AddOn.IsValid() {
 		return time.Time{}, ErrInvalidData
 	}
+	claimedBy, claimedAt := c.AddOn.claimedByField(), c.AddOn.claimedAtField()
 	// unclaimed, already ours (a retry of the same draft), or the releasable claim the
 	// caller observed
 	allowed := bson.A{
-		bson.M{"brandingClaimedBy": bson.M{"$exists": false}},
-		bson.M{"brandingClaimedBy": processID},
+		bson.M{claimedBy: bson.M{"$exists": false}},
+		bson.M{claimedBy: c.ProcessID},
 	}
-	if observedClaimant != bson.NilObjectID && observedClaimant != processID {
+	if c.Observed != bson.NilObjectID && c.Observed != c.ProcessID {
 		allowed = append(allowed, bson.M{
-			"brandingClaimedBy": observedClaimant,
-			"brandingClaimedAt": bson.M{"$lt": time.Now().Add(-BrandingClaimStaleAfter)},
+			claimedBy: c.Observed,
+			claimedAt: bson.M{"$lt": time.Now().Add(-OrgAddOnClaimStaleAfter)},
 		})
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	filter := bson.M{
-		"_id":            orgAddress,
-		"brandingPaidAt": bson.M{"$exists": false},
-		"$or":            allowed,
+		"_id":                 c.OrgAddress,
+		c.AddOn.paidAtField(): bson.M{"$exists": false},
+		"$or":                 allowed,
 	}
-	claimedAt := time.Now().Truncate(time.Millisecond)
-	update := bson.M{"$set": bson.M{"brandingClaimedBy": processID, "brandingClaimedAt": claimedAt}}
-	res, err := ms.organizations.UpdateOne(ctx, filter, update)
+	now := time.Now().Truncate(time.Millisecond)
+	res, err := ms.organizations.UpdateOne(ctx, filter, bson.M{"$set": bson.M{claimedBy: c.ProcessID, claimedAt: now}})
 	if err != nil {
-		return time.Time{}, fmt.Errorf("failed to claim organization branding: %w", err)
+		return time.Time{}, fmt.Errorf("failed to claim organization %s: %w", c.AddOn, err)
 	}
 	// MatchedCount: a same-millisecond re-claim modifies nothing but still wins
 	if res.MatchedCount != 1 {
 		return time.Time{}, nil
 	}
-	return claimedAt, nil
+	return now, nil
 }
 
-// ReleaseOrganizationBrandingClaim removes the claim processID took at claimedAt, abandoned
-// before any money moved. Pinned to that exact claim; never touches brandingPaidAt.
-func (ms *MongoStorage) ReleaseOrganizationBrandingClaim(
-	orgAddress common.Address, processID bson.ObjectID, claimedAt time.Time,
-) error {
-	if (orgAddress.Cmp(common.Address{}) == 0) || processID == bson.NilObjectID || claimedAt.IsZero() {
+// ReleaseOrganizationAddOnClaim removes the claim c.ProcessID took at c.ClaimedAt, abandoned
+// before any money moved. Pinned to that exact claim; never touches the paid stamp.
+func (ms *MongoStorage) ReleaseOrganizationAddOnClaim(c OrgAddOnClaim) error {
+	if (c.OrgAddress.Cmp(common.Address{}) == 0) || c.ProcessID == bson.NilObjectID || c.ClaimedAt.IsZero() ||
+		!c.AddOn.IsValid() {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	_, err := ms.organizations.UpdateOne(ctx,
 		bson.M{
-			"_id":               orgAddress,
-			"brandingClaimedBy": processID,
-			"brandingClaimedAt": claimedAt,
-			"brandingPaidAt":    bson.M{"$exists": false},
+			"_id":                    c.OrgAddress,
+			c.AddOn.claimedByField(): c.ProcessID,
+			c.AddOn.claimedAtField(): c.ClaimedAt,
+			c.AddOn.paidAtField():    bson.M{"$exists": false},
 		},
-		bson.M{"$unset": bson.M{"brandingClaimedBy": "", "brandingClaimedAt": ""}})
+		bson.M{"$unset": bson.M{c.AddOn.claimedByField(): "", c.AddOn.claimedAtField(): ""}})
 	if err != nil {
-		return fmt.Errorf("failed to release organization branding claim: %w", err)
+		return fmt.Errorf("failed to release organization %s claim: %w", c.AddOn, err)
 	}
 	return nil
 }
 
-// ReleaseOrganizationBranding gives the once-per-organization branding add-on back, so the
-// next process can be quoted (and charged) for it: both the claim and the paid stamp are
-// removed. Only the claimant releases it — the filter pins brandingClaimedBy to processID —
-// so a refund for a process that no longer holds the claim leaves another process's branding
-// alone. A no-op when the claim moved on.
-func (ms *MongoStorage) ReleaseOrganizationBranding(orgAddress common.Address, processID bson.ObjectID) error {
-	if (orgAddress.Cmp(common.Address{}) == 0) || processID == bson.NilObjectID {
+// ReleaseOrganizationAddOn gives a once-per-organization add-on back, so the next process can be
+// quoted (and charged) for it: both the claim and the paid stamp are removed. Only the claimant
+// releases it — the filter pins the claim to processID — so a refund for a process that no
+// longer holds the claim leaves another process's add-on alone. A no-op when the claim moved on.
+func (ms *MongoStorage) ReleaseOrganizationAddOn(
+	orgAddress common.Address, addOn OrgAddOn, processID bson.ObjectID,
+) error {
+	if (orgAddress.Cmp(common.Address{}) == 0) || processID == bson.NilObjectID || !addOn.IsValid() {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	_, err := ms.organizations.UpdateOne(ctx,
-		bson.M{"_id": orgAddress, "brandingClaimedBy": processID},
-		bson.M{"$unset": bson.M{"brandingClaimedBy": "", "brandingClaimedAt": "", "brandingPaidAt": ""}})
+		bson.M{"_id": orgAddress, addOn.claimedByField(): processID},
+		bson.M{"$unset": bson.M{addOn.claimedByField(): "", addOn.claimedAtField(): "", addOn.paidAtField(): ""}})
 	if err != nil {
-		return fmt.Errorf("failed to release organization branding: %w", err)
+		return fmt.Errorf("failed to release organization %s: %w", addOn, err)
 	}
 	return nil
 }
 
-// SetOrganizationBrandingPaid stamps branding as paid once, reporting whether this call did.
-func (ms *MongoStorage) SetOrganizationBrandingPaid(address common.Address, when time.Time) (bool, error) {
-	if (address.Cmp(common.Address{}) == 0) || when.IsZero() {
+// SetOrganizationAddOnPaid stamps a once-per-organization add-on as paid once, reporting
+// whether this call did.
+func (ms *MongoStorage) SetOrganizationAddOnPaid(address common.Address, addOn OrgAddOn, when time.Time) (bool, error) {
+	if (address.Cmp(common.Address{}) == 0) || when.IsZero() || !addOn.IsValid() {
 		return false, ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	filter := bson.M{"_id": address, "brandingPaidAt": bson.M{"$exists": false}}
-	res, err := ms.organizations.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"brandingPaidAt": when}})
+	filter := bson.M{"_id": address, addOn.paidAtField(): bson.M{"$exists": false}}
+	res, err := ms.organizations.UpdateOne(ctx, filter, bson.M{"$set": bson.M{addOn.paidAtField(): when}})
 	if err != nil {
-		return false, fmt.Errorf("failed to set organization branding paid: %w", err)
+		return false, fmt.Errorf("failed to set organization %s paid: %w", addOn, err)
 	}
 	return res.MatchedCount == 1, nil
 }

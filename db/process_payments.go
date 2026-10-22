@@ -126,15 +126,26 @@ func (ms *MongoStorage) MarkProcessPaymentPaid(
 	})
 }
 
-// PlanProcessPaymentRefund fixes what a delete refunds before any money moves: withheldCents,
-// the net amount kept back. A compare-and-set on the paid envelope the caller read, and set
-// once: it reports false when the payment is no longer paid at amountCents or already has a
-// plan, and nothing has moved then. A retry reads the stored plan instead of calling this.
+// RefundWithholding is what a delete's refund keeps back: the net cents of the add-ons another
+// process relies on, and which add-ons they are.
+type RefundWithholding struct {
+	Cents  pricing.Cents
+	AddOns []OrgAddOn
+}
+
+// PlanProcessPaymentRefund fixes what a delete refunds before any money moves: the withholding,
+// the net amount kept back and the add-ons it keeps. A compare-and-set on the paid envelope the
+// caller read, and set once: it reports false when the payment is no longer paid at amountCents
+// or already has a plan, and nothing has moved then. A retry reads the stored plan instead.
 func (ms *MongoStorage) PlanProcessPaymentRefund(
-	processID bson.ObjectID, amountCents, withheldCents pricing.Cents,
+	processID bson.ObjectID, amountCents pricing.Cents, withheld RefundWithholding,
 ) (bool, error) {
-	if processID == bson.NilObjectID || withheldCents < 0 {
+	if processID == bson.NilObjectID || withheld.Cents < 0 {
 		return false, ErrInvalidData
+	}
+	set := bson.M{"refundWithheldCents": withheld.Cents, "updatedAt": time.Now()}
+	if len(withheld.AddOns) > 0 {
+		set["refundWithheldAddOns"] = withheld.AddOns
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
@@ -143,7 +154,7 @@ func (ms *MongoStorage) PlanProcessPaymentRefund(
 			"_id": processID, "status": ProcessPaymentPaid, "amountCents": amountCents,
 			"refundWithheldCents": bson.M{"$exists": false},
 		},
-		bson.M{"$set": bson.M{"refundWithheldCents": withheldCents, "updatedAt": time.Now()}})
+		bson.M{"$set": set})
 	if err != nil {
 		return false, fmt.Errorf("failed to plan process payment refund: %w", err)
 	}
@@ -167,7 +178,10 @@ func (ms *MongoStorage) DropProcessPaymentRefundPlan(
 			"_id": processID, "status": ProcessPaymentPaid, "amountCents": amountCents,
 			"refundWithheldCents": withheldCents,
 		},
-		bson.M{"$unset": bson.M{"refundWithheldCents": ""}, "$set": bson.M{"updatedAt": time.Now()}})
+		bson.M{
+			"$unset": bson.M{"refundWithheldCents": "", "refundWithheldAddOns": ""},
+			"$set":   bson.M{"updatedAt": time.Now()},
+		})
 	if err != nil {
 		return false, fmt.Errorf("failed to drop process payment refund plan: %w", err)
 	}
@@ -428,22 +442,25 @@ func (ms *MongoStorage) RaiseProcessPaymentAmount(t ProcessTopUp) (bool, error) 
 	return res.MatchedCount == 1, nil
 }
 
-// OrganizationBrandingReliedOn reports whether a process of the organization other than
-// exceptProcessID carries the branding add-on and is published, paid for, or being paid for. Such
-// a process got (or is getting) its branding free on the strength of the organization's stamp, so
-// the process that paid for the stamp cannot hand the €149 back when it is deleted: the branding
-// it bought is in use. A pending checkout counts: it was priced without branding, and its payment
-// pins that price, so once paid it would publish branded with nobody having paid for it.
-func (ms *MongoStorage) OrganizationBrandingReliedOn(
-	orgAddress common.Address, exceptProcessID bson.ObjectID,
+// OrganizationAddOnReliedOn reports whether a process of the organization other than
+// exceptProcessID carries the once-per-organization addOn and is published, paid for, or being
+// paid for. Such a process got (or is getting) the add-on free on the strength of the
+// organization's stamp, so the process that paid for the stamp cannot hand its price back when it
+// is deleted: the add-on it bought is in use. A pending checkout counts: it was priced without the
+// add-on, and its payment pins that price, so once paid it would publish with it unpaid.
+func (ms *MongoStorage) OrganizationAddOnReliedOn(
+	orgAddress common.Address, addOn OrgAddOn, exceptProcessID bson.ObjectID,
 ) (bool, error) {
+	if !addOn.IsValid() {
+		return false, ErrInvalidData
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	// a published branded process relies on it whatever its payment says
+	// a published process with the add-on relies on it whatever its payment says
 	branded := func(published any) bson.M {
 		return bson.M{
 			"orgAddress": orgAddress, "_id": bson.M{"$ne": exceptProcessID},
-			"addOns.branding": true, "published": published,
+			"addOns." + string(addOn): true, "published": published,
 		}
 	}
 	published, err := ms.votingProcesses.CountDocuments(ctx, branded(true), options.Count().SetLimit(1))

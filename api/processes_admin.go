@@ -26,7 +26,9 @@ import (
 //	@Description	A paid draft is refunded before it is deleted, the way it was paid: a card payment
 //	@Description	is refunded (VAT included) and a managed organization's payment is credited back to
 //	@Description	its integrator wallet. The payment record is kept as the audit trail, and the
-//	@Description	organization's branding add-on is released so its next process can buy it. A draft
+//	@Description	once-per-organization add-ons it paid (branding, custom URL) are released so the
+//	@Description	organization's next process can buy them — except one another process relies on,
+//	@Description	which is withheld from the refund and stays the organization's. A draft
 //	@Description	whose payment is still processing, or whose checkout was just completed, is refused:
 //	@Description	retry once it settles.
 //	@Description
@@ -92,7 +94,7 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		}
 		payment = nil // free process, or never quoted: nothing to release
 	}
-	// read before a pending checkout is dropped, so the branding claim released below is its own
+	// read before a pending checkout is dropped, so the add-on claims released below are its own
 	var claimHolder *db.Organization
 	switch {
 	case payment == nil:

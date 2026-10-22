@@ -15,10 +15,10 @@ import (
 )
 
 // processQuoteInput derives the pricing input from the draft state: census size, the 2FA
-// channels the census authenticates with, the selected add-ons (branding only while the
-// organization has not paid it yet), and the payer type (managed org -> integrator).
-// Branding is settled in full by processQuote, which also honours the claim another process
-// may hold on the organization's add-on — this function sees only the draft.
+// channels the census authenticates with, the selected add-ons (each once-per-organization
+// add-on only while the organization has not paid it yet), and the payer type (managed org ->
+// integrator). The once-per-organization add-ons are settled in full by processQuote, which also
+// honours the claim another process may hold on them — this function sees only the draft.
 func processQuoteInput(vp *db.VotingProcess, census *db.Census, org *db.Organization) pricing.QuoteInput {
 	payer := pricing.PayerStandard
 	if org.ManagedBy != (common.Address{}) {
@@ -29,10 +29,26 @@ func processQuoteInput(vp *db.VotingProcess, census *db.Census, org *db.Organiza
 		EmailTwoFA: census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldEmail),
 		SMSTwoFA:   census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone),
 		SignedCert: vp.AddOns.SignedCertificate,
-		CustomURL:  vp.AddOns.CustomURL,
+		CustomURL:  vp.AddOns.CustomURL && org.CustomURLPaidAt.IsZero(),
 		Branding:   vp.AddOns.Branding && org.BrandingPaidAt.IsZero(),
 		Payer:      payer,
 	}
+}
+
+// quoteAddOn is the field of in that prices the once-per-organization addOn.
+func quoteAddOn(in *pricing.QuoteInput, addOn db.OrgAddOn) *bool {
+	if addOn == db.OrgAddOnCustomURL {
+		return &in.CustomURL
+	}
+	return &in.Branding
+}
+
+// orgAddOnCents is the list price of a once-per-organization add-on.
+func orgAddOnCents(addOn db.OrgAddOn) pricing.Cents {
+	if addOn == db.OrgAddOnCustomURL {
+		return pricing.CustomURLCents
+	}
+	return pricing.BrandingCents
 }
 
 // processQuote loads everything the price depends on and computes the quote.
@@ -50,24 +66,29 @@ func (a *API) processQuote(vp *db.VotingProcess) (pricing.Quote, pricing.QuoteIn
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
 		return pricing.Quote{}, pricing.QuoteInput{}, errors.ErrGenericInternalServerError.WithErr(err)
 	}
-	switch {
-	case err == nil && payment.Status == db.ProcessPaymentPaid:
-		// A paid process's branding is fixed by its payment, both ways. Paid for: it stays in
-		// the price for good — fulfillment stamped the organization, which drops it from
-		// processQuoteInput, and leaving it out would let a re-quote spend the €149 on voters.
-		// Not paid for: it stays out, even if the claim has freed up since — nothing sells the
-		// add-on to a paid process, so pricing it in would strand the draft behind a 402. The
-		// update handler refuses the edit that would turn it on instead.
-		input.Branding = payment.Branding
-	case input.Branding:
-		// Quoting only reads the claim: a price query must never take one, or browsing the
-		// price of a branded draft would deny branding to its siblings.
-		claimable, _, err := a.brandingClaimable(vp, org)
-		if err != nil {
-			return pricing.Quote{}, pricing.QuoteInput{}, err
+	paid := err == nil && payment.Status == db.ProcessPaymentPaid
+	for _, addOn := range db.OrgAddOns {
+		priced := quoteAddOn(&input, addOn)
+		switch {
+		case paid:
+			// A paid process's once-per-organization add-ons are fixed by its payment, both
+			// ways. Paid for: they stay in the price for good — fulfillment stamped the
+			// organization, which drops them from processQuoteInput, and leaving them out would
+			// let a re-quote spend their price on voters. Not paid for: they stay out, even if
+			// the claim has freed up since — nothing sells an add-on to a paid process, so
+			// pricing it in would strand the draft behind a 402. The update handler refuses
+			// the edit that would turn one on instead.
+			*priced = payment.Charged(addOn)
+		case *priced:
+			// Quoting only reads the claim: a price query must never take one, or browsing the
+			// price of a draft would deny the add-on to its siblings.
+			claimable, _, err := a.orgAddOnClaimable(vp, org, addOn)
+			if err != nil {
+				return pricing.Quote{}, pricing.QuoteInput{}, err
+			}
+			*priced = claimable
+		default:
 		}
-		input.Branding = claimable
-	default:
 	}
 	quote, err := pricing.Compute(input)
 	if err != nil {
@@ -76,22 +97,24 @@ func (a *API) processQuote(vp *db.VotingProcess) (pricing.Quote, pricing.QuoteIn
 	return quote, input, nil
 }
 
-// brandingClaimable reports whether vp may still carry the once-per-organization branding
-// add-on, together with the claim it observed while deciding (zero when there is none), which
-// ClaimOrganizationBranding needs to CAS against.
+// orgAddOnClaimable reports whether vp may still carry the once-per-organization addOn,
+// together with the claim it observed while deciding (zero when there is none), which
+// ClaimOrganizationAddOn needs to CAS against.
 //
 // The claim is a hint whose validity is re-derived from the claimant's payment, so it
-// self-heals: a claim no longer backed by a branded payment — none stored, failed, refunded,
-// or stored without branding because the claimant dropped the add-on — is taken over by the
-// next draft instead of denying branding to the organization forever. Only once it is stale
-// (db.BrandingClaimStaleAfter), though: a claimant retrying its payment refreshes the claim
+// self-heals: a claim no longer backed by a payment charging the add-on — none stored, failed,
+// refunded, or stored without it because the claimant dropped the add-on — is taken over by the
+// next draft instead of denying the add-on to the organization forever. Only once it is stale
+// (db.OrgAddOnClaimStaleAfter), though: a claimant retrying its payment refreshes the claim
 // before storing the new payment, so a fresh claim may be backed by a payment not written yet.
-func (a *API) brandingClaimable(vp *db.VotingProcess, org *db.Organization) (bool, bson.ObjectID, error) {
-	claimant := org.BrandingClaimedBy
+func (a *API) orgAddOnClaimable(
+	vp *db.VotingProcess, org *db.Organization, addOn db.OrgAddOn,
+) (bool, bson.ObjectID, error) {
+	claimant, claimedAt := org.AddOnClaim(addOn)
 	if claimant == bson.NilObjectID || claimant == vp.ID {
 		return true, claimant, nil
 	}
-	if time.Since(org.BrandingClaimedAt) <= db.BrandingClaimStaleAfter {
+	if time.Since(claimedAt) <= db.OrgAddOnClaimStaleAfter {
 		return false, claimant, nil
 	}
 	payment, err := a.db.ProcessPayment(claimant)
@@ -99,52 +122,69 @@ func (a *API) brandingClaimable(vp *db.VotingProcess, org *db.Organization) (boo
 	case errors.Is(err, db.ErrNotFound):
 		return true, claimant, nil
 	case err != nil:
-		// never assume a claim is free because it could not be read: that charges branding twice
+		// never assume a claim is free because it could not be read: that charges the add-on twice
 		return false, claimant, errors.ErrGenericInternalServerError.WithErr(err)
-	case !payment.Branding,
+	case !payment.Charged(addOn),
 		payment.Status == db.ProcessPaymentFailed,
 		payment.Status == db.ProcessPaymentRefunded:
 		return true, claimant, nil
 	default:
-		// a pending, processing or paid payment for branding: the claimant is still paying for it
+		// a pending, processing or paid payment for the add-on: the claimant is still paying for it
 		return false, claimant, nil
 	}
 }
 
-// claimBrandingForPayment wins the organization's branding claim for vp and returns the
-// quote that must actually be charged: the one input asks for when the claim is ours, or a
-// re-priced one without branding when another process holds it. The paying paths call this
-// between quoting and charging, so two concurrent publishes can never both be billed for the
-// once-per-organization add-on. input is updated to match the returned quote, because it is
-// what the payment record and the quote hash are built from.
+// orgAddOnClaims are the claims a paying attempt took, by add-on: only those it did not hold
+// before. A nil map took nothing.
+type orgAddOnClaims map[db.OrgAddOn]time.Time
+
+// claimOrgAddOnsForPayment wins the organization's claim on every once-per-organization add-on
+// input prices for vp, and returns the quote that must actually be charged: the one input asks
+// for when every claim is ours, or a re-priced one without each add-on another process holds.
+// The paying paths call this between quoting and charging, so two concurrent publishes can never
+// both be billed for one add-on. input is updated to match the returned quote, because it is what
+// the payment record and the quote hash are built from.
 //
-// It also returns the claim this attempt took, zero unless it took one the draft did not hold
-// before: a caller refused before any money moves hands it to releaseRefusedBrandingClaim, or
-// its siblings would be priced without branding for nothing until the claim went stale. A claim
-// the draft already held is never returned, since an earlier attempt's open payment may back it.
-func (a *API) claimBrandingForPayment(
+// It also returns the claims this attempt took that the draft did not hold before: a caller
+// refused before any money moves hands them to releaseRefusedOrgAddOnClaims, or its siblings
+// would be priced without the add-ons for nothing until the claims went stale. A claim the draft
+// already held is never returned, since an earlier attempt's open payment may back it.
+func (a *API) claimOrgAddOnsForPayment(
 	vp *db.VotingProcess, org *db.Organization, input *pricing.QuoteInput,
-) (pricing.Quote, time.Time, error) {
-	var taken time.Time
-	// with the organization already stamped, a branded input can only be this process's own
-	// paid branding (processQuote): nothing left to claim
-	if input.Branding && org.BrandingPaidAt.IsZero() {
-		claimable, observed, err := a.brandingClaimable(vp, org)
+) (pricing.Quote, orgAddOnClaims, error) {
+	var taken orgAddOnClaims
+	for _, addOn := range db.OrgAddOns {
+		priced := quoteAddOn(input, addOn)
+		// with the organization already stamped, a priced add-on can only be this process's
+		// own paid one (processQuote): nothing left to claim
+		if !*priced || !org.AddOnPaidAt(addOn).IsZero() {
+			continue
+		}
+		claimable, observed, err := a.orgAddOnClaimable(vp, org, addOn)
 		if err != nil {
-			return pricing.Quote{}, time.Time{}, err
+			return pricing.Quote{}, taken, err
 		}
 		var claimedAt time.Time
 		if claimable {
-			if claimedAt, err = a.db.ClaimOrganizationBranding(vp.OrgAddress, vp.ID, observed); err != nil {
-				return pricing.Quote{}, time.Time{}, errors.ErrGenericInternalServerError.WithErr(err)
+			claimedAt, err = a.db.ClaimOrganizationAddOn(db.OrgAddOnClaim{
+				OrgAddress: vp.OrgAddress, AddOn: addOn, ProcessID: vp.ID, Observed: observed,
+			})
+			if err != nil {
+				return pricing.Quote{}, taken, errors.ErrGenericInternalServerError.WithErr(err)
 			}
 		}
-		if claimedAt.IsZero() {
-			log.Infow("branding add-on is claimed by another process, pricing without it",
-				"processId", vp.ID.Hex(), "orgAddress", vp.OrgAddress.String(), "claimedBy", observed.Hex())
-			input.Branding = false
-		} else if observed != vp.ID {
-			taken = claimedAt
+		switch {
+		case claimedAt.IsZero():
+			log.Infow("once-per-organization add-on is claimed by another process, pricing without it",
+				"processId", vp.ID.Hex(), "orgAddress", vp.OrgAddress.String(), "addOn", addOn,
+				"claimedBy", observed.Hex())
+			*priced = false
+		case observed != vp.ID:
+			if taken == nil {
+				taken = orgAddOnClaims{}
+			}
+			taken[addOn] = claimedAt
+		default:
 		}
 	}
 	quote, err := pricing.Compute(*input)
@@ -154,28 +194,33 @@ func (a *API) claimBrandingForPayment(
 	return quote, taken, nil
 }
 
-// releaseRefusedBrandingClaim gives back the branding claim claimBrandingForPayment took for a
-// paying attempt that was then refused before any money moved. A zero claimedAt took nothing.
-// A failure only logs: the claim is unbacked, so it still frees itself once stale.
-func (a *API) releaseRefusedBrandingClaim(vp *db.VotingProcess, claimedAt time.Time) {
-	if claimedAt.IsZero() {
-		return
-	}
-	if err := a.db.ReleaseOrganizationBrandingClaim(vp.OrgAddress, vp.ID, claimedAt); err != nil {
-		log.Warnw("could not release the branding claim of a refused payment",
-			"processId", vp.ID.Hex(), "orgAddress", vp.OrgAddress.String(), "error", err)
+// releaseRefusedOrgAddOnClaims gives back the claims claimOrgAddOnsForPayment took for a paying
+// attempt that was then refused before any money moved. A failure only logs: the claim is
+// unbacked, so it still frees itself once stale.
+func (a *API) releaseRefusedOrgAddOnClaims(vp *db.VotingProcess, claims orgAddOnClaims) {
+	for addOn, claimedAt := range claims {
+		if err := a.db.ReleaseOrganizationAddOnClaim(db.OrgAddOnClaim{
+			OrgAddress: vp.OrgAddress, AddOn: addOn, ProcessID: vp.ID, ClaimedAt: claimedAt,
+		}); err != nil {
+			log.Warnw("could not release the add-on claim of a refused payment",
+				"processId", vp.ID.Hex(), "orgAddress", vp.OrgAddress.String(), "addOn", addOn, "error", err)
+		}
 	}
 }
 
-// releaseDroppedCheckoutClaim frees the branding claim held for vp by a pending checkout that was
-// just dropped (cancelled, or deleted with its draft). Otherwise the claim would keep a sibling
-// draft from being charged branding for up to db.BrandingClaimStaleAfter. org is the
-// organization as read before the checkout was dropped: the release is pinned to that claim, so a
-// newer one, taken by a concurrent checkout of the same draft, is left alone.
+// releaseDroppedCheckoutClaim frees the add-on claims held for vp by a pending checkout that was
+// just dropped (cancelled, or deleted with its draft). Otherwise a claim would keep a sibling
+// draft from being charged the add-on for up to db.OrgAddOnClaimStaleAfter. org is the
+// organization as read before the checkout was dropped: each release is pinned to that claim, so
+// a newer one, taken by a concurrent checkout of the same draft, is left alone.
 func (a *API) releaseDroppedCheckoutClaim(vp *db.VotingProcess, org *db.Organization) {
-	if org.BrandingClaimedBy == vp.ID {
-		a.releaseRefusedBrandingClaim(vp, org.BrandingClaimedAt)
+	held := orgAddOnClaims{}
+	for _, addOn := range db.OrgAddOns {
+		if claimant, claimedAt := org.AddOnClaim(addOn); claimant == vp.ID && !claimedAt.IsZero() {
+			held[addOn] = claimedAt
+		}
 	}
+	a.releaseRefusedOrgAddOnClaims(vp, held)
 }
 
 // pricingHandler godoc
@@ -237,10 +282,12 @@ func (*API) pricingHandler(w http.ResponseWriter, r *http.Request) {
 //
 //	@Summary		Get the price of a voting process
 //	@Description	Server-side price of the draft in EUR cents, VAT excluded: base price from the
-//	@Description	census size plus the selected add-ons, with the current payment status. Above
-//	@Description	15 000 voters a custom quote is recommended; above 50 000 the process is
-//	@Description	quote-only: no price (empty lines, totalCents 0, quoteRequired true), and publish
-//	@Description	and checkout answer 422 (40176). Requires Manager/Admin of the organization.
+//	@Description	census size plus the selected add-ons, with the current payment status. Branding
+//	@Description	and custom URL are once per organization: not priced once the organization paid
+//	@Description	them, nor while another draft's payment holds them. Above 15 000 voters a custom
+//	@Description	quote is recommended; above 50 000 the process is quote-only: no price (empty
+//	@Description	lines, totalCents 0, quoteRequired true), and publish and checkout answer 422
+//	@Description	(40176). Requires Manager/Admin of the organization.
 //	@Tags			processes
 //	@Produce		json
 //	@Security		BearerAuth

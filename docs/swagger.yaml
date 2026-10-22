@@ -4941,7 +4941,9 @@ paths:
         A paid draft is refunded before it is deleted, the way it was paid: a card payment
         is refunded (VAT included) and a managed organization's payment is credited back to
         its integrator wallet. The payment record is kept as the audit trail, and the
-        organization's branding add-on is released so its next process can buy it. A draft
+        once-per-organization add-ons it paid (branding, custom URL) are released so the
+        organization's next process can buy them — except one another process relies on,
+        which is withheld from the refund and stays the organization's. A draft
         whose payment is still processing, or whose checkout was just completed, is refused:
         retry once it settles.
 
@@ -5409,7 +5411,7 @@ paths:
         already paid and what its census would cost at censusSize, so a census that
         outgrew its price can be grown (or a paid draft republished) instead of being
         stuck behind a 402. Add-ons are priced exactly as the original payment priced
-        them, so the branding add-on is never charged twice. The paid amount is raised
+        them, so a once-per-organization add-on (branding, custom URL) is never charged twice. The paid amount is raised
         when the payment is verified by webhook — never before, so the census stays
         refused until the money lands. A managed organization pays from its integrator
         wallet instead: the difference is debited synchronously and the response carries
@@ -5518,7 +5520,7 @@ paths:
     delete:
       description: |-
         Expires the draft's open Stripe checkout session so it can no longer be paid, and
-        returns the payment to failed — which also releases a branding add-on the checkout
+        returns the payment to failed — which also releases the add-on claims the checkout
         claimed. It is how a draft that became free while a checkout was open is published
         (publish refuses it with 409 while the session is payable); a priced draft can
         simply start a new checkout. Idempotent: an already failed payment answers 200.
@@ -5742,10 +5744,12 @@ paths:
     get:
       description: |-
         Server-side price of the draft in EUR cents, VAT excluded: base price from the
-        census size plus the selected add-ons, with the current payment status. Above
-        15 000 voters a custom quote is recommended; above 50 000 the process is
-        quote-only: no price (empty lines, totalCents 0, quoteRequired true), and publish
-        and checkout answer 422 (40176). Requires Manager/Admin of the organization.
+        census size plus the selected add-ons, with the current payment status. Branding
+        and custom URL are once per organization: not priced once the organization paid
+        them, nor while another draft's payment holds them. Above 15 000 voters a custom
+        quote is recommended; above 50 000 the process is quote-only: no price (empty
+        lines, totalCents 0, quoteRequired true), and publish and checkout answer 422
+        (40176). Requires Manager/Admin of the organization.
       parameters:
       - description: Process ID
         in: path

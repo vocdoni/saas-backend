@@ -89,6 +89,13 @@ type Organization struct {
 	// It can be changed but not cleared, dynamicUpdateDocument skipping zero-valued fields.
 	DefaultLang    string `json:"defaultLang,omitempty" bson:"defaultLang,omitempty"`
 	Communications bool   `json:"communications" bson:"communications"`
+	// CustomURLPaidAt is when the once-per-organization custom URL add-on was paid, and
+	// CustomURLClaimedBy/At the process allowed to charge it before then: the same mechanism as
+	// branding below (see OrgAddOn), never written by SetOrganization.
+	CustomURLPaidAt    time.Time     `json:"customUrlPaidAt,omitzero" bson:"customUrlPaidAt,omitempty"`
+	CustomURLClaimedBy bson.ObjectID `json:"-" bson:"customUrlClaimedBy,omitempty"`
+	CustomURLClaimedAt time.Time     `json:"-" bson:"customUrlClaimedAt,omitempty"`
+
 	// BrandingPaidAt is when the once-per-organization branding add-on was paid; zero means unpaid.
 	BrandingPaidAt time.Time `json:"brandingPaidAt,omitzero" bson:"brandingPaidAt,omitempty"`
 	// BrandingClaimedBy is the one process allowed to charge branding before it is paid, so two
@@ -803,6 +810,55 @@ type ProcessAddOns struct {
 	Branding          bool `json:"branding,omitempty" bson:"branding,omitempty"`
 }
 
+// Has reports whether the draft selects the once-per-organization add-on.
+func (p ProcessAddOns) Has(addOn OrgAddOn) bool {
+	switch addOn {
+	case OrgAddOnBranding:
+		return p.Branding
+	case OrgAddOnCustomURL:
+		return p.CustomURL
+	default:
+		return false
+	}
+}
+
+// OrgAddOn is an add-on paid once per organization: the first process that pays it stamps the
+// organization, and the organization's later processes get it for free. Its value is the add-on's
+// bson name in ProcessAddOns and ProcessPayment, and the prefix of its Organization fields.
+type OrgAddOn string
+
+// Once-per-organization add-ons.
+const (
+	OrgAddOnBranding  OrgAddOn = "branding"
+	OrgAddOnCustomURL OrgAddOn = "customUrl"
+)
+
+// OrgAddOns lists every once-per-organization add-on.
+var OrgAddOns = []OrgAddOn{OrgAddOnBranding, OrgAddOnCustomURL}
+
+// IsValid reports whether a is a declared once-per-organization add-on.
+func (a OrgAddOn) IsValid() bool { return a == OrgAddOnBranding || a == OrgAddOnCustomURL }
+
+func (a OrgAddOn) paidAtField() string    { return string(a) + "PaidAt" }
+func (a OrgAddOn) claimedByField() string { return string(a) + "ClaimedBy" }
+func (a OrgAddOn) claimedAtField() string { return string(a) + "ClaimedAt" }
+
+// AddOnPaidAt is when the organization paid addOn; zero means unpaid.
+func (o *Organization) AddOnPaidAt(addOn OrgAddOn) time.Time {
+	if addOn == OrgAddOnCustomURL {
+		return o.CustomURLPaidAt
+	}
+	return o.BrandingPaidAt
+}
+
+// AddOnClaim is the process holding the organization's claim on addOn, and when it took it.
+func (o *Organization) AddOnClaim(addOn OrgAddOn) (bson.ObjectID, time.Time) {
+	if addOn == OrgAddOnCustomURL {
+		return o.CustomURLClaimedBy, o.CustomURLClaimedAt
+	}
+	return o.BrandingClaimedBy, o.BrandingClaimedAt
+}
+
 // ProcessCharge is what a card checkout took: the payment intent to refund against, and the
 // amounts before and after VAT.
 type ProcessCharge struct {
@@ -861,15 +917,19 @@ type ProcessPayment struct {
 	// RefundID is the Stripe refund id, or the wallet credit's idempotency key.
 	RefundID string `json:"-" bson:"refundId,omitempty"`
 	// RefundWithheldCents is the refund a delete fixed before moving any money: the net amount it
-	// keeps back (the relied-on branding add-on, or 0). Set once, so a retried delete repeats the
-	// same refunds under the same keys; nil until a delete starts. While it is set the payment is
-	// locked: nothing may raise it, and the draft can only be deleted.
+	// keeps back (the relied-on once-per-organization add-ons, or 0). Set once, so a retried delete
+	// repeats the same refunds under the same keys; nil until a delete starts. While it is set the
+	// payment is locked: nothing may raise it, and the draft can only be deleted.
 	RefundWithheldCents *pricing.Cents `json:"-" bson:"refundWithheldCents,omitempty"`
+	// RefundWithheldAddOns are the add-ons RefundWithheldCents keeps back, fixed with it: they stay
+	// the organization's, every other charged add-on is released with the refund.
+	RefundWithheldAddOns []OrgAddOn `json:"-" bson:"refundWithheldAddOns,omitempty"`
 	// RequestedBy is the checkout user's email; fulfillment publishes as this user.
 	RequestedBy string `json:"-" bson:"requestedBy,omitempty"`
-	// Branding is whether this payment charged the branding add-on, so fulfillment stamps
-	// Organization.BrandingPaidAt.
-	Branding bool `json:"-" bson:"branding,omitempty"`
+	// Branding and CustomURL are whether this payment charged each once-per-organization add-on,
+	// so fulfillment stamps the organization (SetOrganizationAddOnPaid).
+	Branding  bool `json:"-" bson:"branding,omitempty"`
+	CustomURL bool `json:"-" bson:"customUrl,omitempty"`
 	// TopUpSessions are the (bounded) sessions that already raised AmountCents, so a replayed
 	// top-up webhook raises nothing.
 	TopUpSessions []string `json:"-" bson:"topUpSessions,omitempty"`
@@ -878,6 +938,18 @@ type ProcessPayment struct {
 	PaidAt       time.Time `json:"paidAt,omitzero" bson:"paidAt,omitempty"`
 	CreatedAt    time.Time `json:"-" bson:"createdAt"`
 	UpdatedAt    time.Time `json:"-" bson:"updatedAt"`
+}
+
+// Charged reports whether the payment charged the once-per-organization add-on.
+func (p *ProcessPayment) Charged(addOn OrgAddOn) bool {
+	switch addOn {
+	case OrgAddOnBranding:
+		return p.Branding
+	case OrgAddOnCustomURL:
+		return p.CustomURL
+	default:
+		return false
+	}
 }
 
 // Wallet is an integrator's prepaid EUR balance. AppliedKeys is a bounded window of recent
