@@ -173,7 +173,7 @@ func TestCreateSubOrganizationWithinPlan(t *testing.T) {
 	parent, err := testDB.Organization(parentAddr)
 	c.Assert(err, qt.IsNil)
 	parent.Subscription.PlanID = mockEssentialPlan.ID
-	c.Assert(testDB.SetOrganization(parent), qt.IsNil)
+	c.Assert(testDB.SetOrganizationSubscription(parentAddr, &parent.Subscription), qt.IsNil)
 
 	subOrgInfo := &apicommon.OrganizationInfo{
 		Type:   string(db.CompanyType),
@@ -212,10 +212,11 @@ func TestOrganizationBillingEmailAdminOnly(t *testing.T) {
 		org, err := testDB.Organization(addr)
 		c.Assert(err, qt.IsNil)
 		org.Subscription.Email = email
+		c.Assert(testDB.SetOrganizationSubscription(addr, &org.Subscription), qt.IsNil)
 		if addr == childAddr {
 			org.Parent = parentAddr
+			c.Assert(testDB.SetOrganization(org), qt.IsNil)
 		}
-		c.Assert(testDB.SetOrganization(org), qt.IsNil)
 	}
 
 	getInfo := func(token string) *apicommon.OrganizationInfo {
@@ -299,7 +300,7 @@ func TestManagedOrgBillingEmailRedacted(t *testing.T) {
 	managed, err := testDB.Organization(created.Address)
 	c.Assert(err, qt.IsNil)
 	managed.Subscription.Email = "managed@billing.test"
-	c.Assert(testDB.SetOrganization(managed), qt.IsNil)
+	c.Assert(testDB.SetOrganizationSubscription(created.Address, &managed.Subscription), qt.IsNil)
 
 	// list managed orgs as the integrator (not admin of the managed org) — billing email
 	// must be absent from every entry
