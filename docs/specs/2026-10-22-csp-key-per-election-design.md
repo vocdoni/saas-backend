@@ -12,8 +12,11 @@ Owner decisions (2026-10-22):
 - D3. Plain ECDSA CSP elections move to the same per-election-key model, with keys separate from the
   blind ones.
 - D4. The weight certificate is an Ethereum-style secp256k1 signature (65 bytes) by the election key.
-- D5. saas-backend#779 (every CSP election under OFF_CHAIN_CA_V2, origin stored per question) is the
-  base of the saas-backend change and merges first.
+- D5. saas-backend#779 is folded into this epic's saas-backend PR rather than merged first. The epic
+  keeps its idea of storing the census origin per question, and drops its switch of plain ECDSA
+  elections to `OFF_CHAIN_CA_V2`: legacy ECDSA elections stay on `OFF_CHAIN_CA`, legacy blind ones on
+  `OFF_CHAIN_CA_V2`, and every new one uses the new origins. #779 is closed as superseded once the
+  epic PR is open.
 - D6. All PRs are drafts; nothing is merged, released or deployed without the owner.
 
 ## Problem
@@ -197,10 +200,12 @@ and marks `OFF_CHAIN_CA_V2` as deprecated as well.
 - Blind round 1 is unchanged (arm the nonce, pin the weight). Round 2: sign with `dX` for the pinned
   weight and return, per ballot, the blind signature plus `weightKey` (hex X) and `weightCertificate`
   (hex 65-byte signature). The certificate is deterministic and public.
-- The signing scheme is chosen per question from its stored `censusOrigin` (the mechanism of #779):
-  `OFF_CHAIN_CA_V3_ECDSA` / `OFF_CHAIN_CA_V3_BLIND` → per-election keys (above);
-  `OFF_CHAIN_CA_V2` → today's V2 salt (#779 for ECDSA, current blind path); empty → today's legacy
-  signing (V1 salt for ECDSA, V2 salt for blind). Legacy code stays as is.
+- The signing scheme is chosen per question from a stored `censusOrigin` (the idea of #779, which is
+  folded in): publish stores the origin together with `upstreamId`.
+  `OFF_CHAIN_CA_V3_ECDSA` / `OFF_CHAIN_CA_V3_BLIND` → per-election keys (above). An empty origin
+  means the question was published before this change and is signed exactly as today: plain ECDSA
+  with the V1 salt (`processID[:20]`), blind with the V2 salt. No existing question gets a migration
+  or a new signer, and the legacy signing code stays as is.
 - Every sign response tells the client which proof to build: each `SignBatchResult` (sign,
   sign-batch, blind-sign) and the single `sign` response gain `proofType`, the `ProofCA.Type` name
   (`ECDSA`, `ECDSA_PIDSALTED`, `ECDSA_BLIND`, `ECDSA_BLIND_PIDSALTED`). Clients do not need to know
@@ -258,13 +263,12 @@ and marks `OFF_CHAIN_CA_V2` as deprecated as well.
 | Legacy question → new saas sign | Signed as today, with the legacy `proofType`. |
 
 Rollout order, for the LTS flag day on 2026-11-02 (each step needs the owner's OK):
-1. Merge #779 into saas-backend `main` (it can go to production before the flag day).
-2. Merge and tag dvote-protobuf v1.18.0 (npm + Go).
-3. Re-pin consumers to 1.18.0. Merge and release vochain-sequencer with `CSPKeyFork` for LTS/1.3
+1. Merge and tag dvote-protobuf v1.18.0 (npm + Go).
+2. Re-pin consumers to 1.18.0. Merge and release vochain-sequencer with `CSPKeyFork` for LTS/1.3
    set to the height expected at the agreed time on 2026-11-02. Deploy it before that height.
-4. Release vocdoni-sdk and the integrator-sdk packages; deploy vocdoni-app with them (backward
+3. Release vocdoni-sdk and the integrator-sdk packages; deploy vocdoni-app with them (backward
    compatible, so this can go before the fork).
-5. Once the fork height is reached: deploy saas-backend. Between the fork and this deploy, new CSP
+4. Once the fork height is reached: deploy saas-backend. Between the fork and this deploy, new CSP
    publications fail at CheckTx, so CSP publication is paused for that window.
 
 Rollback: before the fork height, redeploy the previous sequencer, or move the height with a new
@@ -316,9 +320,9 @@ The CSP root secret and saas-backend are trusted.
   TS testkit tests read the same vectors.
 - [ ] AC5 (saas-backend, `api` integration on the sequencer Vocone): ECDSA and blind CSP elections
   publish as V3 with per-question roots and vote successfully. Weighted blind votes carry the
-  certificate. Every sign response carries the right `proofType`. A legacy question (empty or V2
-  origin, created before the fork on a chain whose fork height is set above genesis) still signs
-  and votes. Two questions get different roots.
+  certificate. Every sign response carries the right `proofType`. A legacy question (empty stored
+  origin; ECDSA on `OFF_CHAIN_CA` and blind on `OFF_CHAIN_CA_V2`, created before the fork on a chain
+  whose fork height is set above genesis) still signs and votes after the fork. Two questions get different roots.
 - [ ] AC6 (saas-backend): V3 signing never calls the salted signers; `go test ./...`,
   `golangci-lint`, `check-qt-patterns.sh` and swagger regeneration are clean.
 - [ ] AC7 (integrator-sdk): unit tests build V3 ECDSA and V3 blind transactions with a faked V3 CSP,
