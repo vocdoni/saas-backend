@@ -38,7 +38,7 @@ func (ms *MongoStorage) SetOrgMember(salt string, orgMember *OrgMember) (string,
 
 	member, errs := prepareOrgMember(org, orgMember, salt, time.Now())
 	if len(errs) != 0 {
-		return "", fmt.Errorf("%s", strings.Join(errorsAsStrings(errs), ", "))
+		return "", fmt.Errorf("%w: %s", ErrInvalidData, strings.Join(errorsAsStrings(errs), ", "))
 	}
 
 	updateDoc, err := dynamicUpdateDocument(member, nil)
@@ -458,7 +458,7 @@ func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, 
 	switch err := ms.orgMembers.FindOne(ctx, bson.M{"_id": update.ID}).Decode(&stored); {
 	case err == nil:
 		if stored.OrgAddress != org.Address {
-			return bson.NilObjectID, false, fmt.Errorf("modifying orgAddress is not allowed")
+			return bson.NilObjectID, false, fmt.Errorf("%w: modifying orgAddress is not allowed", ErrInvalidData)
 		}
 	case errors.Is(err, mongo.ErrNoDocuments):
 		created = true
@@ -469,7 +469,8 @@ func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, 
 	now := time.Now()
 	preparedMember, validationErrors := prepareOrgMember(org, update.applyTo(stored), salt, now)
 	if len(validationErrors) > 0 {
-		return bson.NilObjectID, false, fmt.Errorf("errors: %s", errorsAsStrings(validationErrors))
+		return bson.NilObjectID, false, fmt.Errorf("%w: %s", ErrInvalidData,
+			strings.Join(errorsAsStrings(validationErrors), ", "))
 	}
 	// prepareOrgMember only stamps CreatedAt when it assigns the ID, not for a client-chosen one
 	if created {
