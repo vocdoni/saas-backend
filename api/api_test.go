@@ -15,6 +15,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -423,6 +424,13 @@ func TestMain(m *testing.M) {
 		// deliver notifications synchronously so waitForEmail observes a
 		// deterministic happens-before instead of racing the queue worker
 		NotificationsSyncDelivery: true,
+		// the production lookup, except for the nullifiers a test marks as failing
+		VoteOnChainLookup: func(ctx context.Context, nullifier []byte) (bool, error) {
+			if _, failing := failingVoteLookups.Load(string(nullifier)); failing {
+				return false, fmt.Errorf("injected vote lookup failure")
+			}
+			return testAPI.lookupVoteOnChain(ctx, nullifier)
+		},
 	})
 	testAPI.Start()
 	// wait for the API to start
@@ -433,6 +441,10 @@ func TestMain(m *testing.M) {
 	// run the tests
 	m.Run()
 }
+
+// failingVoteLookups holds the nullifiers whose on-chain vote lookup fails (see TestMain's
+// VoteOnChainLookup). Keyed per nullifier so parallel tests do not see each other's failures.
+var failingVoteLookups sync.Map
 
 // request sends a request to the API service and returns the response body and status code.
 // The body is expected to be a JSON object or null.

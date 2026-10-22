@@ -108,7 +108,7 @@ func TestHandlePhoneContact(t *testing.T) {
 // up and answers ErrServerBusy instead of blocking.
 func TestMemberPasswordMatches(t *testing.T) {
 	c := qt.New(t)
-	h := New(&csp.CSP{PasswordSalt: "salt"}, nil)
+	h := New(&csp.CSP{PasswordSalt: "salt"}, nil, nil)
 	clientHash := strings.Repeat("ab", 32)
 	stored := &db.OrgMember{ID: bson.NewObjectID()}
 	stored.HashedPass = db.HashMemberPassword("salt", stored.ID, clientHash)

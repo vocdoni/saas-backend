@@ -3,8 +3,10 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -935,6 +937,11 @@ func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Reques
 //	@Description	question eligibility and vote status. The voter is identified solely by the auth token
 //	@Description	(the only voter data the client stores); the token must be verified and issued for this
 //	@Description	process. Ineligibility is reported as belongsToProcess=false with HTTP 200, not an error.
+//	@Description	Per question, hasSigned reports that the CSP signed the voter's ballot (the vote may not be
+//	@Description	on chain), and hasVoted that the vote is on chain. In an anonymous (blind) census hasVoted
+//	@Description	is always false, since the CSP never learns the voting address: hasSigned is the only
+//	@Description	signal. When the chain cannot be asked about a signed question the call fails with 500
+//	@Description	rather than report the vote as missing.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -944,7 +951,7 @@ func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Reques
 //	@Failure		400			{object}	errors.Error	"Malformed body or missing auth token"
 //	@Failure		401			{object}	errors.Error	"Auth token not verified or not issued for this process"
 //	@Failure		404			{object}	errors.Error	"Process or census not found"
-//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		500			{object}	errors.Error	"Internal server error or blockchain request failed"
 //	@Router			/processes/{processId}/check [post]
 func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request) {
 	oid, anchor, ok := parseProcessID(w, r)
@@ -995,21 +1002,52 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+	resp.Questions = make([]ProcessQuestionStatus, len(questions))
+	rows := make([]*db.CSPProcess, len(questions))
 	for i := range questions {
 		q := &questions[i]
-		status := ProcessQuestionStatus{
+		resp.Questions[i] = ProcessQuestionStatus{
 			QuestionID: q.ID.Hex(),
 			UpstreamID: q.UpstreamID,
 			// a voter can only vote a question if they are a participant of the process
 			// census AND fall within the question's eligibility subset
 			CanVote: resp.BelongsToProcess && memberEligibleForQuestion(q, memberID),
 		}
-		if len(q.UpstreamID) > 0 {
-			if cspProc, err := c.mainDB.CSPProcessByUserAndProcess(auth.UserID, q.UpstreamID); err == nil {
-				status.HasVoted = cspProc.Used
-			}
+		if len(q.UpstreamID) == 0 {
+			continue // question not yet on chain
 		}
-		resp.Questions = append(resp.Questions, status)
+		row, err := c.mainDB.CSPProcessByUserAndProcess(auth.UserID, q.UpstreamID)
+		switch {
+		case err == nil:
+			rows[i] = row
+		case errors.Is(err, db.ErrTokenNotFound):
+			// the CSP never signed this question for the voter
+		default:
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+	}
+	// one goroutine per signed question (at most db.MaxQuestionsPerProcess); only uncached,
+	// non-blind rows reach the chain, and the lookup bounds node reads across requests. Each
+	// goroutine writes only its own index.
+	errs := make([]error, len(rows))
+	var wg sync.WaitGroup
+	for i, row := range rows {
+		if row == nil {
+			continue
+		}
+		wg.Go(func() {
+			resp.Questions[i].HasSigned, resp.Questions[i].HasVoted, errs[i] = ResolveVoteStatus(
+				r.Context(), c.mainDB, c.voteOnChain, row)
+		})
+	}
+	wg.Wait()
+	// a vote the chain could not be asked about is not a hasVoted=false (same policy as
+	// POST /votes/verify); the raw node error goes to the log, not to the voter.
+	if err := stderrors.Join(errs...); err != nil {
+		log.Warnw("vote status lookup failed", "processId", oid.Hex(), "error", err)
+		errors.ErrVochainRequestFailed.Write(w)
+		return
 	}
 	apicommon.HTTPWriteJSON(w, resp)
 }

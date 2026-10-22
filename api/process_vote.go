@@ -234,13 +234,33 @@ const (
 	maxVerifyVotesBodyBytes = db.MaxQuestionsPerProcess*80 + 4*internal.KiB
 )
 
-// verifyLookupSem bounds concurrent node reads across every POST /votes/verify request.
-// Each request fans out through its own 8-worker parallelForEach pool, so without a shared
-// ceiling the node load scales with request concurrency on a public endpoint (the global
-// middleware.Throttle admits 100 requests → up to 800 concurrent reads). 32 lets four
-// fully-fanned batches run against the node; the typical single-nullifier request never
-// notices it.
+// verifyLookupSem bounds concurrent node reads across every POST /votes/verify request, and
+// every vote lookup of POST /processes/{id}/check and the admin participants list (see
+// lookupVoteOnChain). Each request fans out on its own, so without a shared ceiling the node
+// load scales with request concurrency on a public endpoint (the global middleware.Throttle
+// admits 100 requests → up to 800 concurrent reads). 32 lets four fully-fanned batches run
+// against the node; the typical single-nullifier request never notices it.
 var verifyLookupSem = make(chan struct{}, 32)
+
+// lookupVoteOnChain is the production handlers.VoteOnChainLookup: one node read of the vote
+// with this nullifier, holding a verifyLookupSem slot, or ctx.Err() if the caller gives up
+// waiting for one.
+func (a *API) lookupVoteOnChain(ctx context.Context, nullifier []byte) (bool, error) {
+	select {
+	case verifyLookupSem <- struct{}{}:
+		defer func() { <-verifyLookupSem }()
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
+	_, err := a.account.VoteByNullifier(nullifier)
+	if stderrors.Is(err, account.ErrVoteNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
 
 // verifyVotesHandler godoc
 //
