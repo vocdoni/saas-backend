@@ -76,9 +76,13 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 	if q.Status != db.QuestionStatusReady {
 		return errors.Ptr(errors.ErrUnauthorized.Withf("question is not open for voting"))
 	}
-	// only StartDate is checked: publish always persists one, while EndDate is optional.
+	// publish always persists a StartDate, while EndDate is optional.
 	if !vp.StartDate.IsZero() && time.Now().Add(startGrace).Before(vp.StartDate) {
 		return errors.Ptr(errors.ErrUnauthorized.Withf("process has not started yet"))
+	}
+	// no grace at the end: a signature issued after it could only ever be refused by the chain
+	if !vp.EndDate.IsZero() && !time.Now().Before(vp.EndDate) {
+		return errors.Ptr(errors.ErrUnauthorized.Withf("process has ended"))
 	}
 	return nil
 }
