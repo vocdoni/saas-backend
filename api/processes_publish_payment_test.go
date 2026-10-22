@@ -43,7 +43,7 @@ func TestVotingProcessPublishPaymentGate(t *testing.T) {
 	token := testCreateUser(t, "gatepassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	members := postOrgMembers(t, token, orgAddress, newOrgMembers(15)...)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(pricedProcessVoters)...)
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, newVotingProcessRequest(orgAddress, memberIDs(members)),
 		processesCreateEndpoint)
@@ -67,7 +67,7 @@ func TestVotingProcessPublishPaymentGate(t *testing.T) {
 		OrgAddress:        orgAddress,
 		CheckoutSessionID: "cs_gate_test",
 		QuoteHash:         "hash_at_payment_time",
-		AmountCents:       1_515,
+		AmountCents:       pricedProcessCents,
 		Currency:          "eur",
 	}, "")
 	c.Assert(err, qt.IsNil)
@@ -108,7 +108,7 @@ func TestPublishPaidProcessServerSide(t *testing.T) {
 	me := requestAndParse[apicommon.UserInfo](t, http.MethodGet, token, nil, "users", "me")
 	orgAddress := testCreateProvisionedOrganization(t, token)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	members := postOrgMembers(t, token, orgAddress, newOrgMembers(15)...)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(pricedProcessVoters)...)
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, newVotingProcessRequest(orgAddress, memberIDs(members)),
 		processesCreateEndpoint)
@@ -120,7 +120,7 @@ func TestPublishPaidProcessServerSide(t *testing.T) {
 		OrgAddress:        orgAddress,
 		CheckoutSessionID: "cs_hook_test",
 		QuoteHash:         "hash",
-		AmountCents:       1_515,
+		AmountCents:       pricedProcessCents,
 		Currency:          "eur",
 		RequestedBy:       me.Email,
 	}, "")
@@ -152,7 +152,7 @@ func TestPublishPaidProcessRefusals(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		stored, err := testDB.SetProcessPaymentPending(&db.ProcessPayment{
 			ProcessID: oid, OrgAddress: orgAddress, CheckoutSessionID: sessionID,
-			QuoteHash: "hash", AmountCents: 1_515, Currency: "eur", RequestedBy: requestedBy,
+			QuoteHash: "hash", AmountCents: pricedProcessCents, Currency: "eur", RequestedBy: requestedBy,
 		}, "")
 		c.Assert(err, qt.IsNil)
 		c.Assert(stored, qt.IsTrue)
@@ -239,7 +239,7 @@ func TestManagedProcessWalletPublish(t *testing.T) {
 	token := testCreateUser(t, "walletpassword123")
 	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_wallet_integrator")
 
-	members := postOrgMembers(t, token, managedAddr, newOrgMembers(15)...)
+	members := postOrgMembers(t, token, managedAddr, newOrgMembers(pricedProcessVoters)...)
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, newVotingProcessRequest(managedAddr, memberIDs(members)),
 		processesCreateEndpoint)
@@ -256,7 +256,7 @@ func TestManagedProcessWalletPublish(t *testing.T) {
 	requestAndAssertError(errors.ErrInsufficientWalletBalance, t, http.MethodPost, token, nil,
 		"processes", pid, "publish")
 
-	// top up enough (15 voters email 2FA = 1515 cents) and publish
+	// top up enough (26 voters with paid integrator email 2FA = 2026 cents) and publish
 	c.Assert(testDB.CreditWallet(db.WalletCredit{
 		OrgAddress: integratorAddr, AmountCents: 100_000, IdempotencyKey: "cs_wallet_topup_test",
 	}), qt.IsNil)
@@ -267,7 +267,7 @@ func TestManagedProcessWalletPublish(t *testing.T) {
 	// debited exactly once, and the payment is recorded as wallet-paid
 	wallet, err := testDB.Wallet(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-1_515))
+	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-integratorProcessCents))
 	oid, err := bson.ObjectIDFromHex(pid)
 	c.Assert(err, qt.IsNil)
 	payment, err := testDB.ProcessPayment(oid)
@@ -278,7 +278,7 @@ func TestManagedProcessWalletPublish(t *testing.T) {
 	requestAndAssertCode(http.StatusOK, t, http.MethodPost, token, nil, "processes", pid, "publish")
 	wallet, err = testDB.Wallet(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-1_515))
+	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-integratorProcessCents))
 }
 
 // TestManagedWalletPublishRefusesQuoteRequired: above the self-service limit a price is a custom
@@ -299,7 +299,7 @@ func TestManagedWalletPublishRefusesQuoteRequired(t *testing.T) {
 		OrgAddress: integratorAddr, AmountCents: 10_000_000, IdempotencyKey: "cs_wallet_quote_topup",
 	}), qt.IsNil)
 
-	members := postOrgMembers(t, token, managedAddr, newOrgMembers(15)...)
+	members := postOrgMembers(t, token, managedAddr, newOrgMembers(pricedProcessVoters)...)
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, newVotingProcessRequest(managedAddr, memberIDs(members)),
 		processesCreateEndpoint)
@@ -361,17 +361,17 @@ func TestPublishPaidProcessRefusesGrownCensus(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue)
 
-	// grow the census past what was paid; the org listing includes the 15 already in it
-	all := postOrgMembers(t, token, orgAddress, newOrgMembers(45)[15:]...)
+	// grow the census past what was paid; the org listing includes the 26 already in it
+	all := postOrgMembers(t, token, orgAddress, newOrgMembers(3 * pricedProcessVoters)[pricedProcessVoters:]...)
 	added, _, err := testDB.AddCensusParticipantsByMemberIDs(vp.CensusID.Hex(), memberIDs(all))
 	c.Assert(err, qt.IsNil)
-	c.Assert(added, qt.Equals, 30)
+	c.Assert(added, qt.Equals, 2*pricedProcessVoters)
 	price := requestAndParse[apicommon.ProcessPriceResponse](
 		t, http.MethodGet, token, nil, "processes", pid, "price")
 	c.Assert(price.TotalCents > quote.TotalCents, qt.IsTrue)
 
-	// publication is refused with the new price rather than minting a 45-voter election
-	// for the 15-voter price
+	// publication is refused with the new price rather than minting a 78-voter election
+	// for the 26-voter price
 	requestAndAssertError(errors.ErrPaymentRequired, t, http.MethodPost, token, nil,
 		"processes", pid, "publish")
 	vp, err = testDB.VotingProcess(oid)
@@ -402,7 +402,7 @@ func TestManagedWalletDebitRepricesGrownCensus(t *testing.T) {
 	token := testCreateUser(t, "walletgrowth1234")
 	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_wallet_growth")
 
-	members := postOrgMembers(t, token, managedAddr, newOrgMembers(15)...)
+	members := postOrgMembers(t, token, managedAddr, newOrgMembers(pricedProcessVoters)...)
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, newVotingProcessRequest(managedAddr, memberIDs(members)),
 		processesCreateEndpoint)
@@ -416,27 +416,27 @@ func TestManagedWalletDebitRepricesGrownCensus(t *testing.T) {
 		OrgAddress: integratorAddr, AmountCents: 100_000, IdempotencyKey: "cs_wallet_growth_topup",
 	}), qt.IsNil)
 
-	// the debit the publish path performs (15 voters, email 2FA)
+	// the debit the publish path performs (26 voters, integrator email 2FA)
 	c.Assert(testAPI.debitManagedProcessWallet(vp, org), qt.IsNil)
 	wallet, err := testDB.Wallet(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-1_515))
+	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-integratorProcessCents))
 
 	// a retry of the unchanged draft charges nothing
 	c.Assert(testAPI.debitManagedProcessWallet(vp, org), qt.IsNil)
 	wallet, err = testDB.Wallet(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-1_515))
+	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-integratorProcessCents))
 
 	// grow the census behind the paid process — past the census routes' check, as a racing
 	// batch would — then retry the publish debit
-	all := postOrgMembers(t, token, managedAddr, newOrgMembers(45)[15:]...)
+	all := postOrgMembers(t, token, managedAddr, newOrgMembers(3 * pricedProcessVoters)[pricedProcessVoters:]...)
 	added, _, err := testDB.AddCensusParticipantsByMemberIDs(vp.CensusID.Hex(), memberIDs(all))
 	c.Assert(err, qt.IsNil)
-	c.Assert(added, qt.Equals, 30)
+	c.Assert(added, qt.Equals, 2*pricedProcessVoters)
 	grown, _, err := testAPI.processQuote(vp)
 	c.Assert(err, qt.IsNil)
-	c.Assert(grown.TotalCents > 1_515, qt.IsTrue)
+	c.Assert(grown.TotalCents > integratorProcessCents, qt.IsTrue)
 
 	c.Assert(testAPI.debitManagedProcessWallet(vp, org), qt.IsNil)
 	wallet, err = testDB.Wallet(integratorAddr)
@@ -451,8 +451,8 @@ func TestManagedWalletDebitRepricesGrownCensus(t *testing.T) {
 	total, entries, err := testDB.WalletLedger(integratorAddr, 1, 10)
 	c.Assert(err, qt.IsNil)
 	c.Assert(total, qt.Equals, int64(3)) // top-up + two debits
-	c.Assert(entries[0].AmountCents, qt.Equals, -(grown.TotalCents - 1_515))
-	c.Assert(entries[1].AmountCents, qt.Equals, pricing.Cents(-1_515))
+	c.Assert(entries[0].AmountCents, qt.Equals, -(grown.TotalCents - integratorProcessCents))
+	c.Assert(entries[1].AmountCents, qt.Equals, pricing.Cents(-integratorProcessCents))
 
 	// and a further attempt at the unchanged price adds nothing
 	c.Assert(testAPI.debitManagedProcessWallet(vp, org), qt.IsNil)
@@ -470,7 +470,7 @@ func TestManagedWalletConcurrentChargesPayOnce(t *testing.T) {
 	token := testCreateUser(t, "walletrace123456")
 	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_wallet_race")
 
-	members := postOrgMembers(t, token, managedAddr, newOrgMembers(15)...)
+	members := postOrgMembers(t, token, managedAddr, newOrgMembers(pricedProcessVoters)...)
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, newVotingProcessRequest(managedAddr, memberIDs(members)),
 		processesCreateEndpoint)
@@ -483,7 +483,7 @@ func TestManagedWalletConcurrentChargesPayOnce(t *testing.T) {
 	c.Assert(testDB.CreditWallet(db.WalletCredit{
 		OrgAddress: integratorAddr, AmountCents: 100_000, IdempotencyKey: "cs_wallet_race_topup",
 	}), qt.IsNil)
-	c.Assert(testAPI.debitManagedProcessWallet(vp, org), qt.IsNil) // 1 515 paid
+	c.Assert(testAPI.debitManagedProcessWallet(vp, org), qt.IsNil) // 26-voter integrator price paid
 
 	var wg sync.WaitGroup
 	errs := make(chan error, 10)
@@ -519,7 +519,7 @@ func TestManagedWalletChargeRefusesCardOwnedPayment(t *testing.T) {
 	token := testCreateUser(t, "walletcardowned1")
 	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_wallet_card_owned")
 
-	members := postOrgMembers(t, token, managedAddr, newOrgMembers(15)...)
+	members := postOrgMembers(t, token, managedAddr, newOrgMembers(pricedProcessVoters)...)
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, newVotingProcessRequest(managedAddr, memberIDs(members)),
 		processesCreateEndpoint)
@@ -536,7 +536,7 @@ func TestManagedWalletChargeRefusesCardOwnedPayment(t *testing.T) {
 	// a card payment still clearing, from before the organization was managed
 	stored, err := testDB.SetProcessPaymentPending(&db.ProcessPayment{
 		ProcessID: oid, OrgAddress: managedAddr, CheckoutSessionID: "cs_card_owned",
-		AmountCents: 1_515, Currency: "eur",
+		AmountCents: pricedProcessCents, Currency: "eur",
 	}, "")
 	c.Assert(err, qt.IsNil)
 	c.Assert(stored, qt.IsTrue)
@@ -545,7 +545,7 @@ func TestManagedWalletChargeRefusesCardOwnedPayment(t *testing.T) {
 	c.Assert(moved, qt.IsTrue)
 
 	_, err = testAPI.chargeManagedProcessWallet(managedProcessCharge{
-		vp: vp, org: org, quote: pricing.Quote{TotalCents: 1_515},
+		vp: vp, org: org, quote: pricing.Quote{TotalCents: pricedProcessCents},
 	})
 	c.Assert(errors.Is(err, errors.ErrPaymentSessionConflict), qt.IsTrue, qt.Commentf("got %v", err))
 

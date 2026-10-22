@@ -19,6 +19,17 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
+// Census sizes the growth tests walk through, sitting just above the free tier: 27 to 34 voters
+// all cost €25 and 35 to 41 cost €30 (no 2FA channel, so only the base price is billed).
+const (
+	growthBaseVoters  = pricing.FreeCensusSize + 2
+	growthTierEnd     = 34
+	growthTotalVoters = 40
+
+	growthPaidCents  pricing.Cents = 2_500
+	growthGrownCents pricing.Cents = 3_000
+)
+
 // TestPublishedFreeProcessCensusGrowth: a process published free has no checkout to record
 // a price, so publication records a €0 payment instead — without it the census would have no
 // envelope and could grow into a priced size for nothing.
@@ -27,7 +38,7 @@ func TestPublishedFreeProcessCensusGrowth(t *testing.T) {
 	token := testCreateUser(t, "freegrowth12345")
 	orgAddress := testCreateProvisionedOrganization(t, token)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(15)...))
+	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(growthBaseVoters)...))
 
 	// within the free tier and no 2FA channel: nothing to pay
 	req := newVotingProcessRequest(orgAddress, ids[:pricing.FreeCensusSize])
@@ -50,21 +61,21 @@ func TestPublishedFreeProcessCensusGrowth(t *testing.T) {
 		t, http.MethodPut, token,
 		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[pricing.FreeCensusSize:]}, "processes", pid, "census")
 	c.Assert(refusal.Data.PaidCents, qt.Equals, pricing.Cents(0))
-	c.Assert(refusal.Data.DueCents, qt.Equals, pricing.Cents(1_500))
+	c.Assert(refusal.Data.DueCents, qt.Equals, growthPaidCents)
 }
 
 // TestParallelCensusGrowthStaysWithinPrice: the growth check and the write it allows are one
 // step per organization. Without that, parallel PUTs each pass the check against the same size
-// and together grow a free process far past what is free — five adds of 5 on a 5-voter process
-// would reach 30.
+// and together grow a free process far past what is free — five adds of 5 on a 20-voter process
+// would reach 45.
 func TestParallelCensusGrowthStaysWithinPrice(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "parallelgrowth12")
 	orgAddress := testCreateProvisionedOrganization(t, token)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(30)...))
+	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(pricing.FreeCensusSize+20)...))
 
-	req := newVotingProcessRequest(orgAddress, ids[:5])
+	req := newVotingProcessRequest(orgAddress, ids[:pricing.FreeCensusSize-5])
 	req.Census.TwoFaFields = nil
 	req.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber}
 	pid := requestAndParse[apicommon.CreateVotingProcessResponse](
@@ -72,11 +83,11 @@ func TestParallelCensusGrowthStaysWithinPrice(t *testing.T) {
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
 
-	// each batch alone fits the free tier (5+5 = 10); only one of them can
+	// each batch alone fits the free tier (20+5 = 25); only one of them can
 	codes := make(chan int, 5)
 	var wg sync.WaitGroup
 	for i := range 5 {
-		batch := ids[5+5*i : 10+5*i]
+		batch := ids[pricing.FreeCensusSize-5+5*i : pricing.FreeCensusSize+5*i]
 		wg.Go(func() {
 			_, code := testRequest(t, http.MethodPut, token,
 				&apicommon.AddCensusParticipantsRequest{MemberIDs: batch}, "processes", pid, "census")
@@ -106,12 +117,12 @@ func TestPublishedCensusGrowthWithinPaidPrice(t *testing.T) {
 	token := testCreateUser(t, "censusgrowth123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	members := postOrgMembers(t, token, orgAddress, newOrgMembers(25)...)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(growthTotalVoters)...)
 	ids := memberIDs(members)
 
-	// no 2FA channel, so only the base price is billed and the rounding leaves room: 14 to
-	// 19 voters all cost €15, the 20th costs €20
-	req := newVotingProcessRequest(orgAddress, ids[:15])
+	// no 2FA channel, so only the base price is billed and the rounding leaves room: 27 to
+	// 34 voters all cost €25, the 35th costs €30
+	req := newVotingProcessRequest(orgAddress, ids[:growthBaseVoters])
 	req.Census.TwoFaFields = nil
 	req.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber}
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
@@ -121,72 +132,72 @@ func TestPublishedCensusGrowthWithinPaidPrice(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 
 	// pay it and publish, which is the state every priced published process is in
-	c.Assert(markProcessPaid(t, pid), qt.Equals, pricing.Cents(1_500))
+	c.Assert(markProcessPaid(t, pid), qt.Equals, growthPaidCents)
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
 
-	// 4 more voters still cost €15: allowed, and they land in the census (202: the
+	// 7 more voters still cost €25: allowed, and they land in the census (202: the
 	// whole-census questions need their on-chain maxCensusSize raised)
 	added := requestAndParseWithAssertCode[apicommon.UpdateProcessCensusResponse](
 		http.StatusAccepted, t, http.MethodPut, token,
-		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[15:19]}, "processes", pid, "census")
-	c.Assert(added.Added, qt.Equals, uint32(4))
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[growthBaseVoters:growthTierEnd]}, "processes", pid, "census")
+	c.Assert(added.Added, qt.Equals, uint32(7))
 
-	// the ones that raise the price to €20 are refused, and nothing is added — but the
+	// the ones that raise the price to €30 are refused, and nothing is added — but the
 	// refusal has to say what the growth costs, or the user is simply stuck
 	refusal := requestAndParseWithAssertCode[censusGrowthRefusal](http.StatusPaymentRequired,
 		t, http.MethodPut, token,
-		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[19:]}, "processes", pid, "census")
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[growthTierEnd:]}, "processes", pid, "census")
 	c.Assert(refusal.Code, qt.Equals, errors.ErrPaymentRequired.Code)
-	c.Assert(refusal.Data.TotalCents, qt.Equals, pricing.Cents(2_000))
-	c.Assert(refusal.Data.PaidCents, qt.Equals, pricing.Cents(1_500))
-	c.Assert(refusal.Data.DueCents, qt.Equals, pricing.Cents(500))
-	c.Assert(refusal.Data.CensusSize, qt.Equals, int64(25))
+	c.Assert(refusal.Data.TotalCents, qt.Equals, growthGrownCents)
+	c.Assert(refusal.Data.PaidCents, qt.Equals, growthPaidCents)
+	c.Assert(refusal.Data.DueCents, qt.Equals, growthGrownCents-growthPaidCents)
+	c.Assert(refusal.Data.CensusSize, qt.Equals, int64(growthTotalVoters))
 	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
-	c.Assert(got.Census.Size, qt.Equals, int64(19))
+	c.Assert(got.Census.Size, qt.Equals, int64(growthTierEnd))
 
 	// buying the headroom opens a session for the difference only, not the new total
 	fake := installFakePaymentGW(t)
 	installStripeWebhookService(t)
 	headroom := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, token,
-		&apicommon.ProcessCensusCheckoutRequest{CensusSize: 25, ReturnURL: "https://example.com/r"},
+		&apicommon.ProcessCensusCheckoutRequest{CensusSize: growthTotalVoters, ReturnURL: "https://example.com/r"},
 		"processes", pid, "census", "checkout")
-	c.Assert(headroom.AmountCents, qt.Equals, pricing.Cents(500))
+	c.Assert(headroom.AmountCents, qt.Equals, growthGrownCents-growthPaidCents)
 
 	// and until the money is verified the census is still refused
 	requestAndAssertError(errors.ErrPaymentRequired, t, http.MethodPut, token,
-		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[19:]}, "processes", pid, "census")
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[growthTierEnd:]}, "processes", pid, "census")
 
 	// the webhook raises the paid envelope from the base to the target the session carries
 	topUpMeta := fake.created[len(fake.created)-1].Metadata
-	c.Assert(topUpMeta[stripe.MetadataKeyProcessTopUpFromCents], qt.Equals, "1500")
-	c.Assert(topUpMeta[stripe.MetadataKeyProcessTopUpCents], qt.Equals, "2000")
+	c.Assert(topUpMeta[stripe.MetadataKeyProcessTopUpFromCents], qt.Equals, "2500")
+	c.Assert(topUpMeta[stripe.MetadataKeyProcessTopUpCents], qt.Equals, "3000")
 	code := postSignedStripeEvent(t, testWebhookSecret, "evt_headroom_1", "checkout.session.completed",
-		checkoutSessionObject(headroom.SessionID, "paid", 500, topUpMeta))
+		checkoutSessionObject(headroom.SessionID, "paid", growthGrownCents-growthPaidCents, topUpMeta))
 	c.Assert(code, qt.Equals, http.StatusOK)
 	payment, err := testDB.ProcessPayment(oid)
 	c.Assert(err, qt.IsNil)
-	c.Assert(payment.AmountCents, qt.Equals, pricing.Cents(2_000))
+	c.Assert(payment.AmountCents, qt.Equals, growthGrownCents)
 
 	// the same growth now lands
 	added = requestAndParseWithAssertCode[apicommon.UpdateProcessCensusResponse](
 		http.StatusAccepted, t, http.MethodPut, token,
-		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[19:]}, "processes", pid, "census")
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[growthTierEnd:]}, "processes", pid, "census")
 	c.Assert(added.Added, qt.Equals, uint32(6))
 
 	// a replay from another replica (fresh event id, same session) raises nothing: the
 	// envelope must not creep upward on Stripe's retries
 	code = postSignedStripeEvent(t, testWebhookSecret, "evt_headroom_2", "checkout.session.completed",
-		checkoutSessionObject(headroom.SessionID, "paid", 500, topUpMeta))
+		checkoutSessionObject(headroom.SessionID, "paid", growthGrownCents-growthPaidCents, topUpMeta))
 	c.Assert(code, qt.Equals, http.StatusOK)
 	payment, err = testDB.ProcessPayment(oid)
 	c.Assert(err, qt.IsNil)
-	c.Assert(payment.AmountCents, qt.Equals, pricing.Cents(2_000))
+	c.Assert(payment.AmountCents, qt.Equals, growthGrownCents)
 	c.Assert(payment.TopUpSessions, qt.DeepEquals, []string{headroom.SessionID})
 
 	// nothing is left to buy at that size
 	requestAndAssertError(errors.ErrMalformedBody, t, http.MethodPost, token,
-		&apicommon.ProcessCensusCheckoutRequest{CensusSize: 25, ReturnURL: "https://example.com/r"},
+		&apicommon.ProcessCensusCheckoutRequest{CensusSize: growthTotalVoters, ReturnURL: "https://example.com/r"},
 		"processes", pid, "census", "checkout")
 }
 
@@ -199,18 +210,18 @@ func TestQuestionEligibilityPricedAtItsSize(t *testing.T) {
 	token := testCreateUser(t, "eligibilityprice1")
 	orgAddress := testCreateProvisionedOrganization(t, token)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(25)...))
+	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(growthTotalVoters)...))
 
-	req := newVotingProcessRequest(orgAddress, ids[:15])
+	req := newVotingProcessRequest(orgAddress, ids[:growthBaseVoters])
 	req.Census.TwoFaFields = nil
 	req.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber}
 	pid := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, req, processesCreateEndpoint).ProcessID
-	c.Assert(markProcessPaid(t, pid), qt.Equals, pricing.Cents(1_500))
+	c.Assert(markProcessPaid(t, pid), qt.Equals, growthPaidCents)
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
 
-	// the census outgrows its €15 by a path the growth checks do not guard (25 voters cost €20)
+	// the census outgrows its €25 by a path the growth checks do not guard (40 voters cost €30)
 	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
 	oid, err := bson.ObjectIDFromHex(pid)
 	c.Assert(err, qt.IsNil)
@@ -218,9 +229,9 @@ func TestQuestionEligibilityPricedAtItsSize(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	census, err := testDB.Census(vp.CensusID.Hex())
 	c.Assert(err, qt.IsNil)
-	_, _, err = testDB.AddCensusParticipantsByMemberIDs(census.ID.Hex(), ids[15:])
+	_, _, err = testDB.AddCensusParticipantsByMemberIDs(census.ID.Hex(), ids[growthBaseVoters:])
 	c.Assert(err, qt.IsNil)
-	census.Size = 25
+	census.Size = growthTotalVoters
 	_, err = testDB.SetCensus(census)
 	c.Assert(err, qt.IsNil)
 
@@ -240,23 +251,24 @@ func TestCensusGrowthIgnoresUnknownMembers(t *testing.T) {
 	token := testCreateUser(t, "growthtypo12345")
 	orgAddress := testCreateProvisionedOrganization(t, token)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(19)...))
+	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(growthTierEnd)...))
 
-	// no 2FA channel: 15 to 19 voters all cost €15, the 20th costs €20
-	req := newVotingProcessRequest(orgAddress, ids[:15])
+	// no 2FA channel: 27 to 34 voters all cost €25, the 35th costs €30
+	req := newVotingProcessRequest(orgAddress, ids[:growthBaseVoters])
 	req.Census.TwoFaFields = nil
 	req.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber}
 	pid := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, req, processesCreateEndpoint).ProcessID
-	c.Assert(markProcessPaid(t, pid), qt.Equals, pricing.Cents(1_500))
+	c.Assert(markProcessPaid(t, pid), qt.Equals, growthPaidCents)
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
 
 	typo := bson.NewObjectID().Hex()
+	withTypo := append(ids[growthBaseVoters:growthTierEnd:growthTierEnd], typo)
 	added := requestAndParseWithAssertCode[apicommon.UpdateProcessCensusResponse](
 		http.StatusAccepted, t, http.MethodPut, token,
-		&apicommon.AddCensusParticipantsRequest{MemberIDs: append(ids[15:19:19], typo)}, "processes", pid, "census")
-	c.Assert(added.Added, qt.Equals, uint32(4))
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: withTypo}, "processes", pid, "census")
+	c.Assert(added.Added, qt.Equals, uint32(7))
 	c.Assert(strings.Join(added.Errors, "; "), qt.Contains, typo)
 }
 
@@ -298,10 +310,10 @@ func TestMemberbaseGrowthBeyondPaidPrice(t *testing.T) {
 	token := testCreateUser(t, "memberbasegrowth")
 	orgAddress := testCreateProvisionedOrganization(t, token)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	all := newOrgMembers(29)
-	ids := memberIDs(postOrgMembers(t, token, orgAddress, all[:19]...))
+	all := newOrgMembers(growthTierEnd + 7)
+	ids := memberIDs(postOrgMembers(t, token, orgAddress, all[:growthTierEnd]...))
 
-	// no 2FA channel, so only the base price is billed: 19 voters cost €15, the 20th €20
+	// no 2FA channel, so only the base price is billed: 34 voters cost €25, the 35th €30
 	groupProcess := func(groupID string) string {
 		req := newVotingProcessRequest(orgAddress, ids)
 		req.StartDate = ""
@@ -319,7 +331,7 @@ func TestMemberbaseGrowthBeyondPaidPrice(t *testing.T) {
 	}
 
 	// a group update: a process published free on a 5-member group holds a €0 envelope, so
-	// adding the other 14 members prices it at €15 — refused, and the group is left as it was
+	// adding the other members prices it at €25 — refused, and the group is left as it was
 	group := requestAndParse[apicommon.OrganizationMemberGroupInfo](
 		t, http.MethodPost, token, &apicommon.CreateOrganizationMemberGroupRequest{
 			Title: "board", Description: "group census", MemberIDs: ids[:5],
@@ -331,7 +343,7 @@ func TestMemberbaseGrowthBeyondPaidPrice(t *testing.T) {
 		"organizations", orgAddress.String(), "groups", group.ID)
 	c.Assert(refusal.Data.ProcessID, qt.Equals, boardPID)
 	c.Assert(refusal.Data.PaidCents, qt.Equals, pricing.Cents(0))
-	c.Assert(refusal.Data.DueCents, qt.Equals, pricing.Cents(1_500))
+	c.Assert(refusal.Data.DueCents, qt.Equals, growthPaidCents)
 	stored, err := testDB.OrganizationMemberGroup(group.ID, orgAddress)
 	c.Assert(err, qt.IsNil)
 	c.Assert(stored.MemberIDs, qt.HasLen, 5)
@@ -340,37 +352,37 @@ func TestMemberbaseGrowthBeyondPaidPrice(t *testing.T) {
 	autoGroup, err := testDB.AutoMemberGroup(orgAddress)
 	c.Assert(err, qt.IsNil)
 	pid := groupProcess(autoGroup.ID.Hex())
-	c.Assert(markProcessPaid(t, pid), qt.Equals, pricing.Cents(1_500))
+	c.Assert(markProcessPaid(t, pid), qt.Equals, growthPaidCents)
 	publish(pid)
 
-	// one more member is the 20th voter, which raises the price: refused, and not created
-	apiErr := putOrgMemberAndExpectError(t, token, orgAddress, all[19])
+	// one more member is the 35th voter, which raises the price: refused, and not created
+	apiErr := putOrgMemberAndExpectError(t, token, orgAddress, all[growthTierEnd])
 	c.Assert(apiErr.Code, qt.Equals, errors.ErrPaymentRequired.Code)
 	// the bulk import is refused the same way, naming the process to top up
-	bulk := &apicommon.AddMembersRequest{Members: all[19:]}
+	bulk := &apicommon.AddMembersRequest{Members: all[growthTierEnd:]}
 	refusal = requestAndParseWithAssertCode[censusGrowthRefusal](http.StatusPaymentRequired,
 		t, http.MethodPost, token, bulk, organizationMembersURL(orgAddress.String()))
 	c.Assert(refusal.Data.ProcessID, qt.Equals, pid)
-	c.Assert(refusal.Data.PaidCents, qt.Equals, pricing.Cents(1_500))
-	c.Assert(refusal.Data.CensusSize, qt.Equals, int64(29))
+	c.Assert(refusal.Data.PaidCents, qt.Equals, growthPaidCents)
+	c.Assert(refusal.Data.CensusSize, qt.Equals, int64(growthTierEnd+7))
 	count, err := testDB.CountOrgMembers(orgAddress)
 	c.Assert(err, qt.IsNil)
-	c.Assert(count, qt.Equals, int64(19))
+	c.Assert(count, qt.Equals, int64(growthTierEnd))
 
 	// buying the headroom the refusal quoted lets the same import through
 	fake := installFakePaymentGW(t)
 	installStripeWebhookService(t)
 	headroom := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, token,
-		&apicommon.ProcessCensusCheckoutRequest{CensusSize: 29, ReturnURL: "https://example.com/r"},
+		&apicommon.ProcessCensusCheckoutRequest{CensusSize: growthTierEnd + 7, ReturnURL: "https://example.com/r"},
 		"processes", pid, "census", "checkout")
 	c.Assert(headroom.AmountCents, qt.Equals, refusal.Data.DueCents)
 	code := postSignedStripeEvent(t, testWebhookSecret, "evt_memberbase_headroom", "checkout.session.completed",
 		checkoutSessionObject(headroom.SessionID, "paid", headroom.AmountCents, fake.created[len(fake.created)-1].Metadata))
 	c.Assert(code, qt.Equals, http.StatusOK)
 
-	postOrgMembers(t, token, orgAddress, all[19:]...)
+	postOrgMembers(t, token, orgAddress, all[growthTierEnd:]...)
 	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
-	c.Assert(got.Census.Size, qt.Equals, int64(29))
+	c.Assert(got.Census.Size, qt.Equals, int64(growthTierEnd+7))
 
 	// an ended election never grows: once the auto-group process stops accepting votes, its
 	// price no longer gates new members, though its census stays a propagation target
@@ -379,7 +391,7 @@ func TestMemberbaseGrowthBeyondPaidPrice(t *testing.T) {
 	for _, qid := range vp.QuestionIDs {
 		c.Assert(testDB.SetQuestionStatus(qid, db.QuestionStatusEnded), qt.IsNil)
 	}
-	putOrgMember(t, token, orgAddress, newOrgMembers(1)[0]) // the 30th voter, past the price paid
+	putOrgMember(t, token, orgAddress, newOrgMembers(1)[0]) // the 42nd voter, past the price paid
 }
 
 // TestOverlappingCensusTopUpsRefundTheStaleOne: two census top-ups opened against the same
@@ -469,12 +481,12 @@ func TestGrandfatheredProcessCensusGrowth(t *testing.T) {
 	token := testCreateUser(t, "grandfathered")
 	orgAddress := testCreateProvisionedOrganization(t, token)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	all := newOrgMembers(20)
+	all := newOrgMembers(growthTierEnd + 1)
 	ids := memberIDs(postOrgMembers(t, token, orgAddress, all...))
 
 	group := requestAndParse[apicommon.OrganizationMemberGroupInfo](
 		t, http.MethodPost, token, &apicommon.CreateOrganizationMemberGroupRequest{
-			Title: "voters", Description: "group census", MemberIDs: ids[:15],
+			Title: "voters", Description: "group census", MemberIDs: ids[:growthBaseVoters],
 		}, "organizations", orgAddress.String(), "groups")
 	req := newVotingProcessRequest(orgAddress, ids)
 	req.StartDate = ""
@@ -496,21 +508,21 @@ func TestGrandfatheredProcessCensusGrowth(t *testing.T) {
 		DeleteOne(context.Background(), bson.M{"_id": oid})
 	c.Assert(err, qt.IsNil)
 
-	// 15 → 19 voters stays in the €15 tier the census already held: free
+	// 27 → 34 voters stays in the €25 tier the census already held: free
 	requestAndAssertCode(http.StatusOK, t, http.MethodPut, token,
-		&apicommon.UpdateOrganizationMemberGroupsRequest{AddMembers: ids[15:19]},
+		&apicommon.UpdateOrganizationMemberGroupsRequest{AddMembers: ids[growthBaseVoters:growthTierEnd]},
 		"organizations", orgAddress.String(), "groups", group.ID)
 	payment, err := testDB.ProcessPayment(oid)
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPaid)
-	c.Assert(payment.AmountCents, qt.Equals, pricing.Cents(1_500))
+	c.Assert(payment.AmountCents, qt.Equals, growthPaidCents)
 
-	// the 20th voter raises the price past the grandfathered envelope: refused
+	// the 35th voter raises the price past the grandfathered envelope: refused
 	refusal := requestAndParseWithAssertCode[censusGrowthRefusal](http.StatusPaymentRequired,
-		t, http.MethodPut, token, &apicommon.UpdateOrganizationMemberGroupsRequest{AddMembers: ids[19:]},
+		t, http.MethodPut, token, &apicommon.UpdateOrganizationMemberGroupsRequest{AddMembers: ids[growthTierEnd:]},
 		"organizations", orgAddress.String(), "groups", group.ID)
 	c.Assert(refusal.Data.ProcessID, qt.Equals, pid)
-	c.Assert(refusal.Data.PaidCents, qt.Equals, pricing.Cents(1_500))
+	c.Assert(refusal.Data.PaidCents, qt.Equals, growthPaidCents)
 }
 
 // censusGrowthRefusal is the 402 of a census that outgrew its price, typed so the test reads
@@ -530,9 +542,9 @@ func TestManagedCensusGrowthChargesIntegratorWallet(t *testing.T) {
 	token := testCreateUser(t, "managedgrowth123")
 	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_managed_growth")
 
-	members := postOrgMembers(t, token, managedAddr, newOrgMembers(25)...)
+	members := postOrgMembers(t, token, managedAddr, newOrgMembers(growthTotalVoters)...)
 	ids := memberIDs(members)
-	req := newVotingProcessRequest(managedAddr, ids[:15])
+	req := newVotingProcessRequest(managedAddr, ids[:growthBaseVoters])
 	req.Census.TwoFaFields = nil
 	req.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber}
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
@@ -544,63 +556,63 @@ func TestManagedCensusGrowthChargesIntegratorWallet(t *testing.T) {
 		OrgAddress: integratorAddr, AmountCents: 100_000, IdempotencyKey: "cs_managed_growth_topup",
 	}), qt.IsNil)
 
-	// publish, which debits the wallet for 15 voters without 2FA (€15)
+	// publish, which debits the wallet for 27 voters without 2FA (€25)
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
 	wallet, err := testDB.Wallet(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-1_500))
+	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-growthPaidCents))
 
 	// growth the rounding absorbs costs nothing
 	added := requestAndParseWithAssertCode[apicommon.UpdateProcessCensusResponse](
 		http.StatusAccepted, t, http.MethodPut, token,
-		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[15:19]}, "processes", pid, "census")
-	c.Assert(added.Added, qt.Equals, uint32(4))
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[growthBaseVoters:growthTierEnd]}, "processes", pid, "census")
+	c.Assert(added.Added, qt.Equals, uint32(7))
 	wallet, err = testDB.Wallet(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-1_500))
+	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-growthPaidCents))
 
 	// growth past the price is refused with the difference, wallet untouched: the guard only
 	// projects an upper bound, so it must never charge against it
 	refusal := requestAndParseWithAssertCode[censusGrowthRefusal](
 		http.StatusPaymentRequired, t, http.MethodPut, token,
-		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[19:]}, "processes", pid, "census")
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[growthTierEnd:]}, "processes", pid, "census")
 	c.Assert(refusal.Data.DueCents, qt.Equals, pricing.Cents(500))
 	wallet, err = testDB.Wallet(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-1_500))
+	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-growthPaidCents))
 
 	// the integrator buys the headroom from its wallet — no checkout session, effective at once
 	headroom := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, token,
-		&apicommon.ProcessCensusCheckoutRequest{CensusSize: 25, ReturnURL: "https://example.com/r"},
+		&apicommon.ProcessCensusCheckoutRequest{CensusSize: growthTotalVoters, ReturnURL: "https://example.com/r"},
 		"processes", pid, "census", "checkout")
 	c.Assert(headroom.ClientSecret, qt.Equals, "")
 	c.Assert(headroom.AmountCents, qt.Equals, pricing.Cents(500))
 	wallet, err = testDB.Wallet(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-2_000))
+	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-growthGrownCents))
 	payment, err := testDB.ProcessPayment(oid)
 	c.Assert(err, qt.IsNil)
-	c.Assert(payment.AmountCents, qt.Equals, pricing.Cents(2_000))
+	c.Assert(payment.AmountCents, qt.Equals, growthGrownCents)
 
 	// the same growth now lands, and re-adding those members changes nothing
 	added = requestAndParseWithAssertCode[apicommon.UpdateProcessCensusResponse](
 		http.StatusAccepted, t, http.MethodPut, token,
-		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[19:]}, "processes", pid, "census")
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[growthTierEnd:]}, "processes", pid, "census")
 	c.Assert(added.Added, qt.Equals, uint32(6))
 	added = requestAndParseWithAssertCode[apicommon.UpdateProcessCensusResponse](
 		http.StatusAccepted, t, http.MethodPut, token,
-		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[19:]}, "processes", pid, "census")
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[growthTierEnd:]}, "processes", pid, "census")
 	c.Assert(added.Added, qt.Equals, uint32(0))
 	wallet, err = testDB.Wallet(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-2_000))
+	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-growthGrownCents))
 
 	// buying the same size again is nothing left to buy, not a second debit
 	requestAndAssertError(errors.ErrMalformedBody, t, http.MethodPost, token,
-		&apicommon.ProcessCensusCheckoutRequest{CensusSize: 25, ReturnURL: "https://example.com/r"},
+		&apicommon.ProcessCensusCheckoutRequest{CensusSize: growthTotalVoters, ReturnURL: "https://example.com/r"},
 		"processes", pid, "census", "checkout")
 	wallet, err = testDB.Wallet(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-2_000))
+	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-growthGrownCents))
 }

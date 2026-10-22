@@ -116,7 +116,7 @@ func TestStripeCheckoutWebhookProcessPayment(t *testing.T) {
 
 	// a tampered payload (wrong signing secret) is rejected and changes nothing
 	code := postSignedStripeEvent(t, "whsec_wrong_secret", "evt_"+util.RandomHex(8),
-		"checkout.session.completed", checkoutSessionObject(sessionID, "paid", 1_515, processMeta))
+		"checkout.session.completed", checkoutSessionObject(sessionID, "paid", pricedProcessCents, processMeta))
 	c.Assert(code, qt.Equals, http.StatusInternalServerError)
 	payment, err := testDB.ProcessPayment(oid)
 	c.Assert(err, qt.IsNil)
@@ -124,7 +124,7 @@ func TestStripeCheckoutWebhookProcessPayment(t *testing.T) {
 
 	// delayed payment method: session completes while still unpaid -> processing, no publish
 	code = postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8),
-		"checkout.session.completed", checkoutSessionObject(sessionID, "unpaid", 1_515, processMeta))
+		"checkout.session.completed", checkoutSessionObject(sessionID, "unpaid", pricedProcessCents, processMeta))
 	c.Assert(code, qt.Equals, http.StatusOK)
 	payment, err = testDB.ProcessPayment(oid)
 	c.Assert(err, qt.IsNil)
@@ -132,7 +132,7 @@ func TestStripeCheckoutWebhookProcessPayment(t *testing.T) {
 
 	// the async payment clears: paid, and the process publishes with no client involved
 	paidEventID := "evt_" + util.RandomHex(8)
-	paidObject := checkoutSessionObject(sessionID, "paid", 1_515, processMeta)
+	paidObject := checkoutSessionObject(sessionID, "paid", pricedProcessCents, processMeta)
 	code = postSignedStripeEvent(t, testWebhookSecret, paidEventID,
 		"checkout.session.async_payment_succeeded", paidObject)
 	c.Assert(code, qt.Equals, http.StatusOK)
@@ -231,7 +231,7 @@ func TestStripeCheckoutWebhookCardSuccess(t *testing.T) {
 
 	code := postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8),
 		"checkout.session.completed",
-		checkoutSessionObject(checkout.SessionID, "paid", 1_515, map[string]string{
+		checkoutSessionObject(checkout.SessionID, "paid", pricedProcessCents, map[string]string{
 			stripe.MetadataKeyProcessID: pid,
 		}))
 	c.Assert(code, qt.Equals, http.StatusOK)
@@ -262,7 +262,7 @@ func TestStripeCheckoutWebhookSessionMismatch(t *testing.T) {
 
 	code := postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8),
 		"checkout.session.completed",
-		checkoutSessionObject("cs_orphaned_session", "paid", 1_515, map[string]string{
+		checkoutSessionObject("cs_orphaned_session", "paid", pricedProcessCents, map[string]string{
 			stripe.MetadataKeyProcessID: pid,
 		}))
 	c.Assert(code, qt.Equals, http.StatusOK)
@@ -293,11 +293,11 @@ func TestStripeCheckoutWebhookUnderpaidSession(t *testing.T) {
 		"processes", pid, "checkout")
 
 	// the subtotal is quoted before discounts, so it still matches the price
-	session := checkoutSessionObject(checkout.SessionID, "paid", 1_515, map[string]string{
+	session := checkoutSessionObject(checkout.SessionID, "paid", pricedProcessCents, map[string]string{
 		stripe.MetadataKeyProcessID: pid,
 	})
 	session["total_details"] = map[string]any{"amount_discount": 500}
-	session["amount_total"] = 1_015
+	session["amount_total"] = int(pricedProcessCents) - 500
 	code := postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8), "checkout.session.completed", session)
 	c.Assert(code, qt.Equals, http.StatusOK)
 	payment, err := testDB.ProcessPayment(oid)
@@ -327,7 +327,7 @@ func TestStripeCheckoutWebhookStraySessionRefunded(t *testing.T) {
 		t, http.MethodPost, token, &apicommon.ProcessCheckoutRequest{ReturnURL: "https://x.example"},
 		"processes", pid, "checkout")
 
-	stray := checkoutSessionObject("cs_stray_session", "paid", 1_515, map[string]string{
+	stray := checkoutSessionObject("cs_stray_session", "paid", pricedProcessCents, map[string]string{
 		stripe.MetadataKeyProcessID: pid,
 	})
 	stray["payment_intent"] = "pi_stray"
@@ -358,7 +358,7 @@ func TestStripeCheckoutWebhookPaymentFailed(t *testing.T) {
 
 	code := postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8),
 		"checkout.session.async_payment_failed",
-		checkoutSessionObject(checkout.SessionID, "unpaid", 1_515, map[string]string{
+		checkoutSessionObject(checkout.SessionID, "unpaid", pricedProcessCents, map[string]string{
 			stripe.MetadataKeyProcessID: pid,
 		}))
 	c.Assert(code, qt.Equals, http.StatusOK)
@@ -439,7 +439,7 @@ func TestStripeCheckoutWebhookReplayPublishesStrandedProcess(t *testing.T) {
 	// Stripe retries the event: the CAS is already lost, yet the replay publishes
 	code := postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8),
 		"checkout.session.completed",
-		checkoutSessionObject(checkout.SessionID, "paid", 1_515, map[string]string{
+		checkoutSessionObject(checkout.SessionID, "paid", pricedProcessCents, map[string]string{
 			stripe.MetadataKeyProcessID: pid,
 		}))
 	c.Assert(code, qt.Equals, http.StatusOK)
@@ -470,7 +470,7 @@ func TestStripeCheckoutWebhookRetriesTransientPublishFailure(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(claimed, qt.IsTrue)
 	eventID := "evt_" + util.RandomHex(8)
-	paid := checkoutSessionObject(checkout.SessionID, "paid", 1_515, map[string]string{
+	paid := checkoutSessionObject(checkout.SessionID, "paid", pricedProcessCents, map[string]string{
 		stripe.MetadataKeyProcessID: pid,
 	})
 	code := postSignedStripeEvent(t, testWebhookSecret, eventID, "checkout.session.completed", paid)
@@ -520,7 +520,7 @@ func TestStripeCheckoutWebhookPermanentlyInvalidEvents(t *testing.T) {
 	// the async-failed event: no process to reconcile it against, ever
 	for _, eventType := range []string{"checkout.session.completed", "checkout.session.async_payment_failed"} {
 		code = postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8), eventType,
-			checkoutSessionObject("cs_badpid_"+util.RandomHex(4), "paid", 1_515, map[string]string{
+			checkoutSessionObject("cs_badpid_"+util.RandomHex(4), "paid", pricedProcessCents, map[string]string{
 				stripe.MetadataKeyProcessID: "not-an-object-id",
 			}))
 		c.Assert(code, qt.Equals, http.StatusOK)

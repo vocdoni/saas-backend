@@ -118,7 +118,7 @@ func TestDeletePaidDraftRefunds(t *testing.T) {
 	adminToken := testCreateUser(t, "refundpass123456")
 	orgAddress := testCreateOrganization(t, adminToken)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	const withBrandingCents = pricing.Cents(1_515) + 14_900
+	const withBrandingCents = pricedProcessCents + 14_900
 
 	paid := newBrandedVotingProcess(t, adminToken, orgAddress)
 	next := newBrandedVotingProcess(t, adminToken, orgAddress)
@@ -145,7 +145,7 @@ func TestDeletePaidDraftRefunds(t *testing.T) {
 	c.Assert(price.TotalCents, qt.Equals, withBrandingCents)
 	price = requestAndParse[apicommon.ProcessPriceResponse](
 		t, http.MethodGet, adminToken, nil, "processes", next, "price")
-	c.Assert(price.TotalCents, qt.Equals, pricing.Cents(1_515))
+	c.Assert(price.TotalCents, qt.Equals, pricedProcessCents)
 
 	// a census top-up is its own charge, so it has to come back too
 	raised, err := testDB.RaiseProcessPaymentAmount(db.ProcessTopUp{
@@ -203,7 +203,7 @@ func TestDeletePaidDraftWithholdsReliedOnBranding(t *testing.T) {
 	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, adminToken,
 		&apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"},
 		"processes", paid, "checkout")
-	c.Assert(checkout.AmountCents, qt.Equals, pricing.Cents(1_515+14_900))
+	c.Assert(checkout.AmountCents, qt.Equals, pricing.Cents(pricedProcessCents+14_900))
 	oid, err := bson.ObjectIDFromHex(paid)
 	c.Assert(err, qt.IsNil)
 	// €164.15 net at 21% VAT
@@ -267,7 +267,7 @@ func TestDeletePaidDraftWithholdsBrandingOfPendingCheckout(t *testing.T) {
 	sibling := newBrandedVotingProcess(t, adminToken, orgAddress)
 	siblingCheckout := requestAndParse[apicommon.ProcessCheckoutResponse](
 		t, http.MethodPost, adminToken, checkoutReq, "processes", sibling, "checkout")
-	c.Assert(siblingCheckout.AmountCents, qt.Equals, pricing.Cents(1_515))
+	c.Assert(siblingCheckout.AmountCents, qt.Equals, pricedProcessCents)
 
 	requestAndAssertCode(http.StatusOK, t, http.MethodDelete, adminToken, nil, "processes", paid)
 	c.Assert(fake.refunds, qt.HasLen, 1)
@@ -294,7 +294,7 @@ func TestDeletePaidDraftRetryKeepsRefundPlan(t *testing.T) {
 	adminToken := testCreateUser(t, "refundplan123456")
 	orgAddress := testCreateOrganization(t, adminToken)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	const withBrandingCents = pricing.Cents(1_515) + 14_900
+	const withBrandingCents = pricedProcessCents + 14_900
 
 	paid := newBrandedVotingProcess(t, adminToken, orgAddress)
 	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, adminToken,
@@ -472,7 +472,7 @@ func TestDeleteWalletPaidDraftCreditsIntegratorWallet(t *testing.T) {
 	token := testCreateUser(t, "walletrefund1234")
 	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_wallet_refund")
 
-	members := postOrgMembers(t, token, managedAddr, newOrgMembers(15)...)
+	members := postOrgMembers(t, token, managedAddr, newOrgMembers(pricedProcessVoters)...)
 	req := newVotingProcessRequest(managedAddr, memberIDs(members))
 	req.Census.TwoFaFields = nil
 	req.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber}
@@ -484,12 +484,12 @@ func TestDeleteWalletPaidDraftCreditsIntegratorWallet(t *testing.T) {
 		OrgAddress: integratorAddr, AmountCents: 100_000, IdempotencyKey: "cs_wallet_refund_topup",
 	}), qt.IsNil)
 
-	// the publish path's debit, without the publish: 15 voters without 2FA is €15
+	// the publish path's debit, without the publish: 26 voters without 2FA is €20
 	c.Assert(testDB.DebitWalletForProcess(db.WalletDebit{
-		OrgAddress: integratorAddr, ProcessID: oid, AmountCents: 1_500, PriceCents: 1_500,
+		OrgAddress: integratorAddr, ProcessID: oid, AmountCents: pricedProcessCents, PriceCents: pricedProcessCents,
 	}), qt.IsNil)
 	stored, err := testDB.SetProcessPaymentPaidByWallet(&db.ProcessPayment{
-		ProcessID: oid, OrgAddress: managedAddr, AmountCents: 1_500, Currency: "eur",
+		ProcessID: oid, OrgAddress: managedAddr, AmountCents: pricedProcessCents, Currency: "eur",
 	})
 	c.Assert(err, qt.IsNil)
 	c.Assert(stored, qt.IsTrue)
@@ -510,7 +510,7 @@ func TestDeleteWalletPaidDraftCreditsIntegratorWallet(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(entries, qt.HasLen, 3)
 	c.Assert(entries[0].Kind, qt.Equals, db.WalletEntryRefund)
-	c.Assert(entries[0].AmountCents, qt.Equals, pricing.Cents(1_500))
+	c.Assert(entries[0].AmountCents, qt.Equals, pricing.Cents(pricedProcessCents))
 	c.Assert(entries[0].ProcessID, qt.Equals, oid)
 }
 
@@ -525,7 +525,7 @@ func TestDeleteWalletPaidDraftWaitsForHeadroomCharge(t *testing.T) {
 	token := testCreateUser(t, "walletraceref123")
 	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_wallet_refund_race")
 
-	members := postOrgMembers(t, token, managedAddr, newOrgMembers(15)...)
+	members := postOrgMembers(t, token, managedAddr, newOrgMembers(pricedProcessVoters)...)
 	req := newVotingProcessRequest(managedAddr, memberIDs(members))
 	req.Census.TwoFaFields = nil
 	req.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber}
@@ -537,10 +537,10 @@ func TestDeleteWalletPaidDraftWaitsForHeadroomCharge(t *testing.T) {
 		OrgAddress: integratorAddr, AmountCents: 100_000, IdempotencyKey: "cs_wallet_race_topup",
 	}), qt.IsNil)
 	c.Assert(testDB.DebitWalletForProcess(db.WalletDebit{
-		OrgAddress: integratorAddr, ProcessID: oid, AmountCents: 1_500, PriceCents: 1_500,
+		OrgAddress: integratorAddr, ProcessID: oid, AmountCents: pricedProcessCents, PriceCents: pricedProcessCents,
 	}), qt.IsNil)
 	stored, err := testDB.SetProcessPaymentPaidByWallet(&db.ProcessPayment{
-		ProcessID: oid, OrgAddress: managedAddr, AmountCents: 1_500, Currency: "eur",
+		ProcessID: oid, OrgAddress: managedAddr, AmountCents: pricedProcessCents, Currency: "eur",
 	})
 	c.Assert(err, qt.IsNil)
 	c.Assert(stored, qt.IsTrue)
@@ -557,10 +557,10 @@ func TestDeleteWalletPaidDraftWaitsForHeadroomCharge(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.RefundWithheldCents, qt.IsNil) // the delete has not planned past the charge
 	c.Assert(testDB.DebitWalletForProcess(db.WalletDebit{
-		OrgAddress: integratorAddr, ProcessID: oid, AmountCents: 500, PriceCents: 2_000,
+		OrgAddress: integratorAddr, ProcessID: oid, AmountCents: 500, PriceCents: pricedProcessCents + 500,
 	}), qt.IsNil)
 	stored, err = testDB.SetProcessPaymentPaidByWallet(&db.ProcessPayment{
-		ProcessID: oid, OrgAddress: managedAddr, AmountCents: 2_000, Currency: "eur",
+		ProcessID: oid, OrgAddress: managedAddr, AmountCents: pricedProcessCents + 500, Currency: "eur",
 		CreatedAt: payment.CreatedAt, PaidAt: payment.PaidAt,
 	})
 	c.Assert(err, qt.IsNil)
@@ -583,7 +583,7 @@ func TestRefundedDraftIsDeleteOnly(t *testing.T) {
 	token := testCreateUser(t, "refundedzombie12")
 	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_refunded_zombie")
 
-	members := postOrgMembers(t, token, managedAddr, newOrgMembers(15)...)
+	members := postOrgMembers(t, token, managedAddr, newOrgMembers(pricedProcessVoters)...)
 	req := newVotingProcessRequest(managedAddr, memberIDs(members))
 	req.Census.TwoFaFields = nil
 	req.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber}
@@ -597,19 +597,19 @@ func TestRefundedDraftIsDeleteOnly(t *testing.T) {
 
 	// paid from the wallet, then the half of a delete that returns the money
 	c.Assert(testDB.DebitWalletForProcess(db.WalletDebit{
-		OrgAddress: integratorAddr, ProcessID: oid, AmountCents: 1_500, PriceCents: 1_500,
+		OrgAddress: integratorAddr, ProcessID: oid, AmountCents: pricedProcessCents, PriceCents: pricedProcessCents,
 	}), qt.IsNil)
 	stored, err := testDB.SetProcessPaymentPaidByWallet(&db.ProcessPayment{
-		ProcessID: oid, OrgAddress: managedAddr, AmountCents: 1_500, Currency: "eur",
+		ProcessID: oid, OrgAddress: managedAddr, AmountCents: pricedProcessCents, Currency: "eur",
 	})
 	c.Assert(err, qt.IsNil)
 	c.Assert(stored, qt.IsTrue)
 	refundKey := "refund:" + oid.Hex()
 	c.Assert(testDB.CreditWallet(db.WalletCredit{
-		OrgAddress: integratorAddr, AmountCents: 1_500, IdempotencyKey: refundKey,
+		OrgAddress: integratorAddr, AmountCents: pricedProcessCents, IdempotencyKey: refundKey,
 		Kind: db.WalletEntryRefund, ProcessID: oid,
 	}), qt.IsNil)
-	marked, err := testDB.MarkProcessPaymentRefunded(oid, refundKey, 1_500)
+	marked, err := testDB.MarkProcessPaymentRefunded(oid, refundKey, pricedProcessCents)
 	c.Assert(err, qt.IsNil)
 	c.Assert(marked, qt.IsTrue)
 	_, before, err := testDB.WalletLedger(integratorAddr, 1, 10)

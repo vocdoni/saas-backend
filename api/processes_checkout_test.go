@@ -122,32 +122,50 @@ func postNewOrgMembers(t *testing.T, token string, orgAddress common.Address, n 
 	for _, m := range batch {
 		posted[m.MemberNumber] = true
 	}
+	postOrgMembers(t, token, orgAddress, batch...)
+	// the listing is paged at 100 and an organization can hold several priced drafts' members
 	var ids []string
-	for _, m := range postOrgMembers(t, token, orgAddress, batch...) {
-		if posted[m.MemberNumber] {
-			ids = append(ids, m.ID)
+	for page := 1; len(ids) < n && page <= 100; page++ {
+		listed := requestAndParse[apicommon.OrganizationMembersResponse](t, http.MethodGet, token, nil,
+			organizationMembersURL(orgAddress.String())+fmt.Sprintf("?limit=100&page=%d", page))
+		if len(listed.Members) == 0 {
+			break
+		}
+		for _, m := range listed.Members {
+			if posted[m.MemberNumber] {
+				ids = append(ids, m.ID)
+			}
 		}
 	}
 	qt.Assert(t, ids, qt.HasLen, n)
 	return ids
 }
 
+// A census just above the free tier: priced, and with the free email 2FA a standard
+// organization's draft costs only its €20 base.
+const (
+	pricedProcessVoters               = pricing.FreeCensusSize + 1
+	pricedProcessCents  pricing.Cents = 2_000
+	// an integrator's managed organization also pays €0.01 per voter for email 2FA
+	integratorProcessCents = pricedProcessCents + pricedProcessVoters*pricing.Cent
+)
+
 // newPricedVotingProcess creates an org with enough members that the draft prices above
-// zero (15 voters with email 2FA -> €15.15 = 1515 cents) and returns the process id.
+// zero (26 voters with free email 2FA -> €20 = 2000 cents) and returns the process id.
 func newPricedVotingProcess(t *testing.T, token string, orgAddress common.Address) string {
 	t.Helper()
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
-		t, http.MethodPost, token, newVotingProcessRequest(orgAddress, postNewOrgMembers(t, token, orgAddress, 15)),
+		t, http.MethodPost, token, newVotingProcessRequest(orgAddress, postNewOrgMembers(t, token, orgAddress, pricedProcessVoters)),
 		processesCreateEndpoint)
 	return created.ProcessID
 }
 
-// newBrandedVotingProcess creates a priced draft that selects the branding add-on (15
-// voters with email 2FA, €15.15, plus €149 of branding when the organization can still be
+// newBrandedVotingProcess creates a priced draft that selects the branding add-on (26
+// voters with free email 2FA, €20, plus €149 of branding when the organization can still be
 // charged for it).
 func newBrandedVotingProcess(t *testing.T, token string, orgAddress common.Address) string {
 	t.Helper()
-	req := newVotingProcessRequest(orgAddress, postNewOrgMembers(t, token, orgAddress, 15))
+	req := newVotingProcessRequest(orgAddress, postNewOrgMembers(t, token, orgAddress, pricedProcessVoters))
 	req.AddOns = db.ProcessAddOns{Branding: true}
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, req, processesCreateEndpoint)
@@ -161,15 +179,17 @@ func TestProcessPrice(t *testing.T) {
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, adminToken, orgAddress)
 
-	// 15 voters, email 2FA: base R5(1.5*15^0.824) = €15 plus 15 * €0.01
+	// 26 voters, email 2FA free for a standard organization: only the base R5(1.5*26^0.824) = €20
 	price := requestAndParse[apicommon.ProcessPriceResponse](
 		t, http.MethodGet, adminToken, nil, "processes", pid, "price")
-	c.Assert(price.TotalCents, qt.Equals, pricing.Cents(1_515))
+	c.Assert(price.TotalCents, qt.Equals, pricedProcessCents)
 	c.Assert(price.Currency, qt.Equals, "eur")
 	c.Assert(price.QuoteRecommended, qt.IsFalse)
 	c.Assert(price.QuoteRequired, qt.IsFalse)
 	c.Assert(price.PaymentStatus, qt.Equals, db.ProcessPaymentStatus(""))
-	c.Assert(len(price.Lines) >= 2, qt.IsTrue)
+	// email 2FA is free for a standard organization, so the base is the only line
+	c.Assert(price.Lines, qt.HasLen, 1)
+	c.Assert(price.Lines[0].Kind, qt.Equals, pricing.LineBase)
 
 	// an unrelated user cannot read the price
 	strangerToken := testCreateUser(t, "strangerpass123")
@@ -194,14 +214,14 @@ func TestProcessCheckoutFlow(t *testing.T) {
 		t, http.MethodPost, adminToken, checkoutReq, "processes", pid, "checkout")
 	c.Assert(checkout.SessionID, qt.Equals, "cs_test_1")
 	c.Assert(checkout.ClientSecret, qt.Equals, "cs_test_1_secret")
-	c.Assert(checkout.AmountCents, qt.Equals, pricing.Cents(1_515))
+	c.Assert(checkout.AmountCents, qt.Equals, pricedProcessCents)
 	c.Assert(fake.created, qt.HasLen, 1)
 	c.Assert(fake.created[0].Metadata[stripe.MetadataKeyProcessID], qt.Equals, pid)
 	var lineSum pricing.Cents
 	for _, item := range fake.created[0].LineItems {
 		lineSum += item.AmountCents
 	}
-	c.Assert(lineSum, qt.Equals, pricing.Cents(1_515))
+	c.Assert(lineSum, qt.Equals, pricedProcessCents)
 
 	// the payment is stored pending and visible on the status endpoint
 	status := requestAndParse[apicommon.ProcessPaymentStatusResponse](
@@ -217,7 +237,7 @@ func TestProcessCheckoutFlow(t *testing.T) {
 
 	// editing the draft to a different price obsoletes the session: the next checkout
 	// expires it and opens a replacement
-	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(30)[15:]...)
+	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2 * pricedProcessVoters)[pricedProcessVoters:]...)
 	update := newVotingProcessRequest(orgAddress, memberIDs(members))
 	requestAndAssertCode(http.StatusOK, t, http.MethodPut, adminToken, update, "processes", pid)
 	replaced := requestAndParse[apicommon.ProcessCheckoutResponse](
@@ -433,7 +453,7 @@ func TestFreePublishRefusedOverOpenCheckout(t *testing.T) {
 	token := testCreateUser(t, "freeoveropen123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(15)...))
+	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(pricedProcessVoters)...))
 	pid := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, newVotingProcessRequest(orgAddress, ids), processesCreateEndpoint).ProcessID
 	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](
@@ -486,7 +506,7 @@ func TestOrganizationProcessPayments(t *testing.T) {
 	token := testCreateUser(t, "paymentslist123")
 	orgAddress := testCreateOrganization(t, token)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(15)...))
+	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(pricedProcessVoters)...))
 	var pids []string
 	for range 2 {
 		pid := requestAndParse[apicommon.CreateVotingProcessResponse](
@@ -506,7 +526,7 @@ func TestOrganizationProcessPayments(t *testing.T) {
 	c.Assert(open, qt.HasLen, 1)
 	c.Assert(open[0].ProcessID, qt.Equals, pids[1])
 	c.Assert(open[0].Status, qt.Equals, db.ProcessPaymentPending)
-	c.Assert(open[0].AmountCents, qt.Equals, pricing.Cents(1_515))
+	c.Assert(open[0].AmountCents, qt.Equals, pricedProcessCents)
 	c.Assert(open[0].Title, qt.Not(qt.HasLen), 0)
 	c.Assert(open[0].Published, qt.IsFalse)
 

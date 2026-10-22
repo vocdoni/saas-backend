@@ -27,8 +27,8 @@ func TestBrandingChargedOncePerOrganization(t *testing.T) {
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	newBrandedProcess := func() string { return newBrandedVotingProcess(t, adminToken, orgAddress) }
-	// 15 voters + email 2FA = €15.15; branding adds €149
-	const plainCents = pricing.Cents(1_515)
+	// 26 voters, email 2FA free = €20; branding adds €149
+	const plainCents = pricedProcessCents
 	const withBrandingCents = plainCents + 14_900
 
 	first, second := newBrandedProcess(), newBrandedProcess()
@@ -96,7 +96,7 @@ func TestBrandingClaimReleasedWhenClaimantDropsIt(t *testing.T) {
 	adminToken := testCreateUser(t, "brandingdrop1234")
 	orgAddress := testCreateOrganization(t, adminToken)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	const plainCents = pricing.Cents(1_515)
+	const plainCents = pricedProcessCents
 	const withBrandingCents = plainCents + 14_900
 
 	claimant, next := newBrandedVotingProcess(t, adminToken, orgAddress), newBrandedVotingProcess(t, adminToken, orgAddress)
@@ -158,7 +158,7 @@ func TestBrandingClaimReleasedByRefusedPayment(t *testing.T) {
 	c.Assert(claimedBy(orgAddress), qt.Equals, bson.NilObjectID)
 	price := requestAndParse[apicommon.ProcessPriceResponse](
 		t, http.MethodGet, adminToken, nil, "processes", sibling, "price")
-	c.Assert(price.TotalCents, qt.Equals, pricing.Cents(1_515+14_900))
+	c.Assert(price.TotalCents, qt.Equals, pricing.Cents(pricedProcessCents+14_900))
 
 	// wallet: the integrator's balance does not cover the branded price
 	_, managedAddr := newIntegratorWithManagedOrg(t, adminToken, "prod_test_branding_refused")
@@ -179,7 +179,7 @@ func TestBrandingClaimReleasedByDroppedCheckout(t *testing.T) {
 	orgAddress := testCreateOrganization(t, adminToken)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	checkoutReq := &apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}
-	const withBrandingCents = pricing.Cents(1_515 + 14_900)
+	const withBrandingCents = pricing.Cents(pricedProcessCents + 14_900)
 	checkoutCents := func(pid string) pricing.Cents {
 		return requestAndParse[apicommon.ProcessCheckoutResponse](
 			t, http.MethodPost, adminToken, checkoutReq, "processes", pid, "checkout").AmountCents
@@ -205,7 +205,7 @@ func TestCancelCheckoutExcludesConcurrentCheckout(t *testing.T) {
 	orgAddress := testCreateOrganization(t, adminToken)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	checkoutReq := &apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}
-	const withBrandingCents = pricing.Cents(1_515 + 14_900)
+	const withBrandingCents = pricing.Cents(pricedProcessCents + 14_900)
 
 	cancelled, sibling := newBrandedVotingProcess(t, adminToken, orgAddress), newBrandedVotingProcess(t, adminToken, orgAddress)
 	requestAndParse[apicommon.ProcessCheckoutResponse](
@@ -244,7 +244,7 @@ func TestBrandingClaimReleasedByAbandonedCheckout(t *testing.T) {
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	newBrandedProcess := func() string { return newBrandedVotingProcess(t, adminToken, orgAddress) }
-	const plainCents = pricing.Cents(1_515)
+	const plainCents = pricedProcessCents
 	const withBrandingCents = plainCents + 14_900
 
 	abandoned, next := newBrandedProcess(), newBrandedProcess()
@@ -295,7 +295,7 @@ func TestPaidDraftBrandingFixedAtPayment(t *testing.T) {
 	orgAddress := testCreateProvisionedOrganization(t, token)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	checkoutReq := &apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}
-	const plainCents = pricing.Cents(1_515)
+	const plainCents = pricedProcessCents
 
 	payAsCheckedOut := func(pid string) bson.ObjectID {
 		checkout := requestAndParse[apicommon.ProcessCheckoutResponse](
@@ -331,7 +331,7 @@ func TestPaidDraftBrandingFixedAtPayment(t *testing.T) {
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
 
 	// a draft paid without branding cannot turn it on
-	ids := postNewOrgMembers(t, token, orgAddress, 15)
+	ids := postNewOrgMembers(t, token, orgAddress, pricedProcessVoters)
 	plain := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, newVotingProcessRequest(orgAddress, ids), processesCreateEndpoint).ProcessID
 	payAsCheckedOut(plain)
