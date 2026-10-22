@@ -181,7 +181,7 @@ func TestStripeCheckoutWebhookStampsBranding(t *testing.T) {
 		t, http.MethodPost, token, reqA, processesCreateEndpoint)
 	priceA := requestAndParse[apicommon.ProcessPriceResponse](
 		t, http.MethodGet, token, nil, "processes", createdA.ProcessID, "price")
-	c.Assert(priceA.TotalCents, qt.Equals, pricing.Cents(14_900))
+	c.Assert(priceA.TotalCents, qt.Equals, pricing.BrandingCents)
 
 	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](
 		t, http.MethodPost, token, &apicommon.ProcessCheckoutRequest{ReturnURL: "https://x.example"},
@@ -190,7 +190,7 @@ func TestStripeCheckoutWebhookStampsBranding(t *testing.T) {
 	// pay it: the fulfillment stamps the organization branding-paid
 	code := postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8),
 		"checkout.session.completed",
-		checkoutSessionObject(checkout.SessionID, "paid", 14_900, map[string]string{
+		checkoutSessionObject(checkout.SessionID, "paid", pricing.BrandingCents, map[string]string{
 			stripe.MetadataKeyProcessID: createdA.ProcessID,
 		}))
 	c.Assert(code, qt.Equals, http.StatusOK)

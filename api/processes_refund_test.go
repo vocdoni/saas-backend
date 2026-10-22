@@ -118,7 +118,7 @@ func TestDeletePaidDraftRefunds(t *testing.T) {
 	adminToken := testCreateUser(t, "refundpass123456")
 	orgAddress := testCreateOrganization(t, adminToken)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	const withBrandingCents = pricedProcessCents + 14_900
+	const withBrandingCents = pricedProcessCents + pricing.BrandingCents
 
 	paid := newBrandedVotingProcess(t, adminToken, orgAddress)
 	next := newBrandedVotingProcess(t, adminToken, orgAddress)
@@ -203,7 +203,7 @@ func TestDeletePaidDraftWithholdsReliedOnBranding(t *testing.T) {
 	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, adminToken,
 		&apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"},
 		"processes", paid, "checkout")
-	c.Assert(checkout.AmountCents, qt.Equals, pricing.Cents(pricedProcessCents+14_900))
+	c.Assert(checkout.AmountCents, qt.Equals, pricedProcessCents+pricing.BrandingCents)
 	oid, err := bson.ObjectIDFromHex(paid)
 	c.Assert(err, qt.IsNil)
 	// €164.15 net at 21% VAT
@@ -294,7 +294,7 @@ func TestDeletePaidDraftRetryKeepsRefundPlan(t *testing.T) {
 	adminToken := testCreateUser(t, "refundplan123456")
 	orgAddress := testCreateOrganization(t, adminToken)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	const withBrandingCents = pricedProcessCents + 14_900
+	const withBrandingCents = pricedProcessCents + pricing.BrandingCents
 
 	paid := newBrandedVotingProcess(t, adminToken, orgAddress)
 	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, adminToken,
@@ -484,7 +484,7 @@ func TestDeleteWalletPaidDraftCreditsIntegratorWallet(t *testing.T) {
 		OrgAddress: integratorAddr, AmountCents: 100_000, IdempotencyKey: "cs_wallet_refund_topup",
 	}), qt.IsNil)
 
-	// the publish path's debit, without the publish: 26 voters without 2FA is €20
+	// the publish path's debit, without the publish: 26 voters without 2FA is €17.16
 	c.Assert(testDB.DebitWalletForProcess(db.WalletDebit{
 		OrgAddress: integratorAddr, ProcessID: oid, AmountCents: pricedProcessCents, PriceCents: pricedProcessCents,
 	}), qt.IsNil)

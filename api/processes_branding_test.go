@@ -27,9 +27,9 @@ func TestBrandingChargedOncePerOrganization(t *testing.T) {
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	newBrandedProcess := func() string { return newBrandedVotingProcess(t, adminToken, orgAddress) }
-	// 26 voters, email 2FA free = €20; branding adds €149
+	// 26 voters, email 2FA free = €17.16; branding adds €149
 	const plainCents = pricedProcessCents
-	const withBrandingCents = plainCents + 14_900
+	const withBrandingCents = plainCents + pricing.BrandingCents
 
 	first, second := newBrandedProcess(), newBrandedProcess()
 	checkoutReq := &apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}
@@ -97,7 +97,7 @@ func TestBrandingClaimReleasedWhenClaimantDropsIt(t *testing.T) {
 	orgAddress := testCreateOrganization(t, adminToken)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	const plainCents = pricedProcessCents
-	const withBrandingCents = plainCents + 14_900
+	const withBrandingCents = plainCents + pricing.BrandingCents
 
 	claimant, next := newBrandedVotingProcess(t, adminToken, orgAddress), newBrandedVotingProcess(t, adminToken, orgAddress)
 	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, adminToken,
@@ -158,7 +158,7 @@ func TestBrandingClaimReleasedByRefusedPayment(t *testing.T) {
 	c.Assert(claimedBy(orgAddress), qt.Equals, bson.NilObjectID)
 	price := requestAndParse[apicommon.ProcessPriceResponse](
 		t, http.MethodGet, adminToken, nil, "processes", sibling, "price")
-	c.Assert(price.TotalCents, qt.Equals, pricing.Cents(pricedProcessCents+14_900))
+	c.Assert(price.TotalCents, qt.Equals, pricedProcessCents+pricing.BrandingCents)
 
 	// wallet: the integrator's balance does not cover the branded price
 	_, managedAddr := newIntegratorWithManagedOrg(t, adminToken, "prod_test_branding_refused")
@@ -179,7 +179,7 @@ func TestBrandingClaimReleasedByDroppedCheckout(t *testing.T) {
 	orgAddress := testCreateOrganization(t, adminToken)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	checkoutReq := &apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}
-	const withBrandingCents = pricing.Cents(pricedProcessCents + 14_900)
+	const withBrandingCents = pricedProcessCents + pricing.BrandingCents
 	checkoutCents := func(pid string) pricing.Cents {
 		return requestAndParse[apicommon.ProcessCheckoutResponse](
 			t, http.MethodPost, adminToken, checkoutReq, "processes", pid, "checkout").AmountCents
@@ -205,7 +205,7 @@ func TestCancelCheckoutExcludesConcurrentCheckout(t *testing.T) {
 	orgAddress := testCreateOrganization(t, adminToken)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	checkoutReq := &apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}
-	const withBrandingCents = pricing.Cents(pricedProcessCents + 14_900)
+	const withBrandingCents = pricedProcessCents + pricing.BrandingCents
 
 	cancelled, sibling := newBrandedVotingProcess(t, adminToken, orgAddress), newBrandedVotingProcess(t, adminToken, orgAddress)
 	requestAndParse[apicommon.ProcessCheckoutResponse](
@@ -245,7 +245,7 @@ func TestBrandingClaimReleasedByAbandonedCheckout(t *testing.T) {
 
 	newBrandedProcess := func() string { return newBrandedVotingProcess(t, adminToken, orgAddress) }
 	const plainCents = pricedProcessCents
-	const withBrandingCents = plainCents + 14_900
+	const withBrandingCents = plainCents + pricing.BrandingCents
 
 	abandoned, next := newBrandedProcess(), newBrandedProcess()
 	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, adminToken,

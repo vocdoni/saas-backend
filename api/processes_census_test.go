@@ -407,11 +407,14 @@ func TestProcessCensusExceedsTwoFaAllowance(t *testing.T) {
 				testCSPAuthenticateWithFields(t, pid, tc.authReq(m))
 			}
 
+			// paid when priced (SMS 2FA is charged even on 3 voters): only the allowance is at stake
 			draft := func(twoFa db.OrgMemberTwoFaFields) string {
 				req := minimalVotingProcessRequest(orgAddress)
 				req.Census = census(twoFa)
-				return requestAndParse[apicommon.CreateVotingProcessResponse](
+				pid := requestAndParse[apicommon.CreateVotingProcessResponse](
 					t, http.MethodPost, token, req, processesCreateEndpoint).ProcessID
+				payIfPriced(t, token, pid)
+				return pid
 			}
 			validate := func(pid string) apicommon.VotingProcessValidateResponse {
 				return requestAndParse[apicommon.VotingProcessValidateResponse](

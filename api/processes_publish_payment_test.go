@@ -256,7 +256,7 @@ func TestManagedProcessWalletPublish(t *testing.T) {
 	requestAndAssertError(errors.ErrInsufficientWalletBalance, t, http.MethodPost, token, nil,
 		"processes", pid, "publish")
 
-	// top up enough (26 voters with paid integrator email 2FA = 2026 cents) and publish
+	// top up enough (26 voters with paid integrator email 2FA = 1742 cents) and publish
 	c.Assert(testDB.CreditWallet(db.WalletCredit{
 		OrgAddress: integratorAddr, AmountCents: 100_000, IdempotencyKey: "cs_wallet_topup_test",
 	}), qt.IsNil)

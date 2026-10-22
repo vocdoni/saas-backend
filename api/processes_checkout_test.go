@@ -175,7 +175,7 @@ func TestProcessPrice(t *testing.T) {
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, adminToken, orgAddress)
 
-	// 26 voters, email 2FA free for a standard organization: only the base R5(1.5*26^0.824) = €20
+	// 26 voters, email 2FA free for a standard organization: only the base, 26 × €0.66 = €17.16
 	price := requestAndParse[apicommon.ProcessPriceResponse](
 		t, http.MethodGet, adminToken, nil, "processes", pid, "price")
 	c.Assert(price.TotalCents, qt.Equals, pricedProcessCents)
