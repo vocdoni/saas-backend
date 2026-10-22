@@ -39,6 +39,9 @@ var (
 	ErrMaxSubOrgsReached = fmt.Errorf("max suborganizations reached")
 	// ErrMaxUsersReached is returned when the organization's plan allows no more users.
 	ErrMaxUsersReached = fmt.Errorf("max users reached")
+	// ErrInvalidMetaPath is returned when MongoDB refuses a meta update path, such as a sub-key of a
+	// meta value that is not an object, or two paths where one is a prefix of the other.
+	ErrInvalidMetaPath = fmt.Errorf("invalid meta path")
 )
 
 // errorsAsStrings converts a slice of errors to a slice of strings

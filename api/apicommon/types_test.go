@@ -99,3 +99,53 @@ func TestOrgMemberWeight(t *testing.T) {
 		c.Assert(err, qt.ErrorMatches, `member 1: invalid weight ".*"`, qt.Commentf("weight %q", weight))
 	}
 }
+
+func TestValidateMetaKeys(t *testing.T) {
+	c := qt.New(t)
+
+	c.Assert(ValidateMetaKeys(map[string]any{
+		"region": "Europe",
+		"contact": map[string]any{
+			"email":   "info@example.com",
+			"methods": []any{map[string]any{"kind": "phone"}},
+		},
+		"price": "$5",
+	}), qt.IsNil)
+
+	for _, meta := range []map[string]any{
+		{"": "empty"},
+		{"a.b": 1},
+		{"$set": 1},
+		{"settings": map[string]any{"a.b": 1}},
+		{"settings": map[string]any{"$x": 1}},
+		{"list": []any{map[string]any{"a.b": 1}}},
+		{"settings": map[string]any{"": 1}},
+	} {
+		c.Assert(ValidateMetaKeys(meta), qt.IsNotNil, qt.Commentf("%v", meta))
+	}
+}
+
+func TestValidateMetaShorthands(t *testing.T) {
+	c := qt.New(t)
+
+	c.Assert(ValidateMetaShorthands(nil, nil, nil), qt.IsNil)
+	c.Assert(ValidateMetaShorthands(
+		&MultilingualText{"default": "Acme", "es": "Acme ES"},
+		&MultilingualText{"default": "https://example.com/logo.png"},
+		nil,
+	), qt.IsNil)
+	c.Assert(ValidateMetaShorthands(&MultilingualText{"default": "x", "en.US": "y"}, nil, nil), qt.IsNotNil)
+	c.Assert(ValidateMetaShorthands(nil, nil, &MultilingualText{"": "x", "default": "y"}), qt.IsNotNil)
+	c.Assert(ValidateMetaShorthands(nil, &MultilingualText{"$x": "y", "default": "z"}, nil), qt.IsNotNil)
+}
+
+func TestValidateMetaPath(t *testing.T) {
+	c := qt.New(t)
+
+	for _, path := range []string{"region", "contact.email", "name.default", "a$b"} {
+		c.Assert(ValidateMetaPath(path), qt.IsNil, qt.Commentf("%q", path))
+	}
+	for _, path := range []string{"", ".", "a.", ".a", "a..b", "$a", "a.$b"} {
+		c.Assert(ValidateMetaPath(path), qt.IsNotNil, qt.Commentf("%q", path))
+	}
+}

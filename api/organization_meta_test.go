@@ -2,11 +2,13 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
@@ -429,4 +431,378 @@ func TestOrganizationMetaIdentityKeysAdminOnly(t *testing.T) {
 		_, ok = getMeta()["logo"]
 		c.Assert(ok, qt.IsFalse)
 	})
+}
+
+// testAddOrgManager makes a new user a manager of orgAddress and returns their token.
+func testAddOrgManager(t *testing.T, orgAddress common.Address) string {
+	t.Helper()
+	managerToken := testCreateUser(t, "managerpassword123")
+	managerInfo := requestAndParse[apicommon.UserInfo](t, http.MethodGet, managerToken, nil, usersMeEndpoint)
+	managerUser, err := testDB.UserByEmail(managerInfo.Email)
+	qt.Assert(t, err, qt.IsNil)
+	managerUser.Organizations = append(managerUser.Organizations, db.OrganizationUser{
+		Address: orgAddress,
+		Role:    db.ManagerRole,
+	})
+	_, err = testDB.SetUser(managerUser)
+	qt.Assert(t, err, qt.IsNil)
+	return managerToken
+}
+
+// TestOrganizationMetaDottedIdentityKey checks that a manager cannot write into an identity key
+// through a dotted sub-key, even when a literal field with that name is stored next to it.
+func TestOrganizationMetaDottedIdentityKey(t *testing.T) {
+	c := qt.New(t)
+	adminToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	metaPath := []string{"organizations", orgAddress.String(), "meta"}
+	managerToken := testAddOrgManager(t, orgAddress)
+	getMeta := func() map[string]any {
+		return requestAndParse[apicommon.OrganizationMetaResponse](t, http.MethodGet, adminToken, nil, metaPath...).Meta
+	}
+
+	requestAndAssertCode(http.StatusOK, t, http.MethodPut, adminToken,
+		&apicommon.OrganizationInfo{Name: &apicommon.MultilingualText{"default": "Acme"}},
+		"organizations", orgAddress.String())
+	// a literal "name.default" field already stored with the value the manager is about to send,
+	// which is what made the old literal-key comparison let the dotted write through
+	meta := getMeta()
+	meta["name.default"] = "Evil"
+	c.Assert(testDB.AddOrganizationMeta(orgAddress, meta), qt.IsNil)
+
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPut, managerToken,
+		&apicommon.OrganizationAddMetaRequest{Meta: map[string]any{"name.default": "Evil"}}, metaPath...)
+	c.Assert(getMeta()["name"], qt.DeepEquals, map[string]any{"default": "Acme"})
+}
+
+// TestOrganizationMetaLegacyIdentityValues checks that a manager can send back an identity value
+// in the normalized form GET /organizations returns, while it is stored as a legacy plain string.
+func TestOrganizationMetaLegacyIdentityValues(t *testing.T) {
+	c := qt.New(t)
+	adminToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	metaPath := []string{"organizations", orgAddress.String(), "meta"}
+	managerToken := testAddOrgManager(t, orgAddress)
+	getMeta := func() map[string]any {
+		return requestAndParse[apicommon.OrganizationMetaResponse](t, http.MethodGet, adminToken, nil, metaPath...).Meta
+	}
+
+	// a legacy plain-string description and a name, stored without the multilingual wrapper
+	c.Assert(testDB.AddOrganizationMeta(orgAddress, map[string]any{
+		"name":        "Acme",
+		"description": "Legacy",
+	}), qt.IsNil)
+
+	t.Run("put with normalized value", func(t *testing.T) {
+		c := qt.New(t)
+		requestAndAssertCode(http.StatusOK, t, http.MethodPut, managerToken,
+			&apicommon.OrganizationAddMetaRequest{Meta: map[string]any{
+				"description": map[string]any{"default": "Legacy"},
+				"region":      "Spain",
+			}}, metaPath...)
+		meta := getMeta()
+		c.Assert(meta["description"], qt.Equals, "Legacy")
+		c.Assert(meta["region"], qt.Equals, "Spain")
+	})
+
+	t.Run("put with only identity keys", func(t *testing.T) {
+		c := qt.New(t)
+		// every key is stripped before the write, which then sets nothing
+		requestAndAssertCode(http.StatusOK, t, http.MethodPut, managerToken,
+			&apicommon.OrganizationAddMetaRequest{Meta: map[string]any{
+				"description": map[string]any{"default": "Legacy"},
+			}}, metaPath...)
+		c.Assert(getMeta()["description"], qt.Equals, "Legacy")
+	})
+
+	t.Run("post with normalized values", func(t *testing.T) {
+		c := qt.New(t)
+		requestAndAssertCode(http.StatusOK, t, http.MethodPost, managerToken,
+			&apicommon.OrganizationAddMetaRequest{Meta: map[string]any{
+				"name":        map[string]any{"default": "Acme"},
+				"description": map[string]any{"default": "Legacy"},
+				"region":      "Europe",
+			}}, metaPath...)
+		meta := getMeta()
+		c.Assert(meta["name"], qt.Equals, "Acme")
+		c.Assert(meta["description"], qt.Equals, "Legacy")
+		c.Assert(meta["region"], qt.Equals, "Europe")
+	})
+
+	t.Run("post changing a normalized value is still rejected", func(t *testing.T) {
+		requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, managerToken,
+			&apicommon.OrganizationAddMetaRequest{Meta: map[string]any{
+				"name":        map[string]any{"default": "Evil"},
+				"description": map[string]any{"default": "Legacy"},
+			}}, metaPath...)
+	})
+}
+
+// TestOrganizationMetaManagerIdentityDelete checks that a manager may delete identity keys that
+// are not stored, which are no-ops, while stored ones stay admin-only.
+func TestOrganizationMetaManagerIdentityDelete(t *testing.T) {
+	c := qt.New(t)
+	adminToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	metaPath := []string{"organizations", orgAddress.String(), "meta"}
+	managerToken := testAddOrgManager(t, orgAddress)
+
+	requestAndAssertCode(http.StatusOK, t, http.MethodPut, adminToken,
+		&apicommon.OrganizationInfo{Name: &apicommon.MultilingualText{"default": "Acme"}},
+		"organizations", orgAddress.String())
+
+	requestAndAssertCode(http.StatusOK, t, http.MethodDelete, managerToken,
+		&apicommon.OrganizationDeleteMetaRequest{Keys: []string{"logo", "description"}}, metaPath...)
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodDelete, managerToken,
+		&apicommon.OrganizationDeleteMetaRequest{Keys: []string{"name.es"}}, metaPath...)
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodDelete, managerToken,
+		&apicommon.OrganizationDeleteMetaRequest{Keys: []string{"logo", "name"}}, metaPath...)
+
+	meta := requestAndParse[apicommon.OrganizationMetaResponse](t, http.MethodGet, adminToken, nil, metaPath...).Meta
+	c.Assert(meta["name"], qt.DeepEquals, map[string]any{"default": "Acme"})
+}
+
+// TestOrganizationMetaRejectsMalformedKeys checks that malformed meta keys and paths are answered
+// with 400 on every write path, and leave the stored meta untouched.
+func TestOrganizationMetaRejectsMalformedKeys(t *testing.T) {
+	c := qt.New(t)
+	adminToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	metaPath := []string{"organizations", orgAddress.String(), "meta"}
+	getMeta := func() map[string]any {
+		return requestAndParse[apicommon.OrganizationMetaResponse](t, http.MethodGet, adminToken, nil, metaPath...).Meta
+	}
+	requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken,
+		&apicommon.OrganizationAddMetaRequest{Meta: map[string]any{"region": "Europe", "tag": "x"}}, metaPath...)
+	before := getMeta()
+
+	t.Run("post", func(t *testing.T) {
+		requestAndAssertError(errors.ErrInvalidUserData, t, http.MethodPost, adminToken,
+			&apicommon.OrganizationAddMetaRequest{Meta: map[string]any{
+				"settings": map[string]any{"a.b": 1},
+			}}, metaPath...)
+		requestAndAssertError(errors.ErrInvalidUserData, t, http.MethodPost, adminToken,
+			&apicommon.OrganizationAddMetaRequest{Meta: map[string]any{"$set": 1}}, metaPath...)
+	})
+
+	t.Run("put", func(t *testing.T) {
+		for _, meta := range []map[string]any{
+			{"": 1},
+			{"a..b": 1},
+			{"a.$b": 1},
+			{"settings": map[string]any{"a.b": 1}},
+			{"tag": 1, "tag.b": 2},
+			{"region.es": "Europa"}, // a sub-key of a string value
+		} {
+			requestAndAssertError(errors.ErrInvalidUserData, t, http.MethodPut, adminToken,
+				&apicommon.OrganizationAddMetaRequest{Meta: meta}, metaPath...)
+		}
+	})
+
+	t.Run("delete", func(t *testing.T) {
+		for _, keys := range [][]string{{""}, {"a..b"}, {"tag", "tag.b"}} {
+			requestAndAssertError(errors.ErrInvalidUserData, t, http.MethodDelete, adminToken,
+				&apicommon.OrganizationDeleteMetaRequest{Keys: keys}, metaPath...)
+		}
+	})
+
+	t.Run("organization writers", func(t *testing.T) {
+		dotted := map[string]any{"a.b": 1}
+		requestAndAssertError(errors.ErrInvalidUserData, t, http.MethodPut, adminToken,
+			&apicommon.OrganizationInfo{Meta: dotted}, "organizations", orgAddress.String())
+		requestAndAssertError(errors.ErrInvalidUserData, t, http.MethodPost, adminToken,
+			&apicommon.CreateOrganizationRequest{OrganizationInfo: apicommon.OrganizationInfo{
+				Type:    string(db.CompanyType),
+				Website: "https://dotted-meta.example",
+				Meta:    dotted,
+			}}, "organizations")
+	})
+
+	c.Assert(getMeta(), qt.DeepEquals, before)
+}
+
+// TestOrganizationMetaManagedOrgDottedKeys checks that managed-org creation rejects dotted meta
+// keys in the request with 400.
+func TestOrganizationMetaManagedOrgDottedKeys(t *testing.T) {
+	c := qt.New(t)
+	adminToken := testCreateUser(t, "adminpassword123")
+	integratorAddr := testCreateOrganization(t, adminToken)
+	integratorOrg, err := testDB.Organization(integratorAddr)
+	c.Assert(err, qt.IsNil)
+	integratorOrg.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 1}
+	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
+
+	requestAndAssertError(errors.ErrInvalidUserData, t, http.MethodPost, adminToken,
+		&apicommon.CreateManagedOrganizationRequest{OrganizationInfo: apicommon.OrganizationInfo{
+			Type:    string(db.CompanyType),
+			Website: "https://managed-dotted-meta.example",
+			Meta:    map[string]any{"settings": map[string]any{"a.b": 1}},
+		}}, "integrator", "organizations")
+
+	requestAndAssertError(errors.ErrInvalidUserData, t, http.MethodPost, adminToken,
+		&apicommon.CreateManagedOrganizationRequest{OrganizationInfo: apicommon.OrganizationInfo{
+			Type:    string(db.CompanyType),
+			Website: "https://managed-dotted-shorthand.example",
+			Name:    &apicommon.MultilingualText{"default": "x", "en.US": "y"},
+		}}, "integrator", "organizations")
+}
+
+// TestMetaPathsConflict covers the overlap check behind the 400 for keys like "a" and "a.b", which
+// names the overlapping pair.
+func TestMetaPathsConflict(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(checkMetaPathsConflict([]string{"a", "a.b"}), qt.ErrorMatches, `meta keys "a" and "a.b" conflict with each other`)
+	c.Assert(checkMetaPathsConflict([]string{"a.b", "a"}), qt.IsNotNil)
+	c.Assert(checkMetaPathsConflict([]string{"a", "a"}), qt.IsNotNil)
+	c.Assert(checkMetaPathsConflict([]string{"ab", "a", "a.b.c"}), qt.IsNotNil)
+	c.Assert(checkMetaPathsConflict([]string{"ab", "a.c", "b"}), qt.IsNil)
+	c.Assert(checkMetaPathsConflict(nil), qt.IsNil)
+	// "a-" sorts between "a" and "a.b" in plain string order, but the conflict with "a.b" still counts
+	c.Assert(checkMetaPathsConflict([]string{"a", "a-", "a.b"}), qt.ErrorMatches, `meta keys "a" and "a.b" conflict with each other`)
+	c.Assert(checkMetaPathsConflict([]string{"a-", "a.b"}), qt.IsNil)
+	c.Assert(checkMetaPathsConflict([]string{"a", "a.b.c"}), qt.ErrorMatches, `meta keys "a" and "a.b.c" conflict with each other`)
+	// the input order does not change the outcome, and the caller's slice is left as it was
+	paths := []string{"a.b.c", "x", "a", "y.z"}
+	c.Assert(checkMetaPathsConflict(paths), qt.ErrorMatches, `meta keys "a" and "a.b.c" conflict with each other`)
+	c.Assert(paths, qt.DeepEquals, []string{"a.b.c", "x", "a", "y.z"})
+}
+
+// TestMetaPathsConflictManyKeys checks that a large set of distinct paths is validated quickly, which
+// the pairwise comparison this replaced could not do (tens of seconds for 50k keys).
+func TestMetaPathsConflictManyKeys(t *testing.T) {
+	c := qt.New(t)
+	paths := make([]string, 0, 50000)
+	for i := range 50000 {
+		paths = append(paths, fmt.Sprintf("group%d.key%d", i%100, i))
+	}
+	start := time.Now()
+	c.Assert(validateMetaPaths(paths), qt.IsNil)
+	c.Assert(time.Since(start) < 10*time.Second, qt.IsTrue)
+	c.Assert(validateMetaPaths(append(paths, "group7")), qt.IsNotNil)
+}
+
+// TestOrganizationMetaDottedKeyNotMatchedToLiteral checks that a PUT key with a dot is never skipped
+// as unchanged because a literal top-level field of that name is stored: it is a path, so its
+// value is validated and rejected here.
+func TestOrganizationMetaDottedKeyNotMatchedToLiteral(t *testing.T) {
+	c := qt.New(t)
+	adminToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	metaPath := []string{"organizations", orgAddress.String(), "meta"}
+
+	// planted directly in the database, as a legacy literal dotted field
+	c.Assert(testDB.AddOrganizationMeta(orgAddress, map[string]any{
+		"x.y": map[string]any{"$a": 1},
+	}), qt.IsNil)
+	before := requestAndParse[apicommon.OrganizationMetaResponse](t, http.MethodGet, adminToken, nil, metaPath...).Meta
+
+	requestAndAssertError(errors.ErrInvalidUserData, t, http.MethodPut, adminToken,
+		&apicommon.OrganizationAddMetaRequest{Meta: map[string]any{"x.y": map[string]any{"$a": 1}}}, metaPath...)
+	c.Assert(requestAndParse[apicommon.OrganizationMetaResponse](t, http.MethodGet, adminToken, nil, metaPath...).Meta,
+		qt.DeepEquals, before)
+}
+
+// TestOrganizationMetaUnchangedNestedValues checks that a value stored with a nested key the request
+// validation now refuses is echoed back as is by PUT and POST, while a changed value is still rejected.
+func TestOrganizationMetaUnchangedNestedValues(t *testing.T) {
+	c := qt.New(t)
+	adminToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	metaPath := []string{"organizations", orgAddress.String(), "meta"}
+	managerToken := testAddOrgManager(t, orgAddress)
+	getMeta := func() map[string]any {
+		return requestAndParse[apicommon.OrganizationMetaResponse](t, http.MethodGet, adminToken, nil, metaPath...).Meta
+	}
+
+	// planted directly in the database, as written before the nested key check existed
+	c.Assert(testDB.AddOrganizationMeta(orgAddress, map[string]any{
+		"settings": map[string]any{"a.b": 1},
+		"price":    map[string]any{"$x": "y"},
+		"name":     map[string]any{"default": "Acme", "en.US": "Acme US"},
+		"region":   "Europe",
+	}), qt.IsNil)
+	stored := getMeta()
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		token  string
+	}{
+		{"manager put", http.MethodPut, managerToken},
+		{"manager post", http.MethodPost, managerToken},
+		{"admin put", http.MethodPut, adminToken},
+		{"admin post", http.MethodPost, adminToken},
+	} {
+		c.Run(tc.name, func(c *qt.C) {
+			requestAndAssertCode(http.StatusOK, t, tc.method, tc.token,
+				&apicommon.OrganizationAddMetaRequest{Meta: maps.Clone(stored)}, metaPath...)
+			c.Assert(getMeta(), qt.DeepEquals, stored)
+		})
+	}
+
+	t.Run("changed nested value is still rejected", func(t *testing.T) {
+		c := qt.New(t)
+		for _, token := range []string{managerToken, adminToken} {
+			changed := maps.Clone(stored)
+			changed["settings"] = map[string]any{"a.b": 2}
+			requestAndAssertError(errors.ErrInvalidUserData, t, http.MethodPut, token,
+				&apicommon.OrganizationAddMetaRequest{Meta: map[string]any{"settings": map[string]any{"a.b": 2}}}, metaPath...)
+			requestAndAssertError(errors.ErrInvalidUserData, t, http.MethodPost, token,
+				&apicommon.OrganizationAddMetaRequest{Meta: changed}, metaPath...)
+		}
+		c.Assert(getMeta(), qt.DeepEquals, stored)
+	})
+
+	t.Run("new nested value is still rejected", func(t *testing.T) {
+		c := qt.New(t)
+		requestAndAssertError(errors.ErrInvalidUserData, t, http.MethodPut, managerToken,
+			&apicommon.OrganizationAddMetaRequest{Meta: map[string]any{"tags": map[string]any{"x.y": 1}}}, metaPath...)
+		planted := maps.Clone(stored)
+		planted["tags"] = map[string]any{"x.y": 1}
+		requestAndAssertError(errors.ErrInvalidUserData, t, http.MethodPost, managerToken,
+			&apicommon.OrganizationAddMetaRequest{Meta: planted}, metaPath...)
+		c.Assert(getMeta(), qt.DeepEquals, stored)
+	})
+
+	t.Run("literal dotted top-level key is still rejected", func(t *testing.T) {
+		c := qt.New(t)
+		planted := maps.Clone(stored)
+		planted["contact.email"] = "info@example.com"
+		requestAndAssertError(errors.ErrInvalidUserData, t, http.MethodPost, adminToken,
+			&apicommon.OrganizationAddMetaRequest{Meta: planted}, metaPath...)
+		c.Assert(getMeta(), qt.DeepEquals, stored)
+	})
+}
+
+// TestOrganizationIdentityShorthandKeys checks that locale keys of the name, logo and description
+// shorthands are validated like the explicit meta keys, on create, update and managed-org create.
+func TestOrganizationIdentityShorthandKeys(t *testing.T) {
+	c := qt.New(t)
+	adminToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	metaPath := []string{"organizations", orgAddress.String(), "meta"}
+	getMeta := func() map[string]any {
+		return requestAndParse[apicommon.OrganizationMetaResponse](t, http.MethodGet, adminToken, nil, metaPath...).Meta
+	}
+	before := getMeta()
+
+	requestAndAssertError(errors.ErrInvalidUserData, t, http.MethodPost, adminToken,
+		&apicommon.CreateOrganizationRequest{OrganizationInfo: apicommon.OrganizationInfo{
+			Type:    string(db.CompanyType),
+			Website: "https://shorthand-locale.example",
+			Name:    &apicommon.MultilingualText{"default": "x", "en.US": "y"},
+		}}, "organizations")
+	requestAndAssertError(errors.ErrInvalidUserData, t, http.MethodPut, adminToken,
+		&apicommon.OrganizationInfo{Logo: &apicommon.MultilingualText{"default": "https://example.com/l.png", "a.b": "y"}},
+		"organizations", orgAddress.String())
+	requestAndAssertError(errors.ErrInvalidUserData, t, http.MethodPut, adminToken,
+		&apicommon.OrganizationInfo{Description: &apicommon.MultilingualText{"": "x", "default": "y"}},
+		"organizations", orgAddress.String())
+	c.Assert(getMeta(), qt.DeepEquals, before)
+
+	// a valid locale map still goes through
+	requestAndAssertCode(http.StatusOK, t, http.MethodPut, adminToken,
+		&apicommon.OrganizationInfo{Name: &apicommon.MultilingualText{"default": "Acme", "es": "Acme ES"}},
+		"organizations", orgAddress.String())
+	c.Assert(getMeta()["name"], qt.DeepEquals, map[string]any{"default": "Acme", "es": "Acme ES"})
 }
