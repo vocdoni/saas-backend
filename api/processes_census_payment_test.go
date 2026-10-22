@@ -696,3 +696,41 @@ func TestCensusCheckoutChargesTheMinimum(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.AmountCents, qt.Equals, targetCents)
 }
+
+// TestCensusCheckoutRefusesQuoteOnlySize: above 50 000 voters the quote has no price, so the
+// headroom checkout answers 422 before opening a card session or debiting the wallet.
+func TestCensusCheckoutRefusesQuoteOnlySize(t *testing.T) {
+	c := qt.New(t)
+	fake := installFakePaymentGW(t)
+	installStripeWebhookService(t)
+	token := testCreateUser(t, "censusquoteonly123")
+	quoteOnly := &apicommon.ProcessCensusCheckoutRequest{CensusSize: 50_001, ReturnURL: "https://example.com/r"}
+
+	// card: a standard organization's paid process
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	pid := newPricedVotingProcess(t, token, orgAddress)
+	markProcessPaid(t, pid)
+	requestAndAssertError(errors.ErrQuoteRequired, t, http.MethodPost, token, quoteOnly,
+		"processes", pid, "census", "checkout")
+	c.Assert(fake.created, qt.HasLen, 0)
+
+	// wallet: a managed organization's published process
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_quote_only")
+	members := postOrgMembers(t, token, managedAddr, newOrgMembers(pricedProcessVoters)...)
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, newVotingProcessRequest(managedAddr, memberIDs(members)), processesCreateEndpoint)
+	c.Assert(testDB.CreditWallet(db.WalletCredit{
+		OrgAddress: integratorAddr, AmountCents: 100_000, IdempotencyKey: "cs_quote_only_topup",
+	}), qt.IsNil)
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", created.ProcessID, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
+	before, err := testDB.Wallet(integratorAddr)
+	c.Assert(err, qt.IsNil)
+	requestAndAssertError(errors.ErrQuoteRequired, t, http.MethodPost, token, quoteOnly,
+		"processes", created.ProcessID, "census", "checkout")
+	after, err := testDB.Wallet(integratorAddr)
+	c.Assert(err, qt.IsNil)
+	c.Assert(after.BalanceCents, qt.Equals, before.BalanceCents)
+	c.Assert(fake.created, qt.HasLen, 0)
+}

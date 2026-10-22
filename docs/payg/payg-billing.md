@@ -470,7 +470,8 @@ Three layers, from hermetic to manual:
   one is governed by its envelope, which `census/checkout` can raise.
 - Payments recorded before the custom URL became once per organization priced it per process
   and do not record `customUrl`: they neither stamp the organization nor withhold or release it
-  on refund (accepted, stage data only).
+  on refund, and their growth quotes leave the €89 they paid out of the projection, so that much
+  census growth fits the envelope for free (accepted, stage data only).
 - Chargebacks are out of scope: a disputed payment is not reverted automatically. A refund
   Stripe reports as failed after the draft was deleted needs a human — the error log is the
   only signal, by design.
