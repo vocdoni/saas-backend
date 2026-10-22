@@ -1088,6 +1088,26 @@ definitions:
           $ref: '#/definitions/apicommon.ProcessParticipantEntry'
         type: array
     type: object
+  apicommon.ProcessPriceResponse:
+    properties:
+      currency:
+        type: string
+      lines:
+        items:
+          $ref: '#/definitions/pricing.QuoteLine'
+        type: array
+      quoteRecommended:
+        description: 'QuoteRecommended: census above 15 000 voters — suggest requesting
+          a custom quote.'
+        type: boolean
+      quoteRequired:
+        description: |-
+          QuoteRequired: census above 50 000 voters — quote-only: no price (no lines, totalCents 0,
+          which is not free) and no self-service payment.
+        type: boolean
+      totalCents:
+        $ref: '#/definitions/pricing.Cents'
+    type: object
   apicommon.PublicQuestionResponse:
     properties:
       ballotProtocol:
@@ -2498,6 +2518,42 @@ definitions:
       weight:
         example: 2a
         format: hex
+        type: string
+    type: object
+  pricing.Cents:
+    enum:
+    - 1
+    - 100
+    - 1
+    - 5
+    - 3900
+    - 14900
+    - 9900
+    - 100
+    format: int64
+    type: integer
+    x-enum-comments:
+      signedCertPrice: per process
+      smsTwoFAPerVoter: per eligible voter
+    x-enum-descriptions:
+    - per eligible voter
+    - per process
+    x-enum-varnames:
+    - Cent
+    - Euro
+    - integratorEmailTwoFAPerVoter
+    - smsTwoFAPerVoter
+    - signedCertPrice
+    - BrandingCents
+    - CustomURLCents
+    - MinimumChargeCents
+  pricing.QuoteLine:
+    properties:
+      amountCents:
+        $ref: '#/definitions/pricing.Cents'
+      description:
+        type: string
+      kind:
         type: string
     type: object
 host: localhost:8080
@@ -4522,6 +4578,58 @@ paths:
       summary: Get all subscription plans
       tags:
       - plans
+  /pricing:
+    get:
+      description: |-
+        Public calculator over the published pricing formula: pass the inputs, get the
+        same breakdown GET /processes/{processId}/price returns for a draft. EUR cents,
+        VAT excluded (Stripe Tax adds VAT at checkout). No organization context: branding
+        is charged as requested and legacy plan credits are not applied. Base price on
+        graduated bands, free up to 25 voters; add-ons are charged on free processes too.
+        A priced total below €1 is raised to €1 by a minimumCharge line. Above 15 000
+        voters a custom quote is recommended (quoteRecommended). Above 50 000 the process
+        is quote-only: quoteRequired is true and there is no price (empty lines,
+        totalCents 0 — not free).
+      parameters:
+      - description: Eligible voters (census size), at least 1
+        in: query
+        name: voters
+        required: true
+        type: integer
+      - description: Email 2FA add-on (free for standard organizations)
+        in: query
+        name: emailTwoFA
+        type: boolean
+      - description: SMS 2FA add-on (€0.05 per voter)
+        in: query
+        name: smsTwoFA
+        type: boolean
+      - description: Signed results certificate add-on (€39)
+        in: query
+        name: signedCertificate
+        type: boolean
+      - description: Custom URL add-on (€99, once per organization)
+        in: query
+        name: customUrl
+        type: boolean
+      - description: Branding / white label add-on (€149, once per organization)
+        in: query
+        name: branding
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessPriceResponse'
+        "400":
+          description: Missing or invalid voters
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Compute a pay-per-process price
+      tags:
+      - processes
   /processes:
     get:
       description: |-
