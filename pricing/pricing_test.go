@@ -53,21 +53,21 @@ func TestComputeAddOns(t *testing.T) {
 		// per-voter add-ons are free inside the free tier (they would price below any
 		// chargeable amount); flat add-ons stay billable at any census size
 		{"free tier zeroes per-voter add-ons", QuoteInput{CensusSize: 25, EmailTwoFA: true, SMSTwoFA: true}, 0},
-		{"free base still pays flat add-ons", QuoteInput{CensusSize: 10, SignedCert: true}, 4_900},
+		{"free base still pays flat add-ons", QuoteInput{CensusSize: 10, SignedCert: true}, 3_900},
 		{"above the free tier 2FA bills per voter", QuoteInput{CensusSize: 26, EmailTwoFA: true}, 2_026},
 		{"10k voters", QuoteInput{CensusSize: 10_000}, 142_000},
 		// spec examples for 10 000 voters
 		{"10k + email 2FA", QuoteInput{CensusSize: 10_000, EmailTwoFA: true}, 152_000},
 		{"10k + email and SMS 2FA", QuoteInput{CensusSize: 10_000, EmailTwoFA: true, SMSTwoFA: true}, 182_000},
-		{"10k + email 2FA + certificate", QuoteInput{CensusSize: 10_000, EmailTwoFA: true, SignedCert: true}, 156_900},
-		// spec legacy-plans example: 900 voters + SMS 2FA + certificate = €456
-		{"900 + SMS 2FA + certificate", QuoteInput{CensusSize: 900, SMSTwoFA: true, SignedCert: true}, 45_600},
+		{"10k + email 2FA + certificate", QuoteInput{CensusSize: 10_000, EmailTwoFA: true, SignedCert: true}, 155_900},
+		// 900 voters + SMS 2FA + certificate = €446 (€456 in the spec, written with a €49 certificate)
+		{"900 + SMS 2FA + certificate", QuoteInput{CensusSize: 900, SMSTwoFA: true, SignedCert: true}, 44_600},
 		{"custom URL", QuoteInput{CensusSize: 10, CustomURL: true}, 8_900},
 		{"branding", QuoteInput{CensusSize: 10, Branding: true}, 14_900},
 		{
 			"everything at once",
 			QuoteInput{CensusSize: 600, EmailTwoFA: true, SMSTwoFA: true, SignedCert: true, CustomURL: true, Branding: true},
-			29_000 + 600 + 1_800 + 4_900 + 8_900 + 14_900,
+			29_000 + 600 + 1_800 + 3_900 + 8_900 + 14_900,
 		},
 	}
 	for _, tc := range cases {

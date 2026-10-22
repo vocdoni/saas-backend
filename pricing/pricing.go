@@ -50,7 +50,7 @@ const (
 const (
 	emailTwoFAPerVoter = 1 * Cent  // per eligible voter
 	smsTwoFAPerVoter   = 3 * Cent  // per eligible voter
-	signedCertPrice    = 49 * Euro // per process
+	signedCertPrice    = 39 * Euro // per process
 	customURLPrice     = 89 * Euro // per process
 	// BrandingCents is exported for refunds, which withhold it when the branding stays in use.
 	BrandingCents = 149 * Euro // once per organization
