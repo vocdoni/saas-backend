@@ -1221,8 +1221,9 @@ definitions:
           a custom quote.'
         type: boolean
       quoteRequired:
-        description: 'QuoteRequired: census above 50 000 voters — self-service checkout
-          is blocked.'
+        description: |-
+          QuoteRequired: census above 50 000 voters — quote-only: no price (no lines, totalCents 0,
+          which is not free) and no self-service payment.
         type: boolean
       totalCents:
         type: integer
@@ -4768,9 +4769,12 @@ paths:
         Public calculator over the published pricing formula: pass the inputs, get the
         same breakdown GET /processes/{processId}/price returns for a draft. EUR cents,
         VAT excluded (Stripe Tax adds VAT at checkout). No organization context: branding
-        is charged as requested and legacy plan credits are not applied. Above 15 000
-        voters a custom quote is recommended; above 50 000 the flag is informational here —
-        self-service checkout enforces the block.
+        is charged as requested and legacy plan credits are not applied. Base price on
+        graduated bands, free up to 25 voters; add-ons are charged on free processes too.
+        A priced total below €1 is raised to €1 by a minimumCharge line. Above 15 000
+        voters a custom quote is recommended (quoteRecommended). Above 50 000 the process
+        is quote-only: quoteRequired is true and there is no price (empty lines,
+        totalCents 0 — not free).
       parameters:
       - description: Eligible voters (census size), at least 1
         in: query
@@ -4785,15 +4789,15 @@ paths:
         in: query
         name: smsTwoFA
         type: boolean
-      - description: Signed results certificate add-on
+      - description: Signed results certificate add-on (€39)
         in: query
         name: signedCertificate
         type: boolean
-      - description: Custom URL add-on
+      - description: Custom URL add-on (€99, once per organization)
         in: query
         name: customUrl
         type: boolean
-      - description: Branding / white label add-on
+      - description: Branding / white label add-on (€149, once per organization)
         in: query
         name: branding
         type: boolean

@@ -188,7 +188,8 @@ type ProcessPriceResponse struct {
 	Currency   string              `json:"currency"`
 	// QuoteRecommended: census above 15 000 voters — suggest requesting a custom quote.
 	QuoteRecommended bool `json:"quoteRecommended"`
-	// QuoteRequired: census above 50 000 voters — self-service checkout is blocked.
+	// QuoteRequired: census above 50 000 voters — quote-only: no price (no lines, totalCents 0,
+	// which is not free) and no self-service payment.
 	QuoteRequired bool `json:"quoteRequired"`
 	// PaymentStatus is the process's current payment state (pending, processing, failed,
 	// paid); empty when no payment exists yet.

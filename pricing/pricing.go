@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"math"
 )
 
 // Cents is an amount of money in euro cents: the unit Stripe, the database and the API use. It
@@ -19,16 +18,8 @@ const (
 	Euro       = 100 * Cent
 )
 
-// Round rounds c half-up to the nearest multiple of m.
-func (c Cents) Round(m Cents) Cents { return (c + m/2) / m * m }
-
-// floorEuros truncates a floating-point euro amount to whole cents. Truncating never crosses a
-// whole-cent rounding threshold, so a later Round gives the exact result, where rounding to cents
-// first would not: €477.499 (1673 voters) must round to €475, not to €477.50 and then €480.
-func floorEuros(euros float64) Cents { return Cents(math.Floor(euros * float64(Euro))) }
-
-// PayerType selects the pricing policy. The base price is the same for both today; integrators
-// also pay email 2FA, which is free for standard organizations.
+// PayerType selects the pricing policy. The base price is the same for both; integrators also
+// pay email 2FA, which is free for standard organizations.
 type PayerType int
 
 // Payer types.
@@ -45,6 +36,8 @@ const (
 	LineSignedCert = "signedCertificate"
 	LineCustomURL  = "customUrl"
 	LineBranding   = "branding"
+	// LineMinimumCharge raises a priced total below MinimumChargeCents to it.
+	LineMinimumCharge = "minimumCharge"
 )
 
 // Add-on prices and the self-service thresholds, from the spec.
@@ -53,23 +46,28 @@ const (
 	integratorEmailTwoFAPerVoter = 1 * Cent
 	smsTwoFAPerVoter             = 5 * Cent  // per eligible voter
 	signedCertPrice              = 39 * Euro // per process
-	customURLPrice               = 89 * Euro // per process
-	// BrandingCents is exported for refunds, which withhold it when the branding stays in use.
-	BrandingCents = 149 * Euro // once per organization
+	// BrandingCents and CustomURLCents are the once-per-organization add-ons, exported for
+	// refunds, which withhold them when another process relies on them.
+	BrandingCents  = 149 * Euro
+	CustomURLCents = 99 * Euro
+
+	// MinimumChargeCents is the smallest amount ever charged: a priced total between zero and it
+	// is raised to it (Stripe cannot charge less than €0.50).
+	MinimumChargeCents = 1 * Euro
 
 	// FreeCensusSize is the largest census with a free base price (also db.TestMaxCensusSize).
 	FreeCensusSize = 25
 
-	// MaxCensusSize keeps the formula from overflowing int64 (reachable from the public
-	// /pricing calculator); far above any real electorate.
+	// MaxCensusSize bounds the census the public /pricing calculator accepts; far above any
+	// real electorate.
 	MaxCensusSize = 10_000_000
 
 	quoteRecommendedAbove = 15_000 // recommend a custom quote above this census size
-	quoteRequiredAbove    = 50_000 // self-service checkout unavailable above this
+	quoteRequiredAbove    = 50_000 // quote-only above this: no price, no self-service payment
 )
 
-// QuoteInput is everything the price depends on. Branding must be false once the
-// organization has paid it.
+// QuoteInput is everything the price depends on. Branding and CustomURL must be false once the
+// organization has paid them.
 type QuoteInput struct {
 	CensusSize int
 	EmailTwoFA bool
@@ -92,42 +90,47 @@ type Quote struct {
 	Lines            []QuoteLine `json:"lines"`
 	TotalCents       Cents       `json:"totalCents"`
 	QuoteRecommended bool        `json:"quoteRecommended"` // census above 15 000: suggest a custom quote
-	QuoteRequired    bool        `json:"quoteRequired"`    // census above 50 000: self-service checkout blocked
+	// QuoteRequired: census above 50 000. The quote has no price (no lines, a zero total that
+	// is never "free") and nothing may be paid or published through self-service.
+	QuoteRequired bool `json:"quoteRequired"`
 }
 
-// Compute prices a voting process. A zero total means it publishes without checkout.
+// Compute prices a voting process. A zero total means it publishes without checkout, unless
+// QuoteRequired is set: then there is no price at all. Any other total is at least
+// MinimumChargeCents.
 func Compute(in QuoteInput) (Quote, error) {
 	if in.CensusSize < 1 || in.CensusSize > MaxCensusSize {
 		return Quote{}, fmt.Errorf("census size must be between 1 and %d, got %d", MaxCensusSize, in.CensusSize)
 	}
-	quote := Quote{
-		QuoteRecommended: in.CensusSize > quoteRecommendedAbove,
-		QuoteRequired:    in.CensusSize > quoteRequiredAbove,
+	quote := Quote{QuoteRecommended: in.CensusSize > quoteRecommendedAbove}
+	if in.CensusSize > quoteRequiredAbove {
+		quote.Lines = []QuoteLine{}
+		quote.QuoteRequired = true
+		return quote, nil
 	}
 	addLine := func(kind, description string, cents Cents) {
 		quote.Lines = append(quote.Lines, QuoteLine{Kind: kind, Description: description, AmountCents: cents})
 		quote.TotalCents += cents
 	}
-	basePrice := basePriceFor(in.Payer)
-	addLine(LineBase, fmt.Sprintf("voting process (%d eligible voters)", in.CensusSize), basePrice(in.CensusSize))
-	// per-voter add-ons are free in the free tier, like its base price; flat add-ons are
-	// billed at any size
-	if in.CensusSize > FreeCensusSize {
-		if in.EmailTwoFA && in.Payer == PayerIntegrator {
-			addLine(LineEmailTwoFA, "email 2FA", Cents(in.CensusSize)*integratorEmailTwoFAPerVoter)
-		}
-		if in.SMSTwoFA {
-			addLine(LineSMSTwoFA, "SMS 2FA", Cents(in.CensusSize)*smsTwoFAPerVoter)
-		}
+	addLine(LineBase, fmt.Sprintf("voting process (%d eligible voters)", in.CensusSize), basePriceCents(in.CensusSize))
+	// add-ons are billed at any census size, free base price included
+	if in.EmailTwoFA && in.Payer == PayerIntegrator {
+		addLine(LineEmailTwoFA, "email 2FA", Cents(in.CensusSize)*integratorEmailTwoFAPerVoter)
+	}
+	if in.SMSTwoFA {
+		addLine(LineSMSTwoFA, "SMS 2FA", Cents(in.CensusSize)*smsTwoFAPerVoter)
 	}
 	if in.SignedCert {
 		addLine(LineSignedCert, "signed results certificate", signedCertPrice)
 	}
 	if in.CustomURL {
-		addLine(LineCustomURL, "custom URL", customURLPrice)
+		addLine(LineCustomURL, "custom URL", CustomURLCents)
 	}
 	if in.Branding {
 		addLine(LineBranding, "branding and white label", BrandingCents)
+	}
+	if quote.TotalCents > 0 && quote.TotalCents < MinimumChargeCents {
+		addLine(LineMinimumCharge, "minimum charge", MinimumChargeCents-quote.TotalCents)
 	}
 	return quote, nil
 }
@@ -140,34 +143,46 @@ func QuoteHash(in QuoteInput, totalCents Cents) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// basePriceFor selects the base-price formula for a payer type.
-func basePriceFor(PayerType) func(censusSize int) Cents {
-	return standardBasePriceCents
-}
-
-// standardBasePriceCents implements the base-price brackets, rounded to the nearest €5:
+// basePriceCents prices a census on graduated bands: each rate applies only to the voters inside
+// its band. The rates are exact in hundredths of a cent (€0.125 = 1250), so the bands are summed
+// exactly and rounded half-up to the cent once. Up to FreeCensusSize voters it is free; above it
+// every voter is priced, from the first band. Compute never calls it above 50 000 (quote-only).
 //
-//	1–25          free
-//	26–800        R5(1.5·v^0.824)
-//	801–5000      R5(33·v^0.36)
-//	5001–15000    R5(0.142·v)
-//	>15000        R5(2130 + 0.11·(v−15000))
-func standardBasePriceCents(censusSize int) Cents {
-	v := float64(censusSize)
-	var base Cents
-	switch {
-	case censusSize <= FreeCensusSize:
+//	1–100          €0.660
+//	101–500        €0.430
+//	501–1 000      €0.240
+//	1 001–5 000    €0.125
+//	5 001–15 000   €0.100
+//	15 001–50 000  €0.090
+func basePriceCents(censusSize int) Cents {
+	if censusSize <= FreeCensusSize {
 		return 0
-	case censusSize <= 800:
-		base = floorEuros(1.5 * math.Pow(v, 0.824))
-	case censusSize <= 5000:
-		base = floorEuros(33 * math.Pow(v, 0.36))
-	case censusSize <= 15_000:
-		// €0.142 per voter, in whole cents: the truncation stays below a cent, so it never
-		// crosses a €2.50 midpoint (6250 voters is exactly €887.50, and rounds up)
-		base = Cents(censusSize) * 142 / 10
-	default:
-		base = 2130*Euro + Cents(censusSize-15_000)*11*Cent
 	}
-	return base.Round(5 * Euro)
+	// each case prices the voters above its band's floor, then hands the floor to the band below
+	voters, hundredths := int64(censusSize), int64(0)
+	switch {
+	case voters > 15_000:
+		hundredths += (voters - 15_000) * 900
+		voters = 15_000
+		fallthrough
+	case voters > 5_000:
+		hundredths += (voters - 5_000) * 1_000
+		voters = 5_000
+		fallthrough
+	case voters > 1_000:
+		hundredths += (voters - 1_000) * 1_250
+		voters = 1_000
+		fallthrough
+	case voters > 500:
+		hundredths += (voters - 500) * 2_400
+		voters = 500
+		fallthrough
+	case voters > 100:
+		hundredths += (voters - 100) * 4_300
+		voters = 100
+		fallthrough
+	default:
+		hundredths += voters * 6_600
+	}
+	return Cents((hundredths + 50) / 100)
 }
