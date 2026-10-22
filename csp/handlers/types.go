@@ -37,6 +37,9 @@ type AuthResponse struct {
 	AuthToken internal.HexBytes `json:"authToken,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	Signature internal.HexBytes `json:"signature,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	Weight    internal.HexBytes `json:"weight,omitempty" swaggertype:"string" format:"hex" example:"2a"`
+	// ProofType is the ProofCA.Type name of the proof to build with Signature (ECDSA or
+	// ECDSA_PIDSALTED). Set with Signature.
+	ProofType string `json:"proofType,omitempty" example:"ECDSA"`
 }
 
 // AuthRequest defines the payload for finishing the authentication process.
@@ -86,8 +89,16 @@ type SignBatchResult struct {
 	UpstreamID internal.HexBytes `json:"upstreamId" swaggertype:"string" format:"hex" example:"deadbeef"`
 	Signature  internal.HexBytes `json:"signature,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	Weight     internal.HexBytes `json:"weight,omitempty" swaggertype:"string" format:"hex" example:"2a"`
-	Code       string            `json:"code,omitempty"`
-	Error      string            `json:"error,omitempty"`
+	// ProofType is the ProofCA.Type name of the proof to build with Signature: ECDSA,
+	// ECDSA_PIDSALTED, ECDSA_BLIND or ECDSA_BLIND_PIDSALTED. Set with Signature.
+	ProofType string `json:"proofType,omitempty" example:"ECDSA_BLIND"`
+	// WeightKey and WeightCertificate are set on a blind signature of an OFF_CHAIN_CA_V3_BLIND
+	// election: the compressed public key that blind-signed the ballot, and the 65-byte certificate
+	// of that key for this election and weight. The client puts both in ProofCA.weightCertificate.
+	WeightKey         internal.HexBytes `json:"weightKey,omitempty" swaggertype:"string" format:"hex" example:"02a1b2"`
+	WeightCertificate internal.HexBytes `json:"weightCertificate,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Code              string            `json:"code,omitempty"`
+	Error             string            `json:"error,omitempty"`
 }
 
 // BlindPointRequest is round 1 of the blind (anonymous) signing flow of a voting process: for each

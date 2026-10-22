@@ -7,7 +7,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/api/apicommon"
-	"github.com/vocdoni/saas-backend/csp/signers"
+	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
@@ -78,23 +78,23 @@ func parseAddress(w http.ResponseWriter, payload string) (*internal.HexBytes, bo
 
 // signAndRespond signs the request and sends the response. A failure is mapped through
 // signOutcome so the public body carries the sanitized message, not the raw signer error
-// (csp.Sign joins internal detail into it), which stays in the log: authorization outcomes
+// (csp.SignBallot joins internal detail into it), which stays in the log: authorization outcomes
 // are 401, internal failures 500.
-func (c *CSPHandlers) signAndRespond(w http.ResponseWriter, authToken, address, processID, weight internal.HexBytes) {
-	log.Debugw("new CSP sign request", "address", address, "procId", processID, "weight", weight)
+func (c *CSPHandlers) signAndRespond(w http.ResponseWriter, req *csp.BallotRequest) {
+	log.Debugw("new CSP sign request", "address", req.Address, "procId", req.Election.ID, "weight", req.Weight)
 
-	signature, err := c.csp.Sign(authToken, address, processID, weight, signers.SignerTypeECDSASalted)
+	signed, err := c.csp.SignBallot(req)
 	if err != nil {
 		code, message := signOutcome(err)
 		if code == signCodeFailed {
-			log.Warnw("could not sign", "procId", processID, "error", err)
+			log.Warnw("could not sign", "procId", req.Election.ID, "error", err)
 			errors.ErrGenericInternalServerError.With(message).Write(w)
 			return
 		}
-		log.Debugw("sign rejected", "procId", processID, "reason", err)
+		log.Debugw("sign rejected", "procId", req.Election.ID, "reason", err)
 		errors.ErrUnauthorized.With(message).Write(w)
 		return
 	}
 
-	apicommon.HTTPWriteJSON(w, &AuthResponse{Signature: signature, Weight: weight})
+	apicommon.HTTPWriteJSON(w, &AuthResponse{Signature: signed.Signature, Weight: signed.Weight, ProofType: signed.ProofType})
 }
