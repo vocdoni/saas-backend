@@ -7577,20 +7577,24 @@ Full suites before any PR leaves draft (each implementer reports the counts; the
 
 Merge order: proto → sequencer → saas-backend and the SDKs → vocdoni-app.
 
-Pin swaps (controller):
-1. After PROTO is pushed (owner OK): SEQ `replace go.vocdoni.io/proto => go.vocdoni.io/proto <pseudo-version of the pushed commit>` (or drop the replace and `go get go.vocdoni.io/proto@<sha>`); TS repos keep the tarball or use the git commit.
+Pin swaps (controller). Swaps 1 and 3 happen right after the PROTO and SEQ branches are pushed and before the SEQ and
+SAAS draft PRs are opened, so their CI runs against fetchable pseudo-versions; the TS repos keep the tarball pin
+until 1.18.0 is published and their PRs stay draft.
+1. After PROTO is pushed (no owner OK needed, R17): SEQ `replace go.vocdoni.io/proto => go.vocdoni.io/proto <pseudo-version of the pushed commit>` (or drop the replace and `go get go.vocdoni.io/proto@<sha>`); TS repos keep the tarball or use the git commit.
 2. After v1.18.0 is tagged and published: SEQ `go get go.vocdoni.io/proto@v1.18.0`, drop the replace, `go mod tidy`; ISDK/VSDK `"@vocdoni/proto": "1.18.0"` and reinstall.
 3. SAAS `test/sequencer/go.mod`: replace both local paths with `go get github.com/vocdoni/vochain-sequencer@<epic commit>` and `go.vocdoni.io/proto@v1.18.0`, `go mod tidy`; re-pin to the sequencer release tag once it exists.
 4. APP: released `@vocdoni/*` versions (Task 10 Step 2).
 
 Owner OK required before (pushing branches and opening DRAFT PRs is already authorized):
+- merging any of the six PRs (D6);
 - tagging dvote-protobuf v1.18.0 (Go tag) and publishing `@vocdoni/proto` 1.18.0 to npm;
 - publishing `@vocdoni/api-types`, `@vocdoni/api-voting`, `@vocdoni/react-providers` (changesets) and `@vocdoni/sdk` to npm;
 - the vochain-sequencer release that sets `CSPKeyFork` for LTS/1.3 (`config/forks.go:31`) to the height expected at the agreed time on 2026-11-02, and the DEV/36 height (`:38`);
 - every deploy: sequencer nodes, vocdoni-app, saas-backend.
 
 Flag-day runbook (spec, Compatibility and rollout):
-1. Merge and tag dvote-protobuf v1.18.0 (npm + Go).
+1. Commit `chore(release): 1.18.0` bumping PROTO package.json (and package-lock.json) to 1.18.0, then merge and
+   tag dvote-protobuf v1.18.0 (npm + Go).
 2. Re-pin consumers to 1.18.0. Merge and release vochain-sequencer with the LTS `CSPKeyFork`
    height; deploy it to all LTS nodes before that height (check every node reports the release).
 3. Release vocdoni-sdk and the integrator-sdk packages; deploy vocdoni-app with them (backward
