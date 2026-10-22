@@ -15,17 +15,20 @@ import (
 //	@Description	Public calculator over the published pricing formula: pass the inputs, get the
 //	@Description	same breakdown GET /processes/{processId}/price returns for a draft. EUR cents,
 //	@Description	VAT excluded (Stripe Tax adds VAT at checkout). No organization context: branding
-//	@Description	is charged as requested and legacy plan credits are not applied. Above 15 000
-//	@Description	voters a custom quote is recommended; above 50 000 the flag is informational here —
-//	@Description	self-service checkout enforces the block.
+//	@Description	is charged as requested and legacy plan credits are not applied. Base price on
+//	@Description	graduated bands, free up to 25 voters; add-ons are charged on free processes too.
+//	@Description	A priced total below €1 is raised to €1 by a minimumCharge line. Above 15 000
+//	@Description	voters a custom quote is recommended (quoteRecommended). Above 50 000 the process
+//	@Description	is quote-only: quoteRequired is true and there is no price (empty lines,
+//	@Description	totalCents 0 — not free).
 //	@Tags			processes
 //	@Produce		json
 //	@Param			voters				query		int		true	"Eligible voters (census size), at least 1"
 //	@Param			emailTwoFA			query		bool	false	"Email 2FA add-on (free for standard organizations)"
 //	@Param			smsTwoFA			query		bool	false	"SMS 2FA add-on (€0.05 per voter)"
-//	@Param			signedCertificate	query		bool	false	"Signed results certificate add-on"
-//	@Param			customUrl			query		bool	false	"Custom URL add-on"
-//	@Param			branding			query		bool	false	"Branding / white label add-on"
+//	@Param			signedCertificate	query		bool	false	"Signed results certificate add-on (€39)"
+//	@Param			customUrl			query		bool	false	"Custom URL add-on (€99, once per organization)"
+//	@Param			branding			query		bool	false	"Branding / white label add-on (€149, once per organization)"
 //	@Success		200					{object}	apicommon.ProcessPriceResponse
 //	@Failure		400					{object}	errors.Error	"Missing or invalid voters"
 //	@Router			/pricing [get]
