@@ -970,15 +970,16 @@ func TestOrganizationUsers(t *testing.T) {
 			orgAddress.String(),
 			"users",
 		)
-		c.Assert(code, qt.Not(qt.Equals), http.StatusOK, qt.Commentf("expected error, got success: %s", resp))
 
-		// Verify the error message contains "max users reached"
+		// Verify the plan limit is reported as a 400 with its own error code
+		c.Assert(code, qt.Equals, http.StatusBadRequest, qt.Commentf("response: %s", resp))
 		var errorResp struct {
 			Error string `json:"error"`
 			Code  int    `json:"code"`
 		}
 		err = json.Unmarshal(resp, &errorResp)
 		c.Assert(err, qt.IsNil)
+		c.Assert(errorResp.Code, qt.Equals, errors.ErrMaxUsersReached.Code)
 		c.Assert(errorResp.Error, qt.Contains, "max users reached")
 	})
 
