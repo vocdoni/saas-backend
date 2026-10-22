@@ -16,7 +16,7 @@ type Error struct {
 	Err        error  `json:"error"` // Original error
 	Code       int    // Error code
 	HTTPstatus int    // HTTP status code to return
-	LogLevel   string // Log level for this error (defaults to "debug")
+	LogLevel   string // Log level for this error (defaults to "debug" for 4xx and "error" for 5xx)
 	Data       any    // Optional data to include in the error response
 
 	// public is the client-safe message of a 5xx error: Err without the detail appended
@@ -117,10 +117,6 @@ func (e Error) Write(w http.ResponseWriter) {
 		return
 	}
 
-	// Get caller information for better logging
-	pc, file, line, _ := runtime.Caller(1)
-	caller := runtime.FuncForPC(pc).Name()
-
 	// Log at the error's own level, defaulting to error for 5xx and debug for 4xx. The logger
 	// filters by level too, but skipping the Sprintf keeps discarded lines cheap.
 	logLevel := e.LogLevel
@@ -131,6 +127,9 @@ func (e Error) Write(w http.ResponseWriter) {
 		}
 	}
 	if logLevelRank(logLevel) >= logLevelRank(log.Level()) {
+		// Get caller information for better logging, only for the lines that are logged
+		pc, file, line, _ := runtime.Caller(1)
+		caller := runtime.FuncForPC(pc).Name()
 		// For 5xx errors the full error details are logged, the body only has the client-safe message
 		var errMsg string
 		if e.HTTPstatus >= 500 {

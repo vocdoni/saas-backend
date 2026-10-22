@@ -59,8 +59,11 @@ func (s *Service) CreateCheckoutSessionWithLookupKey(
 	}
 
 	org, err := s.db.Organization(orgAddress)
+	if stderrors.Is(err, db.ErrNotFound) {
+		return nil, errors.ErrOrganizationNotFound
+	}
 	if err != nil {
-		return nil, errors.ErrStripeError.Withf("organization %s not found: %v", orgAddress, err)
+		return nil, errors.ErrStripeError.Withf("could not get organization %s: %v", orgAddress, err)
 	}
 
 	// a private plan (a custom contract, the integrator tier) is only for the organizations

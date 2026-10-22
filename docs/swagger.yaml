@@ -2223,7 +2223,8 @@ definitions:
         description: HTTP status code to return
         type: integer
       logLevel:
-        description: Log level for this error (defaults to "debug")
+        description: Log level for this error (defaults to "debug" for 4xx and "error"
+          for 5xx)
         type: string
     type: object
   github_com_vocdoni_saas-backend_stripe.CheckoutSessionStatus:
@@ -3166,11 +3167,12 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.OrganizationInfo'
         "400":
-          description: Invalid input data
+          description: Invalid input data, or the user has reached the maximum number
+            of organizations
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Unauthorized
+          description: Unauthorized, or the user is not an admin of the parent organization
           schema:
             $ref: '#/definitions/errors.Error'
         "404":

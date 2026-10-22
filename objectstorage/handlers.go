@@ -15,6 +15,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.vocdoni.io/dvote/log"
 )
 
 // isObjectNameRgx is a regular expression to match object names.
@@ -53,13 +54,13 @@ func (osc *Client) processFile(w http.ResponseWriter, fileHeader *multipart.File
 	// Open the file
 	file, err := fileHeader.Open()
 	if err != nil {
-		errors.ErrStorageInvalidObject.Withf("cannot open file %s %v", fileHeader.Filename, err).Write(w)
+		errors.ErrInternalStorageError.WithErr(err).Write(w)
 		return "", false
 	}
 	defer func() {
+		// the response is already decided by now, so a close failure is only logged
 		if err := file.Close(); err != nil {
-			errors.ErrStorageInvalidObject.Withf("cannot close file %s %v", fileHeader.Filename, err).Write(w)
-			return
+			log.Warnw("cannot close uploaded file", "file", fileHeader.Filename, "error", err)
 		}
 	}()
 

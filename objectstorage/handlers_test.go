@@ -70,8 +70,12 @@ func TestProcessFileRejectsUnsupportedTypeAsBadRequest(t *testing.T) {
 	c.Assert(req.ParseMultipartForm(32*1024), qt.IsNil)
 	fileHeader := req.MultipartForm.File["file"][0]
 
+	// the client must carry the real supported types, otherwise every type would be rejected
+	osc, err := New(&Config{})
+	c.Assert(err, qt.IsNil)
+	c.Assert(osc.supportedTypes[FileTypePNG], qt.IsTrue)
+
 	rec := httptest.NewRecorder()
-	osc := &Client{}
 	_, ok := osc.processFile(rec, fileHeader, "user@example.com")
 	c.Assert(ok, qt.IsFalse)
 	c.Assert(rec.Code, qt.Equals, http.StatusBadRequest)
