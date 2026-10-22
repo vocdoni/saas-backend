@@ -142,6 +142,8 @@ func TestWithKeepsFields(t *testing.T) {
 	c.Assert(e.LogLevel, qt.Equals, "warn")
 	c.Assert(e.HTTPstatus, qt.Equals, http.StatusInternalServerError)
 	c.Assert(e.Code, qt.Equals, testInternalErr.Code)
+	_, body = writtenBody(t, e)
+	c.Assert(body["error"], qt.Equals, testInternalErr.Err.Error()+": tagged")
 }
 
 func TestWriteKeepsDetailOn4xx(t *testing.T) {
