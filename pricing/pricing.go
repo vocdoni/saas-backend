@@ -27,7 +27,8 @@ func (c Cents) Round(m Cents) Cents { return (c + m/2) / m * m }
 // first would not: €477.499 (1673 voters) must round to €475, not to €477.50 and then €480.
 func floorEuros(euros float64) Cents { return Cents(math.Floor(euros * float64(Euro))) }
 
-// PayerType selects the pricing policy. Integrator pricing is identical today but may diverge.
+// PayerType selects the pricing policy. The base price is the same for both today; integrators
+// also pay email 2FA, which is free for standard organizations.
 type PayerType int
 
 // Payer types.
@@ -48,10 +49,11 @@ const (
 
 // Add-on prices and the self-service thresholds, from the spec.
 const (
-	emailTwoFAPerVoter = 1 * Cent  // per eligible voter
-	smsTwoFAPerVoter   = 3 * Cent  // per eligible voter
-	signedCertPrice    = 39 * Euro // per process
-	customURLPrice     = 89 * Euro // per process
+	// email 2FA is free for standard organizations; integrators pay it per eligible voter
+	integratorEmailTwoFAPerVoter = 1 * Cent
+	smsTwoFAPerVoter             = 5 * Cent  // per eligible voter
+	signedCertPrice              = 39 * Euro // per process
+	customURLPrice               = 89 * Euro // per process
 	// BrandingCents is exported for refunds, which withhold it when the branding stays in use.
 	BrandingCents = 149 * Euro // once per organization
 
@@ -111,8 +113,8 @@ func Compute(in QuoteInput) (Quote, error) {
 	// per-voter add-ons are free in the free tier, like its base price; flat add-ons are
 	// billed at any size
 	if in.CensusSize > FreeCensusSize {
-		if in.EmailTwoFA {
-			addLine(LineEmailTwoFA, "email 2FA", Cents(in.CensusSize)*emailTwoFAPerVoter)
+		if in.EmailTwoFA && in.Payer == PayerIntegrator {
+			addLine(LineEmailTwoFA, "email 2FA", Cents(in.CensusSize)*integratorEmailTwoFAPerVoter)
 		}
 		if in.SMSTwoFA {
 			addLine(LineSMSTwoFA, "SMS 2FA", Cents(in.CensusSize)*smsTwoFAPerVoter)

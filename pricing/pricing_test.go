@@ -54,20 +54,28 @@ func TestComputeAddOns(t *testing.T) {
 		// chargeable amount); flat add-ons stay billable at any census size
 		{"free tier zeroes per-voter add-ons", QuoteInput{CensusSize: 25, EmailTwoFA: true, SMSTwoFA: true}, 0},
 		{"free base still pays flat add-ons", QuoteInput{CensusSize: 10, SignedCert: true}, 3_900},
-		{"above the free tier 2FA bills per voter", QuoteInput{CensusSize: 26, EmailTwoFA: true}, 2_026},
+		// email 2FA is free for standard organizations and billed per voter to integrators;
+		// SMS 2FA is billed per voter to everyone
+		{"above the free tier email 2FA stays free", QuoteInput{CensusSize: 26, EmailTwoFA: true}, 2_000},
+		{"above the free tier SMS 2FA bills per voter", QuoteInput{CensusSize: 26, SMSTwoFA: true}, 2_130},
+		{
+			"above the free tier an integrator pays email 2FA",
+			QuoteInput{CensusSize: 26, EmailTwoFA: true, Payer: PayerIntegrator},
+			2_026,
+		},
 		{"10k voters", QuoteInput{CensusSize: 10_000}, 142_000},
-		// spec examples for 10 000 voters
-		{"10k + email 2FA", QuoteInput{CensusSize: 10_000, EmailTwoFA: true}, 152_000},
-		{"10k + email and SMS 2FA", QuoteInput{CensusSize: 10_000, EmailTwoFA: true, SMSTwoFA: true}, 182_000},
-		{"10k + email 2FA + certificate", QuoteInput{CensusSize: 10_000, EmailTwoFA: true, SignedCert: true}, 155_900},
-		// 900 voters + SMS 2FA + certificate = €446 (€456 in the spec, written with a €49 certificate)
-		{"900 + SMS 2FA + certificate", QuoteInput{CensusSize: 900, SMSTwoFA: true, SignedCert: true}, 44_600},
+		// 10 000 voters (the spec's examples, repriced: free email 2FA, €0.05 SMS, €39 certificate)
+		{"10k + email 2FA", QuoteInput{CensusSize: 10_000, EmailTwoFA: true}, 142_000},
+		{"10k + email 2FA, integrator", QuoteInput{CensusSize: 10_000, EmailTwoFA: true, Payer: PayerIntegrator}, 152_000},
+		{"10k + email and SMS 2FA", QuoteInput{CensusSize: 10_000, EmailTwoFA: true, SMSTwoFA: true}, 192_000},
+		{"10k + email 2FA + certificate", QuoteInput{CensusSize: 10_000, EmailTwoFA: true, SignedCert: true}, 145_900},
+		{"900 + SMS 2FA + certificate", QuoteInput{CensusSize: 900, SMSTwoFA: true, SignedCert: true}, 46_400},
 		{"custom URL", QuoteInput{CensusSize: 10, CustomURL: true}, 8_900},
 		{"branding", QuoteInput{CensusSize: 10, Branding: true}, 14_900},
 		{
 			"everything at once",
 			QuoteInput{CensusSize: 600, EmailTwoFA: true, SMSTwoFA: true, SignedCert: true, CustomURL: true, Branding: true},
-			29_000 + 600 + 1_800 + 3_900 + 8_900 + 14_900,
+			29_000 + 3_000 + 3_900 + 8_900 + 14_900, // email 2FA free, SMS €0.05 × 600
 		},
 	}
 	for _, tc := range cases {
@@ -117,8 +125,8 @@ func TestComputeRejectsInvalidCensus(t *testing.T) {
 	c.Assert(err, qt.Not(qt.IsNil))
 }
 
-// TestPayerPolicyParity asserts the integrator policy is currently identical to the
-// standard one — the seam exists for future divergence, not present behavior.
+// TestPayerPolicyParity asserts the integrator base price is currently identical to the
+// standard one (only email 2FA differs, see TestComputeAddOns).
 func TestPayerPolicyParity(t *testing.T) {
 	c := qt.New(t)
 	for _, censusSize := range []int{1, 26, 600, 801, 5001, 15_001, 60_000} {

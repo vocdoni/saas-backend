@@ -2523,8 +2523,8 @@ definitions:
     - 1
     - 100
     - 1
-    - 3
-    - 4900
+    - 5
+    - 3900
     - 8900
     - 14900
     format: int64
@@ -2532,11 +2532,9 @@ definitions:
     x-enum-comments:
       BrandingCents: once per organization
       customURLPrice: per process
-      emailTwoFAPerVoter: per eligible voter
       signedCertPrice: per process
       smsTwoFAPerVoter: per eligible voter
     x-enum-descriptions:
-    - per eligible voter
     - per eligible voter
     - per process
     - per process
@@ -2544,7 +2542,7 @@ definitions:
     x-enum-varnames:
     - Cent
     - Euro
-    - emailTwoFAPerVoter
+    - integratorEmailTwoFAPerVoter
     - smsTwoFAPerVoter
     - signedCertPrice
     - customURLPrice
@@ -4593,11 +4591,11 @@ paths:
         name: voters
         required: true
         type: integer
-      - description: Email 2FA add-on
+      - description: Email 2FA add-on (free for standard organizations)
         in: query
         name: emailTwoFA
         type: boolean
-      - description: SMS 2FA add-on
+      - description: SMS 2FA add-on (€0.05 per voter)
         in: query
         name: smsTwoFA
         type: boolean
