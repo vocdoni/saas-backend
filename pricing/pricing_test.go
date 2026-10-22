@@ -17,7 +17,8 @@ func TestBasePriceBrackets(t *testing.T) {
 	}{
 		{1, 0},
 		{10, 0},           // spec example: 10 voters are free
-		{11, 1_000},       // R5(1.5·11^0.824) = R5(10.82) = €10
+		{25, 0},           // the free tier ends at 25 voters
+		{26, 2_000},       // R5(1.5·26^0.824) = R5(21.98) = €20
 		{600, 29_000},     // spec example: €290
 		{800, 37_000},     // R5(1.5·800^0.824) = R5(370.0) = €370
 		{801, 36_500},     // R5(33·801^0.36) = R5(366.3) = €365
@@ -48,12 +49,12 @@ func TestComputeAddOns(t *testing.T) {
 		in        QuoteInput
 		wantCents Cents
 	}{
-		{"free process, no add-ons", QuoteInput{CensusSize: 10}, 0},
+		{"free process, no add-ons", QuoteInput{CensusSize: 25}, 0},
 		// per-voter add-ons are free inside the free tier (they would price below any
 		// chargeable amount); flat add-ons stay billable at any census size
-		{"free tier zeroes per-voter add-ons", QuoteInput{CensusSize: 10, EmailTwoFA: true, SMSTwoFA: true}, 0},
+		{"free tier zeroes per-voter add-ons", QuoteInput{CensusSize: 25, EmailTwoFA: true, SMSTwoFA: true}, 0},
 		{"free base still pays flat add-ons", QuoteInput{CensusSize: 10, SignedCert: true}, 4_900},
-		{"above the free tier 2FA bills per voter", QuoteInput{CensusSize: 11, EmailTwoFA: true}, 1_011},
+		{"above the free tier 2FA bills per voter", QuoteInput{CensusSize: 26, EmailTwoFA: true}, 2_026},
 		{"10k voters", QuoteInput{CensusSize: 10_000}, 142_000},
 		// spec examples for 10 000 voters
 		{"10k + email 2FA", QuoteInput{CensusSize: 10_000, EmailTwoFA: true}, 152_000},
@@ -120,7 +121,7 @@ func TestComputeRejectsInvalidCensus(t *testing.T) {
 // standard one — the seam exists for future divergence, not present behavior.
 func TestPayerPolicyParity(t *testing.T) {
 	c := qt.New(t)
-	for _, censusSize := range []int{1, 11, 600, 801, 5001, 15_001, 60_000} {
+	for _, censusSize := range []int{1, 26, 600, 801, 5001, 15_001, 60_000} {
 		c.Run(fmt.Sprintf("%d voters", censusSize), func(c *qt.C) {
 			standard, err := Compute(QuoteInput{CensusSize: censusSize, Payer: PayerStandard})
 			c.Assert(err, qt.IsNil)

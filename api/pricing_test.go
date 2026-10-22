@@ -21,9 +21,10 @@ func TestPublicPricing(t *testing.T) {
 	// spec examples, unauthenticated
 	c.Assert(price("?voters=600").TotalCents, qt.Equals, pricing.Cents(29_000))
 	c.Assert(price("?voters=10000&emailTwoFA=true").TotalCents, qt.Equals, pricing.Cents(152_000))
-	c.Assert(price("?voters=10").TotalCents, qt.Equals, pricing.Cents(0))
+	c.Assert(price("?voters=25").TotalCents, qt.Equals, pricing.Cents(0))
+	c.Assert(price("?voters=26").TotalCents, qt.Equals, pricing.Cents(2_000))
 	// flat add-ons bill even in the free tier; per-voter ones do not
-	c.Assert(price("?voters=10&signedCertificate=true&smsTwoFA=true").TotalCents, qt.Equals, pricing.Cents(4_900))
+	c.Assert(price("?voters=25&signedCertificate=true&smsTwoFA=true").TotalCents, qt.Equals, pricing.Cents(4_900))
 	// branding is charged as requested — there is no organization context here
 	c.Assert(price("?voters=600&branding=true&customUrl=true").TotalCents,
 		qt.Equals, pricing.Cents(29_000+14_900+8_900))

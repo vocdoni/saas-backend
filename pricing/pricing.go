@@ -56,7 +56,7 @@ const (
 	BrandingCents = 149 * Euro // once per organization
 
 	// FreeCensusSize is the largest census with a free base price (also db.TestMaxCensusSize).
-	FreeCensusSize = 10
+	FreeCensusSize = 25
 
 	// MaxCensusSize keeps the formula from overflowing int64 (reachable from the public
 	// /pricing calculator); far above any real electorate.
@@ -108,8 +108,8 @@ func Compute(in QuoteInput) (Quote, error) {
 	}
 	basePrice := basePriceFor(in.Payer)
 	addLine(LineBase, fmt.Sprintf("voting process (%d eligible voters)", in.CensusSize), basePrice(in.CensusSize))
-	// per-voter add-ons are free in the free tier (below Stripe's minimum charge anyway);
-	// flat add-ons are billed at any size
+	// per-voter add-ons are free in the free tier, like its base price; flat add-ons are
+	// billed at any size
 	if in.CensusSize > FreeCensusSize {
 		if in.EmailTwoFA {
 			addLine(LineEmailTwoFA, "email 2FA", Cents(in.CensusSize)*emailTwoFAPerVoter)
@@ -145,8 +145,8 @@ func basePriceFor(PayerType) func(censusSize int) Cents {
 
 // standardBasePriceCents implements the base-price brackets, rounded to the nearest €5:
 //
-//	1–10          free
-//	11–800        R5(1.5·v^0.824)
+//	1–25          free
+//	26–800        R5(1.5·v^0.824)
 //	801–5000      R5(33·v^0.36)
 //	5001–15000    R5(0.142·v)
 //	>15000        R5(2130 + 0.11·(v−15000))
