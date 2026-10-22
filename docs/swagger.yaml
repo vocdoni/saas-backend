@@ -4157,7 +4157,8 @@ paths:
           schema:
             type: string
         "400":
-          description: Invalid input data
+          description: Invalid input data, or the organization's plan allows no more
+            users
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -5947,7 +5948,8 @@ paths:
               type: string
             type: object
         "400":
-          description: Invalid input data
+          description: Invalid input data, or the plan has no price for the billing
+            period
           schema:
             $ref: '#/definitions/errors.Error'
         "401":

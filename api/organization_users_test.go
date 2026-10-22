@@ -956,7 +956,7 @@ func TestOrganizationUsers(t *testing.T) {
 		err = testDB.SetOrganization(org)
 		c.Assert(err, qt.IsNil)
 
-		// Try to invite a user to the organization (should fail with "max users reached")
+		// Try to invite a user to the organization (should fail with "the organization's plan allows no more users")
 		inviteRequest := &apicommon.OrganizationInvite{
 			Email: "maxusers@example.com",
 			Role:  db.ViewerRole,
@@ -980,7 +980,7 @@ func TestOrganizationUsers(t *testing.T) {
 		err = json.Unmarshal(resp, &errorResp)
 		c.Assert(err, qt.IsNil)
 		c.Assert(errorResp.Code, qt.Equals, errors.ErrMaxUsersReached.Code)
-		c.Assert(errorResp.Error, qt.Contains, "max users reached")
+		c.Assert(errorResp.Error, qt.Contains, "the organization's plan allows no more users")
 	})
 
 	t.Run("OrganizationRoles", func(t *testing.T) {

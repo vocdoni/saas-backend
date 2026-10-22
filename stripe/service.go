@@ -96,7 +96,7 @@ func (s *Service) CreateCheckoutSessionWithLookupKey(
 	} else if billingPeriod == string(db.BillingPeriodAnnual) && plan.StripeYearlyPriceID != "" {
 		params.PriceID = plan.StripeYearlyPriceID
 	} else {
-		return nil, errors.ErrStripeError.Withf("invalid billing period %s for plan %s", billingPeriod, plan.ID)
+		return nil, errors.ErrInvalidData.Withf("invalid billing period %s for plan %s", billingPeriod, plan.ID)
 	}
 
 	return s.client.CreateCheckoutSession(params)

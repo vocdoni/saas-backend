@@ -70,7 +70,7 @@ func (osc *Client) processFile(w http.ResponseWriter, fileHeader *multipart.File
 			errors.ErrRequestBodyTooLarge.Withf("%s: %v", fileHeader.Filename, err).Write(w)
 			return "", false
 		}
-		if stderrors.Is(err, ErrorObjectEmpty) {
+		if stderrors.Is(err, ErrorObjectEmpty) || stderrors.Is(err, ErrorFileTypeNotSupported) {
 			errors.ErrStorageInvalidObject.Withf("%s: %v", fileHeader.Filename, err).Write(w)
 			return "", false
 		}

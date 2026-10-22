@@ -139,6 +139,12 @@ func TestCreateSubscriptionCheckoutRefusals(t *testing.T) {
 	requestAndAssertError(errors.ErrStripeError,
 		t, http.MethodPost, adminToken, checkout(privatePlan.ID), "subscriptions", "checkout")
 
+	// a billing period the plan has no price for is refused before reaching Stripe
+	badPeriod := checkout(privatePlan.ID)
+	badPeriod.BillingPeriod = "weekly"
+	requestAndAssertError(errors.ErrInvalidData,
+		t, http.MethodPost, adminToken, badPeriod, "subscriptions", "checkout")
+
 	// with a paid subscription, no new checkout, for any plan
 	c.Assert(testDB.SetOrganizationSubscription(orgAddress, &db.OrganizationSubscription{
 		PlanID:               mockEssentialPlan.ID,
