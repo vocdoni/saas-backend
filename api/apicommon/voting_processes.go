@@ -7,6 +7,7 @@ import (
 
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/pricing"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -171,6 +172,18 @@ type VotingProcessResponse struct {
 	// Formatted as "2006-01-02T15:04:05Z". Absent when the process ran to its scheduled end, or while
 	// any published question is still open or has no recorded endedAt yet.
 	EndedAt string `json:"endedAt,omitempty"`
+}
+
+// ProcessPriceResponse is a server-side pay-per-process quote: the line breakdown and the
+// net total in EUR cents (VAT excluded; Stripe Tax adds it at checkout).
+type ProcessPriceResponse struct {
+	Lines      []pricing.QuoteLine `json:"lines"`
+	TotalCents pricing.Cents       `json:"totalCents"`
+	Currency   string              `json:"currency"`
+	// QuoteRecommended: census above 15 000 voters — suggest requesting a custom quote.
+	QuoteRecommended bool `json:"quoteRecommended"`
+	// QuoteRequired: census above 50 000 voters — self-service checkout is blocked.
+	QuoteRequired bool `json:"quoteRequired"`
 }
 
 // VotingProcessListResponse is the paginated list of voting processes.
