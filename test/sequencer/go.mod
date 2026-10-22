@@ -77,9 +77,9 @@ require (
 	github.com/valyala/fastrand v1.1.0 // indirect
 	github.com/valyala/histogram v1.2.0 // indirect
 	github.com/vocdoni/go-blindsecp256k1 v0.2.0 // indirect
-	github.com/vocdoni/vochain-sequencer v0.0.0-00010101000000-000000000000 // indirect
+	github.com/vocdoni/vochain-sequencer v0.0.0-20261022215338-7ada328f67c3 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.vocdoni.io/proto v1.17.0 // indirect
+	go.vocdoni.io/proto v1.17.1-0.20261022195919-1a34741a4f8b // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/exp v0.0.0-20260718201538-764159d718ef // indirect
 	golang.org/x/net v0.58.0 // indirect
@@ -91,7 +91,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/blake3 v1.4.1 // indirect
 )
-
-replace github.com/vocdoni/vochain-sequencer => /home/user/src/vd/vochain-sequencer/.claude/worktrees/csp-key-per-election
-
-replace go.vocdoni.io/proto => /home/user/src/vd/dvote-protobuf/.claude/worktrees/csp-key-per-election

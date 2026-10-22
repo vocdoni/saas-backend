@@ -178,12 +178,16 @@ github.com/valyala/histogram v1.2.0 h1:wyYGAZZt3CpwUiIb9AU/Zbllg1llXyrtApRS815OL
 github.com/valyala/histogram v1.2.0/go.mod h1:Hb4kBwb4UxsaNbbbh+RRz8ZR6pdodR57tzWUS3BUzXY=
 github.com/vocdoni/go-blindsecp256k1 v0.2.0 h1:UZ5htrmZ0RnJXA+9MjhKAie1Tpm/lt+l2W0GXUgVbTM=
 github.com/vocdoni/go-blindsecp256k1 v0.2.0/go.mod h1:ivL5WWib9JZkUYYve5PEVJnHGjInSJy2f70OFGkw6t0=
+github.com/vocdoni/vochain-sequencer v0.0.0-20261022215338-7ada328f67c3 h1:SPA8yFRQoGK9NizGRkdRY6yfx/koftEHUjpeTshxtVc=
+github.com/vocdoni/vochain-sequencer v0.0.0-20261022215338-7ada328f67c3/go.mod h1:fUhLEElPw7dw6tmjB0FbvNhVLQHbqvb8KP+vi6KvyK0=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.2.1/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=
 go.uber.org/goleak v1.3.0/go.mod h1:CoHD4mav9JJNrW/WLlf7HGZPjdw8EucARQHekz1X6bE=
 go.uber.org/multierr v1.11.0 h1:blXXJkSxSSfBVBlC76pxqeO+LN3aDfLQo+309xJstO0=
 go.uber.org/multierr v1.11.0/go.mod h1:20+QtiLqy0Nd6FdQB9TLXag12DsQkrbs3htMFfDN80Y=
+go.vocdoni.io/proto v1.17.1-0.20261022195919-1a34741a4f8b h1:VC5RMXI/dBwhVQcWGXqLnnvz44eW/ddTGNfR0wV5c8E=
+go.vocdoni.io/proto v1.17.1-0.20261022195919-1a34741a4f8b/go.mod h1:mDw1XpOLQ/GJhUhx4k9MBlA4/lACN8AMd13qy4pmOlE=
 go.yaml.in/yaml/v2 v2.4.4 h1:tuyd0P+2Ont/d6e2rl3be67goVK4R6deVxCUX5vyPaQ=
 go.yaml.in/yaml/v2 v2.4.4/go.mod h1:gMZqIpDtDqOfM0uNfy0SkpRhvUryYH0Z6wdMYcacYXQ=
 go.yaml.in/yaml/v3 v3.0.5 h1:N6y/pJk8buWs9NY5ERU2HSMfm+IuD/OtfdAnq6kESPw=
