@@ -245,6 +245,10 @@ func TestProcessCSP(t *testing.T) {
 	testCastVote(t, testNewVocdoniClient(t), &voter, openElection,
 		testGenerateVoteProof(openElection, voter.Address().Bytes(), sign0.Signature, 1), []byte("[\"1\"]"))
 	assertParticipant(true, true)
+	// the found vote is cached on the row: a chain that cannot be asked no longer matters
+	failVoteLookup(signInfo.Consumed[0].Nullifier)
+	assertParticipant(true, true)
+	unfailVoteLookup(signInfo.Consumed[0].Nullifier)
 	check0 = requestAndParse[handlers.ProcessCheckResponse](t, http.MethodPost, "",
 		&handlers.CheckMembershipRequest{AuthToken: tok0}, "processes", pid, "check")
 	for _, q := range check0.Questions {
