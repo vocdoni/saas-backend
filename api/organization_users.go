@@ -115,6 +115,12 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 
 	// check if the user/org has permission to invite new users
 	hasPermission, err := a.subscriptions.HasDBPermission(user.Email, org.Address, subscriptions.InviteUser)
+	// a refusal (the user is not an admin) is an API error the caller is allowed to see as is
+	var apiErr errors.Error
+	if errors.As(err, &apiErr) && apiErr.HTTPstatus < http.StatusInternalServerError {
+		apiErr.Write(w)
+		return
+	}
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return

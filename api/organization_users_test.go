@@ -935,6 +935,20 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 	})
 
+	t.Run("InviteRefusedForNonAdmin", func(t *testing.T) {
+		adminToken := testCreateUser(t, "adminpassword123")
+		orgAddress := testCreateOrganization(t, adminToken)
+		// a user with no role in the organization is refused as a non-admin, not as a server fault
+		strangerToken := testCreateUser(t, "strangerpassword123")
+
+		inviteRequest := &apicommon.OrganizationInvite{
+			Email: "nonadmin@example.com",
+			Role:  db.ViewerRole,
+		}
+		requestAndAssertError(errors.ErrUserHasNoAdminRole,
+			t, http.MethodPost, strangerToken, inviteRequest, "organizations", orgAddress.String(), "users")
+	})
+
 	t.Run("MaxUsersReached", func(t *testing.T) {
 		c := qt.New(t)
 
