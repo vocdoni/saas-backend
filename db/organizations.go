@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -77,6 +78,12 @@ func (ms *MongoStorage) OrganizationWithParent(address common.Address) (org *Org
 // If the organization already exists, it updates the fields that have changed.
 // If the organization doesn't exist, it creates it. If an error occurs, it
 // returns the error.
+//
+// The subscription is only written when the organization is created. Callers
+// read-modify-write the whole organization, so a write of an existing one would
+// put back the subscription it read, undoing any change the billing webhooks made
+// in between. Subscription changes go through SetOrganizationSubscription,
+// UpdateOrganizationSubscription and SetOrganizationLastPaymentDate.
 func (ms *MongoStorage) SetOrganization(org *Organization) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
@@ -93,19 +100,38 @@ func (ms *MongoStorage) SetOrganization(org *Organization) error {
 	if err != nil {
 		return err
 	}
+	// fields written only when the document is created: the subscription (see above) and the
+	// signer seed, which takes part in the organization key derivation and is never rewritten.
+	// Both go into one $setOnInsert map so neither can overwrite the other.
+	setOnInsert := bson.M{}
+	if set, ok := updateDoc["$set"].(bson.M); ok {
+		if subscription, ok := set["subscription"]; ok {
+			delete(set, "subscription")
+			setOnInsert["subscription"] = subscription
+		}
+		delete(set, "signerSeed")
+	}
+	if org.SignerSeed != "" {
+		setOnInsert["signerSeed"] = org.SignerSeed
+	}
+	if len(setOnInsert) > 0 {
+		updateDoc["$setOnInsert"] = setOnInsert
+	}
 	// set upsert to true to create the document if it doesn't exist
 	opts := options.UpdateOne().SetUpsert(true)
-	if _, err := ms.organizations.UpdateOne(ctx, bson.M{"_id": org.Address}, updateDoc, opts); err != nil {
+	res, err := ms.organizations.UpdateOne(ctx, bson.M{"_id": org.Address}, updateDoc, opts)
+	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			return ErrAlreadyExists
 		}
 		return err
 	}
-	// assing organization to the creator if it's not empty including the address
-	// in the organizations list of the user if it's not already there as admin
-	if org.Creator != "" {
+	// grant the creator the admin role only when the organization was just created. Updates
+	// must not touch memberships, so they cannot re-admin a creator whose role was changed or
+	// removed, and a failed grant never deletes an organization that already existed.
+	if res.UpsertedCount > 0 && org.Creator != "" {
 		if err := ms.addOrganizationToUser(ctx, org.Creator, org.Address, AdminRole); err != nil {
-			// if an error occurs, delete the organization from the database
+			// roll back the freshly created organization so creation stays all-or-nothing
 			if _, delErr := ms.organizations.DeleteOne(ctx, bson.M{"_id": org.Address}); delErr != nil {
 				return errors.Join(err, delErr)
 			}
@@ -134,12 +160,25 @@ func (ms *MongoStorage) ReplaceCreatorEmail(oldEmail, newEmail string) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
-	// update the creator email in the organizations where it is the creator
-	updateDoc := bson.M{"$set": bson.M{"creator": newEmail}}
+	// update the creator email in the organizations where it is the creator. The organization
+	// signer is derived from signerSeed, falling back to the creator for rows the backfill
+	// migration has not stamped (see Organization.SignerSeedValue). Rewriting the creator of
+	// such a row would silently re-derive a different key and strand its on-chain account, so
+	// the same update first pins the seed to the current (old) creator when it is missing.
+	// Within a pipeline $set stage, "$creator" still reads the value before this update.
+	updateDoc := mongo.Pipeline{{{Key: "$set", Value: bson.M{
+		"signerSeed": bson.M{"$cond": bson.A{
+			bson.M{"$in": bson.A{bson.M{"$ifNull": bson.A{"$signerSeed", ""}}, bson.A{""}}},
+			"$creator",
+			"$signerSeed",
+		}},
+		// $literal: inside a pipeline a string starting with "$" would be read as a field path
+		"creator": bson.M{"$literal": newEmail},
+	}}}}
 	if _, err := ms.organizations.UpdateMany(ctx, bson.M{"creator": oldEmail}, updateDoc); err != nil {
-		return err
+		return fmt.Errorf("could not replace organization creator email: %w", err)
 	}
 	return nil
 }
@@ -202,9 +241,9 @@ func (ms *MongoStorage) UpdateOrganizationUserRole(address common.Address, userI
 	return nil
 }
 
-// RemoveOrganizationUser method removes the user from the organization
-// with the given address.
-func (ms *MongoStorage) RemoveOrganizationUser(address common.Address, userID uint64) error {
+// RemoveOrganizationUser removes the organization from the user's organizations. It reports
+// whether the user was a member, so callers only update membership counters for real removals.
+func (ms *MongoStorage) RemoveOrganizationUser(address common.Address, userID uint64) (bool, error) {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
@@ -221,11 +260,11 @@ func (ms *MongoStorage) RemoveOrganizationUser(address common.Address, userID ui
 			},
 		},
 	}
-	_, err := ms.users.UpdateOne(ctx, filter, update)
+	res, err := ms.users.UpdateOne(ctx, filter, update)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return nil
+	return res.ModifiedCount == 1, nil
 }
 
 // RemoveOrganizationFromAllUsers unlinks the given organization from every user that is a
@@ -238,7 +277,7 @@ func (ms *MongoStorage) RemoveOrganizationFromAllUsers(address common.Address) e
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 	filter := bson.M{"organizations._id": address}
 	update := bson.M{
@@ -271,6 +310,47 @@ func (ms *MongoStorage) SetOrganizationSubscription(address common.Address, orgS
 	// update the organization in the database
 	if _, err := ms.organizations.UpdateOne(ctx, filter, updateDoc); err != nil {
 		return err
+	}
+	return nil
+}
+
+// UpdateOrganizationSubscription sets every field of the organization's subscription
+// except lastPaymentDate, which has its own writer (SetOrganizationLastPaymentDate), so
+// the subscription and payment webhooks never overwrite each other's field.
+func (ms *MongoStorage) UpdateOrganizationSubscription(address common.Address, sub *OrganizationSubscription) error {
+	if _, err := ms.Plan(sub.PlanID); err != nil {
+		return ErrInvalidData
+	}
+	return ms.updateOrganizationFields(address, bson.M{
+		"subscription.planID":               sub.PlanID,
+		"subscription.stripeSubscriptionID": sub.StripeSubscriptionID,
+		"subscription.billingPeriod":        sub.BillingPeriod,
+		"subscription.startDate":            sub.StartDate,
+		"subscription.renewalDate":          sub.RenewalDate,
+		"subscription.active":               sub.Active,
+		"subscription.email":                sub.Email,
+	})
+}
+
+// SetOrganizationLastPaymentDate sets only the last payment date of the organization's
+// subscription.
+func (ms *MongoStorage) SetOrganizationLastPaymentDate(address common.Address, date time.Time) error {
+	return ms.updateOrganizationFields(address, bson.M{"subscription.lastPaymentDate": date})
+}
+
+// updateOrganizationFields $sets the given fields of an existing organization, returning
+// ErrNotFound if there is no organization with that address.
+func (ms *MongoStorage) updateOrganizationFields(address common.Address, fields bson.M) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.organizations.UpdateOne(ctx, bson.M{"_id": address}, bson.M{"$set": fields})
+	if err != nil {
+		return err
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
 	}
 	return nil
 }
@@ -398,7 +478,7 @@ func (ms *MongoStorage) IncrementOrganizationSubOrgsCounter(address common.Addre
 	}
 
 	if org.Counters.SubOrgs >= plan.Organization.SubOrgs {
-		return fmt.Errorf("max suborgs reached (%d >= %d)", org.Counters.SubOrgs, plan.Organization.SubOrgs)
+		return fmt.Errorf("%w (%d >= %d)", ErrMaxSubOrgsReached, org.Counters.SubOrgs, plan.Organization.SubOrgs)
 	}
 
 	return ms.addToOrganizationCounter(address, "subOrgs", 1)
@@ -449,23 +529,33 @@ func (ms *MongoStorage) DecrementOrganizationManagedOrgsCounter(address common.A
 	return ms.addToOrganizationCounter(address, "managedOrgs", -1)
 }
 
-// ReserveManagedPublish atomically reserves one managed process slot for the integrator,
-// re-reading the counter under keysLock so concurrent publishes cannot each pass a stale
-// check and exceed the integrator's aggregate process quota. Returns ErrManagedQuotaReached
-// if the limit would be exceeded. Roll back with AddOrganizationManagedProcesses(-1) if the
-// publish later fails.
+// ReserveManagedPublish atomically reserves one managed process slot for the integrator:
+// the quota check is part of the increment's filter, so concurrent publishes — also from
+// different service replicas — cannot each pass a stale check and exceed the integrator's
+// aggregate process quota. Returns ErrManagedQuotaReached if the limit would be exceeded.
+// Roll back with AddOrganizationManagedProcesses(-1) if the publish later fails.
 func (ms *MongoStorage) ReserveManagedPublish(address common.Address, processLimit int) error {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
 
-	org, err := ms.Organization(address)
-	if err != nil {
-		return fmt.Errorf("could not get organization: %w", err)
+	filter := bson.M{
+		"_id": address,
+		// $not also matches a missing counter, unlike $lt
+		"counters.managedProcesses": bson.M{"$not": bson.M{"$gte": processLimit}},
 	}
-	if org.Counters.ManagedProcesses >= processLimit {
+	update := bson.M{"$inc": bson.M{"counters.managedProcesses": 1}}
+	result, err := ms.organizations.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("could not reserve managed publish slot: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		// either the organization does not exist or its quota is already full
+		if _, err := ms.Organization(address); err != nil {
+			return fmt.Errorf("could not get organization: %w", err)
+		}
 		return ErrManagedQuotaReached
 	}
-	return ms.addToOrganizationCounter(address, "managedProcesses", 1)
+	return nil
 }
 
 // AddOrganizationManagedProcesses atomically adds delta to the managed processes counter.
@@ -489,6 +579,34 @@ func (ms *MongoStorage) managedOrgAddresses(ctx context.Context, integratorAddr 
 		return nil, ErrInvalidData
 	}
 	filter := bson.M{"managedBy": integratorAddr}
+	opts := options.Find().SetProjection(bson.M{"_id": 1})
+	cursor, err := ms.organizations.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, fmt.Errorf("could not list managed organizations: %w", err)
+	}
+	defer func() { _ = cursor.Close(ctx) }()
+
+	var orgs []Organization
+	if err := cursor.All(ctx, &orgs); err != nil {
+		return nil, fmt.Errorf("could not decode managed organizations: %w", err)
+	}
+	addrs := make([]common.Address, len(orgs))
+	for i := range orgs {
+		addrs[i] = orgs[i].Address
+	}
+	return addrs, nil
+}
+
+// OrgAddressesManagedBy returns, out of the candidate addresses, those that belong to an
+// organization managed by owner, projected to just their _id to keep the read lightweight.
+// Used to confine an API key's reach to its own organization and the ones it manages.
+func (ms *MongoStorage) OrgAddressesManagedBy(owner common.Address, candidates []common.Address) ([]common.Address, error) {
+	if owner.Cmp(common.Address{}) == 0 || len(candidates) == 0 {
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	filter := bson.M{"_id": bson.M{"$in": candidates}, "managedBy": owner}
 	opts := options.Find().SetProjection(bson.M{"_id": 1})
 	cursor, err := ms.organizations.Find(ctx, filter, opts)
 	if err != nil {

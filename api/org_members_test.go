@@ -583,7 +583,7 @@ func TestUpsertOrganizationMember(t *testing.T) {
 			MemberNumber: members[0].MemberNumber,
 			Email:        members[0].Email,
 		}),
-			qt.ErrorMatches, errors.ErrCensusParticipantNotFound.Err.Error()+".*")
+			qt.ErrorMatches, errors.ErrCSPAuthFailed.Err.Error()+".*")
 
 		// New values should work
 		testCSPAuthenticateWithFields(t, pid, &handlers.AuthRequest{
@@ -729,7 +729,7 @@ func TestUpsertOrganizationMember(t *testing.T) {
 			Email: members[0].Email,
 			Phone: members[0].Phone,
 		}),
-			qt.ErrorMatches, errors.ErrCensusParticipantNotFound.Err.Error()+".*")
+			qt.ErrorMatches, errors.ErrCSPAuthFailed.Err.Error()+".*")
 		c.Assert(postProcessAuth0AndExpectError(t, pid, &handlers.AuthRequest{
 			Name:         members[0].Name,
 			Surname:      members[0].Surname,
@@ -739,7 +739,7 @@ func TestUpsertOrganizationMember(t *testing.T) {
 
 			Phone: members[0].Phone,
 		}),
-			qt.ErrorMatches, errors.ErrCensusParticipantNotFound.Err.Error()+".*")
+			qt.ErrorMatches, errors.ErrCSPAuthFailed.Err.Error()+".*")
 		c.Assert(postProcessAuth0AndExpectError(t, pid, &handlers.AuthRequest{
 			Name:         members[0].Name,
 			Surname:      members[0].Surname,
@@ -749,7 +749,7 @@ func TestUpsertOrganizationMember(t *testing.T) {
 
 			Email: members[0].Email,
 		}),
-			qt.ErrorMatches, errors.ErrCensusParticipantNotFound.Err.Error()+".*")
+			qt.ErrorMatches, errors.ErrCSPAuthFailed.Err.Error()+".*")
 
 		// New values should work
 		testCSPAuthenticateWithFields(t, pid, &handlers.AuthRequest{
@@ -835,15 +835,16 @@ func TestUpsertMemberEditAtCensusQuota(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(stored.Name, qt.Equals, "Renamed")
 
-	// creating one is still refused, and creates nothing
+	// creating one is still refused, and creates nothing. The member-base quota — checked first,
+	// as in the bulk POST — trips before the census preflight: the org is at its member limit too
 	apiErr := putOrgMemberAndExpectError(t, token, orgAddress, newOrgMember())
-	c.Assert(apiErr.Code, qt.Equals, errors.ErrProcessCensusSizeExceedsPlanLimit.Code)
+	c.Assert(apiErr.Code, qt.Equals, errors.ErrExceedsOrganizationMembersLimit.Code)
 
 	// an id that names no member of this organization is a creation too, refused the same way
 	unknown := newOrgMember()
 	unknown.ID = bson.NewObjectID().Hex()
 	apiErr = putOrgMemberAndExpectError(t, token, orgAddress, unknown)
-	c.Assert(apiErr.Code, qt.Equals, errors.ErrProcessCensusSizeExceedsPlanLimit.Code)
+	c.Assert(apiErr.Code, qt.Equals, errors.ErrExceedsOrganizationMembersLimit.Code)
 
 	count, err := testDB.CountOrgMembers(orgAddress)
 	c.Assert(err, qt.IsNil)
@@ -918,4 +919,52 @@ func TestOrganizationMembersSort(t *testing.T) {
 	for _, query := range []string{"sortBy=phone", "sortBy=Name", "sortOrder=descending", "sortBy=name&sortOrder=DESC"} {
 		requestAndAssertError(errors.ErrMalformedURLParam, t, http.MethodGet, adminToken, nil, membersURL+"?"+query)
 	}
+}
+
+// TestUpsertOrganizationMemberInvalidData pins #733: a member the db layer rejects is a 400, not a 500.
+func TestUpsertOrganizationMemberInvalidData(t *testing.T) {
+	c := qt.New(t)
+	loginToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, loginToken)
+	member := postOrgMembers(t, loginToken, orgAddress, newOrgMembers(1)...)[0]
+
+	for name, edit := range map[string]apicommon.OrgMember{
+		"email":       {ID: member.ID, Email: "not-an-email"},
+		"birthDate":   {ID: member.ID, BirthDate: "garbage"},
+		"maskedPhone": {ID: member.ID, Phone: member.Phone},
+	} {
+		c.Run(name, func(c *qt.C) {
+			err := putOrgMemberAndExpectError(t, loginToken, orgAddress, edit)
+			c.Assert(err.Code, qt.Equals, errors.ErrInvalidData.Code)
+		})
+	}
+
+	c.Run("otherOrgMember", func(c *qt.C) {
+		otherOrg := testCreateOrganization(t, loginToken)
+		err := putOrgMemberAndExpectError(t, loginToken, otherOrg, apicommon.OrgMember{ID: member.ID, Name: "x"})
+		c.Assert(err.Code, qt.Equals, errors.ErrInvalidData.Code)
+	})
+}
+
+// TestAddOrganizationMembersAsyncInsertFailure pins #735: an import whose rows do not all insert
+// still ends, with the rows it did insert and the insert error.
+func TestAddOrganizationMembersAsyncInsertFailure(t *testing.T) {
+	c := qt.New(t)
+	loginToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, loginToken)
+
+	// two members sharing one _id: the second insert fails on the duplicate key
+	members := newOrgMembers(2)
+	members[0].ID = bson.NewObjectID().Hex()
+	members[1].ID = members[0].ID
+
+	resp := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, loginToken,
+		&apicommon.AddMembersRequest{Members: members},
+		"organizations", orgAddress.String(), "members?async=true")
+	job := pollOrgJob(t, loginToken, orgAddress.String(), resp.JobID.String())
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted)
+	c.Assert(job.Result.Added, qt.Equals, 1)
+	c.Assert(job.Result.Total, qt.Equals, 2)
+	c.Assert(job.Errors, qt.HasLen, 1)
+	c.Assert(job.Errors[0], qt.Matches, "lines 1-2: .*duplicate key.*")
 }

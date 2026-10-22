@@ -30,7 +30,6 @@ func main() {
 	}
 	mongoDB := viper.GetString("mongoDB")
 
-	log.Infow("connecting to MongoDB", "url", mongoURL, "database", mongoDB)
 	storage, err := db.New(mongoURL, mongoDB)
 	if err != nil {
 		log.Fatalf("failed to connect to MongoDB: %v", err)

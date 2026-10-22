@@ -7,7 +7,7 @@ CLUSTER=${DB_CLUSTER:-}
 [ -n "$CLUSTER" ] || { echo "DB_CLUSTER is required (cluster name from \`doctl databases list\`)" >&2; exit 1; }
 
 need() { command -v "$1" >/dev/null || { echo "missing: $1" >&2; exit 1; }; }
-need doctl
+need doctl; need jq
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "ok:   $*"; }
@@ -23,12 +23,8 @@ ok "cluster $CLUSTER resolves to $DB / $HOST"
 
 # rule_uuids: same shape as dbaccess.sh, duplicated to keep selfcheck standalone.
 rule_uuids() {
-  # Unlike `databases list`, `firewalls list` has no --format/--no-header, so
-  # parse its default table (UUID ClusterUUID Type Value) and skip the header.
-  # -o text is explicit: doctl reads its default output format from config.yaml,
-  # and a user with `output: json` there would otherwise silently parse to empty.
-  doctl databases firewalls list "$DB" -o text |
-    awk -v ip="$1" 'NR>1 && $3=="ip_addr" && $4==ip {print $1}'
+  doctl databases firewalls list "$DB" -o json |
+    jq -r --arg ip "$1" '.[] | select(.type == "ip_addr" and .value == $ip) | .uuid'
 }
 
 # 2. rule_uuids returns empty for an unknown IP.
@@ -39,8 +35,8 @@ ok "unknown IP -> empty"
 # 3. rule_uuids returns empty when handed an existing app rule's value.
 #    Proves the type=ip_addr filter rejects app rules (so cleanup can't
 #    delete an app rule whose value happens to collide with an IP).
-app_val=$(doctl databases firewalls list "$DB" -o text |
-          awk 'NR>1 && $3=="app" {print $4; exit}')
+app_val=$(doctl databases firewalls list "$DB" -o json |
+          jq -r 'first(.[] | select(.type == "app") | .value) // empty')
 if [[ -n "$app_val" ]]; then
   u=$(rule_uuids "$app_val")
   [[ -z "$u" ]] || fail "rule_uuids matched app rule value '$app_val' -> $u"

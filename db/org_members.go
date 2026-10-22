@@ -38,7 +38,7 @@ func (ms *MongoStorage) SetOrgMember(salt string, orgMember *OrgMember) (string,
 
 	member, errs := prepareOrgMember(org, orgMember, salt, time.Now())
 	if len(errs) != 0 {
-		return "", fmt.Errorf("%s", strings.Join(errorsAsStrings(errs), ", "))
+		return "", fmt.Errorf("%w: %s", ErrInvalidData, strings.Join(errorsAsStrings(errs), ", "))
 	}
 
 	updateDoc, err := dynamicUpdateDocument(member, nil)
@@ -458,7 +458,7 @@ func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, 
 	switch err := ms.orgMembers.FindOne(ctx, bson.M{"_id": update.ID}).Decode(&stored); {
 	case err == nil:
 		if stored.OrgAddress != org.Address {
-			return bson.NilObjectID, false, fmt.Errorf("modifying orgAddress is not allowed")
+			return bson.NilObjectID, false, fmt.Errorf("%w: modifying orgAddress is not allowed", ErrInvalidData)
 		}
 	case errors.Is(err, mongo.ErrNoDocuments):
 		created = true
@@ -469,7 +469,8 @@ func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, 
 	now := time.Now()
 	preparedMember, validationErrors := prepareOrgMember(org, update.applyTo(stored), salt, now)
 	if len(validationErrors) > 0 {
-		return bson.NilObjectID, false, fmt.Errorf("errors: %s", errorsAsStrings(validationErrors))
+		return bson.NilObjectID, false, fmt.Errorf("%w: %s", ErrInvalidData,
+			strings.Join(errorsAsStrings(validationErrors), ", "))
 	}
 	// prepareOrgMember only stamps CreatedAt when it assigns the ID, not for a client-chosen one
 	if created {
@@ -513,7 +514,15 @@ func (ms *MongoStorage) updateCensusParticipantsForMember(ctx context.Context, m
 		return fmt.Errorf("failed to decode census participants: %w", err)
 	}
 
-	// Process each census participant
+	// Two phases: validate every census first, collecting the planned writes, and only then
+	// apply them. Writing as we validate would leave the participants of the already-processed
+	// censuses changed when a later census reports a duplicate conflict, so the member's hashes
+	// would no longer match its stored data in some censuses but not others.
+	type plannedWrite struct {
+		filter bson.M
+		update bson.M
+	}
+	writes := make([]plannedWrite, 0, len(participants))
 	for _, participant := range participants {
 		// Get the census to find AuthFields and TwoFaFields
 		census, err := ms.Census(participant.CensusID)
@@ -528,14 +537,13 @@ func (ms *MongoStorage) updateCensusParticipantsForMember(ctx context.Context, m
 		// the edit left the member without the data to log in: drop its login hashes rather than
 		// re-hash it, so it can neither log in nor clash with another participant
 		if member.MissingLoginData(census.AuthFields, census.TwoFaFields) {
-			unset := bson.M{
-				"$unset": bson.M{"loginHash": "", "loginHashEmail": "", "loginHashPhone": ""},
-				"$set":   bson.M{"updatedAt": time.Now()},
-			}
-			if _, err := ms.censusParticipants.UpdateOne(ctx, participantFilter, unset); err != nil {
-				return fmt.Errorf("failed to update census participant %s in census %s: %w",
-					participant.ParticipantID, participant.CensusID, err)
-			}
+			writes = append(writes, plannedWrite{
+				filter: participantFilter,
+				update: bson.M{
+					"$unset": bson.M{"loginHash": "", "loginHashEmail": "", "loginHashPhone": ""},
+					"$set":   bson.M{"updatedAt": time.Now()},
+				},
+			})
 			continue
 		}
 
@@ -564,16 +572,16 @@ func (ms *MongoStorage) updateCensusParticipantsForMember(ctx context.Context, m
 				participant.ParticipantID, participant.CensusID, ErrUpdateWouldCreateDuplicates)
 		}
 
-		// Update the census participant
 		// Prepare update document for census participant
 		set := maps.Clone(hashes)
 		set["updatedAt"] = time.Now()
-		participantUpdate := bson.M{"$set": set}
+		writes = append(writes, plannedWrite{filter: participantFilter, update: bson.M{"$set": set}})
+	}
 
-		_, err = ms.censusParticipants.UpdateOne(ctx, participantFilter, participantUpdate)
-		if err != nil {
-			return fmt.Errorf("failed to update census participant %s in census %s: %w",
-				participant.ParticipantID, participant.CensusID, err)
+	// every census validated: apply the writes
+	for _, w := range writes {
+		if _, err := ms.censusParticipants.UpdateOne(ctx, w.filter, w.update); err != nil {
+			return fmt.Errorf("failed to update census participant %v: %w", w.filter["participantID"], err)
 		}
 	}
 
@@ -716,12 +724,27 @@ func (ms *MongoStorage) DeleteOrgMembers(
 		},
 	}
 
+	deleted, err := ms.deleteOrgMembersLocked(ctx, orgAddress, filter, oids)
+	if err != nil {
+		return 0, nil, err
+	}
+	// the members are gone: revoke them once more to drop any participant a concurrent census
+	// build wrote back between the first revocation and the delete
+	emptied = append(emptied, ms.sweepRevokedMembers(scoped)...)
+	return deleted, emptied, nil
+}
+
+// deleteOrgMembersLocked deletes the org members matching filter and unlinks the given ids from
+// the organization's groups, under keysLock. It reports how many members were deleted.
+func (ms *MongoStorage) deleteOrgMembersLocked(
+	ctx context.Context, orgAddress common.Address, filter bson.M, oids []bson.ObjectID,
+) (int, error) {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
 	result, err := ms.orgMembers.DeleteMany(ctx, filter)
 	if err != nil {
-		return 0, nil, fmt.Errorf("failed to delete orgMembers: %w", err)
+		return 0, fmt.Errorf("failed to delete orgMembers: %w", err)
 	}
 
 	// Convert ObjectIDs to string IDs for group updates (groups store member IDs as strings)
@@ -752,7 +775,7 @@ func (ms *MongoStorage) DeleteOrgMembers(
 
 	_, err = ms.orgMemberGroups.UpdateMany(ctx, groupFilter, groupUpdate)
 	if err != nil {
-		return 0, nil, fmt.Errorf("failed to update groups after deleting orgMembers: %w", err)
+		return 0, fmt.Errorf("failed to update groups after deleting orgMembers: %w", err)
 	}
 
 	// Clean up the auto group if the org now has no members.
@@ -760,8 +783,30 @@ func (ms *MongoStorage) DeleteOrgMembers(
 		log.Warnw("could not clean up auto member group after DeleteOrgMembers", "error", err)
 	}
 
-	return int(result.DeletedCount), emptied, nil
+	return int(result.DeletedCount), nil
 }
+
+// sweepRevokedMembers revokes already deleted members from every census once more. Member deletion
+// revokes before deleting, so a failed revocation leaves everything retryable; but a census build
+// that read a member before that revocation can still write its participant afterwards, leaving a
+// row for a member that no longer exists (counted in the census size and weight). The sweep drops
+// those. It is best-effort: the members are already deleted, so a failure is only logged. It
+// returns the questions the sweep emptied, if any.
+func (ms *MongoStorage) sweepRevokedMembers(memberIDs []string) []VotingProcessQuestion {
+	if afterMemberDeleteHook != nil {
+		afterMemberDeleteHook(memberIDs)
+	}
+	_, emptied, err := ms.RevokeMembersEverywhere(memberIDs)
+	if err != nil {
+		log.Warnw("could not sweep census participants of deleted members", "members", len(memberIDs), "error", err)
+		return nil
+	}
+	return emptied
+}
+
+// afterMemberDeleteHook, when set (tests only), runs between a member deletion and its revocation
+// sweep, to simulate a concurrent census build writing a participant back.
+var afterMemberDeleteHook func(memberIDs []string)
 
 // DeleteAllOrgMembers removes all members from an organization, revoking them from every census
 // they were part of. The returned questions are those whose eligibility list became empty.
@@ -789,12 +834,24 @@ func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, []V
 		"orgAddress": orgAddress,
 	}
 
+	deleted, err := ms.deleteAllOrgMembersLocked(ctx, orgAddress, filter)
+	if err != nil {
+		return 0, nil, err
+	}
+	// see DeleteOrgMembers: drop participants a concurrent census build wrote back meanwhile
+	emptied = append(emptied, ms.sweepRevokedMembers(memberIDs)...)
+	return deleted, emptied, nil
+}
+
+// deleteAllOrgMembersLocked deletes the org members matching filter and empties the
+// organization's groups, under keysLock. It reports how many members were deleted.
+func (ms *MongoStorage) deleteAllOrgMembersLocked(ctx context.Context, orgAddress common.Address, filter bson.M) (int, error) {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
 	result, err := ms.orgMembers.DeleteMany(ctx, filter)
 	if err != nil {
-		return 0, nil, fmt.Errorf("failed to delete all orgMembers: %w", err)
+		return 0, fmt.Errorf("failed to delete all orgMembers: %w", err)
 	}
 
 	// Update all groups to remove the deleted member IDs
@@ -810,7 +867,7 @@ func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, []V
 
 	_, err = ms.orgMemberGroups.UpdateMany(ctx, groupFilter, groupUpdate)
 	if err != nil {
-		return 0, nil, fmt.Errorf("failed to update groups after deleting all orgMembers: %w", err)
+		return 0, fmt.Errorf("failed to update groups after deleting all orgMembers: %w", err)
 	}
 
 	// All members are gone — remove the auto group too.
@@ -818,7 +875,7 @@ func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, []V
 		log.Warnw("could not delete auto member group after DeleteAllOrgMembers", "error", err)
 	}
 
-	return int(result.DeletedCount), emptied, nil
+	return int(result.DeletedCount), nil
 }
 
 // GetAllOrgMemberIDs retrieves all member IDs for an organization
@@ -828,7 +885,7 @@ func (ms *MongoStorage) GetAllOrgMemberIDs(orgAddress common.Address) ([]string,
 	}
 
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	// Create filter for the organization
@@ -965,7 +1022,7 @@ func (ms *MongoStorage) FilterOrgMemberIDs(orgAddress common.Address, ids []stri
 		return nil, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	cursor, err := ms.orgMembers.Find(ctx,
@@ -1107,7 +1164,7 @@ func (ms *MongoStorage) OrgMembersByField(
 		return nil, ErrInvalidData
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	filter := bson.M{

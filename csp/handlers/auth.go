@@ -81,52 +81,64 @@ func validateAuthRequest(req *AuthRequest, census *db.Census) error {
 	return validateEmail(req.Email)
 }
 
-// verifyEmail checks if the provided email matches the member's stored email
-func verifyEmail(email string, storedEmail string) error {
-	if !strings.EqualFold(email, storedEmail) {
-		return errors.ErrUnauthorized.Withf("invalid user email")
-	}
-	return nil
-}
-
-// handleEmailContact verifies the email and returns the appropriate contact method
+// handleEmailContact verifies the email and returns the appropriate contact method.
+// A mismatch returns the bare ErrCSPAuthFailed: adding the reason would let a caller
+// distinguish it from an unknown participant.
 func handleEmailContact(
 	email string,
 	storedEmail string,
 ) (string, notifications.ChallengeType, error) {
-	if err := verifyEmail(email, storedEmail); err != nil {
-		return "", "", err
+	if !strings.EqualFold(email, storedEmail) {
+		return "", "", errors.ErrCSPAuthFailed
 	}
 	return email, notifications.EmailChallenge, nil
 }
 
-// handlePhoneContact verifies the phone and returns the appropriate contact method
-func handlePhoneContact(
-	org *db.Organization,
-	phone string,
-	memberHashedPhone db.HashedPhone,
-) (string, notifications.ChallengeType, error) {
-	normalized, err := internal.SanitizeAndVerifyPhoneNumber(phone, org.Country)
-	if err != nil {
-		return "", "", err
-	}
-
-	hashedPhone, err := db.NewHashedPhone(normalized, org)
-	if err != nil {
-		return "", "", err
-	}
-
-	if !memberHashedPhone.Matches(hashedPhone) {
-		return "", "", errors.ErrUnauthorized.Withf("user phone doesn't match")
-	}
-	return normalized, notifications.SMSChallenge, nil
+// voterPhone is a phone number a voter submitted, normalized (the SMS destination) and hashed (to
+// compare with the stored member phone).
+type voterPhone struct {
+	normalized string
+	hashed     db.HashedPhone
 }
 
-// determineContactMethod determines the contact method based on the census type and request data
+// parseVoterPhone normalizes and hashes a submitted phone number, returning nil for an empty one.
+// The hash is deliberately expensive (Argon2), so step 0 computes it once, before the participant
+// lookup, and reuses it for the contact check: hashing it only for a found participant would make
+// a found participant measurably slower to answer than an unknown one.
+func parseVoterPhone(phone string, org *db.Organization) (*voterPhone, error) {
+	if phone == "" {
+		return nil, nil
+	}
+	normalized, err := internal.SanitizeAndVerifyPhoneNumber(phone, org.Country)
+	if err != nil {
+		return nil, err
+	}
+	hashed, err := db.NewHashedPhone(normalized, org)
+	if err != nil {
+		return nil, err
+	}
+	return &voterPhone{normalized: normalized, hashed: hashed}, nil
+}
+
+// handlePhoneContact verifies the phone and returns the appropriate contact method.
+// A missing or mismatched phone returns the bare ErrCSPAuthFailed: adding the
+// reason would let a caller distinguish it from an unknown participant.
+func handlePhoneContact(
+	phone *voterPhone,
+	memberHashedPhone db.HashedPhone,
+) (string, notifications.ChallengeType, error) {
+	if phone == nil || !memberHashedPhone.Matches(phone.hashed) {
+		return "", "", errors.ErrCSPAuthFailed
+	}
+	return phone.normalized, notifications.SMSChallenge, nil
+}
+
+// determineContactMethod determines the contact method based on the census type and request data.
+// phone is the request's phone as parseVoterPhone returns it.
 func determineContactMethod(
 	census *db.Census,
-	org *db.Organization,
 	req *AuthRequest,
+	phone *voterPhone,
 	member *db.OrgMember,
 ) (string, notifications.ChallengeType, error) {
 	switch census.Type {
@@ -134,7 +146,7 @@ func determineContactMethod(
 		return handleEmailContact(req.Email, member.Email)
 
 	case db.CensusTypeSMS:
-		return handlePhoneContact(org, req.Phone, member.Phone)
+		return handlePhoneContact(phone, member.Phone)
 
 	case db.CensusTypeSMSorMail:
 		if req.Email != "" {
@@ -142,7 +154,7 @@ func determineContactMethod(
 		}
 
 		if req.Phone != "" {
-			return handlePhoneContact(org, req.Phone, member.Phone)
+			return handlePhoneContact(phone, member.Phone)
 		}
 
 		// If neither email nor phone is provided for SMS or Mail census
@@ -153,6 +165,20 @@ func determineContactMethod(
 	default:
 		return "", "", errors.ErrNotSupported.Withf("invalid census type")
 	}
+}
+
+// authAttemptKeys derives the keys of the failed-attempt budgets a step-0 request spends. The
+// submission key covers every login and contact field submitted, so failures with a wrong contact
+// never spend the budget of the voter's own submission. The voter key covers the login fields
+// alone, and is set only when the census has both login and contact fields: it is the coarser
+// bound on trying many contacts for one voter. A census with only one kind of field has nothing
+// coarser to key on and uses the submission key alone.
+func authAttemptKeys(census *db.Census, member *db.OrgMember) (submission, voter []byte) {
+	submission = db.HashAuthTwoFaFields(*member, census.AuthFields, census.TwoFaFields)
+	if len(census.AuthFields) > 0 && len(census.TwoFaFields) > 0 {
+		voter = db.HashAuthTwoFaFields(*member, census.AuthFields, nil)
+	}
+	return submission, voter
 }
 
 // authFirstStep is the first step of the authentication process. It receives
@@ -166,18 +192,23 @@ func determineContactMethod(
 //
 // The function first validates the request data against census information,
 // then attempts to find the participant in the census using the login hash
-// generated from the provided fields. If the participant is not found in the
-// census, it returns ErrCensusParticipantNotFound. If found, it determines the
-// appropriate contact method (email, SMS, or none for auth-only censuses) based
-// on the census type and provided contact information. Finally, it generates and
-// returns an authentication token that will be used in the second step. If the
-// cooldown period between authentication attempts has not elapsed, the underlying
-// AuthToken call may return ErrAttemptCoolDownTime.
+// generated from the provided fields. An unknown participant and a found
+// participant whose contact data does not match both return the same
+// ErrCSPAuthFailed, so a caller cannot probe the census contents; every such
+// failure also spends the hourly failed-attempt budgets of the submission and of
+// the claimed voter (see authAttemptKeys), and once one is exhausted step 0
+// refuses further such attempts until the hour ends with
+// ErrVerificationMaxAttempts, whether or not they match a participant. If found, it
+// determines the appropriate contact method (email, SMS, or none for auth-only
+// censuses) based on the census type and provided contact information. Finally,
+// it generates and returns an authentication token that will be used in the
+// second step. If the cooldown period between authentication attempts has not
+// elapsed, the underlying AuthToken call may return ErrAttemptCoolDownTime.
 func (c *CSPHandlers) authFirstStep(
 	r *http.Request,
 	anchorID internal.HexBytes,
 	censusID string,
-) (internal.HexBytes, error) {
+) (token internal.HexBytes, err error) {
 	// Parse request
 	var req AuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -208,9 +239,19 @@ func (c *CSPHandlers) authFirstStep(
 		return nil, err
 	}
 
-	phone, err := db.NewHashedPhone(req.Phone, org)
-	if err != nil {
-		return nil, errors.ErrInvalidData.WithErr(err)
+	// the phone only takes part in the login hash and the contact check when it is a 2FA field (a
+	// census only sends SMS then), and hashing it is deliberately expensive, so a phone sent to a
+	// census that does not use it is ignored instead of hashed. When used, it is hashed once here,
+	// before the lookup, for both purposes (see parseVoterPhone).
+	var phone *voterPhone
+	var hashedPhone db.HashedPhone
+	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone) {
+		if phone, err = parseVoterPhone(req.Phone, org); err != nil {
+			return nil, errors.ErrInvalidData.WithErr(err)
+		}
+		if phone != nil {
+			hashedPhone = phone.hashed
+		}
 	}
 
 	// create an empty member and assign the input data where applicable, then
@@ -225,7 +266,7 @@ func (c *CSPHandlers) authFirstStep(
 		NationalID:   req.NationalID,
 		BirthDate:    req.BirthDate,
 		Email:        req.Email,
-		Phone:        phone,
+		Phone:        hashedPhone,
 	}).Normalized()
 
 	// a voter must supply every login field the census requires: an empty value would otherwise hash
@@ -234,11 +275,27 @@ func (c *CSPHandlers) authFirstStep(
 		return nil, errors.ErrInvalidUserData.Withf("missing required auth data")
 	}
 
+	// reserve one unit of the hourly failed-attempt budgets before checking the submission, so
+	// concurrent attempts cannot all slip under the cap; it is given back unless the attempt fails
+	// on the submitted data. The keys are what the caller submits, not the participant it may match,
+	// so a submission matching nobody runs out exactly like one matching a participant (an
+	// exhausted budget answers 40017 with retryAfter, the seconds until the hour resets)
+	submissionKey, voterKey := authAttemptKeys(census, inputMember)
+	claim, err := c.csp.ClaimAuthAttempt(anchorID, submissionKey, voterKey)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if !errors.Is(err, errors.ErrCSPAuthFailed) {
+			c.csp.ReleaseAuthAttempt(claim)
+		}
+	}()
+
 	// Check the participant is in the census
 	censusParticipant, err := c.mainDB.CensusParticipantByLoginHash(*census, *inputMember)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			return nil, errors.ErrCensusParticipantNotFound
+			return nil, errors.ErrCSPAuthFailed
 		}
 		return nil, errors.ErrGenericInternalServerError.WithErr(err)
 	}
@@ -246,17 +303,24 @@ func (c *CSPHandlers) authFirstStep(
 	// Fetch the corresponding org member using the participant ID (which is the ObjectID hex string)
 	orgMember, err := c.mainDB.OrgMember(census.OrgAddress, censusParticipant.ParticipantID)
 	if err != nil {
-		return nil, errors.ErrCensusParticipantNotFound.With("failed to get org member")
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, errors.ErrCSPAuthFailed
+		}
+		return nil, errors.ErrGenericInternalServerError.WithErr(err)
 	}
+	uID := internal.HexBytesFromString(orgMember.ID.Hex())
 
-	if census.Weighted && orgMember.Weight == 0 {
-		return nil, errors.ErrZeroWeightVoter
-	}
-
-	// Determine contact method based on census type
-	toDestinations, challengeType, err := determineContactMethod(census, org, &req, orgMember)
+	// Determine contact method based on census type. A mismatch is an ErrCSPAuthFailed, which keeps
+	// the reserved failed-attempt unit spent.
+	toDestinations, challengeType, err := determineContactMethod(census, &req, phone, orgMember)
 	if err != nil {
 		return nil, err
+	}
+
+	// only now that the contact matched: a distinct error before it would tell whoever merely
+	// knows a member's login fields that they name a (zero-weight) participant
+	if census.Weighted && orgMember.Weight == 0 {
+		return nil, errors.ErrZeroWeightVoter
 	}
 
 	name, logo := orgNameAndLogo(org)
@@ -264,7 +328,7 @@ func (c *CSPHandlers) authFirstStep(
 	// Generate the token
 	return c.csp.AuthToken(
 		anchorID,
-		internal.HexBytesFromString(orgMember.ID.Hex()),
+		uID,
 		toDestinations,
 		challengeType,
 		lang,

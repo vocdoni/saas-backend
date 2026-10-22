@@ -88,6 +88,7 @@ func (h *StripeHandlers) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 //	@Failure		400		{object}	errors.Error					"Invalid input data"
 //	@Failure		401		{object}	errors.Error					"Unauthorized"
 //	@Failure		404		{object}	errors.Error					"Organization or plan not found"
+//	@Failure		409		{object}	errors.Error					"Organization already has a paid subscription"
 //	@Failure		500		{object}	errors.Error					"Internal server error"
 //	@Router			/subscriptions/checkout [post]
 func (h *StripeHandlers) CreateSubscriptionCheckout(w http.ResponseWriter, r *http.Request) {
@@ -126,6 +127,12 @@ func (h *StripeHandlers) CreateSubscriptionCheckout(w http.ResponseWriter, r *ht
 		checkout.Address,
 		checkout.Locale,
 	)
+	// a refusal (unknown or private plan, already subscribed) is the caller's to see as is
+	var apiErr errors.Error
+	if errors.As(err, &apiErr) && apiErr.HTTPstatus < http.StatusInternalServerError {
+		apiErr.Write(w)
+		return
+	}
 	if err != nil {
 		errors.ErrStripeError.Withf("cannot create checkout session").WithErr(err).Write(w)
 		return
@@ -145,16 +152,32 @@ func (h *StripeHandlers) CreateSubscriptionCheckout(w http.ResponseWriter, r *ht
 // checkoutSessionHandler godoc
 //
 //	@Summary		Get checkout session status
-//	@Description	Retrieve the status of a Stripe checkout session
+//	@Description	Retrieve the status of a Stripe checkout session. Only an admin of the organization
+//	@Description	the session was created for may read it; any other session id answers 404, so the
+//	@Description	existence of a session is never revealed.
 //	@Tags			plans
 //	@Accept			json
 //	@Produce		json
+//	@Security		BearerAuth
 //	@Param			sessionId	path		string	true	"Checkout session ID"
 //	@Success		200			{object}	stripe.CheckoutSessionStatus
 //	@Failure		400			{object}	errors.Error	"Invalid session ID"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		404			{object}	errors.Error	"Checkout session not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/subscriptions/checkout/{sessionId} [get]
 func (h *StripeHandlers) GetCheckoutSession(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.service == nil {
+		errors.ErrStripeError.Withf("stripe service not available").Write(w)
+		return
+	}
+
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+
 	sessionID := chi.URLParam(r, "sessionId")
 	if sessionID == "" {
 		errors.ErrMalformedURLParam.Withf("sessionId is required").Write(w)
@@ -162,8 +185,25 @@ func (h *StripeHandlers) GetCheckoutSession(w http.ResponseWriter, r *http.Reque
 	}
 
 	status, err := h.service.GetCheckoutSession(sessionID)
+	if errors.Is(err, errors.ErrCheckoutSessionNotFound) {
+		// a missing session answers like one the caller may not read
+		errors.ErrCheckoutSessionNotFound.Write(w)
+		return
+	}
 	if err != nil {
-		errors.ErrStripeError.Withf("cannot get checkout session").WithErr(err).Write(w)
+		// any other failure (network, rate limit, outage) does not depend on the session, so a
+		// generic 5xx reveals nothing about it. The Stripe error stays in the log
+		log.Warnw("cannot get checkout session", "session", sessionID, "error", err)
+		errors.ErrStripeError.Write(w)
+		return
+	}
+
+	// only an admin of the organization the session was created for may read it; anything
+	// else — no recorded organization included — is answered as if the session did not exist
+	orgAddress := common.HexToAddress(status.OrgAddress)
+	if status.OrgAddress == "" || orgAddress.Cmp(common.Address{}) == 0 ||
+		!user.HasRoleFor(orgAddress, db.AdminRole) {
+		errors.ErrCheckoutSessionNotFound.Write(w)
 		return
 	}
 
@@ -204,9 +244,11 @@ func (h *StripeHandlers) CreateSubscriptionPortalSession(w http.ResponseWriter, 
 		return
 	}
 
-	session, err := h.service.CreatePortalSession(org.Creator)
+	session, err := h.service.CreatePortalSession(org)
 	if err != nil {
-		errors.ErrStripeError.Withf("cannot create customer portal session").WithErr(err).Write(w)
+		// the detail may name Stripe objects or other organizations: it stays in the log
+		log.Warnw("cannot create customer portal session", "org", org.Address, "error", err)
+		errors.ErrStripeError.With("cannot create customer portal session").Write(w)
 		return
 	}
 

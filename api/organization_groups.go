@@ -300,6 +300,15 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		errors.ErrMalformedBody.Write(w)
 		return
 	}
+	// a member in both lists is ambiguous: the removal revokes it from the group censuses while
+	// the addition keeps it in the group, so it would end up a group member that cannot vote.
+	// Refuse the request before anything is touched.
+	for _, id := range toUpdate.AddMembers {
+		if slices.Contains(toUpdate.RemoveMembers, id) {
+			errors.ErrInvalidData.Withf("member %s is in both addMembers and removeMembers", id).Write(w)
+			return
+		}
+	}
 
 	group, err := a.db.OrganizationMemberGroup(groupID, org.Address)
 	if err != nil {

@@ -36,7 +36,7 @@ urlenc() {
   done
   printf '%s' "$out"
 }
-need doctl; need curl   # mongosh is checked in the client dispatch at the bottom
+need doctl; need curl; need jq   # mongosh is checked in the client dispatch at the bottom
 
 CLIENT=${DB_CLIENT:-mongosh}
 # Embedding the password in the URI (argv, LaunchServices' opened-URL record,
@@ -135,13 +135,10 @@ esac
 
 # uuids (one per line) of ip_addr rules matching $1. The type filter is
 # load-bearing: without it a cleanup could match and delete an `app` rule.
+# `firewalls list` has no --format flag, so the rules are read as JSON.
 rule_uuids() {
-  # Unlike `databases list`, `firewalls list` has no --format/--no-header, so
-  # parse its default table (UUID ClusterUUID Type Value) and skip the header.
-  # -o text is explicit: doctl reads its default output format from config.yaml,
-  # and a user with `output: json` there would otherwise silently parse to empty.
-  doctl databases firewalls list "$DB" -o text |
-    awk -v ip="$1" 'NR>1 && $3=="ip_addr" && $4==ip {print $1}'
+  doctl databases firewalls list "$DB" -o json |
+    jq -r --arg ip "$1" '.[] | select(.type == "ip_addr" and .value == $ip) | .uuid'
 }
 
 IP=$(curl -fsS https://ipv4.icanhazip.com | tr -d '[:space:]')

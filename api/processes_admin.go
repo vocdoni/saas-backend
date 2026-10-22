@@ -5,6 +5,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
@@ -13,6 +14,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -31,7 +33,7 @@ import (
 //	@Success		200			{string}	string			"OK"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		404			{object}	errors.Error	"Process not found"
-//	@Failure		409			{object}	errors.Error	"Process already published"
+//	@Failure		409			{object}	errors.Error	"Process already published, partially published (40904), or being published"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId} [delete]
 func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
@@ -49,14 +51,53 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrDuplicateConflict.Withf("process already published and not in draft mode").Write(w)
 		return
 	}
-	// deleting mid-publish would orphan on chain whatever the worker has already mined.
-	if refusePublishInProgress(w, vp) {
+	// Deleting mid-publish would orphan on chain whatever the worker has already mined. So
+	// delete takes the claim a publish takes, and the two exclude each other: checking the
+	// marker on the read above would let a publish claim the draft right after.
+	// Every refusal below releases it; a deleted draft takes the marker with it.
+	owner, claimed, err := a.db.ClaimVotingProcessForPublish(oid, time.Time{})
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if !claimed {
+		errors.ErrPublishInProgress.Write(w)
+		return
+	}
+	deleted := false
+	defer func() {
+		if deleted {
+			return
+		}
+		if e := a.db.ClearVotingProcessPublishing(oid, owner); e != nil {
+			log.Warnw("could not release the delete's claim on a draft", "processId", oid.Hex(), "error", e)
+		}
+	}()
+	// a partially published draft (an earlier publish mined some elections before failing) is
+	// not deletable: dropping it would erase the on-chain ids and orphan the mined elections.
+	// Publishing again resumes the remaining questions instead. Reloaded under the claim, so
+	// no publish worker can be minting elections concurrently.
+	questions, err := a.db.QuestionsByProcess(oid)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	current, err := a.db.VotingProcess(oid)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	// the flag is set before a mined election id is stored, so it also covers an election whose
+	// id never reached its question
+	if anyMined(questions) || current.HasMinedElections {
+		errors.ErrProcessPartiallyPublished.Write(w)
 		return
 	}
 	if err := a.db.DeleteVotingProcess(oid); err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+	deleted = true
 	// best-effort: drop the draft's inline census so it is not orphaned.
 	if !vp.CensusID.IsZero() {
 		_ = a.db.DelCensus(vp.CensusID.Hex())
@@ -352,9 +393,29 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 	}
 	// while a publish worker holds the process, its questions all look like drafts: an eligibility
 	// write would take the draft path, skip the resize, and the worker would then mint an election
-	// sized from its older snapshot.
-	if refusePublishInProgress(w, vp) {
-		return
+	// sized from its older snapshot. So an unpublished process is changed under the claim a publish
+	// takes, as delete does, and the two exclude each other; checking the marker on the read above
+	// would let a publish claim the process right after. The questions are reloaded under the
+	// claim. A published process is never claimed again, so it needs none.
+	if !vp.Published {
+		owner, claimed, err := a.db.ClaimVotingProcessForPublish(oid, time.Time{})
+		if err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+		if !claimed {
+			errors.ErrPublishInProgress.Write(w)
+			return
+		}
+		defer func() {
+			if e := a.db.ClearVotingProcessPublishing(oid, owner); e != nil {
+				log.Warnw("could not release the eligibility update's claim", "processId", oid.Hex(), "error", e)
+			}
+		}()
+		if questions, err = a.db.QuestionsByProcess(oid); err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
 	}
 	question, ok := questionOfProcess(w, questions, chi.URLParam(r, "questionId"))
 	if !ok {
@@ -625,6 +686,9 @@ func (a *API) electionMaxCensusSize(q *db.VotingProcessQuestion) (uint64, error)
 // so blindly submitting the census size would eventually fail the job; each election is read first
 // and only a genuine increase is sent.
 //
+// It never answers ErrOrgTxBusy: when the organization lock is held, the job is created anyway and
+// the resize waits for the lock in the background (see below).
+//
 // A failed election read does not fail the request. By the time this runs, the participant or
 // eligibility write it follows has already committed, so reporting failure would report it for work
 // that landed — the tx goes out anyway and a chain refusal surfaces on the job with its real reason.
@@ -655,7 +719,7 @@ func (a *API) enqueueSetProcessCensus(orgAddress common.Address, targets []censu
 	if err != nil {
 		return "", fmt.Errorf("could not load organization: %w", err)
 	}
-	orgSigner, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce)
+	orgSigner, err := account.OrganizationSigner(a.secret, org.SignerSeedValue(), org.Nonce)
 	if err != nil {
 		return "", fmt.Errorf("could not restore organization signer: %w", err)
 	}
@@ -666,38 +730,67 @@ func (a *API) enqueueSetProcessCensus(orgAddress common.Address, targets []censu
 	if err := a.db.CreateTxJob(jobID, db.JobTypeSetProcessCensus, org.Address); err != nil {
 		return "", fmt.Errorf("could not create tx job: %w", err)
 	}
-
-	orgLock := a.orgTxLocks.lock(org.Address)
-	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
-		defer orgLock.Unlock()
-		for i := range growing {
-			t := &growing[i]
-			tx, err := a.account.BuildSetProcessCensusTx(
-				orgSigner.Address(), t.question.UpstreamID,
-				t.census.Published.Root, t.census.Published.URI, t.size,
-			)
-			if err != nil {
-				return nil, err
+	submit := func(orgLock *orgTxLock) error {
+		if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
+			defer orgLock.Unlock()
+			return a.setProcessCensusSizes(orgSigner, growing)
+		}}) {
+			orgLock.Unlock()
+			if e := a.db.SetJobStatus(jobID, db.JobStatusFailed, nil, "tx queue full"); e != nil {
+				log.Warnw("could not mark job failed after full queue", "error", e)
 			}
-			fundedTx, _, err := a.account.FundTransaction(tx, orgSigner.Address())
-			if err != nil {
-				return nil, err
-			}
-			stx, err := a.account.SignTransaction(fundedTx, orgSigner)
-			if err != nil {
-				return nil, err
-			}
-			if _, err := a.account.SubmitSignedTx(stx); err != nil {
-				return nil, err
-			}
+			return errors.ErrTxQueueFull
 		}
-		return &db.JobResult{Status: string(db.JobStatusCompleted)}, nil
-	}}) {
-		orgLock.Unlock()
-		if e := a.db.SetJobStatus(jobID, db.JobStatusFailed, nil, "tx queue full"); e != nil {
-			log.Warnw("could not mark job failed after full queue", "error", e)
-		}
-		return "", errors.ErrTxQueueFull
+		return nil
 	}
+	if orgLock, ok := a.orgTxLocks.tryLock(org.Address); ok {
+		if err := submit(orgLock); err != nil {
+			return "", err
+		}
+		return jobID, nil
+	}
+	// The organization has a tx in flight, and a publish holds the lock through every mining
+	// round. The participant or eligibility write this follows has already committed and no
+	// caller retries the resize, so it waits for the lock in the background instead of being
+	// dropped; the job stays pending meanwhile and is what the caller polls. The lock is always
+	// released once its holder's tx is done, so the wait ends.
+	a.heldTxJobs.hold(jobID)
+	go func() {
+		defer a.heldTxJobs.release(jobID)
+		if err := submit(a.orgTxLocks.lock(org.Address)); err != nil {
+			log.Warnw("could not enqueue a deferred census resize", "org", org.Address, "jobId", jobID, "error", err)
+		}
+	}()
 	return jobID, nil
+}
+
+// setProcessCensusSizes submits one SET_PROCESS_CENSUS tx per target, skipping the elections that
+// already have the room: a resize that waited for the organization lock may have been overtaken by
+// a larger one, and the chain refuses a shrink.
+func (a *API) setProcessCensusSizes(orgSigner *ethereum.SignKeys, targets []censusSizeTarget) (*db.JobResult, error) {
+	for i := range targets {
+		t := &targets[i]
+		if current, err := a.electionMaxCensusSize(&t.question); err == nil && t.size <= current {
+			continue
+		}
+		tx, err := a.account.BuildSetProcessCensusTx(
+			orgSigner.Address(), t.question.UpstreamID,
+			t.census.Published.Root, t.census.Published.URI, t.size,
+		)
+		if err != nil {
+			return nil, err
+		}
+		fundedTx, _, err := a.account.FundTransaction(tx, orgSigner.Address())
+		if err != nil {
+			return nil, err
+		}
+		stx, err := a.account.SignTransaction(fundedTx, orgSigner)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := a.account.SubmitSignedTx(stx); err != nil {
+			return nil, err
+		}
+	}
+	return &db.JobResult{Status: string(db.JobStatusCompleted)}, nil
 }

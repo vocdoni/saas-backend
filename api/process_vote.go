@@ -69,7 +69,7 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	if !a.enqueueTx(txTask{jobID: jobID, run: a.submitRelayVote(vote)}) {
+	if !a.enqueueRelayTx(txTask{jobID: jobID, run: a.submitRelayVote(vote)}) {
 		// full queue: mark the job failed so it is not orphaned pending.
 		if e := a.db.SetJobStatus(jobID, db.JobStatusFailed, nil, "tx queue full"); e != nil {
 			log.Warnw("could not mark job failed after full queue", "error", e)
@@ -86,7 +86,7 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 // process cannot hold more questions than that, so the cap is expressed as what it actually
 // depends on rather than a duplicated literal: raising it means raising db.MaxQuestionsPerProcess
 // first, and the vochain batch transaction endpoint above that. It is deliberately NOT tied to
-// txQueueSize — the queue is sized to hold several full batches (see api/jobqueue.go), because
+// relayTxQueueSize — the queue is sized to hold several full batches (see api/jobqueue.go), because
 // a batch rejected for lack of queue room sends the client back to relaying one vote at a time,
 // which is the half-voted window this endpoint exists to close.
 //
@@ -102,10 +102,10 @@ const (
 	// envelope marshals to ~300 bytes, ~600 characters once hex-encoded into the JSON field, so
 	// this leaves an order of magnitude of headroom for larger proofs while keeping these public,
 	// unauthenticated endpoints from reading an unbounded body.
-	maxVoteBodyBytes = 8 << 10
+	maxVoteBodyBytes = 8 * internal.KiB
 	// maxVotesBodyBytes bounds a whole batch: one envelope allowance each, plus slack for the
 	// JSON framing around them.
-	maxVotesBodyBytes = db.MaxQuestionsPerProcess*maxVoteBodyBytes + 4<<10
+	maxVotesBodyBytes = db.MaxQuestionsPerProcess*maxVoteBodyBytes + 4*internal.KiB
 )
 
 // relayVotesHandler godoc
@@ -208,8 +208,8 @@ func (a *API) relayVotesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// one task per envelope rather than one task submitting them all: each submit blocks
 	// its worker until the tx is mined, so a single task would serialize the batch and hold
-	// one worker for the whole of it. enqueueTxBatch takes all the slots or none.
-	if !a.enqueueTxBatch(tasks) {
+	// one worker for the whole of it. enqueueRelayTxBatch takes all the slots or none.
+	if !a.enqueueRelayTxBatch(tasks) {
 		if e := a.db.SetJobStatus(jobID, db.JobStatusFailed, nil, "tx queue full"); e != nil {
 			log.Warnw("could not mark job failed after full queue", "error", e)
 		}
@@ -230,7 +230,7 @@ const (
 	// characters, so 80 leaves room for the JSON quoting and separator around each, plus
 	// slack for the framing. Like the relay endpoints this one is public, so the body has
 	// to be bounded before it is buffered.
-	maxVerifyVotesBodyBytes = db.MaxQuestionsPerProcess*80 + 4<<10
+	maxVerifyVotesBodyBytes = db.MaxQuestionsPerProcess*80 + 4*internal.KiB
 )
 
 // verifyLookupSem bounds concurrent node reads across every POST /votes/verify request.

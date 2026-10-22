@@ -123,7 +123,8 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 			errors.ErrGenericInternalServerError.Withf("could not get parent organization: %v", err).Write(w)
 			return
 		}
-		if len(dbParentOrg.Parent) > 0 {
+		// Parent is a fixed-size address, so its length is always 20: test for the zero address
+		if dbParentOrg.Parent != (common.Address{}) {
 			errors.ErrMalformedBody.Withf("parent organization is already a suborganization").Write(w)
 			return
 		}
@@ -141,6 +142,10 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		parentOrg = orgInfo.Parent.Address
 		// update the parent organization counter
 		if err := a.db.IncrementOrganizationSubOrgsCounter(parentOrg); err != nil {
+			if errors.Is(err, db.ErrMaxSubOrgsReached) {
+				errors.ErrMaxSubOrgsReached.Write(w)
+				return
+			}
 			errors.ErrGenericInternalServerError.Withf("increment suborgs: %v", err).Write(w)
 			return
 		}
@@ -150,6 +155,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		Address:         signer.Address(),
 		Website:         orgInfo.Website,
 		Creator:         user.Email,
+		SignerSeed:      user.Email,
 		CreatedAt:       time.Now(),
 		Nonce:           nonce,
 		Type:            db.OrganizationType(orgInfo.Type),
@@ -226,8 +232,24 @@ func (a *API) organizationInfoHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrNoOrganizationProvided.Write(w)
 		return
 	}
+	info := apicommon.OrganizationFromDB(org, parent)
+	// the endpoint is public, but the billing email is only for the organization's admins, as on
+	// the dedicated subscription endpoint
+	redactBillingEmails(info, a.optionalCallerUser(r))
 	// send the organization back to the user
-	apicommon.HTTPWriteJSON(w, apicommon.OrganizationFromDB(org, parent))
+	apicommon.HTTPWriteJSON(w, info)
+}
+
+// redactBillingEmails clears the subscription billing email of every organization in info's
+// parent chain that user is not an admin of (all of them when user is nil). The billing email is
+// admin-only data, as on the dedicated subscription endpoint, and each level is checked against
+// its own organization: an admin of a suborganization is not an admin of its parent.
+func redactBillingEmails(info *apicommon.OrganizationInfo, user *db.User) {
+	for o := info; o != nil; o = o.Parent {
+		if o.Subscription != nil && (user == nil || !user.HasRoleFor(o.Address, db.AdminRole)) {
+			o.Subscription.Email = ""
+		}
+	}
 }
 
 // updateOrganizationHandler godoc
