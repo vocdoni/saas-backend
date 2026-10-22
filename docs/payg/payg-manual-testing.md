@@ -123,8 +123,8 @@ AUTH="Authorization: Bearer $TOKEN"
 ORG=$(curl -s $API/organizations -H "$AUTH" \
   -d '{"type":"company","website":"https://payg-test.example","provisionAccount":true}' | jq -r .address)
 
-# two members — with the certificate add-on that is already a priced (€49) process,
-# no need to import 11+ voters to get past the free tier
+# two members — with the certificate add-on that is already a priced (€39) process,
+# no need to import 26+ voters to get past the free tier
 curl -s $API/organizations/$ORG/members -H "$AUTH" -d '{"members":[
   {"memberNumber":"P001","name":"Alice","surname":"One","email":"alice@example.com"},
   {"memberNumber":"P002","name":"Bob","surname":"Two","email":"bob@example.com"}]}'

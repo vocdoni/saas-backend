@@ -24,30 +24,32 @@ Base price per eligible voter count `v`, rounded to the nearest €5 (`R5`):
 
 | Voters | Formula |
 |---|---|
-| 1–10 | free |
-| 11–800 | `R5(1.5·v^0.824)` |
+| 1–25 | free |
+| 26–800 | `R5(1.5·v^0.824)` |
 | 801–5 000 | `R5(33·v^0.36)` |
 | 5 001–15 000 | `R5(0.142·v)` |
 | >15 000 | `R5(2130 + 0.11·(v−15000))` |
 
-Add-ons: email 2FA €0.01/voter, SMS 2FA €0.03/voter (both derive from the census
-`twoFaFields`, not a separate flag), signed results certificate €49/process, custom URL
+Add-ons: SMS 2FA €0.05/voter, email 2FA free for standard organizations and €0.01/voter for
+integrators (both derive from the census
+`twoFaFields`, not a separate flag), signed results certificate €39/process, custom URL
 €89/process, branding €149 **once per organization** — the line is suppressed once
 `Organization.BrandingPaidAt` is stamped, and while another process holds the claim
 described in [Branding is claimed, not just checked](#branding-is-claimed-not-just-checked).
 
-Worked examples (pinned in `pricing/pricing_test.go`): 10 voters → free; 600 → €290;
-10 000 → €1 420; 10 000 + email 2FA + certificate → €1 569.
+Worked examples (pinned in `pricing/pricing_test.go`): 25 voters → free; 26 → €20; 600 → €290;
+10 000 → €1 420; 10 000 + email 2FA + certificate → €1 459 (€1 559 for an integrator).
 
 Two deliberate refinements over the spec text:
 
-- **Free tier zeroes per-voter add-ons.** At ≤10 voters, 2FA would price at €0.10–€0.30 —
-  below any amount Stripe can charge — and such test-sized processes are already exempt
-  from process counters (`db.TestMaxCensusSize`). Flat add-ons (certificate, custom URL,
+- **Free tier zeroes per-voter add-ons.** At ≤25 voters 2FA is free like the base price,
+  and such test-sized processes are already exempt from process counters
+  (`db.TestMaxCensusSize`). Flat add-ons (certificate, custom URL,
   branding) stay billable at any census size.
-- **Payer-type policy seam.** The bracket function is selected by payer type
-  (`PayerStandard` / `PayerIntegrator`). Both are identical today; integrator pricing can
-  diverge later without touching the payment flow.
+- **Payer-type policy.** The payer type (`PayerStandard` / `PayerIntegrator`, the latter for a
+  managed organization) selects the policy. The base-price brackets are identical today; email
+  2FA is free for standard organizations and billed per voter to integrators. Integrator pricing
+  can diverge further without touching the payment flow.
 
 Thresholds: above 15 000 voters the price response sets `quoteRecommended` (the app
 should suggest a custom quote); above 50 000, `quoteRequired` — self-service checkout, and
