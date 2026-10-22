@@ -142,16 +142,16 @@ func postNewOrgMembers(t *testing.T, token string, orgAddress common.Address, n 
 }
 
 // A census just above the free tier: priced, and with the free email 2FA a standard
-// organization's draft costs only its €20 base.
+// organization's draft costs only its base, every voter at the first band's €0.66.
 const (
 	pricedProcessVoters               = pricing.FreeCensusSize + 1
-	pricedProcessCents  pricing.Cents = 2_000
+	pricedProcessCents  pricing.Cents = 1_716 // 26 × €0.66
 	// an integrator's managed organization also pays €0.01 per voter for email 2FA
 	integratorProcessCents = pricedProcessCents + pricedProcessVoters*pricing.Cent
 )
 
 // newPricedVotingProcess creates an org with enough members that the draft prices above
-// zero (26 voters with free email 2FA -> €20 = 2000 cents) and returns the process id.
+// zero (26 voters with free email 2FA -> €17.16 = 1716 cents) and returns the process id.
 func newPricedVotingProcess(t *testing.T, token string, orgAddress common.Address) string {
 	t.Helper()
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
@@ -161,15 +161,11 @@ func newPricedVotingProcess(t *testing.T, token string, orgAddress common.Addres
 }
 
 // newBrandedVotingProcess creates a priced draft that selects the branding add-on (26
-// voters with free email 2FA, €20, plus €149 of branding when the organization can still be
+// voters with free email 2FA, €17.16, plus €149 of branding when the organization can still be
 // charged for it).
 func newBrandedVotingProcess(t *testing.T, token string, orgAddress common.Address) string {
 	t.Helper()
-	req := newVotingProcessRequest(orgAddress, postNewOrgMembers(t, token, orgAddress, pricedProcessVoters))
-	req.AddOns = db.ProcessAddOns{Branding: true}
-	created := requestAndParse[apicommon.CreateVotingProcessResponse](
-		t, http.MethodPost, token, req, processesCreateEndpoint)
-	return created.ProcessID
+	return newAddOnsVotingProcess(t, token, orgAddress, db.ProcessAddOns{Branding: true})
 }
 
 func TestProcessPrice(t *testing.T) {
