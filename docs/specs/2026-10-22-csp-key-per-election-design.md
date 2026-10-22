@@ -4,11 +4,16 @@ Status: approved 2026-10-22 (controller, owner-authorized autonomous mode)   Cla
 Epic: vocdoni/saas-backend#769 (label `epic-csp-key-per-election`)
 Owner decisions (2026-10-22):
 - D1. The chain side is vochain-sequencer (not vocdoni-node).
-- D2. Soft transition. From the fork on, new CSP elections are created only with the new scheme.
-  Elections already open (`OFF_CHAIN_CA`, `OFF_CHAIN_CA_V2`) keep today's salted signing and
+- D2. Soft transition. From the deploy of the new sequencer on, new CSP elections are created only
+  with the new scheme. Elections already open (`OFF_CHAIN_CA`, `OFF_CHAIN_CA_V2`) keep today's salted signing and
   verification until they end: on LTS, valid elections run past the flag day (11 `OFF_CHAIN_CA`
   elections of one organization end 2026-11-07). Removing the legacy paths is a follow-up.
-- D2b. Target: deploy to LTS on 2026-11-02 (flag day).
+- D2b. Target: deploy to LTS on 2026-11-02 (flag day), the afternoon after that morning's LTS
+  cutover from vocdoni-node to vochain-sequencer, once the cutover is verified.
+- D2c. No fork height. The rules apply unconditionally from the deploy of the new sequencer binary:
+  vochain-sequencer is a single node that never re-executes past blocks (`--importGenesis` copies
+  the state as is and continues at the next height, `recoverHeight` re-executes nothing, and the
+  indexer reindex only decodes transactions), so no height has to keep old blocks valid.
 - D3. Plain ECDSA CSP elections move to the same per-election-key model, with keys separate from the
   blind ones.
 - D4. The weight certificate is an Ethereum-style secp256k1 signature (65 bytes) by the election key.
@@ -41,9 +46,9 @@ both the ECDSA and the blind public key).
 3. For V3 elections, the chain verifies CSP proofs against keys it is told, checking a CSP-issued
    certificate; it never derives a V3 key. Legacy elections keep the salted derivation until they
    end (D2).
-4. One coordinated switch: from the fork height on, the sequencer creates CSP elections only with
-   the new census origins and saas-backend publishes only those. Votes on legacy elections created
-   before the fork keep working, unchanged, until those elections end.
+4. One coordinated switch: from the deploy of the new sequencer on, it creates CSP elections only
+   with the new census origins, and saas-backend, deployed right after it, publishes only those.
+   Votes on legacy elections already open keep working, unchanged, until those elections end.
 5. Every client that builds CSP vote proofs (vocdoni-sdk, vocdoni-integrator-sdk `api-voting` /
    `react-providers`) builds the new proofs; vocdoni-app ships with those packages.
 
@@ -54,9 +59,9 @@ both the ECDSA and the blind public key).
   rule of the blind flow (`saas-backend/db/csp.go:339-429`).
 - Changing vocdoni-node, or the standalone `vocdoni/blind-csp` service. vocdoni-sdk only passes the
   certificate through; it does not depend on any CSP producing one.
-- Removing the legacy (salted) signing and verification paths. They stay for elections created
-  before the fork (D2), and the sequencer needs them anyway to replay history. A follow-up issue
-  removes the saas-backend side once no legacy election is open.
+- Removing the legacy (salted) signing and verification paths. They stay while legacy elections are
+  open, because those elections still take votes (D2). A follow-up issue removes the saas-backend
+  side once no legacy election is open.
 - Fixing the re-targeting weakness for legacy elections that are still open: that residual risk is
   accepted until they end.
 
@@ -72,8 +77,7 @@ both the ECDSA and the blind public key).
   address and processId, then the signature, with any of the four proof types on either origin
   (`vochain/transaction/proofs/cspproof/cspproof.go:42-131`). `NewProcessTxCheck` accepts both CSP
   origins and does not validate the census root (`vochain/transaction/election_tx.go:58-70`). The
-  processID embeds the census origin in byte 26 (`vochain/processid/process_id.go:44-64`). Soft forks
-  live in `config/forks.go` (`MetadataFork`, LTS/1.3 at 8_705_150). The REST API maps census types
+  processID embeds the census origin in byte 26 (`vochain/processid/process_id.go:44-64`). The REST API maps census types
   `csp`/`csp2` to the two origins (`api/censuses.go:28-31`, `api/api_types.go:562-575`).
   `ethereum.PubKeyFromSignature` rewrites `signature[64]` in place (`crypto/ethereum/ethereum.go:224`).
 - saas-backend: one root key from `--privateKey` (`cmd/service/main.go:147-181`) wrapped in
@@ -105,8 +109,8 @@ both the ECDSA and the blind public key).
 ```proto
 enum CensusOrigin {
     ...
-    OFF_CHAIN_CA = 3;          // no new processes from the CSP key fork on
-    OFF_CHAIN_CA_V2 = 4;       // no new processes from the CSP key fork on
+    OFF_CHAIN_CA = 3;          // no new processes on vochain-sequencer
+    OFF_CHAIN_CA_V2 = 4;       // no new processes on vochain-sequencer
     OFF_CHAIN_CA_V3_ECDSA = 5; // per-election CSP key, ECDSA proofs
     OFF_CHAIN_CA_V3_BLIND = 6; // per-election CSP key, blind proofs with a weight certificate
 }
@@ -167,7 +171,7 @@ The message is not a valid `CAbundle` encoding, because its first byte, 0x76, ha
 type 6. A certificate signature therefore can never pass as a bundle signature, or the other way
 round.
 
-### Chain verification (vochain-sequencer, from `CSPKeyFork`)
+### Chain verification (vochain-sequencer)
 
 For a vote on an `OFF_CHAIN_CA_V3_*` election, after the existing bundle address and processId checks:
 
@@ -182,20 +186,14 @@ For a vote on an `OFF_CHAIN_CA_V3_*` election, after the existing bundle address
   signature, must equal `process.CensusRoot`. Then `blind.Verify(keccak256(bundleBytes), sig, X)`
   must hold. Weight = `w`.
 
-`NewProcessTxCheck`, from the fork on: CSP origins must be `V3_ECDSA` or `V3_BLIND`, and the census
-root must be a valid 33-byte compressed point. New `OFF_CHAIN_CA` and `OFF_CHAIN_CA_V2` processes are
-rejected with `census origin %s retired for new processes`. `VerifyProof` keeps verifying votes on
-existing `OFF_CHAIN_CA`/`V2` processes exactly as today. From `CSPKeyFork` on, a `ProofCA`
-carrying a `weightCertificate` is rejected on those legacy origins. Below the fork the field is
-ignored, exactly as an old binary ignores an unknown field, so replaying pre-fork blocks
-(including any historical vote whose ProofCA bytes carried field-4 content) stays byte-identical.
-Below the fork, the V3 origins are also rejected at process creation.
+`NewProcessTxCheck`: CSP origins must be `V3_ECDSA` or `V3_BLIND`, and the census root must be a
+valid 33-byte compressed point. New `OFF_CHAIN_CA` and `OFF_CHAIN_CA_V2` processes are rejected with
+`census origin %s retired for new processes`. `VerifyProof` keeps verifying votes on existing
+`OFF_CHAIN_CA`/`V2` processes exactly as today. A `ProofCA` carrying a `weightCertificate` is
+rejected on those legacy origins.
 
-`ForksCfg` gains `CSPKeyFork uint32`. Chains not listed activate it from genesis. For test and dev
-chains, `voconed` gains a `--cspKeyForkHeight` flag that registers the height for its own chain ID
-before the chain starts. The flag is refused for chain IDs listed in `config.Forks`, so it can
-never change LTS or DEV heights. LTS/1.3 and
-DEV/36 get explicit heights; the LTS height is set at flag-day planning (see rollout). The REST API
+These rules have no activation height: they apply on every chain from the deploy of the binary
+that carries them (D2c). The REST API
 adds census types `csp3` (`V3_ECDSA`) and `csp3blind` (`V3_BLIND`), reports the new origin names,
 and marks `OFF_CHAIN_CA_V2` as deprecated as well.
 
@@ -239,10 +237,14 @@ and marks `OFF_CHAIN_CA_V2` as deprecated as well.
   dvote's in-process Vocone, so they publish and vote V3 elections end to end. The binary is built
   at `TestMain` from a nested Go module used only by tests (`test/sequencer/go.mod`, pinning
   `github.com/vocdoni/vochain-sequencer` at the epic commit and re-pinned at release), so the
-  production module's dependency graph is unchanged. Two chains run per test binary: one with
-  `--cspKeyForkHeight 0` for every V3 test, and one with the fork far beyond any height the tests
-  reach, where the legacy tests create and vote `OFF_CHAIN_CA`/`V2` elections. Being "before the
-  fork" then never races block production.
+  production module's dependency graph is unchanged. One chain runs per test binary. Legacy
+  elections cannot be created on it, so legacy coverage is split in two: the `api` tests check that
+  a legacy question (empty stored origin) signs with the legacy `proofType`, and that a legacy
+  publish (`OFF_CHAIN_CA`/`V2` `NEW_PROCESS`, as a saas-backend without this change sends it) is
+  rejected by the chain; a second nested module, `test/sequencer/legacycsp`, signs legacy ballots
+  with the saas-backend CSP and verifies them in process with the vochain-sequencer `cspproof`
+  verifier of the legacy origins. It is separate from `test/sequencer` so the saas-backend
+  dependencies never change the versions the `voconed` binary is built with.
 - Swagger regenerated (`make swagger`).
 
 ### Clients
@@ -275,34 +277,36 @@ and marks `OFF_CHAIN_CA_V2` as deprecated as well.
 | One origin `OFF_CHAIN_CA_V3` with both proof types | It works only because the certificate message and bundle encodings are disjoint. Two origins make "proof type matches origin" a chain rule (issue #769) and separate the processIDs. |
 | Random per-election key stored in Mongo | It needs secret storage and backups, and losing the row loses the election. Hash derivation from the root plus the question `_id` needs nothing new. |
 | CSP-signed weight inside the blinded bundle | The CSP cannot read a blinded bundle; only the choice of signing key is under its control (issue #769). |
-| Hard cut (retire legacy elections at the fork) | Rejected by the owner (D2): valid legacy elections are open past the flag day. |
+| Hard cut (retire legacy elections on the flag day) | Rejected by the owner (D2): valid legacy elections are open past the flag day. |
+| Activation height (`config/forks.go`) for the new rules | vochain-sequencer never re-executes past blocks (D2c), so a height protects nothing; the deploy itself is the switch. |
 
 ## Compatibility and rollout
 
 | Writer → reader | Result |
 |---|---|
-| Legacy client (salted proof) → sequencer, legacy election, any height | Accepted as today. |
-| Legacy client → V3 election | Rejected cleanly (PIDSALTED type or missing certificate). Clients must be deployed no later than saas-backend. |
+| Legacy client (salted proof) → new sequencer, legacy election | Accepted as today. |
+| Legacy client → V3 election | Rejected cleanly (PIDSALTED type or missing certificate). Clients are deployed before saas-backend. |
 | New client → legacy election | Works: the CSP returns the legacy `proofType` and no certificate. |
-| New client (V3 proof) → sequencer before fork | Not applicable: V3 elections cannot exist before the fork. |
-| Old saas (legacy publish) → sequencer after fork | Rejected cleanly at CheckTx. saas-backend switches at the fork. |
-| New saas (V3 publish) → sequencer before fork | Rejected cleanly at CheckTx. |
+| New client (V3 proof) → old sequencer | Not applicable: V3 elections exist only on the new sequencer. |
+| Old saas (legacy publish) → new sequencer | Rejected cleanly at CheckTx (`census origin %s retired for new processes`); the idempotent publish retries and succeeds once the new saas-backend is deployed. |
+| New saas (V3 publish) → old sequencer | Not applicable: saas-backend is deployed after the sequencer. |
 | Old proto decoder reading ProofCA with field 4 | The unknown field is ignored; only old nodes would read it, and none runs after the flag day. |
-| New sequencer replaying pre-fork blocks | Byte-identical to today. |
 | Legacy question → new saas sign | Signed as today, with the legacy `proofType`. |
 
-Rollout order, for the LTS flag day on 2026-11-02 (each step needs the owner's OK):
-1. Merge and tag dvote-protobuf v1.18.0 (npm + Go).
-2. Re-pin consumers to 1.18.0. Merge and release vochain-sequencer with `CSPKeyFork` for LTS/1.3
-   set to the height expected at the agreed time on 2026-11-02. Deploy it before that height.
-3. Release vocdoni-sdk and the integrator-sdk packages; deploy vocdoni-app with them (backward
-   compatible, so this can go before the fork).
-4. Once the fork height is reached: deploy saas-backend. Between the fork and this deploy, new CSP
-   publications fail at CheckTx, so CSP publication is paused for that window.
+Rollout, around the LTS flag day on 2026-11-02 (each step needs the owner's OK):
+1. Beforehand: merge and tag dvote-protobuf v1.18.0 (npm + Go), and re-pin the consumers to it.
+2. Beforehand: release vocdoni-sdk and the integrator-sdk packages, and deploy vocdoni-app with
+   them. They are backward compatible with legacy elections and the current saas-backend.
+3. Morning of 2026-11-02: the LTS cutover from vocdoni-node to vochain-sequencer (single sequencer)
+   runs and is verified. It is a separate operation and carries none of these rules.
+4. Afternoon of 2026-11-02, once the cutover is verified: deploy the vochain-sequencer release with
+   the new rules, then saas-backend, back to back. In the minutes between the two, a publish by the
+   old saas-backend is rejected cleanly at CheckTx and the idempotent publish retries it, so it
+   lands as V3 once the new saas-backend runs.
 
-Rollback: before the fork height, redeploy the previous sequencer, or move the height with a new
-release. The clients are backward compatible and need no rollback. After V3 elections exist, only
-rolling forward is possible.
+Rollback: before saas-backend is deployed, redeploy the previous sequencer. The clients are
+backward compatible and need no rollback. After V3 elections exist, only rolling forward is
+possible.
 
 ## Failure modes and security
 
@@ -311,7 +315,7 @@ elections and weights, sees every public key, root and certificate, and controls
 proofs. They must not get a valid proof for an election or weight the CSP did not authorize for them.
 The CSP root secret and saas-backend are trusted.
 
-- Legacy elections still open after the fork keep the #769 weakness until they end (accepted, D2).
+- Legacy elections still open after the flag day keep the #769 weakness until they end (accepted, D2).
   No V3 key or certificate is ever related to a legacy key, so a legacy authorization cannot be
   turned into a V3 one, or the other way round.
 - Re-targeting across elections: keys of different elections are independent hash outputs, so no
@@ -352,20 +356,20 @@ The CSP root secret and saas-backend are trusted.
   weight, a linearly shifted blind signature (the #769 attack), PIDSALTED types on V3, a certificate
   on V3_ECDSA, a missing certificate on V3_BLIND, a malformed X, a malformed signature, weight 0,
   empty or >32 bytes, and a certificate signed by the wrong key.
-- [ ] AC3 (sequencer, `vochain` integration): below the fork, the existing CSP tests pass unchanged
-  and V3 NewProcess is rejected. From the fork, V3 elections vote end to end, new OFF_CHAIN_CA/V2
-  processes are rejected, an OFF_CHAIN_CA/V2 process created before the fork still accepts its
-  legacy votes after it, an invalid V3 census root is rejected, and a legacy vote whose ProofCA
-  carries a weightCertificate is accepted below the fork (field ignored) and rejected from it on.
-  `voconed --cspKeyForkHeight` is refused for a chain ID listed in `config.Forks`.
+- [ ] AC3 (sequencer, `vochain` integration): V3 elections vote end to end, new OFF_CHAIN_CA/V2
+  processes are rejected, an OFF_CHAIN_CA/V2 process already in the state (seeded directly, as no
+  transaction creates one) accepts its legacy votes, an invalid V3 census root is rejected, and a
+  legacy vote whose ProofCA carries a weightCertificate is rejected by CheckTx and DeliverTx.
+  `config/forks.go` is untouched.
 - [ ] AC4 (shared golden vectors): `testdata/csp-v3-vectors.json` (key derivation, certificate
   message, certificate signature) is byte-identical in saas-backend and vochain-sequencer, and the
   TS testkit tests read the same vectors.
 - [ ] AC5 (saas-backend, `api` integration on the sequencer Vocone): ECDSA and blind CSP elections
   publish as V3 with per-question roots and vote successfully. Weighted blind votes carry the
   certificate. Every sign response carries the right `proofType`. A legacy question (empty stored
-  origin; ECDSA on `OFF_CHAIN_CA` and blind on `OFF_CHAIN_CA_V2`, created before the fork on a chain
-  whose fork height is set above genesis) still signs and votes after the fork. Two questions get different roots.
+  origin) signs with `ECDSA_PIDSALTED` or `ECDSA_BLIND_PIDSALTED`, and those signatures verify with
+  the vochain-sequencer `OFF_CHAIN_CA`/`OFF_CHAIN_CA_V2` verifiers (`test/sequencer/legacycsp`). A
+  legacy `NEW_PROCESS` is rejected by the chain. Two questions get different roots.
 - [ ] AC6 (saas-backend): a unit test runs every V3 signing path against a CSP whose salted signer
   is replaced by a stub that fails the test if invoked; the production `go.mod` keeps
   `go.vocdoni.io/proto v1.15.14` and does not require `vochain-sequencer`; `go test ./...`,
@@ -386,9 +390,9 @@ The CSP root secret and saas-backend are trusted.
   what is and why, never history.
 - One branch name everywhere: `feat/csp-key-per-election`. Draft PRs labeled
   `epic-csp-key-per-election`, with concise bodies.
-- Pre-fork behaviour of the sequencer is byte-identical. Untrusted proof input never panics.
+- Untrusted proof input never panics.
 - No secret is logged; derived keys never leave the CSP.
 
 ## Open questions
 
-None. The LTS fork height is a release-time value chosen at flag-day planning, not a design question.
+None.

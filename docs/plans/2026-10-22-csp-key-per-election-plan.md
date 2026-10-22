@@ -16,8 +16,10 @@ trees are identical to the worktree bases (proto, sequencer, integrator-sdk, voc
 tree hash; saas-backend: identical except docs/ and .delivery/). The diffs below are those scratch
 diffs with the dev pins rewritten to the worktree paths, so each one applies with `git apply` from
 the repo root (save the fenced block to `$HOME/.cache/csp-epic/patches/tN-<repo>.diff` first) or can
-be typed in by hand. Where a step says UNVERIFIED (verified at implementation), the code was not
-compiled in that exact intermediate state: the implementer makes it compile and pass, keeping the
+be typed in by hand. The diffs of Tasks 3 and 4, and those of `api/api_test.go`,
+`api/csp_key_per_election_test.go` and `test/voconed.go` in Task 7, are the branch diffs. Where a
+step says UNVERIFIED (verified at implementation), the code was not compiled in that exact
+intermediate state: the implementer makes it compile and pass, keeping the
 behaviour described, and reports any change to the shape.
 
 ## Global Constraints
@@ -30,8 +32,8 @@ behaviour described, and reports any change to the shape.
   shell that builds or tests. Go needs `PATH=$PATH:$(go env GOROOT)/bin` (saas tests exec `go`).
 - Docs and code comments describe what is and why. Never history: no "was", "previously", "moved
   from", "since <date>", "no longer" in files. History goes only in commit messages.
-- vochain-sequencer: behaviour below `CSPKeyFork` is byte-identical to the base (replaying pre-fork
-  blocks gives the same state). Every new branch of consensus code is gated on the fork.
+- vochain-sequencer: the new census origin rules have no activation height and `config/forks.go`
+  is untouched (spec D2c). Votes on legacy CSP processes verify exactly as on the base.
 - Untrusted proof input (envelope, ProofCA, certificate, bundle, weight) never panics: typed error,
   no index without a length check, signatures copied before any in-place rewrite.
 - No secret is logged or returned: root key, `dE`, `dB`, `dX` never leave the CSP; only public keys,
@@ -63,13 +65,10 @@ Line numbers are those of the finished files (scratch), so they hold after the t
   (`:81`), certificate presence per origin, `checkWeightCertificate` (`:148`) builds the message from
   the envelope's processId and the bundle weight, `checkSigner` (`:175`) copies the signature before
   the `v` rewrite. `BundleWeight` (`:107`) rejects 0, empty and >32 bytes.
-- SEQ `vochain/transaction/election_tx.go` (NewProcessTxCheck hunk): legacy origins rejected from the
-  fork, V3 origins rejected below it, `checkCSPKeyCensusRoot` requires a 33-byte valid point.
-- SEQ `vochain/transaction/vote_tx.go` `checkVoteCSPCertificate`: runs outside the vote-cache branch
-  so a mempool vote from below the fork is re-checked in a block from it; ignored below the fork.
-- SEQ `config/forks.go:31,38`: LTS/1.3 and DEV/36 `CSPKeyFork: math.MaxUint32` placeholders; the LTS
-  height is a release-time value (owner OK). `SetCSPKeyForkHeight` (`:57`) refuses chain IDs listed
-  in `config.Forks`; `cmd/voconed/voconed.go:396` `applyCSPKeyForkHeight` range check.
+- SEQ `vochain/transaction/election_tx.go` (NewProcessTxCheck hunk): legacy origins rejected,
+  `checkCSPKeyCensusRoot` requires a 33-byte valid point for the V3 origins.
+- SEQ `vochain/transaction/vote_tx.go` `checkVoteCSPCertificate`: rejects a weight certificate on a
+  legacy origin; runs outside the vote-cache branch, so CheckTx and DeliverTx both apply it.
 - SEQ `vochain/state/censusorigins.go`: V3 origins have `AllowCensusUpdate: false` (a per-election
   key root must never be swapped by SET_PROCESS_CENSUS).
 - SAAS `csp/signers/electionkey/electionkey.go:97,130-173,206`: derivation, domain tags, cert
@@ -90,24 +89,18 @@ Line numbers are those of the finished files (scratch), so they hold after the t
 
 ## Spec deviations
 
-1. AC5 (spec:364-369) needs a legacy question signed and voted after the fork on a chain whose
-   fork is above genesis; the harness text (spec:241-245) puts the legacy tests on a chain whose fork
-   is never reached. Implemented: `TestMain` runs one chain (`test-csp-key`, fork 0);
-   `TestCSPLegacyQuestionsAfterFork` starts its own chain `test-csp-legacy` with fork 25, asserts the
-   legacy elections are created at height < 25, waits past it and votes (SAAS
-   `api/csp_key_per_election_test.go`, `api/api_test.go` TestMain).
-2. AC3 (spec:355) "existing CSP tests pass unchanged": because unlisted chains activate the fork at
-   genesis (spec:194), the packages whose tests create OFF_CHAIN_CA/V2 processes pin their chain
-   below the fork in a new `TestMain` (SEQ `vochain/main_test.go`, `vocone/main_test.go`,
-   `api/main_test.go`, `apiclient/main_test.go`); the test bodies are unchanged.
-3. spec:196-198 gives LTS/1.3 and DEV/36 explicit heights: SEQ `config/forks.go:31,38` set
-   `math.MaxUint32` until the release-time heights are chosen (owner OK).
-4. Not in the spec: V3 origins have `AllowCensusUpdate: false` (SEQ `vochain/state/censusorigins.go`),
+1. The sequencer tests that created OFF_CHAIN_CA/V2 processes through NewProcessTx use
+   OFF_CHAIN_TREE_WEIGHTED or V3_ECDSA, and the legacy vote tests seed their processes with
+   `state.AddProcess` (SEQ `vochain/process_test.go`, `vochain/cspkey_test.go`, `vochain/vote_test.go`,
+   `vocone/vocone_test.go`, `api/metadata_helpers_test.go`, `apiclient/metadata_test.go`).
+2. Owner ruling R30 (2026-10-22): the census origin rules have no activation height and `voconed`
+   takes no height flag; they apply from the deploy of the binary (spec D2c).
+3. Not in the spec: V3 origins have `AllowCensusUpdate: false` (SEQ `vochain/state/censusorigins.go`),
    so SET_PROCESS_CENSUS cannot swap a per-election key root.
-5. Not in the spec (spec:260-263 lists only the certificate for vocdoni-sdk): Task 9 also makes
+4. Not in the spec (spec:260-263 lists only the certificate for vocdoni-sdk): Task 9 also makes
    vocdoni-sdk read `OFF_CHAIN_CA_V3_*` elections as CSP (`src/types/census/census.ts:82`), or SDK
    readers of saas V3 elections would see an unknown census. Open for the owner: SDK-created CSP
-   elections stay `OFF_CHAIN_CA_V2` (`src/core/election.ts:155-162`) and are rejected after the fork.
+   elections stay `OFF_CHAIN_CA_V2` (`src/core/election.ts:155-162`) and are rejected by the sequencer.
 
 ## Task order and parallelism
 
@@ -115,11 +108,11 @@ Line numbers are those of the finished files (scratch), so they hold after the t
 |---|---|---|---|
 | 1 proto origins + certificate | – | PROTO `src/vochain/vochain.proto`, `build/` | 5 |
 | 2 seq V3 proof verifier + vectors | 1 | SEQ `vochain/transaction/proofs/cspproof/`, `test/testcommon/testcsp/v3.go`, `go.mod`, `go.sum` | 5, 8 |
-| 3 seq fork rules | 2 | SEQ `config/`, `vochain/state/`, `vochain/transaction/`, `vochain/*_test.go`, 4× `main_test.go` | 5, 6, 8 |
-| 4 seq voconed flag, API, e2e | 3 | SEQ `cmd/`, `api/`, `apiclient/`, `scripts/` | 5, 6, 8 |
+| 3 seq API census types | 2 | SEQ `api/`, `apiclient/` | 5, 6, 8 |
+| 4 seq census origin rules, e2e | 3 | SEQ `vochain/`, `vocone/`, `api/*_test.go`, `apiclient/*_test.go`, `cmd/end2endtest/`, `scripts/` | 5, 6, 8 |
 | 5 saas electionkey | – (vectors file from 2, or from this plan) | SAAS `csp/signers/electionkey/` | 1-4, 8 |
 | 6 saas CSP signing core + handlers | 5 | SAAS `csp/`, `db/types.go`, `docs/swagger.yaml` | 2-4, 8 |
-| 7 saas V3 publish + sequencer harness | 4, 6 | SAAS `db/`, `account/`, `api/`, `test/`, `go.mod`, `go.sum` | 8, 9 |
+| 7 saas V3 publish + sequencer harness | 4, 6 | SAAS `db/`, `account/`, `api/`, `test/`, `test/sequencer/legacycsp/`, `go.mod`, `go.sum` | 8, 9 |
 | 8 integrator-sdk | 1 | ISDK `packages/{api-types,api-voting,react-providers}`, `.changeset/` | 2-7, 9 |
 | 9 vocdoni-sdk | 1 | VSDK `src/`, `test/unit/`, `CHANGELOG.md` | 2-8 |
 | 10 vocdoni-app bump | 8, 9 | APP `package.json`, `pnpm-lock.yaml` | – |
@@ -1334,115 +1327,262 @@ Interfaces this task provides: `cspproof.ProofVerifierCSPV3{}` (implements the v
 `cspproof.CertMessage(processID []byte, w *big.Int, weightKey []byte) ([]byte, error)`;
 test helpers `testcsp.NewV3Election() (*testcsp.V3Election, error)` and `testcsp.WeightCredential`.
 
-### Task 3: sequencer CSP key fork rules
+### Task 3: sequencer API census types and apiclient
 
-Model: opus   Repo: SEQ   Files: config/forks.go, config/forks_test.go, vochain/state/censusorigins.go,
-vochain/transaction/election_tx.go, vochain/transaction/proof.go, vochain/transaction/transaction.go,
-vochain/transaction/vote_tx.go, vochain/cspkey_test.go, vochain/process_test.go, vochain/main_test.go,
-vocone/main_test.go, api/main_test.go, apiclient/main_test.go
+Model: sonnet   Repo: SEQ   Files: api/api_types.go, api/censuses.go, api/elections.go,
+api/csp_census_types_test.go, apiclient/vote.go
 
-Goal: `ForksCfg.CSPKeyFork`. From the fork: V3 processes allowed (root a valid 33-byte point), new
-OFF_CHAIN_CA/V2 processes rejected (`census origin %s retired for new processes`), a ProofCA with a
-weight certificate on a legacy origin rejected. Below it: V3 processes rejected, everything else
-byte-identical. Chains not in `config.Forks` activate it from genesis, so the existing tests of the
-packages that create legacy CSP processes pin their chain below the fork in `TestMain`.
+Goal: the REST API maps census types `csp3` → V3_ECDSA and `csp3blind` → V3_BLIND, reports the new
+origin names and flags both retired legacy CSP origins with `censusOriginDeprecated`. apiclient can
+send a weight certificate.
 
 Step 1 (failing test):
 
 ```diff
-diff --git a/api/main_test.go b/api/main_test.go
+diff --git a/api/csp_census_types_test.go b/api/csp_census_types_test.go
 new file mode 100644
-index 0000000..099af3c
+index 00000000..f276f520
 --- /dev/null
-+++ b/api/main_test.go
-@@ -0,0 +1,21 @@
++++ b/api/csp_census_types_test.go
+@@ -0,0 +1,39 @@
 +package api
-+
-+import (
-+	"math"
-+	"os"
-+	"testing"
-+
-+	"github.com/vocdoni/vochain-sequencer/config"
-+)
-+
-+// legacyCSPChainID is the chain the tests of this package run on. They create
-+// OFF_CHAIN_CA and OFF_CHAIN_CA_V2 processes, so it runs below the CSP key
-+// fork. Tests of the fork rules use their own chain IDs.
-+const legacyCSPChainID = "test"
-+
-+func TestMain(m *testing.M) {
-+	if err := config.SetCSPKeyForkHeight(legacyCSPChainID, math.MaxUint32); err != nil {
-+		panic(err)
-+	}
-+	os.Exit(m.Run())
-+}
-diff --git a/apiclient/main_test.go b/apiclient/main_test.go
-new file mode 100644
-index 0000000..771a98d
---- /dev/null
-+++ b/apiclient/main_test.go
-@@ -0,0 +1,21 @@
-+package apiclient_test
-+
-+import (
-+	"math"
-+	"os"
-+	"testing"
-+
-+	"github.com/vocdoni/vochain-sequencer/config"
-+)
-+
-+// legacyCSPChainID is the chain the tests of this package run on. They create
-+// OFF_CHAIN_CA and OFF_CHAIN_CA_V2 processes, so it runs below the CSP key
-+// fork. Tests of the fork rules use their own chain IDs.
-+const legacyCSPChainID = "test"
-+
-+func TestMain(m *testing.M) {
-+	if err := config.SetCSPKeyForkHeight(legacyCSPChainID, math.MaxUint32); err != nil {
-+		panic(err)
-+	}
-+	os.Exit(m.Run())
-+}
-diff --git a/config/forks_test.go b/config/forks_test.go
-new file mode 100644
-index 0000000..39a6a19
---- /dev/null
-+++ b/config/forks_test.go
-@@ -0,0 +1,27 @@
-+package config
 +
 +import (
 +	"testing"
 +
 +	qt "github.com/frankban/quicktest"
++	"go.vocdoni.io/proto/build/go/models"
 +)
 +
-+func TestCSPKeyForkConfigured(t *testing.T) {
++func TestCensusTypeToOriginCSP(t *testing.T) {
 +	c := qt.New(t)
-+	for _, chainID := range []string{"vocdoni/LTS/1.3", "vocdoni/DEV/36"} {
-+		c.Assert(ForksForChainID(chainID).CSPKeyFork, qt.Not(qt.Equals), uint32(0), qt.Commentf(chainID))
++	key := []byte{2, 1, 2, 3}
++	for typ, want := range map[string]models.CensusOrigin{
++		CensusTypeCSP:        models.CensusOrigin_OFF_CHAIN_CA,
++		CensusTypeCSPv2:      models.CensusOrigin_OFF_CHAIN_CA_V2,
++		CensusTypeCSPv3:      models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA,
++		CensusTypeCSPv3Blind: models.CensusOrigin_OFF_CHAIN_CA_V3_BLIND,
++	} {
++		origin, root, err := CensusTypeToOrigin(CensusTypeDescription{Type: typ, PublicKey: key})
++		c.Assert(err, qt.IsNil, qt.Commentf(typ))
++		c.Assert(origin, qt.Equals, want, qt.Commentf(typ))
++		c.Assert([]byte(root), qt.DeepEquals, key)
++		_, _, err = CensusTypeToOrigin(CensusTypeDescription{Type: typ})
++		c.Assert(err, qt.ErrorMatches, ".*census root is nil.*", qt.Commentf(typ))
 +	}
-+	c.Assert(ForksForChainID("unlisted").CSPKeyFork, qt.Equals, uint32(0))
 +}
 +
-+func TestSetCSPKeyForkHeight(t *testing.T) {
++func TestCensusOriginDeprecated(t *testing.T) {
 +	c := qt.New(t)
-+	const chainID = "config-test-csp-fork"
-+	t.Cleanup(func() { delete(Forks, chainID) })
-+
-+	c.Assert(SetCSPKeyForkHeight(chainID, 7), qt.IsNil)
-+	c.Assert(ForksForChainID(chainID).CSPKeyFork, qt.Equals, uint32(7))
-+	// registered chains are listed, so a second call is refused too
-+	c.Assert(SetCSPKeyForkHeight(chainID, 8), qt.ErrorMatches, "chain config-test-csp-fork has configured fork heights.*")
-+	c.Assert(SetCSPKeyForkHeight("vocdoni/LTS/1.3", 0), qt.ErrorMatches, "chain vocdoni/LTS/1.3 has configured fork heights.*")
++	for origin, want := range map[models.CensusOrigin]bool{
++		models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED: false,
++		models.CensusOrigin_OFF_CHAIN_CA:            true,
++		models.CensusOrigin_OFF_CHAIN_CA_V2:         true,
++		models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA:   false,
++		models.CensusOrigin_OFF_CHAIN_CA_V3_BLIND:   false,
++	} {
++		c.Assert(censusOriginDeprecated(int32(origin)), qt.Equals, want, qt.Commentf(origin.String()))
++	}
 +}
+```
+
+```bash
+cd SEQ && go test ./api/ -run 'CensusTypeToOriginCSP|CensusOriginDeprecated' -count=1
+```
+
+Expected failure: the `csp3`/`csp3blind` types are unknown and OFF_CHAIN_CA_V2 is not flagged.
+
+Step 2 (implementation):
+
+```diff
+diff --git a/api/api_types.go b/api/api_types.go
+index defd31f1..c3f84c21 100644
+--- a/api/api_types.go
++++ b/api/api_types.go
+@@ -179,7 +179,9 @@ type ElectionKeys struct {
+ }
+ 
+ type ElectionCensus struct {
+-	CensusOrigin           string         `json:"censusOrigin"`
++	CensusOrigin string `json:"censusOrigin"`
++	// CensusOriginDeprecated is set on the retired CSP census origins
++	// (OFF_CHAIN_CA, OFF_CHAIN_CA_V2): no new election can use them.
+ 	CensusOriginDeprecated bool           `json:"censusOriginDeprecated,omitempty"`
+ 	CensusRoot             types.HexBytes `json:"censusRoot" `
+ 	PostRegisterCensusRoot types.HexBytes `json:"postRegisterCensusRoot" `
+@@ -569,6 +571,12 @@ func CensusTypeToOrigin(ctype CensusTypeDescription) (models.CensusOrigin, []byt
+ 	case CensusTypeCSPv2:
+ 		origin = models.CensusOrigin_OFF_CHAIN_CA_V2
+ 		root = ctype.PublicKey
++	case CensusTypeCSPv3:
++		origin = models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA
++		root = ctype.PublicKey
++	case CensusTypeCSPv3Blind:
++		origin = models.CensusOrigin_OFF_CHAIN_CA_V3_BLIND
++		root = ctype.PublicKey
+ 	case CensusTypeWeighted:
+ 		origin = models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED
+ 		root = ctype.RootHash
+diff --git a/api/censuses.go b/api/censuses.go
+index 14d7198a..df52c782 100644
+--- a/api/censuses.go
++++ b/api/censuses.go
+@@ -28,8 +28,15 @@ const (
+ 	CensusTypeCSP      = "csp"
+ 	// CensusTypeCSPv2 is CensusTypeCSP with the fixed salt derivation for the
+ 	// salted proof types (census origin OFF_CHAIN_CA_V2).
+-	CensusTypeCSPv2   = "csp2"
+-	CensusTypeUnknown = "unknown"
++	CensusTypeCSPv2 = "csp2"
++	// CensusTypeCSPv3 is a CSP census whose public key belongs to one election
++	// only, with ECDSA proofs (census origin OFF_CHAIN_CA_V3_ECDSA).
++	CensusTypeCSPv3 = "csp3"
++	// CensusTypeCSPv3Blind is a CSP census whose public key belongs to one
++	// election only and certifies the blind signing key of each vote weight
++	// (census origin OFF_CHAIN_CA_V3_BLIND).
++	CensusTypeCSPv3Blind = "csp3blind"
++	CensusTypeUnknown    = "unknown"
+ 	// CensusTypeZKWeighted is vocdoni-node's anonymous census type. This node
+ 	// does not support anonymous voting, so creating one answers
+ 	// ErrEndpointRemoved rather than ErrCensusTypeUnknown.
+diff --git a/api/elections.go b/api/elections.go
+index 0fb10f13..0967e323 100644
+--- a/api/elections.go
++++ b/api/elections.go
+@@ -251,7 +251,7 @@ func (a *API) electionHandler(_ *apirest.APIdata, ctx *httprouter.HTTPContext) e
+ 		TallyMode:       TallyMode{ProcessVoteOptions: proc.VoteOpts},
+ 		Census: &ElectionCensus{
+ 			CensusOrigin:           models.CensusOrigin_name[proc.CensusOrigin],
+-			CensusOriginDeprecated: proc.CensusOrigin == int32(models.CensusOrigin_OFF_CHAIN_CA),
++			CensusOriginDeprecated: censusOriginDeprecated(proc.CensusOrigin),
+ 			CensusRoot:             proc.CensusRoot,
+ 			CensusURL:              proc.CensusURI,
+ 			MaxCensusSize:          proc.MaxCensusSize,
+@@ -853,3 +853,10 @@ func electionParams(f func(key string) string, keys ...string) (*ElectionParams,
+ 		EndDateBefore:    dates[ParamEndDateBefore],
+ 	}, nil
+ }
++
++// censusOriginDeprecated reports whether origin is a retired CSP census origin
++// that no new election can use.
++func censusOriginDeprecated(origin int32) bool {
++	return origin == int32(models.CensusOrigin_OFF_CHAIN_CA) ||
++		origin == int32(models.CensusOrigin_OFF_CHAIN_CA_V2)
++}
+diff --git a/apiclient/vote.go b/apiclient/vote.go
+index cd393123..74bd9c4e 100644
+--- a/apiclient/vote.go
++++ b/apiclient/vote.go
+@@ -5,6 +5,7 @@ import (
+ 	"encoding/json"
+ 	"fmt"
+ 	"math/big"
++	"slices"
+ 
+ 	"github.com/vocdoni/vochain-sequencer/api"
+ 	"github.com/vocdoni/vochain-sequencer/crypto/ethereum"
+@@ -81,8 +82,12 @@ func (cl *HTTPclient) Vote(v *VoteData) (types.HexBytes, error) {
+ 
+ 	log.Debugw("generating a new vote", "electionId", v.Election.ElectionID, "voter", c.account.AddressString())
+ 	voteAPI := &api.Vote{}
+-	censusOriginCSP := models.CensusOrigin_name[int32(models.CensusOrigin_OFF_CHAIN_CA)]
+-	censusOriginCSPv2 := models.CensusOrigin_name[int32(models.CensusOrigin_OFF_CHAIN_CA_V2)]
++	cspCensusOrigins := []string{
++		models.CensusOrigin_OFF_CHAIN_CA.String(),
++		models.CensusOrigin_OFF_CHAIN_CA_V2.String(),
++		models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA.String(),
++		models.CensusOrigin_OFF_CHAIN_CA_V3_BLIND.String(),
++	}
+ 	censusOriginWeighted := models.CensusOrigin_name[int32(models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED)]
+ 	switch {
+ 	case v.Election.Census.CensusOrigin == censusOriginWeighted:
+@@ -109,8 +114,7 @@ func (cl *HTTPclient) Vote(v *VoteData) (types.HexBytes, error) {
+ 		if err != nil {
+ 			return nil, err
+ 		}
+-	case v.Election.Census.CensusOrigin == censusOriginCSP ||
+-		v.Election.Census.CensusOrigin == censusOriginCSPv2:
++	case slices.Contains(cspCensusOrigins, v.Election.Census.CensusOrigin):
+ 		// decode the CSP proof and include in a VoteEnvelope
+ 		p := models.ProofCA{}
+ 		if err := proto.Unmarshal(v.ProofCSP, &p); err != nil {
+```
+
+```bash
+go test ./api/... ./apiclient/... -count=1 && go vet ./api/... ./apiclient/...
+```
+
+Expected pass: `TestCensusTypeToOriginCSP`, `TestCensusOriginDeprecated` and every api/apiclient
+test pass.
+
+Step 3: `git commit -m "feat(api): expose the v3 csp census types" -- api/api_types.go api/censuses.go api/elections.go api/csp_census_types_test.go apiclient/vote.go`
+
+Interfaces this task provides: API census types `csp3`, `csp3blind`; origin names
+`OFF_CHAIN_CA_V3_ECDSA`, `OFF_CHAIN_CA_V3_BLIND` in election info.
+
+### Task 4: sequencer census origin rules, tests and end-to-end
+
+Model: opus   Repo: SEQ   Files: vochain/state/censusorigins.go, vochain/transaction/election_tx.go,
+vochain/transaction/proof.go, vochain/transaction/transaction.go, vochain/transaction/vote_tx.go,
+vochain/cspkey_test.go, vochain/process_test.go, vochain/vote_test.go, vocone/vocone_test.go,
+api/metadata_helpers_test.go, apiclient/metadata_test.go, cmd/end2endtest/*.go,
+scripts/live-csp-elections.sh
+
+Goal: V3 processes are accepted when the census root is a valid 33-byte compressed point; new
+OFF_CHAIN_CA/V2 processes are rejected (`census origin %s retired for new processes`); a ProofCA
+with a weight certificate on a legacy origin is rejected; votes on legacy processes already in the
+state verify as before. The rules have no activation height (spec D2c), and `config/forks.go` is
+untouched. Tests that created legacy CSP processes through NewProcessTx use other origins, and the
+legacy vote tests seed their processes with `state.AddProcess`. end2endtest runs its CSP operations
+on the V3 origins; `scripts/live-csp-elections.sh` lists the live legacy CSP elections of a network.
+
+Step 1 (failing test):
+
+```diff
+diff --git a/api/metadata_helpers_test.go b/api/metadata_helpers_test.go
+index 9362e36a..50fdd7c6 100644
+--- a/api/metadata_helpers_test.go
++++ b/api/metadata_helpers_test.go
+@@ -119,8 +119,8 @@ func (e *metadataTestEnv) newProcessTx(uri string, hash []byte, encrypted bool)
+ 			Mode:          &models.ProcessMode{AutoStart: true, Interruptible: true, EncryptedMetaData: encrypted},
+ 			VoteOptions:   &models.ProcessVoteOptions{MaxCount: 1, MaxValue: 1},
+ 			Status:        models.ProcessStatus_READY,
+-			CensusRoot:    util.RandomBytes(33),
+-			CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA_V2,
++			CensusRoot:    ethereum.NewSignKeysBatch(1)[0].PublicKey(),
++			CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA,
+ 			Duration:      10240,
+ 			MaxCensusSize: 10,
+ 			Metadata:      &uri,
+diff --git a/apiclient/metadata_test.go b/apiclient/metadata_test.go
+index 7131c466..99c29ca3 100644
+--- a/apiclient/metadata_test.go
++++ b/apiclient/metadata_test.go
+@@ -11,7 +11,6 @@ import (
+ 	"github.com/vocdoni/vochain-sequencer/crypto/ethereum"
+ 	"github.com/vocdoni/vochain-sequencer/data"
+ 	"github.com/vocdoni/vochain-sequencer/test/testcommon"
+-	"github.com/vocdoni/vochain-sequencer/util"
+ 	"github.com/vocdoni/vochain-sequencer/vochain"
+ 	"go.vocdoni.io/proto/build/go/models"
+ )
+@@ -64,8 +63,8 @@ func TestMetadataUpload(t *testing.T) {
+ 			},
+ 		}},
+ 		Census: api.CensusTypeDescription{
+-			Type:      api.CensusTypeCSPv2,
+-			PublicKey: util.RandomBytes(33),
++			Type:      api.CensusTypeCSPv3,
++			PublicKey: ethereum.NewSignKeysBatch(1)[0].PublicKey(),
+ 			Size:      10,
+ 		},
+ 	}, false)
 diff --git a/vochain/cspkey_test.go b/vochain/cspkey_test.go
 new file mode 100644
-index 0000000..e48677b
+index 00000000..bf6594d0
 --- /dev/null
 +++ b/vochain/cspkey_test.go
-@@ -0,0 +1,245 @@
+@@ -0,0 +1,229 @@
 +package vochain
 +
 +import (
@@ -1452,7 +1592,6 @@ index 0000000..e48677b
 +
 +	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 +	qt "github.com/frankban/quicktest"
-+	"github.com/vocdoni/vochain-sequencer/config"
 +	"github.com/vocdoni/vochain-sequencer/crypto/ethereum"
 +	"github.com/vocdoni/vochain-sequencer/crypto/saltedkey"
 +	"github.com/vocdoni/vochain-sequencer/test/testcommon/testcsp"
@@ -1460,16 +1599,6 @@ index 0000000..e48677b
 +	"github.com/vocdoni/vochain-sequencer/vochain/state"
 +	"go.vocdoni.io/proto/build/go/models"
 +)
-+
-+// cspKeyTestApp returns a test application and accounts on its own chain,
-+// whose CSP key fork activates at forkHeight.
-+func cspKeyTestApp(t *testing.T, forkHeight uint32) (*BaseApplication, []*ethereum.SignKeys) {
-+	t.Helper()
-+	chainID := "csp-key-fork-" + t.Name()
-+	qt.Assert(t, config.SetCSPKeyForkHeight(chainID, forkHeight), qt.IsNil)
-+	t.Cleanup(func() { delete(config.Forks, chainID) })
-+	return createTestBaseApplicationAndAccountsWithChainID(t, chainID, 1)
-+}
 +
 +// cspKeyTestProcess builds a NewProcess payload for a CSP census.
 +func cspKeyTestProcess(entityID []byte, origin models.CensusOrigin, root []byte) *models.Process {
@@ -1495,34 +1624,20 @@ index 0000000..e48677b
 +	return ethcrypto.CompressPubkey(&k.Public)
 +}
 +
-+func TestCSPKeyForkNewProcess(t *testing.T) {
-+	const forkHeight = 100
-+	app, accounts := cspKeyTestApp(t, forkHeight)
++// TestCSPKeyNewProcess checks the census origin rules of NewProcessTx: the
++// legacy CSP origins are retired for new processes, and the V3 origins need a
++// valid per-election CSP key as census root.
++func TestCSPKeyNewProcess(t *testing.T) {
++	app, accounts := createTestBaseApplicationAndAccounts(t, 1)
 +	entity := accounts[0].Address().Bytes()
-+	v3Origins := []models.CensusOrigin{
-+		models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA, models.CensusOrigin_OFF_CHAIN_CA_V3_BLIND,
-+	}
-+	legacyOrigins := []models.CensusOrigin{
++
++	for _, origin := range []models.CensusOrigin{
 +		models.CensusOrigin_OFF_CHAIN_CA, models.CensusOrigin_OFF_CHAIN_CA_V2,
-+	}
-+
-+	// below the fork: V3 is unknown, legacy CSP origins are accepted
-+	app.State.SetHeight(forkHeight - 1)
-+	for _, origin := range v3Origins {
-+		err := testCreateProcessWithErr(t, accounts[0], app, cspKeyTestProcess(entity, origin, compressedTestKey(t)))
-+		qt.Assert(t, err, qt.ErrorMatches, ".*census origin "+origin.String()+" not supported for new process.*")
-+	}
-+	for _, origin := range legacyOrigins {
-+		pid := testCreateProcess(t, accounts[0], app, cspKeyTestProcess(entity, origin, compressedTestKey(t)))
-+		qt.Assert(t, pid, qt.IsNotNil, qt.Commentf("origin %s", origin))
-+	}
-+
-+	// from the fork: legacy CSP origins are retired, V3 needs a valid key as census root
-+	app.State.SetHeight(forkHeight)
-+	for _, origin := range legacyOrigins {
++	} {
 +		err := testCreateProcessWithErr(t, accounts[0], app, cspKeyTestProcess(entity, origin, compressedTestKey(t)))
 +		qt.Assert(t, err, qt.ErrorMatches, ".*census origin "+origin.String()+" retired for new processes.*")
 +	}
++
 +	k := ethereum.NewSignKeys()
 +	qt.Assert(t, k.Generate(), qt.IsNil)
 +	invalidRoots := map[string][]byte{
@@ -1532,7 +1647,9 @@ index 0000000..e48677b
 +		"bad prefix":   append([]byte{0x04}, ethcrypto.CompressPubkey(&k.Public)[1:]...),
 +		"not on curve": append([]byte{0x02}, bytes.Repeat([]byte{0xff}, 32)...),
 +	}
-+	for _, origin := range v3Origins {
++	for _, origin := range []models.CensusOrigin{
++		models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA, models.CensusOrigin_OFF_CHAIN_CA_V3_BLIND,
++	} {
 +		for name, root := range invalidRoots {
 +			err := testCreateProcessWithErr(t, accounts[0], app, cspKeyTestProcess(entity, origin, root))
 +			qt.Assert(t, err, qt.ErrorMatches, ".*CSP census root .*", qt.Commentf("%s %s", origin, name))
@@ -1546,11 +1663,10 @@ index 0000000..e48677b
 +	}
 +}
 +
-+// TestCSPKeyV3VotesEndToEnd creates V3 elections through NewProcessTx on a
-+// chain where the fork is active from genesis and votes on them through
-+// CheckTx, DeliverTx and commit.
++// TestCSPKeyV3VotesEndToEnd creates V3 elections through NewProcessTx and
++// votes on them through CheckTx, DeliverTx and commit.
 +func TestCSPKeyV3VotesEndToEnd(t *testing.T) {
-+	app, accounts := cspKeyTestApp(t, 0)
++	app, accounts := createTestBaseApplicationAndAccounts(t, 1)
 +	entity := accounts[0].Address().Bytes()
 +	vp, err := state.NewVotePackage([]int{1}).Encode()
 +	qt.Assert(t, err, qt.IsNil)
@@ -1598,31 +1714,23 @@ index 0000000..e48677b
 +	})
 +}
 +
-+// TestCSPKeyForkLegacyProcessKeepsVoting checks that OFF_CHAIN_CA and
-+// OFF_CHAIN_CA_V2 processes created below the fork accept their legacy votes
-+// from the fork on.
-+func TestCSPKeyForkLegacyProcessKeepsVoting(t *testing.T) {
-+	const forkHeight = 50
-+	app, accounts := cspKeyTestApp(t, forkHeight)
-+	entity := accounts[0].Address().Bytes()
++// TestCSPKeyLegacyProcessKeepsVoting checks that OFF_CHAIN_CA and
++// OFF_CHAIN_CA_V2 processes already in the state keep accepting their legacy
++// votes. NewProcessTx no longer creates them, so they are seeded in the state.
++func TestCSPKeyLegacyProcessKeepsVoting(t *testing.T) {
++	app := TestBaseApplication(t)
 +	signer, err := testcsp.NewSigner()
 +	qt.Assert(t, err, qt.IsNil)
 +	vp, err := state.NewVotePackage([]int{1}).Encode()
 +	qt.Assert(t, err, qt.IsNil)
 +
-+	app.State.SetHeight(forkHeight - 10)
 +	ecdsaRoot, err := signer.CensusRoot(models.ProofCA_ECDSA_PIDSALTED)
 +	qt.Assert(t, err, qt.IsNil)
-+	caPID, err := testCreateProcessWithErrAndData(t, accounts[0], app,
-+		cspKeyTestProcess(entity, models.CensusOrigin_OFF_CHAIN_CA, ecdsaRoot))
-+	qt.Assert(t, err, qt.IsNil)
++	caPID := cspTestProcess(t, app, ecdsaRoot, models.CensusOrigin_OFF_CHAIN_CA)
 +	blindRoot, err := signer.CensusRoot(models.ProofCA_ECDSA_BLIND_PIDSALTED)
 +	qt.Assert(t, err, qt.IsNil)
-+	v2PID, err := testCreateProcessWithErrAndData(t, accounts[0], app,
-+		cspKeyTestProcess(entity, models.CensusOrigin_OFF_CHAIN_CA_V2, blindRoot))
-+	qt.Assert(t, err, qt.IsNil)
++	v2PID := cspTestProcess(t, app, blindRoot, models.CensusOrigin_OFF_CHAIN_CA_V2)
 +
-+	app.State.SetHeight(forkHeight + 10)
 +	voter := ethereum.NewSignKeysBatch(1)[0]
 +	proof, err := signer.Sign(models.ProofCA_ECDSA_PIDSALTED, testcsp.Bundle(caPID, voter.Address().Bytes(), nil), caPID)
 +	qt.Assert(t, err, qt.IsNil)
@@ -1637,25 +1745,18 @@ index 0000000..e48677b
 +	testCSPsendVotes(t, v2PID, vp, voter, proof, app, true)
 +}
 +
-+// TestCSPKeyForkLegacyVoteWithCertificate checks that a weight certificate on
-+// a legacy CSP vote is ignored below the fork and rejected from it on,
-+// including for a vote checked into the mempool below the fork and delivered
-+// from it on.
-+func TestCSPKeyForkLegacyVoteWithCertificate(t *testing.T) {
-+	const forkHeight = 50
-+	app, accounts := cspKeyTestApp(t, forkHeight)
-+	entity := accounts[0].Address().Bytes()
++// TestCSPKeyLegacyVoteWithCertificate checks that a weight certificate on a
++// legacy CSP vote is rejected by CheckTx and by DeliverTx, while the same vote
++// without it is accepted.
++func TestCSPKeyLegacyVoteWithCertificate(t *testing.T) {
++	app := TestBaseApplication(t)
 +	signer, err := testcsp.NewSigner()
 +	qt.Assert(t, err, qt.IsNil)
-+
-+	app.State.SetHeight(forkHeight - 10)
 +	root, err := signer.CensusRoot(models.ProofCA_ECDSA_BLIND_PIDSALTED)
 +	qt.Assert(t, err, qt.IsNil)
-+	pid, err := testCreateProcessWithErrAndData(t, accounts[0], app,
-+		cspKeyTestProcess(entity, models.CensusOrigin_OFF_CHAIN_CA_V2, root))
-+	qt.Assert(t, err, qt.IsNil)
++	pid := cspTestProcess(t, app, root, models.CensusOrigin_OFF_CHAIN_CA_V2)
 +
-+	voteWithCertificate := func() *models.SignedTx {
++	legacyVote := func(withCertificate bool) *models.SignedTx {
 +		voter := ethereum.NewSignKeysBatch(1)[0]
 +		weight := big.NewInt(2)
 +		salt, err := saltedkey.Salt(pid, weight.Bytes())
@@ -1663,667 +1764,410 @@ index 0000000..e48677b
 +		proof, err := signer.Sign(models.ProofCA_ECDSA_BLIND_PIDSALTED,
 +			testcsp.Bundle(pid, voter.Address().Bytes(), weight), salt)
 +		qt.Assert(t, err, qt.IsNil)
-+		proof.WeightCertificate = &models.CAWeightCertificate{
-+			WeightKey: util.RandomBytes(33),
-+			Signature: util.RandomBytes(65),
++		if withCertificate {
++			proof.WeightCertificate = &models.CAWeightCertificate{
++				WeightKey: util.RandomBytes(33),
++				Signature: util.RandomBytes(65),
++			}
 +		}
 +		return testBuildSignedVote(t, pid, voter, proof, []int{1}, app.ChainID())
 +	}
 +
-+	// below the fork the field is ignored
-+	app.State.SetHeight(forkHeight - 1)
-+	stx := voteWithCertificate()
++	stx := legacyVote(true)
++	qt.Assert(t, testSendVote(app, stx, false), qt.Not(qt.Equals), uint32(0))
++	qt.Assert(t, testSendVote(app, stx, true), qt.Not(qt.Equals), uint32(0))
++
++	stx = legacyVote(false)
 +	qt.Assert(t, testSendVote(app, stx, false), qt.Equals, uint32(0))
 +	qt.Assert(t, testSendVote(app, stx, true), qt.Equals, uint32(0))
 +	testCommitState(t, app)
-+
-+	// checked into the mempool below the fork, delivered from it on
-+	stx = voteWithCertificate()
-+	qt.Assert(t, testSendVote(app, stx, false), qt.Equals, uint32(0))
-+	app.State.SetHeight(forkHeight)
-+	qt.Assert(t, testSendVote(app, stx, true), qt.Not(qt.Equals), uint32(0))
-+
-+	// from the fork on
-+	stx = voteWithCertificate()
-+	qt.Assert(t, testSendVote(app, stx, false), qt.Not(qt.Equals), uint32(0))
-+	qt.Assert(t, testSendVote(app, stx, true), qt.Not(qt.Equals), uint32(0))
 +}
-diff --git a/vochain/main_test.go b/vochain/main_test.go
-new file mode 100644
-index 0000000..9032bd9
---- /dev/null
-+++ b/vochain/main_test.go
-@@ -0,0 +1,21 @@
-+package vochain
 +
-+import (
-+	"math"
-+	"os"
-+	"testing"
++// TestCSPKeyV3CensusUpdate checks that SET_PROCESS_CENSUS cannot replace the
++// per-election CSP key of a V3 process, even with dynamic census enabled,
++// while a census size increase is accepted.
++func TestCSPKeyV3CensusUpdate(t *testing.T) {
++	app, accounts := createTestBaseApplicationAndAccounts(t, 1)
++	entity := accounts[0].Address().Bytes()
++	for _, origin := range []models.CensusOrigin{
++		models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA, models.CensusOrigin_OFF_CHAIN_CA_V3_BLIND,
++	} {
++		process := cspKeyTestProcess(entity, origin, compressedTestKey(t))
++		process.Mode.DynamicCensus = true
++		pid := testCreateProcess(t, accounts[0], app, process)
++		app.AdvanceTestBlock()
 +
-+	"github.com/vocdoni/vochain-sequencer/config"
-+)
++		censusURI := ipfsUrlTest
++		err := testSetProcessCensus(t, pid, accounts[0], app, compressedTestKey(t), &censusURI, 0)
++		qt.Assert(t, err, qt.ErrorMatches, ".*does not allow update.*", qt.Commentf("origin %s", origin))
++		app.AdvanceTestBlock()
 +
-+// legacyCSPChainID is the chain the tests of this package run on. They create
-+// OFF_CHAIN_CA and OFF_CHAIN_CA_V2 processes, so it runs below the CSP key
-+// fork. Tests of the fork rules use their own chain IDs.
-+const legacyCSPChainID = "test"
++		qt.Assert(t, testSetProcessCensus(t, pid, accounts[0], app, nil, nil, 20), qt.IsNil,
++			qt.Commentf("origin %s", origin))
++		app.AdvanceTestBlock()
 +
-+func TestMain(m *testing.M) {
-+	if err := config.SetCSPKeyForkHeight(legacyCSPChainID, math.MaxUint32); err != nil {
-+		panic(err)
++		stored, err := app.State.Process(pid, true)
++		qt.Assert(t, err, qt.IsNil)
++		qt.Assert(t, stored.CensusRoot, qt.DeepEquals, process.CensusRoot)
++		qt.Assert(t, stored.MaxCensusSize, qt.Equals, uint64(20))
 +	}
-+	os.Exit(m.Run())
 +}
 diff --git a/vochain/process_test.go b/vochain/process_test.go
-index 9dca09c..53d99a3 100644
+index 9dca09c3..4406d609 100644
 --- a/vochain/process_test.go
 +++ b/vochain/process_test.go
-@@ -387,7 +387,15 @@ func TestCount(t *testing.T) {
- func createTestBaseApplicationAndAccounts(t *testing.T,
- 	txCostNumber uint64,
- ) (*BaseApplication, []*ethereum.SignKeys) {
--	app := TestBaseApplication(t)
-+	return createTestBaseApplicationAndAccountsWithChainID(t, "test", txCostNumber)
-+}
-+
-+// createTestBaseApplicationAndAccountsWithChainID is
-+// createTestBaseApplicationAndAccounts on the given chain.
-+func createTestBaseApplicationAndAccountsWithChainID(t *testing.T, chainID string,
-+	txCostNumber uint64,
-+) (*BaseApplication, []*ethereum.SignKeys) {
-+	app := TestBaseApplicationWithChainID(t, chainID)
- 	keys := make([]*ethereum.SignKeys, 0)
- 	for i := 0; i < 4; i++ {
- 		key := &ethereum.SignKeys{}
-diff --git a/vocone/main_test.go b/vocone/main_test.go
-new file mode 100644
-index 0000000..2c23009
---- /dev/null
-+++ b/vocone/main_test.go
-@@ -0,0 +1,21 @@
-+package vocone
-+
-+import (
-+	"math"
-+	"os"
-+	"testing"
-+
-+	"github.com/vocdoni/vochain-sequencer/config"
-+)
-+
-+// legacyCSPChainID is the chain the tests of this package run on. They create
-+// OFF_CHAIN_CA and OFF_CHAIN_CA_V2 processes, so it runs below the CSP key
-+// fork. Tests of the fork rules use their own chain IDs.
-+const legacyCSPChainID = "test-vocone"
-+
-+func TestMain(m *testing.M) {
-+	if err := config.SetCSPKeyForkHeight(legacyCSPChainID, math.MaxUint32); err != nil {
-+		panic(err)
+@@ -35,7 +35,7 @@ func TestNewProcessCheckTxDeliverTxCommitTransitions(t *testing.T) {
+ 		EntityId:      accounts[0].Address().Bytes(),
+ 		CensusRoot:    util.RandomBytes(32),
+ 		CensusURI:     &censusURI,
+-		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA_V2,
++		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED,
+ 		BlockCount:    1024,
+ 		MaxCensusSize: 100,
+ 	}
+@@ -108,7 +108,7 @@ func TestProcessSetStatusCheckTxDeliverTxCommitTransitions(t *testing.T) {
+ 		EntityId:      keys[0].Address().Bytes(),
+ 		CensusRoot:    util.RandomBytes(32),
+ 		CensusURI:     &censusURI,
+-		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA_V2,
++		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED,
+ 		Duration:      1024,
+ 		MaxCensusSize: 100,
+ 	}
+@@ -161,7 +161,7 @@ func TestProcessSetStatusCheckTxDeliverTxCommitTransitions(t *testing.T) {
+ 		EntityId:      keys[0].Address().Bytes(),
+ 		CensusRoot:    util.RandomBytes(32),
+ 		CensusURI:     &censusURI,
+-		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA_V2,
++		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED,
+ 		Duration:      1024,
+ 		MaxCensusSize: 100,
+ 	}
+@@ -200,7 +200,7 @@ func TestProcessSetStatusCheckTxDeliverTxCommitTransitions(t *testing.T) {
+ 		EntityId:      keys[0].Address().Bytes(),
+ 		CensusRoot:    util.RandomBytes(32),
+ 		CensusURI:     &censusURI,
+-		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA_V2,
++		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED,
+ 		Duration:      1024,
+ 		MaxCensusSize: 100,
+ 	}
+@@ -277,7 +277,7 @@ func TestProcessSetCensusCheckTxDeliverTxCommitTransitions(t *testing.T) {
+ 		EntityId:      keys[0].Address().Bytes(),
+ 		CensusRoot:    util.RandomBytes(32),
+ 		CensusURI:     &censusURI,
+-		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA_V2,
++		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED,
+ 		BlockCount:    1024,
+ 		MaxCensusSize: 100,
+ 	}
+@@ -291,7 +291,7 @@ func TestProcessSetCensusCheckTxDeliverTxCommitTransitions(t *testing.T) {
+ 		EntityId:      keys[0].Address().Bytes(),
+ 		CensusRoot:    util.RandomBytes(32),
+ 		CensusURI:     &censusURI2,
+-		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA_V2,
++		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED,
+ 		BlockCount:    1024,
+ 		MaxCensusSize: 100,
+ 	}
+@@ -305,7 +305,7 @@ func TestProcessSetCensusCheckTxDeliverTxCommitTransitions(t *testing.T) {
+ 		EntityId:      keys[0].Address().Bytes(),
+ 		CensusRoot:    util.RandomBytes(32),
+ 		CensusURI:     &censusURI2,
+-		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA_V2,
++		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED,
+ 		BlockCount:    1024,
+ 		MaxCensusSize: 100,
+ 	}
+@@ -507,7 +507,7 @@ func TestGlobalMaxProcessSize(t *testing.T) {
+ 		EntityId:      accounts[0].Address().Bytes(),
+ 		CensusRoot:    util.RandomBytes(32),
+ 		CensusURI:     &censusURI,
+-		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA_V2,
++		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED,
+ 		Duration:      60,
+ 		MaxCensusSize: 5,
+ 	}
+@@ -534,7 +534,7 @@ func TestSetProcessCensusSize(t *testing.T) {
+ 		EntityId:      accounts[0].Address().Bytes(),
+ 		CensusRoot:    util.RandomBytes(32),
+ 		CensusURI:     &censusURI,
+-		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA_V2,
++		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED,
+ 		Duration:      60 * 60,
+ 		MaxCensusSize: 2,
+ 	}
+@@ -619,7 +619,7 @@ func TestSetProcessCensusSize(t *testing.T) {
+ 		EntityId:      accounts[0].Address().Bytes(),
+ 		CensusRoot:    util.RandomBytes(32),
+ 		CensusURI:     &censusURI,
+-		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA_V2,
++		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED,
+ 		Duration:      60 * 60,
+ 		MaxCensusSize: 2,
+ 	}
+@@ -655,7 +655,7 @@ func TestSetProcessDuration(t *testing.T) {
+ 		EntityId:      accounts[0].Address().Bytes(),
+ 		CensusRoot:    util.RandomBytes(32),
+ 		CensusURI:     &censusURI,
+-		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA_V2,
++		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED,
+ 		Duration:      60,
+ 		MaxCensusSize: 2,
+ 	}
+@@ -699,39 +699,8 @@ func TestSetProcessDuration(t *testing.T) {
+ 	qt.Assert(t, oldBalance-newBalance >= 30, qt.IsTrue)
+ }
+ 
+-// TestNewProcessSoftDeprecatesLegacyCSPOrigin covers the LTS/1.3 soft deprecation
+-// of CensusOrigin_OFF_CHAIN_CA: process creation still succeeds so integrators
+-// currently on the SDK's legacy origin keep working, but the CheckTx response
+-// carries a warning in its Log field that surfaces to API clients (and via
+-// log.Warnw to validator operators). The follow-up LTS/1.4 change will flip
+-// this to a hard rejection.
+-func TestNewProcessSoftDeprecatesLegacyCSPOrigin(t *testing.T) {
+-	app, accounts := createTestBaseApplicationAndAccounts(t, 2)
+-
+-	buildProcess := func(origin models.CensusOrigin) *models.Process {
+-		return &models.Process{
+-			EnvelopeType:  &models.EnvelopeType{EncryptedVotes: false},
+-			Mode:          &models.ProcessMode{Interruptible: true},
+-			VoteOptions:   &models.ProcessVoteOptions{MaxCount: 1, MaxValue: 1},
+-			Status:        models.ProcessStatus_READY,
+-			EntityId:      accounts[0].Address().Bytes(),
+-			CensusRoot:    util.RandomBytes(33),
+-			CensusOrigin:  origin,
+-			Duration:      10240,
+-			MaxCensusSize: 10,
+-		}
+-	}
+-
+-	// legacy OFF_CHAIN_CA: accepted, warning surfaced in CheckTx Log
+-	log := checkTxLog(t, app, accounts[0], buildProcess(models.CensusOrigin_OFF_CHAIN_CA))
+-	qt.Assert(t, log, qt.Contains, "OFF_CHAIN_CA is deprecated")
+-
+-	// OFF_CHAIN_CA_V2: accepted, no warning
+-	log = checkTxLog(t, app, accounts[1], buildProcess(models.CensusOrigin_OFF_CHAIN_CA_V2))
+-	qt.Assert(t, log, qt.Equals, "")
+-}
+-
+-// TestNewProcessOnlyCSP checks that only non-anonymous CSP elections can be created.
++// TestNewProcessCensusOrigins checks the census origins new processes accept:
++// only non-anonymous ones, and none of the retired legacy CSP origins.
+ func TestNewProcessCensusOrigins(t *testing.T) {
+ 	app, accounts := createTestBaseApplicationAndAccounts(t, 1)
+ 	censusURI := ipfsUrlTest
+@@ -743,7 +712,7 @@ func TestNewProcessCensusOrigins(t *testing.T) {
+ 			VoteOptions:   &models.ProcessVoteOptions{MaxCount: 1, MaxValue: 1},
+ 			Status:        models.ProcessStatus_READY,
+ 			EntityId:      accounts[0].Address().Bytes(),
+-			CensusRoot:    util.RandomBytes(33),
++			CensusRoot:    compressedTestKey(t),
+ 			CensusURI:     &censusURI,
+ 			CensusOrigin:  origin,
+ 			Duration:      10240,
+@@ -758,11 +727,18 @@ func TestNewProcessCensusOrigins(t *testing.T) {
+ 		err := testCreateProcessWithErr(t, accounts[0], app, buildProcess(origin, false))
+ 		qt.Assert(t, err, qt.ErrorMatches, ".*census origin .* not supported.*")
+ 	}
++	for _, origin := range []models.CensusOrigin{
++		models.CensusOrigin_OFF_CHAIN_CA,
++		models.CensusOrigin_OFF_CHAIN_CA_V2,
++	} {
++		err := testCreateProcessWithErr(t, accounts[0], app, buildProcess(origin, false))
++		qt.Assert(t, err, qt.ErrorMatches, ".*census origin .* retired for new processes.*")
 +	}
-+	os.Exit(m.Run())
-+}
+ 	origins := []models.CensusOrigin{
+ 		models.CensusOrigin_OFF_CHAIN_TREE,
+ 		models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED,
+-		models.CensusOrigin_OFF_CHAIN_CA,
+-		models.CensusOrigin_OFF_CHAIN_CA_V2,
++		models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA,
++		models.CensusOrigin_OFF_CHAIN_CA_V3_BLIND,
+ 	}
+ 	for _, origin := range origins {
+ 		err := testCreateProcessWithErr(t, accounts[0], app, buildProcess(origin, true))
+@@ -774,32 +750,6 @@ func TestNewProcessCensusOrigins(t *testing.T) {
+ 	}
+ }
+ 
+-// checkTxLog signs and runs CheckTx for a NewProcess and returns the response
+-// Log field (the API surfaces it as the ElectionCreate.Warning field). The test
+-// asserts a Code=0 acceptance; use it only where the transaction is expected to
+-// pass its checks.
+-func checkTxLog(t *testing.T, app *BaseApplication, txSender *ethereum.SignKeys, process *models.Process) string {
+-	t.Helper()
+-	txSenderAcc, err := app.State.GetAccount(txSender.Address(), false)
+-	qt.Assert(t, err, qt.IsNil)
+-	tx := &models.NewProcessTx{
+-		Txtype:  models.TxType_NEW_PROCESS,
+-		Nonce:   txSenderAcc.Nonce,
+-		Process: process,
+-	}
+-	var stx models.SignedTx
+-	stx.Tx, err = proto.Marshal(&models.Tx{Payload: &models.Tx_NewProcess{NewProcess: tx}})
+-	qt.Assert(t, err, qt.IsNil)
+-	stx.Signature, err = txSender.SignVocdoniTx(stx.Tx, app.chainID)
+-	qt.Assert(t, err, qt.IsNil)
+-	rawTx, err := proto.Marshal(&stx)
+-	qt.Assert(t, err, qt.IsNil)
+-	resp, err := app.CheckTx(context.Background(), &CheckTxRequest{Tx: rawTx})
+-	qt.Assert(t, err, qt.IsNil)
+-	qt.Assert(t, resp.Code, qt.Equals, uint32(0), qt.Commentf("CheckTx failed: %s", resp.Data))
+-	return resp.Log
+-}
+-
+ func testSetProcessMetadata(t *testing.T, pid []byte, txSender *ethereum.SignKeys,
+ 	app *BaseApplication, uri *string, hash []byte,
+ ) error {
+@@ -822,7 +772,7 @@ func testMetadataProcess(entityID []byte) *models.Process {
+ 		EntityId:      entityID,
+ 		CensusRoot:    util.RandomBytes(32),
+ 		CensusURI:     &censusURI,
+-		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA_V2,
++		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED,
+ 		Duration:      1024,
+ 		MaxCensusSize: 100,
+ 		Metadata:      &metadataURI,
+diff --git a/vochain/vote_test.go b/vochain/vote_test.go
+index fc0e5c34..6a4defbf 100644
+--- a/vochain/vote_test.go
++++ b/vochain/vote_test.go
+@@ -227,6 +227,7 @@ func testMetadataVoteSetup(t *testing.T) (*BaseApplication, *ethereum.SignKeys,
+ 	process.Mode = &models.ProcessMode{AutoStart: true, Interruptible: true}
+ 	process.VoteOptions = &models.ProcessVoteOptions{MaxCount: 3, MaxValue: 3}
+ 	process.CensusRoot = root
++	process.CensusOrigin = models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA
+ 	process.BlockCount = 1024
+ 	qt.Assert(t, app.State.AddProcess(process), qt.IsNil)
+ 	app.AdvanceTestBlock()
+@@ -297,6 +298,7 @@ func TestVoteMetadataHashWithoutCommittedHash(t *testing.T) {
+ 	process.Mode = &models.ProcessMode{AutoStart: true}
+ 	process.VoteOptions = &models.ProcessVoteOptions{MaxCount: 3, MaxValue: 3}
+ 	process.CensusRoot = root
++	process.CensusOrigin = models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA
+ 	process.BlockCount = 1024
+ 	process.MetadataHash = nil
+ 	qt.Assert(t, app.State.AddProcess(process), qt.IsNil)
+diff --git a/vocone/vocone_test.go b/vocone/vocone_test.go
+index 92d323b0..cdf36f1a 100644
+--- a/vocone/vocone_test.go
++++ b/vocone/vocone_test.go
+@@ -546,7 +546,7 @@ func testCSPvote(cli *apiclient.HTTPclient, encrypted bool) error {
+ 	}
+ 	entityID := cli.MyAddress().Bytes()
+ 	censusRoot := cspKey.PublicKey()
+-	censusOrigin := models.CensusOrigin_OFF_CHAIN_CA
++	censusOrigin := models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA
+ 	censusSize := uint64(10)
+ 	processID, err := cli.NewElectionRaw(
+ 		&models.Process{
 ```
 
 ```bash
-cd SEQ && go test ./config/ ./vochain/ -run 'CSPKey|SetCSPKeyForkHeight' -count=1
+cd SEQ && go test ./vochain/ -run 'CSPKey|NewProcessCensusOrigins' -count=1
 ```
-Expected failure: build error `undefined: config.SetCSPKeyForkHeight` / `CSPKeyFork`.
+
+Expected failure: V3 processes are rejected as `not supported for new process` and legacy ones are
+accepted.
 
 Step 2 (implementation):
 
 ```diff
-diff --git a/config/forks.go b/config/forks.go
-index 24422d3..3f352d6 100644
---- a/config/forks.go
-+++ b/config/forks.go
-@@ -1,5 +1,10 @@
- package config
- 
-+import (
-+	"fmt"
-+	"math"
-+)
-+
- // ForksCfg holds the heights at which soft forks activate on a chain. A zero
- // height means the fork is active from genesis.
- type ForksCfg struct {
-@@ -8,6 +13,13 @@ type ForksCfg struct {
- 	// NewProcessTx and the metadata hash attestation on votes. Before it, the
- 	// chain must behave exactly as binaries without these rules.
- 	MetadataFork uint32
-+	// CSPKeyFork activates per-election CSP keys (saas-backend issue #769):
-+	// NewProcessTx accepts the OFF_CHAIN_CA_V3_ECDSA and OFF_CHAIN_CA_V3_BLIND
-+	// census origins and rejects new OFF_CHAIN_CA and OFF_CHAIN_CA_V2
-+	// processes, and a ProofCA carrying a weight certificate is rejected on
-+	// those legacy origins. Before it, the chain must behave exactly as
-+	// binaries without these rules.
-+	CSPKeyFork uint32
- }
- 
- // Forks maps chainIDs to their soft fork heights. Chains not listed activate
-@@ -15,10 +27,15 @@ type ForksCfg struct {
- var Forks = map[string]*ForksCfg{
- 	"vocdoni/DEV/36": {
- 		MetadataFork: 40_793,
-+		// set when the release that activates it is cut
-+		CSPKeyFork: math.MaxUint32,
- 	},
- 	"vocdoni/LTS/1.3": {
- 		// ~2026-10-08 07:00 UTC
- 		MetadataFork: 8_705_150,
-+		// set to the height expected at the agreed time of the 2026-11-02 flag
-+		// day when the release that activates it is cut
-+		CSPKeyFork: math.MaxUint32,
- 	},
- }
- 
-@@ -30,3 +47,17 @@ func ForksForChainID(chainID string) *ForksCfg {
- 	}
- 	return &ForksCfg{}
- }
-+
-+// SetCSPKeyForkHeight registers the CSPKeyFork height of a chain that is not
-+// listed in Forks; every other fork of that chain stays active from genesis.
-+// It lets test and development chains run legacy CSP elections before the
-+// fork. It refuses chains listed in Forks, so it can never change the heights
-+// of a public network. It is not safe for concurrent use: call it before the
-+// chain starts.
-+func SetCSPKeyForkHeight(chainID string, height uint32) error {
-+	if _, found := Forks[chainID]; found {
-+		return fmt.Errorf("chain %s has configured fork heights, its CSP key fork height cannot be changed", chainID)
-+	}
-+	Forks[chainID] = &ForksCfg{CSPKeyFork: height}
-+	return nil
-+}
-diff --git a/vochain/state/censusorigins.go b/vochain/state/censusorigins.go
-index ace7585..8eab874 100644
---- a/vochain/state/censusorigins.go
-+++ b/vochain/state/censusorigins.go
-@@ -29,4 +29,14 @@ var CensusOrigins = map[models.CensusOrigin]CensusProperties{
- 		Name: "ca_v2", WeightedSupport: true,
- 		NeedsURI: true, AllowCensusUpdate: true,
- 	},
-+	// The census root of a V3 origin is the per-election CSP key the proofs
-+	// are checked against; it cannot be replaced once the process exists.
-+	models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA: {
-+		Name: "ca_v3_ecdsa", WeightedSupport: true,
-+		NeedsURI: true,
-+	},
-+	models.CensusOrigin_OFF_CHAIN_CA_V3_BLIND: {
-+		Name: "ca_v3_blind", WeightedSupport: true,
-+		NeedsURI: true,
-+	},
- }
-diff --git a/vochain/transaction/election_tx.go b/vochain/transaction/election_tx.go
-index ab96f3d..b8f209e 100644
---- a/vochain/transaction/election_tx.go
-+++ b/vochain/transaction/election_tx.go
-@@ -5,6 +5,8 @@ import (
- 	"encoding/hex"
- 	"fmt"
- 
-+	ethcrypto "github.com/ethereum/go-ethereum/crypto"
-+
- 	"github.com/vocdoni/vochain-sequencer/crypto/ethereum"
- 	"github.com/vocdoni/vochain-sequencer/crypto/nacl"
- 	"github.com/vocdoni/vochain-sequencer/log"
-@@ -57,6 +59,18 @@ func (t *TransactionHandler) NewProcessTxCheck(vtx *vochaintx.Tx) (*models.Proce
- 	// run specific checks based on census origin; no origin supports anonymous processes
- 	switch tx.Process.CensusOrigin {
- 	case models.CensusOrigin_OFF_CHAIN_CA, models.CensusOrigin_OFF_CHAIN_CA_V2:
-+		if t.cspKeyForkActive() {
-+			return nil, ethereum.Address{}, fmt.Errorf("census origin %s retired for new processes",
-+				tx.Process.CensusOrigin)
-+		}
-+	case models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA, models.CensusOrigin_OFF_CHAIN_CA_V3_BLIND:
-+		if !t.cspKeyForkActive() {
-+			return nil, ethereum.Address{}, fmt.Errorf("census origin %s not supported for new process",
-+				tx.Process.CensusOrigin)
-+		}
-+		if err := checkCSPKeyCensusRoot(tx.Process.CensusRoot); err != nil {
-+			return nil, ethereum.Address{}, err
-+		}
- 	case models.CensusOrigin_OFF_CHAIN_TREE, models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED:
- 		// no additional origin-specific checks
- 	default:
-@@ -169,6 +183,19 @@ func (t *TransactionHandler) NewProcessTxCheck(vtx *vochaintx.Tx) (*models.Proce
- 	return tx.Process, ethereum.Address(*addr), nil
- }
- 
-+// checkCSPKeyCensusRoot checks that the census root of a V3 CSP process is a
-+// per-election CSP public key: a valid 33-byte compressed secp256k1 point.
-+func checkCSPKeyCensusRoot(root []byte) error {
-+	if len(root) != ethereum.PubKeyLengthBytes {
-+		return fmt.Errorf("CSP census root is %d bytes, expected a %d-byte compressed public key",
-+			len(root), ethereum.PubKeyLengthBytes)
-+	}
-+	if _, err := ethcrypto.DecompressPubkey(root); err != nil {
-+		return fmt.Errorf("CSP census root is not a valid public key: %w", err)
-+	}
-+	return nil
-+}
-+
- // SetProcessTxCheck is an abstraction of ABCI checkTx for canceling an existing process
- func (t *TransactionHandler) SetProcessTxCheck(vtx *vochaintx.Tx) (ethereum.Address, error) {
- 	// check vtx.Signature available
-diff --git a/vochain/transaction/proof.go b/vochain/transaction/proof.go
-index e44be7b..cf144dd 100644
---- a/vochain/transaction/proof.go
-+++ b/vochain/transaction/proof.go
-@@ -55,6 +55,8 @@ func VerifyProof(process *models.Process, envelope *models.VoteEnvelope, vID sta
- 		verifier = &cspproof.ProofVerifierCSP{}
- 	case models.CensusOrigin_OFF_CHAIN_CA_V2:
- 		verifier = &cspproof.ProofVerifierCSP{V2: true}
-+	case models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA, models.CensusOrigin_OFF_CHAIN_CA_V3_BLIND:
-+		verifier = &cspproof.ProofVerifierCSPV3{}
- 	default:
- 		return false, nil, fmt.Errorf("census origin not compatible")
- 	}
-diff --git a/vochain/transaction/transaction.go b/vochain/transaction/transaction.go
-index 63e57e3..6b2582f 100644
---- a/vochain/transaction/transaction.go
-+++ b/vochain/transaction/transaction.go
-@@ -56,6 +56,13 @@ func (t *TransactionHandler) metadataForkActive() bool {
- 	return t.state.CurrentHeight() >= config.ForksForChainID(t.state.ChainID()).MetadataFork
- }
- 
-+// cspKeyForkActive reports whether per-election CSP keys (saas-backend issue
-+// #769) are active at the current height, as set by config.Forks for the
-+// chain.
-+func (t *TransactionHandler) cspKeyForkActive() bool {
-+	return t.state.CurrentHeight() >= config.ForksForChainID(t.state.ChainID()).CSPKeyFork
-+}
-+
- // CheckTx check the validity of a transaction and adds it to the state if forCommit=true.
- // It returns a bytes value which depends on the transaction type:
- //
-diff --git a/vochain/transaction/vote_tx.go b/vochain/transaction/vote_tx.go
-index dac96bc..e3ad540 100644
---- a/vochain/transaction/vote_tx.go
-+++ b/vochain/transaction/vote_tx.go
-@@ -41,6 +41,21 @@ func (t *TransactionHandler) checkVoteMetadataHash(voteHash []byte, process *mod
- 	return nil
- }
- 
-+// checkVoteCSPCertificate rejects, from the CSP key fork on, a ProofCA that
-+// carries a weight certificate on a legacy CSP origin (OFF_CHAIN_CA,
-+// OFF_CHAIN_CA_V2). Below the fork the field is ignored, as binaries that do
-+// not know it ignore it.
-+func (t *TransactionHandler) checkVoteCSPCertificate(envelope *models.VoteEnvelope, process *models.Process) error {
-+	if process.CensusOrigin != models.CensusOrigin_OFF_CHAIN_CA &&
-+		process.CensusOrigin != models.CensusOrigin_OFF_CHAIN_CA_V2 {
-+		return nil
-+	}
-+	if envelope.GetProof().GetCa().GetWeightCertificate() == nil || !t.cspKeyForkActive() {
-+		return nil
-+	}
-+	return fmt.Errorf("CSP weight certificate not accepted on census origin %s", process.CensusOrigin)
-+}
-+
- // VoteTxCheck performs basic checks on a vote transaction.
- func (t *TransactionHandler) VoteTxCheck(vtx *vochaintx.Tx, forCommit bool) (*vstate.Vote, error) {
- 	// Get the vote envelope from the transaction
-@@ -144,7 +159,8 @@ func (t *TransactionHandler) VoteTxCheck(vtx *vochaintx.Tx, forCommit bool) (*vs
- 		switch process.CensusOrigin {
- 		case models.CensusOrigin_OFF_CHAIN_TREE,
- 			models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED,
--			models.CensusOrigin_OFF_CHAIN_CA, models.CensusOrigin_OFF_CHAIN_CA_V2:
-+			models.CensusOrigin_OFF_CHAIN_CA, models.CensusOrigin_OFF_CHAIN_CA_V2,
-+			models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA, models.CensusOrigin_OFF_CHAIN_CA_V3_BLIND:
- 			vote, err = initializeSignedVote(voteEnvelope, vtx.SignedBody, vtx.Signature, height)
- 		default:
- 			return nil, fmt.Errorf("could not initialize vote, census origin not compatible")
-@@ -172,6 +188,12 @@ func (t *TransactionHandler) VoteTxCheck(vtx *vochaintx.Tx, forCommit bool) (*vs
- 		return nil, err
- 	}
- 
-+	// Like the memo, it runs outside the vote-cache branch: a vote that entered
-+	// the mempool below the CSP key fork must be rejected in a block from it.
-+	if err := t.checkVoteCSPCertificate(voteEnvelope, process); err != nil {
-+		return nil, err
-+	}
-+
- 	// Check if the vote is valid for the current state
- 	isOverwrite, err := t.checkVoteCanBeCasted(vote.Nullifier, process)
- 	if err != nil {
-```
-
-```bash
-go test ./config/ -count=1 -v | grep -c '^--- PASS'            # includes TestCSPKeyForkConfigured, TestSetCSPKeyForkHeight
-go test ./vochain/ -run 'CSPKey' -count=1 -v | grep '^--- '     # 4 PASS
-go test ./vochain/... ./vocone/... ./api/... ./apiclient/... -count=1
-```
-Expected pass: the 2 config tests and the 4 `TestCSPKey*` tests (ForkNewProcess,
-V3VotesEndToEnd, ForkLegacyProcessKeepsVoting, ForkLegacyVoteWithCertificate) pass; every existing
-test of vochain, vocone, api and apiclient passes unchanged (AC3).
-
-Step 3: `git commit -m "feat(vochain): add the csp key fork for per-election csp census origins" -- config/forks.go config/forks_test.go vochain/state/censusorigins.go vochain/transaction/election_tx.go vochain/transaction/proof.go vochain/transaction/transaction.go vochain/transaction/vote_tx.go vochain/cspkey_test.go vochain/process_test.go vochain/main_test.go vocone/main_test.go api/main_test.go apiclient/main_test.go`
-
-Interfaces this task provides: `config.ForksCfg.CSPKeyFork uint32`,
-`config.SetCSPKeyForkHeight(chainID string, height uint32) error` (refuses chain IDs in
-`config.Forks`), `(*TransactionHandler).cspKeyForkActive() bool`.
-
-### Task 4: voconed `--cspKeyForkHeight`, API census types, apiclient, end-to-end tests
-
-Model: sonnet   Repo: SEQ   Files: cmd/voconed/voconed.go, cmd/voconed/voconed_test.go, api/api_types.go,
-api/censuses.go, api/elections.go, api/csp_census_types_test.go, apiclient/vote.go, cmd/end2endtest/*.go,
-scripts/live-csp-elections.sh
-
-Goal: test and dev chains set their fork height with `voconed --cspKeyForkHeight N` (refused for
-chain IDs in `config.Forks`). The REST API maps census types `csp3` → V3_ECDSA and `csp3blind` →
-V3_BLIND, reports the new origin names and marks OFF_CHAIN_CA_V2 deprecated as well. apiclient can
-send a weight certificate. end2endtest covers V3 elections; `scripts/live-csp-elections.sh` drives
-them against a running voconed.
-
-Step 1 (failing test):
-
-```diff
-diff --git a/api/csp_census_types_test.go b/api/csp_census_types_test.go
-new file mode 100644
-index 0000000..f276f52
---- /dev/null
-+++ b/api/csp_census_types_test.go
-@@ -0,0 +1,39 @@
-+package api
-+
-+import (
-+	"testing"
-+
-+	qt "github.com/frankban/quicktest"
-+	"go.vocdoni.io/proto/build/go/models"
-+)
-+
-+func TestCensusTypeToOriginCSP(t *testing.T) {
-+	c := qt.New(t)
-+	key := []byte{2, 1, 2, 3}
-+	for typ, want := range map[string]models.CensusOrigin{
-+		CensusTypeCSP:        models.CensusOrigin_OFF_CHAIN_CA,
-+		CensusTypeCSPv2:      models.CensusOrigin_OFF_CHAIN_CA_V2,
-+		CensusTypeCSPv3:      models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA,
-+		CensusTypeCSPv3Blind: models.CensusOrigin_OFF_CHAIN_CA_V3_BLIND,
-+	} {
-+		origin, root, err := CensusTypeToOrigin(CensusTypeDescription{Type: typ, PublicKey: key})
-+		c.Assert(err, qt.IsNil, qt.Commentf(typ))
-+		c.Assert(origin, qt.Equals, want, qt.Commentf(typ))
-+		c.Assert([]byte(root), qt.DeepEquals, key)
-+		_, _, err = CensusTypeToOrigin(CensusTypeDescription{Type: typ})
-+		c.Assert(err, qt.ErrorMatches, ".*census root is nil.*", qt.Commentf(typ))
-+	}
-+}
-+
-+func TestCensusOriginDeprecated(t *testing.T) {
-+	c := qt.New(t)
-+	for origin, want := range map[models.CensusOrigin]bool{
-+		models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED: false,
-+		models.CensusOrigin_OFF_CHAIN_CA:            true,
-+		models.CensusOrigin_OFF_CHAIN_CA_V2:         true,
-+		models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA:   false,
-+		models.CensusOrigin_OFF_CHAIN_CA_V3_BLIND:   false,
-+	} {
-+		c.Assert(censusOriginDeprecated(int32(origin)), qt.Equals, want, qt.Commentf(origin.String()))
-+	}
-+}
-diff --git a/cmd/voconed/voconed_test.go b/cmd/voconed/voconed_test.go
-new file mode 100644
-index 0000000..4012119
---- /dev/null
-+++ b/cmd/voconed/voconed_test.go
-@@ -0,0 +1,32 @@
-+package main
-+
-+import (
-+	"math"
-+	"testing"
-+
-+	qt "github.com/frankban/quicktest"
-+	seqconfig "github.com/vocdoni/vochain-sequencer/config"
-+)
-+
-+func TestApplyCSPKeyForkHeight(t *testing.T) {
-+	c := qt.New(t)
-+	const chainID = "voconed-test-csp-fork"
-+	t.Cleanup(func() { delete(seqconfig.Forks, chainID) })
-+
-+	c.Assert(applyCSPKeyForkHeight(chainID, -1), qt.IsNil)
-+	_, listed := seqconfig.Forks[chainID]
-+	c.Assert(listed, qt.IsFalse)
-+
-+	c.Assert(applyCSPKeyForkHeight(chainID, math.MaxUint32+1), qt.ErrorMatches, "cspKeyForkHeight .* out of range")
-+
-+	c.Assert(applyCSPKeyForkHeight(chainID, 1000), qt.IsNil)
-+	c.Assert(seqconfig.ForksForChainID(chainID).CSPKeyFork, qt.Equals, uint32(1000))
-+	c.Assert(seqconfig.ForksForChainID(chainID).MetadataFork, qt.Equals, uint32(0))
-+
-+	for _, listedChain := range []string{"vocdoni/LTS/1.3", "vocdoni/DEV/36"} {
-+		before := *seqconfig.ForksForChainID(listedChain)
-+		c.Assert(applyCSPKeyForkHeight(listedChain, 0), qt.ErrorMatches,
-+			"cannot apply cspKeyForkHeight: chain .* has configured fork heights.*")
-+		c.Assert(*seqconfig.ForksForChainID(listedChain), qt.Equals, before)
-+	}
-+}
-```
-
-```bash
-cd SEQ && go test ./cmd/voconed/ ./api/ -run 'ApplyCSPKeyForkHeight|CensusTypeToOriginCSP|CensusOriginDeprecated' -count=1
-```
-Expected failure: build error `undefined: applyCSPKeyForkHeight` and failing census type mapping.
-
-Step 2 (implementation):
-
-```diff
-diff --git a/api/api_types.go b/api/api_types.go
-index defd31f..a160832 100644
---- a/api/api_types.go
-+++ b/api/api_types.go
-@@ -179,7 +179,9 @@ type ElectionKeys struct {
- }
- 
- type ElectionCensus struct {
--	CensusOrigin           string         `json:"censusOrigin"`
-+	CensusOrigin string `json:"censusOrigin"`
-+	// CensusOriginDeprecated is set on the CSP census origins that no new
-+	// election uses from the CSP key fork on (OFF_CHAIN_CA, OFF_CHAIN_CA_V2).
- 	CensusOriginDeprecated bool           `json:"censusOriginDeprecated,omitempty"`
- 	CensusRoot             types.HexBytes `json:"censusRoot" `
- 	PostRegisterCensusRoot types.HexBytes `json:"postRegisterCensusRoot" `
-@@ -569,6 +571,12 @@ func CensusTypeToOrigin(ctype CensusTypeDescription) (models.CensusOrigin, []byt
- 	case CensusTypeCSPv2:
- 		origin = models.CensusOrigin_OFF_CHAIN_CA_V2
- 		root = ctype.PublicKey
-+	case CensusTypeCSPv3:
-+		origin = models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA
-+		root = ctype.PublicKey
-+	case CensusTypeCSPv3Blind:
-+		origin = models.CensusOrigin_OFF_CHAIN_CA_V3_BLIND
-+		root = ctype.PublicKey
- 	case CensusTypeWeighted:
- 		origin = models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED
- 		root = ctype.RootHash
-diff --git a/api/censuses.go b/api/censuses.go
-index 14d7198..df52c78 100644
---- a/api/censuses.go
-+++ b/api/censuses.go
-@@ -28,8 +28,15 @@ const (
- 	CensusTypeCSP      = "csp"
- 	// CensusTypeCSPv2 is CensusTypeCSP with the fixed salt derivation for the
- 	// salted proof types (census origin OFF_CHAIN_CA_V2).
--	CensusTypeCSPv2   = "csp2"
--	CensusTypeUnknown = "unknown"
-+	CensusTypeCSPv2 = "csp2"
-+	// CensusTypeCSPv3 is a CSP census whose public key belongs to one election
-+	// only, with ECDSA proofs (census origin OFF_CHAIN_CA_V3_ECDSA).
-+	CensusTypeCSPv3 = "csp3"
-+	// CensusTypeCSPv3Blind is a CSP census whose public key belongs to one
-+	// election only and certifies the blind signing key of each vote weight
-+	// (census origin OFF_CHAIN_CA_V3_BLIND).
-+	CensusTypeCSPv3Blind = "csp3blind"
-+	CensusTypeUnknown    = "unknown"
- 	// CensusTypeZKWeighted is vocdoni-node's anonymous census type. This node
- 	// does not support anonymous voting, so creating one answers
- 	// ErrEndpointRemoved rather than ErrCensusTypeUnknown.
-diff --git a/api/elections.go b/api/elections.go
-index 0fb10f1..4863946 100644
---- a/api/elections.go
-+++ b/api/elections.go
-@@ -251,7 +251,7 @@ func (a *API) electionHandler(_ *apirest.APIdata, ctx *httprouter.HTTPContext) e
- 		TallyMode:       TallyMode{ProcessVoteOptions: proc.VoteOpts},
- 		Census: &ElectionCensus{
- 			CensusOrigin:           models.CensusOrigin_name[proc.CensusOrigin],
--			CensusOriginDeprecated: proc.CensusOrigin == int32(models.CensusOrigin_OFF_CHAIN_CA),
-+			CensusOriginDeprecated: censusOriginDeprecated(proc.CensusOrigin),
- 			CensusRoot:             proc.CensusRoot,
- 			CensusURL:              proc.CensusURI,
- 			MaxCensusSize:          proc.MaxCensusSize,
-@@ -853,3 +853,10 @@ func electionParams(f func(key string) string, keys ...string) (*ElectionParams,
- 		EndDateBefore:    dates[ParamEndDateBefore],
- 	}, nil
- }
-+
-+// censusOriginDeprecated reports whether origin is a CSP census origin that no
-+// new election uses from the CSP key fork on.
-+func censusOriginDeprecated(origin int32) bool {
-+	return origin == int32(models.CensusOrigin_OFF_CHAIN_CA) ||
-+		origin == int32(models.CensusOrigin_OFF_CHAIN_CA_V2)
-+}
-diff --git a/apiclient/vote.go b/apiclient/vote.go
-index cd39312..74bd9c4 100644
---- a/apiclient/vote.go
-+++ b/apiclient/vote.go
-@@ -5,6 +5,7 @@ import (
- 	"encoding/json"
- 	"fmt"
- 	"math/big"
-+	"slices"
- 
- 	"github.com/vocdoni/vochain-sequencer/api"
- 	"github.com/vocdoni/vochain-sequencer/crypto/ethereum"
-@@ -81,8 +82,12 @@ func (cl *HTTPclient) Vote(v *VoteData) (types.HexBytes, error) {
- 
- 	log.Debugw("generating a new vote", "electionId", v.Election.ElectionID, "voter", c.account.AddressString())
- 	voteAPI := &api.Vote{}
--	censusOriginCSP := models.CensusOrigin_name[int32(models.CensusOrigin_OFF_CHAIN_CA)]
--	censusOriginCSPv2 := models.CensusOrigin_name[int32(models.CensusOrigin_OFF_CHAIN_CA_V2)]
-+	cspCensusOrigins := []string{
-+		models.CensusOrigin_OFF_CHAIN_CA.String(),
-+		models.CensusOrigin_OFF_CHAIN_CA_V2.String(),
-+		models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA.String(),
-+		models.CensusOrigin_OFF_CHAIN_CA_V3_BLIND.String(),
-+	}
- 	censusOriginWeighted := models.CensusOrigin_name[int32(models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED)]
- 	switch {
- 	case v.Election.Census.CensusOrigin == censusOriginWeighted:
-@@ -109,8 +114,7 @@ func (cl *HTTPclient) Vote(v *VoteData) (types.HexBytes, error) {
- 		if err != nil {
- 			return nil, err
- 		}
--	case v.Election.Census.CensusOrigin == censusOriginCSP ||
--		v.Election.Census.CensusOrigin == censusOriginCSPv2:
-+	case slices.Contains(cspCensusOrigins, v.Election.Census.CensusOrigin):
- 		// decode the CSP proof and include in a VoteEnvelope
- 		p := models.ProofCA{}
- 		if err := proto.Unmarshal(v.ProofCSP, &p); err != nil {
 diff --git a/cmd/end2endtest/csp.go b/cmd/end2endtest/csp.go
-index 1e9da12..5f0d4ea 100644
+index 1e9da12a..239ed183 100644
 --- a/cmd/end2endtest/csp.go
 +++ b/cmd/end2endtest/csp.go
-@@ -17,16 +17,32 @@ func init() {
+@@ -13,24 +13,28 @@ import (
+ )
+ 
+ func init() {
+-	ops["cspelection"] = operation{
++	ops["cspelectionv3"] = operation{
  		testFunc: func() VochainTest {
  			return &E2ECSPElection{}
  		},
 -		description: "csp election",
-+		description: "csp election with census origin OFF_CHAIN_CA (needs a chain below the CSP key fork)",
- 		example:     os.Args[0] + " --operation=cspelection --votes=1000",
- 	}
- 	ops["cspelectionv2"] = operation{
- 		testFunc: func() VochainTest {
- 			return &E2ECSPElectionV2{}
- 		},
--		description: "csp election with census origin OFF_CHAIN_CA_V2 and weighted blind pid-salted proofs (issue #1424 derivation)",
-+		description: "csp election with census origin OFF_CHAIN_CA_V2 and weighted blind pid-salted proofs " +
-+			"(issue #1424 derivation; needs a chain below the CSP key fork)",
- 		example:     os.Args[0] + " --operation=cspelectionv2 --votes=1000",
- 	}
-+	ops["cspelectionv3"] = operation{
-+		testFunc: func() VochainTest {
-+			return &E2ECSPElectionV3{}
-+		},
+-		example:     os.Args[0] + " --operation=cspelection --votes=1000",
 +		description: "csp election with census origin OFF_CHAIN_CA_V3_ECDSA: per-election CSP key, ECDSA proofs",
 +		example:     os.Args[0] + " --operation=cspelectionv3 --votes=1000",
-+	}
+ 	}
+-	ops["cspelectionv2"] = operation{
 +	ops["cspelectionv3blind"] = operation{
-+		testFunc: func() VochainTest {
+ 		testFunc: func() VochainTest {
+-			return &E2ECSPElectionV2{}
 +			return &E2ECSPElectionV3Blind{}
-+		},
+ 		},
+-		description: "csp election with census origin OFF_CHAIN_CA_V2 and weighted blind pid-salted proofs (issue #1424 derivation)",
+-		example:     os.Args[0] + " --operation=cspelectionv2 --votes=1000",
 +		description: "csp election with census origin OFF_CHAIN_CA_V3_BLIND: per-election CSP key, " +
 +			"weighted blind proofs with weight certificates",
 +		example: os.Args[0] + " --operation=cspelectionv3blind --votes=1000",
-+	}
+ 	}
  }
  
  var _ VochainTest = (*E2ECSPElection)(nil)
-@@ -128,3 +144,59 @@ func (t *E2ECSPElectionV2) Setup(api *apiclient.HTTPclient, c *config) error {
- 	logElection(t.election)
- 	return nil
- }
-+
-+var _ VochainTest = (*E2ECSPElectionV3)(nil)
-+
-+// E2ECSPElectionV3 runs a CSP election with census origin
+ 
++// E2ECSPElection runs a CSP election with census origin
 +// OFF_CHAIN_CA_V3_ECDSA, where the census root is a per-election CSP key that
 +// signs every voter's bundle.
-+type E2ECSPElectionV3 struct {
-+	E2ECSPElection
-+}
-+
-+func (t *E2ECSPElectionV3) Setup(api *apiclient.HTTPclient, c *config) error {
-+	t.api = api
-+	t.config = c
-+
-+	p := newTestProcess()
+ type E2ECSPElection struct {
+ 	e2eElection
+ }
+@@ -39,10 +43,8 @@ func (t *E2ECSPElection) Setup(api *apiclient.HTTPclient, c *config) error {
+ 	t.api = api
+ 	t.config = c
+ 
+-	// setup for ranked voting
+ 	p := newTestProcess()
+-	// update to use csp origin
+-	p.CensusOrigin = models.CensusOrigin_OFF_CHAIN_CA
 +	p.CensusOrigin = models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA
-+
-+	if err := t.setupElectionRaw(p); err != nil {
-+		return err
-+	}
-+
-+	logElection(t.election)
-+	return nil
-+}
-+
+ 
+ 	if err := t.setupElectionRaw(p); err != nil {
+ 		return err
+@@ -97,29 +99,29 @@ func (t *E2ECSPElection) Run() error {
+ 	return nil
+ }
+ 
+-var _ VochainTest = (*E2ECSPElectionV2)(nil)
 +var _ VochainTest = (*E2ECSPElectionV3Blind)(nil)
-+
+ 
+-// E2ECSPElectionV2 runs a CSP election with census origin OFF_CHAIN_CA_V2,
+-// where every proof is ECDSA_BLIND_PIDSALTED with a CSP-authorized weight,
+-// exercising the fixed salt derivation of issue #1424 end to end.
+-type E2ECSPElectionV2 struct {
 +// E2ECSPElectionV3Blind runs a CSP election with census origin
 +// OFF_CHAIN_CA_V3_BLIND, where every proof is ECDSA_BLIND with a
 +// CSP-authorized weight, signed by a weight key that the election key
 +// certifies for this election and weight.
 +type E2ECSPElectionV3Blind struct {
-+	E2ECSPElection
-+}
-+
+ 	E2ECSPElection
+ }
+ 
+-func (t *E2ECSPElectionV2) Setup(api *apiclient.HTTPclient, c *config) error {
+-	signer, err := testcsp.NewSigner()
 +func (t *E2ECSPElectionV3Blind) Setup(api *apiclient.HTTPclient, c *config) error {
 +	election, err := testcsp.NewV3Election()
-+	if err != nil {
-+		return err
-+	}
+ 	if err != nil {
+ 		return err
+ 	}
+-	t.cspSigner = signer
+-	t.cspProofType = models.ProofCA_ECDSA_BLIND_PIDSALTED
 +	t.cspV3Blind = election
-+	t.cspVoteWeight = big.NewInt(10)
-+
-+	t.api = api
-+	t.config = c
-+
-+	p := newTestProcess()
+ 	t.cspVoteWeight = big.NewInt(10)
+ 
+ 	t.api = api
+ 	t.config = c
+ 
+ 	p := newTestProcess()
+-	p.CensusOrigin = models.CensusOrigin_OFF_CHAIN_CA_V2
 +	p.CensusOrigin = models.CensusOrigin_OFF_CHAIN_CA_V3_BLIND
-+
-+	if err := t.setupElectionRaw(p); err != nil {
-+		return err
-+	}
-+
-+	logElection(t.election)
-+	return nil
-+}
+ 
+ 	if err := t.setupElectionRaw(p); err != nil {
+ 		return err
 diff --git a/cmd/end2endtest/electiontimebounds.go b/cmd/end2endtest/electiontimebounds.go
-index af263a6..a58ee29 100644
+index af263a6a..a58ee298 100644
 --- a/cmd/end2endtest/electiontimebounds.go
 +++ b/cmd/end2endtest/electiontimebounds.go
 @@ -49,7 +49,7 @@ func (t *E2EElectionTimeBounds) Setup(api *apiclient.HTTPclient, c *config) erro
@@ -2336,7 +2180,7 @@ index af263a6..a58ee29 100644
  	if err := t.setupElection(ed, 10, false); err != nil {
  		return err
 diff --git a/cmd/end2endtest/encrypted.go b/cmd/end2endtest/encrypted.go
-index e4a55c9..941ce71 100644
+index e4a55c97..941ce71b 100644
 --- a/cmd/end2endtest/encrypted.go
 +++ b/cmd/end2endtest/encrypted.go
 @@ -37,7 +37,7 @@ func (t *E2EEncryptedElection) Setup(api *apiclient.HTTPclient, c *config) error
@@ -2349,10 +2193,18 @@ index e4a55c9..941ce71 100644
  	if err := t.setupElection(ed, t.config.nvotes, true); err != nil {
  		return err
 diff --git a/cmd/end2endtest/helpers.go b/cmd/end2endtest/helpers.go
-index 0b939e8..50e37d3 100644
+index 0b939e84..2ca18934 100644
 --- a/cmd/end2endtest/helpers.go
 +++ b/cmd/end2endtest/helpers.go
-@@ -67,7 +67,7 @@ func newTestProcess() *models.Process {
+@@ -15,7 +15,6 @@ import (
+ 	vapi "github.com/vocdoni/vochain-sequencer/api"
+ 	"github.com/vocdoni/vochain-sequencer/apiclient"
+ 	"github.com/vocdoni/vochain-sequencer/crypto/ethereum"
+-	"github.com/vocdoni/vochain-sequencer/crypto/saltedkey"
+ 	"github.com/vocdoni/vochain-sequencer/log"
+ 	"github.com/vocdoni/vochain-sequencer/test/testcommon/testcsp"
+ 	"github.com/vocdoni/vochain-sequencer/types"
+@@ -67,7 +66,7 @@ func newTestProcess() *models.Process {
  			EncryptedVotes: false,
  			UniqueValues:   true,
  		},
@@ -2361,17 +2213,18 @@ index 0b939e8..50e37d3 100644
  		VoteOptions: &models.ProcessVoteOptions{
  			MaxCount: 1,
  			MaxValue: 1,
-@@ -200,6 +200,9 @@ func (t *e2eElection) generateProofs(csp *ethereum.SignKeys, voterAccts []*ether
- 				if t.cspSigner != nil {
- 					return t.cspGenProofSalted(voterKey)
- 				}
+@@ -197,8 +196,8 @@ func (t *e2eElection) generateProofs(csp *ethereum.SignKeys, voterAccts []*ether
+ 		for _, acc := range accounts {
+ 			voterKey := acc.Address().Bytes()
+ 			proof, err := func() (*apiclient.CensusProof, error) {
+-				if t.cspSigner != nil {
+-					return t.cspGenProofSalted(voterKey)
 +				if t.cspV3Blind != nil {
 +					return t.cspGenProofV3Blind(voterKey)
-+				}
+ 				}
  				if csp != nil {
  					return cspGenProof(t.election.ElectionID, voterKey, csp)
- 				}
-@@ -292,8 +295,8 @@ func (t *e2eElection) setupCensus(censusType string, nAcct int) (types.HexBytes,
+@@ -292,8 +291,8 @@ func (t *e2eElection) setupCensus(censusType string, nAcct int) (types.HexBytes,
  // the census proofs of nvAccts voter accounts. With census type
  // CensusTypeWeighted it creates and publishes a weighted census tree of those
  // accounts through the census API. With any other type the census type on ed
@@ -2382,7 +2235,7 @@ index 0b939e8..50e37d3 100644
  // zero it defaults to nvAccts (or 1 when nvotes is 0).
  func (t *e2eElection) setupElection(ed *vapi.ElectionDescription, nvAccts int, waitUntilStarted bool) error {
  	if err := t.setupAccount(); err != nil {
-@@ -318,7 +321,7 @@ func (t *e2eElection) setupElection(ed *vapi.ElectionDescription, nvAccts int, w
+@@ -318,7 +317,7 @@ func (t *e2eElection) setupElection(ed *vapi.ElectionDescription, nvAccts int, w
  			return fmt.Errorf("cannot generate CSP key: %w", err)
  		}
  		voterAccts = ethereum.NewSignKeysBatch(nvAccts)
@@ -2391,7 +2244,7 @@ index 0b939e8..50e37d3 100644
  		ed.Census.PublicKey = csp.PublicKey()
  	}
  	if ed.Census.Size == 0 {
-@@ -378,7 +381,16 @@ func (t *e2eElection) setupElectionRaw(prc *models.Process) error {
+@@ -378,17 +377,16 @@ func (t *e2eElection) setupElectionRaw(prc *models.Process) error {
  	csp := &ethereum.SignKeys{}
  
  	switch prc.CensusOrigin {
@@ -2400,48 +2253,70 @@ index 0b939e8..50e37d3 100644
 +		if t.cspV3Blind == nil {
 +			return fmt.Errorf("census origin %s needs a V3 CSP election key", prc.CensusOrigin)
 +		}
-+		voterAccounts = ethereum.NewSignKeysBatch(t.config.nvotes)
+ 		voterAccounts = ethereum.NewSignKeysBatch(t.config.nvotes)
 +		prc.CensusRoot = t.cspV3Blind.CensusRoot()
 +		csp = nil
-+
-+	case models.CensusOrigin_OFF_CHAIN_CA, models.CensusOrigin_OFF_CHAIN_CA_V2,
-+		models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA:
- 		voterAccounts = ethereum.NewSignKeysBatch(t.config.nvotes)
  
- 		if t.cspSigner != nil {
-@@ -629,6 +641,30 @@ func (t *e2eElection) cspGenProofSalted(voterKey []byte) (*apiclient.CensusProof
- 	return &apiclient.CensusProof{Proof: caProofBytes}, nil
+-		if t.cspSigner != nil {
+-			censusRoot, err := t.cspSigner.CensusRoot(t.cspProofType)
+-			if err != nil {
+-				return err
+-			}
+-			prc.CensusRoot = censusRoot
+-			break
+-		}
++	case models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA:
++		voterAccounts = ethereum.NewSignKeysBatch(t.config.nvotes)
+ 		if err := csp.Generate(); err != nil {
+ 			return err
+ 		}
+@@ -598,31 +596,24 @@ func votesToBigInt(votes ...uint64) []*types.BigInt {
+ 	return vBigInt
  }
  
+-// cspGenProofSalted issues a t.cspProofType proof for the running election,
+-// signed by t.cspSigner with the salt derivation the chain expects. It reads
+-// the same public data an external CSP service uses to pick the derivation:
+-// the election's census origin.
+-func (t *e2eElection) cspGenProofSalted(voterKey []byte) (*apiclient.CensusProof, error) {
 +// cspGenProofV3Blind issues an OFF_CHAIN_CA_V3_BLIND proof for the running
 +// election: a weight key for t.cspVoteWeight (1 when nil), certified by
 +// t.cspV3Blind for this election, blind-signs the voter's bundle.
 +func (t *e2eElection) cspGenProofV3Blind(voterKey []byte) (*apiclient.CensusProof, error) {
-+	pid := t.election.ElectionID
+ 	pid := t.election.ElectionID
+-	bundle := testcsp.Bundle(pid, voterKey, t.cspVoteWeight)
+-
+-	salt := []byte(pid) // legacy derivation: the raw processID
+-	if t.election.Census.CensusOrigin == models.CensusOrigin_name[int32(models.CensusOrigin_OFF_CHAIN_CA_V2)] {
+-		var weightBytes []byte
+-		if t.cspVoteWeight != nil {
+-			weightBytes = t.cspVoteWeight.Bytes()
+-		}
+-		var err error
+-		if salt, err = saltedkey.Salt(pid, weightBytes); err != nil {
+-			return nil, err
+-		}
 +	weight := t.cspVoteWeight
 +	if weight == nil {
 +		weight = big.NewInt(1)
-+	}
+ 	}
+-
+-	caProof, err := t.cspSigner.Sign(t.cspProofType, bundle, salt)
 +	cred, err := t.cspV3Blind.IssueWeightCredential(pid, weight)
-+	if err != nil {
-+		return nil, err
-+	}
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	caProofBytes, err := proto.Marshal(caProof)
 +	proof, err := cred.SignBlindProof(testcsp.Bundle(pid, voterKey, t.cspVoteWeight))
 +	if err != nil {
 +		return nil, err
 +	}
 +	caProofBytes, err := proto.Marshal(proof.GetCa())
-+	if err != nil {
-+		return nil, err
-+	}
-+	return &apiclient.CensusProof{Proof: caProofBytes}, nil
-+}
-+
- func cspGenProof(pid, voterKey []byte, csp *ethereum.SignKeys) (*apiclient.CensusProof, error) {
- 	bundle := &models.CAbundle{
- 		ProcessId: pid,
+ 	if err != nil {
+ 		return nil, err
+ 	}
 diff --git a/cmd/end2endtest/lifecycle.go b/cmd/end2endtest/lifecycle.go
-index f202fd0..384204e 100644
+index f202fd0f..384204eb 100644
 --- a/cmd/end2endtest/lifecycle.go
 +++ b/cmd/end2endtest/lifecycle.go
 @@ -45,7 +45,7 @@ func (t *E2ELifecycleElection) Setup(api *apiclient.HTTPclient, c *config) error
@@ -2454,12 +2329,27 @@ index f202fd0..384204e 100644
  		if err := t.elections[i].setupElection(ed.d, t.elections[0].config.nvotes, true); err != nil {
  			log.Errorf("failed to setup election %d: %v", i, err)
 diff --git a/cmd/end2endtest/main.go b/cmd/end2endtest/main.go
-index 68428bc..8d0ec77 100644
+index 68428bc4..985f2db0 100644
 --- a/cmd/end2endtest/main.go
 +++ b/cmd/end2endtest/main.go
-@@ -52,6 +52,10 @@ type e2eElection struct {
- 	cspSigner     *testcsp.Signer
- 	cspProofType  models.ProofCA_Type
+@@ -17,7 +17,6 @@ import (
+ 	"github.com/vocdoni/vochain-sequencer/log"
+ 	"github.com/vocdoni/vochain-sequencer/test/testcommon/testcsp"
+ 	"github.com/vocdoni/vochain-sequencer/util"
+-	"go.vocdoni.io/proto/build/go/models"
+ )
+ 
+ // how many times to retry flaky transactions
+@@ -47,11 +46,13 @@ type e2eElection struct {
+ 	election *vapi.Election
+ 	voters   *sync.Map // key:acc.Public, value: acctProof struct {account, proof}
+ 
+-	// cspSigner, when set on a CSP election, issues the CSP proofs as
+-	// cspProofType with cspVoteWeight, instead of the default plain ECDSA
+-	cspSigner     *testcsp.Signer
+-	cspProofType  models.ProofCA_Type
++	// cspVoteWeight is the vote weight the CSP proofs of a weighted CSP
++	// election authorize
  	cspVoteWeight *big.Int
 +	// cspV3Blind, when set on an OFF_CHAIN_CA_V3_BLIND election, certifies a
 +	// weight key for cspVoteWeight per voter, and the CSP proofs are blind
@@ -2469,7 +2359,7 @@ index 68428bc..8d0ec77 100644
  
  type operation struct {
 diff --git a/cmd/end2endtest/memo.go b/cmd/end2endtest/memo.go
-index a407da9..31572e3 100644
+index a407da98..31572e3b 100644
 --- a/cmd/end2endtest/memo.go
 +++ b/cmd/end2endtest/memo.go
 @@ -37,7 +37,7 @@ func (t *E2EMemoElection) Setup(api *apiclient.HTTPclient, c *config) error {
@@ -2482,7 +2372,7 @@ index a407da9..31572e3 100644
  	if err := t.setupElection(ed, t.config.nvotes, true); err != nil {
  		return err
 diff --git a/cmd/end2endtest/metadata.go b/cmd/end2endtest/metadata.go
-index 089eebf..f0ac766 100644
+index 089eebf3..f0ac766f 100644
 --- a/cmd/end2endtest/metadata.go
 +++ b/cmd/end2endtest/metadata.go
 @@ -44,7 +44,7 @@ func (t *E2EMetadataElection) Setup(api *apiclient.HTTPclient, c *config) error
@@ -2495,7 +2385,7 @@ index 089eebf..f0ac766 100644
  	if err := t.setupElection(ed, t.config.nvotes, true); err != nil {
  		return err
 diff --git a/cmd/end2endtest/overwrite.go b/cmd/end2endtest/overwrite.go
-index 47d3978..8f32fe5 100644
+index 47d39784..8f32fe5d 100644
 --- a/cmd/end2endtest/overwrite.go
 +++ b/cmd/end2endtest/overwrite.go
 @@ -38,7 +38,7 @@ func (t *E2EOverwriteElection) Setup(api *apiclient.HTTPclient, c *config) error
@@ -2508,7 +2398,7 @@ index 47d3978..8f32fe5 100644
  	if err := t.setupElection(ed, t.config.nvotes, true); err != nil {
  		return err
 diff --git a/cmd/end2endtest/plaintext.go b/cmd/end2endtest/plaintext.go
-index 1318794..44d4254 100644
+index 13187948..44d4254f 100644
 --- a/cmd/end2endtest/plaintext.go
 +++ b/cmd/end2endtest/plaintext.go
 @@ -36,7 +36,7 @@ func (t *E2EPlaintextElection) Setup(api *apiclient.HTTPclient, c *config) error
@@ -2521,7 +2411,7 @@ index 1318794..44d4254 100644
  	if err := t.setupElection(ed, t.config.nvotes, true); err != nil {
  		return err
 diff --git a/cmd/end2endtest/race.go b/cmd/end2endtest/race.go
-index 32a581f..9fee4fe 100644
+index 32a581f0..9fee4feb 100644
 --- a/cmd/end2endtest/race.go
 +++ b/cmd/end2endtest/race.go
 @@ -39,7 +39,7 @@ func (t *E2ERaceDuringCommit) Setup(api *apiclient.HTTPclient, c *config) error
@@ -2533,72 +2423,9 @@ index 32a581f..9fee4fe 100644
  
  	if err := t.setupElection(ed, t.config.nvotes, true); err != nil {
  		return err
-diff --git a/cmd/voconed/voconed.go b/cmd/voconed/voconed.go
-index feb88ea..d6d1949 100644
---- a/cmd/voconed/voconed.go
-+++ b/cmd/voconed/voconed.go
-@@ -4,6 +4,7 @@ import (
- 	"context"
- 	"encoding/hex"
- 	"fmt"
-+	"math"
- 	"os"
- 	"os/signal"
- 	"path/filepath"
-@@ -17,6 +18,7 @@ import (
- 	flag "github.com/spf13/pflag"
- 	"github.com/spf13/viper"
- 	"github.com/vocdoni/vochain-sequencer/api/faucet"
-+	seqconfig "github.com/vocdoni/vochain-sequencer/config"
- 	"github.com/vocdoni/vochain-sequencer/crypto/ethereum"
- 	"github.com/vocdoni/vochain-sequencer/internal"
- 	"github.com/vocdoni/vochain-sequencer/log"
-@@ -80,6 +82,9 @@ func main() {
- 
- 	flag.StringSliceVar(&config.fundedAccounts, "fundedAccounts", []string{},
- 		"list of pre-funded accounts (address:balance,address:balance,...), only applied when the chain is created")
-+	cspKeyForkHeight := flag.Int64("cspKeyForkHeight", -1,
-+		"height at which per-election CSP keys activate on this chain (default: from genesis); "+
-+			"refused for chains with configured fork heights, not persisted: pass it on every start")
- 	flag.CommandLine.SortFlags = false
- 	flag.Parse()
- 
-@@ -326,6 +331,9 @@ func main() {
- 		}
- 	}
- 	log.Infof("using chainID: %s", vc.App.ChainID())
-+	if err := applyCSPKeyForkHeight(vc.App.ChainID(), *cspKeyForkHeight); err != nil {
-+		log.Fatal(err)
-+	}
- 
- 	if *setTxCosts {
- 		if err := vc.SetBulkTxCosts(config.txCosts, true); err != nil {
-@@ -383,6 +391,22 @@ func main() {
- }
- 
- // fileExists reports whether path exists.
-+// applyCSPKeyForkHeight registers the --cspKeyForkHeight value for chainID. A
-+// negative height leaves the chain's CSP key fork as configured.
-+func applyCSPKeyForkHeight(chainID string, height int64) error {
-+	if height < 0 {
-+		return nil
-+	}
-+	if height > math.MaxUint32 {
-+		return fmt.Errorf("cspKeyForkHeight %d out of range", height)
-+	}
-+	if err := seqconfig.SetCSPKeyForkHeight(chainID, uint32(height)); err != nil {
-+		return fmt.Errorf("cannot apply cspKeyForkHeight: %w", err)
-+	}
-+	log.Infow("CSP key fork height set", "chainID", chainID, "height", height)
-+	return nil
-+}
-+
- func fileExists(path string) bool {
- 	_, err := os.Stat(path)
- 	return err == nil
 diff --git a/scripts/live-csp-elections.sh b/scripts/live-csp-elections.sh
 new file mode 100755
-index 0000000..2584bd5
+index 00000000..2584bd53
 --- /dev/null
 +++ b/scripts/live-csp-elections.sh
 @@ -0,0 +1,33 @@
@@ -2635,19 +2462,170 @@ index 0000000..2584bd5
 +		page="${next}"
 +	done
 +done
+diff --git a/vochain/state/censusorigins.go b/vochain/state/censusorigins.go
+index ace7585a..8eab8749 100644
+--- a/vochain/state/censusorigins.go
++++ b/vochain/state/censusorigins.go
+@@ -29,4 +29,14 @@ var CensusOrigins = map[models.CensusOrigin]CensusProperties{
+ 		Name: "ca_v2", WeightedSupport: true,
+ 		NeedsURI: true, AllowCensusUpdate: true,
+ 	},
++	// The census root of a V3 origin is the per-election CSP key the proofs
++	// are checked against; it cannot be replaced once the process exists.
++	models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA: {
++		Name: "ca_v3_ecdsa", WeightedSupport: true,
++		NeedsURI: true,
++	},
++	models.CensusOrigin_OFF_CHAIN_CA_V3_BLIND: {
++		Name: "ca_v3_blind", WeightedSupport: true,
++		NeedsURI: true,
++	},
+ }
+diff --git a/vochain/transaction/election_tx.go b/vochain/transaction/election_tx.go
+index ab96f3d2..36978dea 100644
+--- a/vochain/transaction/election_tx.go
++++ b/vochain/transaction/election_tx.go
+@@ -5,6 +5,8 @@ import (
+ 	"encoding/hex"
+ 	"fmt"
+ 
++	ethcrypto "github.com/ethereum/go-ethereum/crypto"
++
+ 	"github.com/vocdoni/vochain-sequencer/crypto/ethereum"
+ 	"github.com/vocdoni/vochain-sequencer/crypto/nacl"
+ 	"github.com/vocdoni/vochain-sequencer/log"
+@@ -57,6 +59,13 @@ func (t *TransactionHandler) NewProcessTxCheck(vtx *vochaintx.Tx) (*models.Proce
+ 	// run specific checks based on census origin; no origin supports anonymous processes
+ 	switch tx.Process.CensusOrigin {
+ 	case models.CensusOrigin_OFF_CHAIN_CA, models.CensusOrigin_OFF_CHAIN_CA_V2:
++		// processes created with these origins keep taking votes until they end
++		return nil, ethereum.Address{}, fmt.Errorf("census origin %s retired for new processes",
++			tx.Process.CensusOrigin)
++	case models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA, models.CensusOrigin_OFF_CHAIN_CA_V3_BLIND:
++		if err := checkCSPKeyCensusRoot(tx.Process.CensusRoot); err != nil {
++			return nil, ethereum.Address{}, err
++		}
+ 	case models.CensusOrigin_OFF_CHAIN_TREE, models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED:
+ 		// no additional origin-specific checks
+ 	default:
+@@ -159,16 +168,22 @@ func (t *TransactionHandler) NewProcessTxCheck(vtx *vochaintx.Tx) (*models.Proce
+ 		tx.Process.EncryptionPrivateKeys = make([]string, types.KeyKeeperMaxKeyIndex)
+ 	}
+ 
+-	if tx.Process.CensusOrigin == models.CensusOrigin_OFF_CHAIN_CA {
+-		// Legacy OFF_CHAIN_CA has a broken salt derivation.
+-		// Soft-deprecated in LTS/1.3 and scheduled for hard rejection in LTS/1.4.
+-		log.Warnw("deprecated OFF_CHAIN_CA census origin (issue #1424); use OFF_CHAIN_CA_V2",
+-			"processId", hex.EncodeToString(tx.Process.ProcessId),
+-			"entityId", hex.EncodeToString(tx.Process.EntityId))
+-	}
+ 	return tx.Process, ethereum.Address(*addr), nil
+ }
+ 
++// checkCSPKeyCensusRoot checks that the census root of a V3 CSP process is a
++// per-election CSP public key: a valid 33-byte compressed secp256k1 point.
++func checkCSPKeyCensusRoot(root []byte) error {
++	if len(root) != ethereum.PubKeyLengthBytes {
++		return fmt.Errorf("CSP census root is %d bytes, expected a %d-byte compressed public key",
++			len(root), ethereum.PubKeyLengthBytes)
++	}
++	if _, err := ethcrypto.DecompressPubkey(root); err != nil {
++		return fmt.Errorf("CSP census root is not a valid public key: %w", err)
++	}
++	return nil
++}
++
+ // SetProcessTxCheck is an abstraction of ABCI checkTx for canceling an existing process
+ func (t *TransactionHandler) SetProcessTxCheck(vtx *vochaintx.Tx) (ethereum.Address, error) {
+ 	// check vtx.Signature available
+diff --git a/vochain/transaction/proof.go b/vochain/transaction/proof.go
+index e44be7b6..cf144dd3 100644
+--- a/vochain/transaction/proof.go
++++ b/vochain/transaction/proof.go
+@@ -55,6 +55,8 @@ func VerifyProof(process *models.Process, envelope *models.VoteEnvelope, vID sta
+ 		verifier = &cspproof.ProofVerifierCSP{}
+ 	case models.CensusOrigin_OFF_CHAIN_CA_V2:
+ 		verifier = &cspproof.ProofVerifierCSP{V2: true}
++	case models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA, models.CensusOrigin_OFF_CHAIN_CA_V3_BLIND:
++		verifier = &cspproof.ProofVerifierCSPV3{}
+ 	default:
+ 		return false, nil, fmt.Errorf("census origin not compatible")
+ 	}
+diff --git a/vochain/transaction/transaction.go b/vochain/transaction/transaction.go
+index 63e57e3b..f966d2fa 100644
+--- a/vochain/transaction/transaction.go
++++ b/vochain/transaction/transaction.go
+@@ -113,9 +113,6 @@ func (t *TransactionHandler) CheckTx(vtx *vochaintx.Tx, forCommit bool) (*Transa
+ 			return nil, fmt.Errorf("newProcessTx: %w", err)
+ 		}
+ 		response.Data = p.ProcessId
+-		if p.CensusOrigin == models.CensusOrigin_OFF_CHAIN_CA {
+-			response.Log = "warning: census origin OFF_CHAIN_CA is deprecated (issue #1424); use OFF_CHAIN_CA_V2"
+-		}
+ 		if forCommit {
+ 			tx := vtx.Tx.GetNewProcess()
+ 			if tx.Process == nil {
+diff --git a/vochain/transaction/vote_tx.go b/vochain/transaction/vote_tx.go
+index dac96bcc..315647f4 100644
+--- a/vochain/transaction/vote_tx.go
++++ b/vochain/transaction/vote_tx.go
+@@ -41,6 +41,20 @@ func (t *TransactionHandler) checkVoteMetadataHash(voteHash []byte, process *mod
+ 	return nil
+ }
+ 
++// checkVoteCSPCertificate rejects a ProofCA that carries a weight certificate
++// on a legacy CSP origin (OFF_CHAIN_CA, OFF_CHAIN_CA_V2): weight certificates
++// belong to the per-election CSP key origins only.
++func checkVoteCSPCertificate(envelope *models.VoteEnvelope, process *models.Process) error {
++	if process.CensusOrigin != models.CensusOrigin_OFF_CHAIN_CA &&
++		process.CensusOrigin != models.CensusOrigin_OFF_CHAIN_CA_V2 {
++		return nil
++	}
++	if envelope.GetProof().GetCa().GetWeightCertificate() == nil {
++		return nil
++	}
++	return fmt.Errorf("CSP weight certificate not accepted on census origin %s", process.CensusOrigin)
++}
++
+ // VoteTxCheck performs basic checks on a vote transaction.
+ func (t *TransactionHandler) VoteTxCheck(vtx *vochaintx.Tx, forCommit bool) (*vstate.Vote, error) {
+ 	// Get the vote envelope from the transaction
+@@ -144,7 +158,8 @@ func (t *TransactionHandler) VoteTxCheck(vtx *vochaintx.Tx, forCommit bool) (*vs
+ 		switch process.CensusOrigin {
+ 		case models.CensusOrigin_OFF_CHAIN_TREE,
+ 			models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED,
+-			models.CensusOrigin_OFF_CHAIN_CA, models.CensusOrigin_OFF_CHAIN_CA_V2:
++			models.CensusOrigin_OFF_CHAIN_CA, models.CensusOrigin_OFF_CHAIN_CA_V2,
++			models.CensusOrigin_OFF_CHAIN_CA_V3_ECDSA, models.CensusOrigin_OFF_CHAIN_CA_V3_BLIND:
+ 			vote, err = initializeSignedVote(voteEnvelope, vtx.SignedBody, vtx.Signature, height)
+ 		default:
+ 			return nil, fmt.Errorf("could not initialize vote, census origin not compatible")
+@@ -172,6 +187,10 @@ func (t *TransactionHandler) VoteTxCheck(vtx *vochaintx.Tx, forCommit bool) (*vs
+ 		return nil, err
+ 	}
+ 
++	if err := checkVoteCSPCertificate(voteEnvelope, process); err != nil {
++		return nil, err
++	}
++
+ 	// Check if the vote is valid for the current state
+ 	isOverwrite, err := t.checkVoteCanBeCasted(vote.Nullifier, process)
+ 	if err != nil {
 ```
 
 ```bash
-go test ./cmd/... ./api/... ./apiclient/... -count=1
-go vet ./... && shellcheck scripts/live-csp-elections.sh   # shellcheck: UNVERIFIED (verified at implementation)
+go test ./vochain/... ./vocone/... ./api/... ./apiclient/... -count=1
+go vet ./... && go build ./cmd/end2endtest/ && shellcheck scripts/live-csp-elections.sh
 ```
-Expected pass: `TestApplyCSPKeyForkHeight`, `TestCensusTypeToOriginCSP`, `TestCensusOriginDeprecated`
-pass; all cmd/api/apiclient packages ok.
 
-Step 3: `git commit -m "feat(voconed): set the csp key fork height and expose v3 csp census types" -- cmd/voconed/voconed.go cmd/voconed/voconed_test.go api/api_types.go api/censuses.go api/elections.go api/csp_census_types_test.go apiclient/vote.go cmd/end2endtest/ scripts/live-csp-elections.sh`
+Expected pass: the 5 `TestCSPKey*` tests (NewProcess, V3VotesEndToEnd, LegacyProcessKeepsVoting,
+LegacyVoteWithCertificate, V3CensusUpdate) and `TestNewProcessCensusOrigins` pass, and every test of
+vochain, vocone, api and apiclient passes (AC3).
 
-Interfaces this task provides: `voconed --cspKeyForkHeight <uint32>`; API census types `csp3`,
-`csp3blind`; origin names `OFF_CHAIN_CA_V3_ECDSA`, `OFF_CHAIN_CA_V3_BLIND` in election info.
+Step 3: `git commit -m "feat(vochain): accept per-election csp census origins and retire the legacy ones" -- vochain/ vocone/vocone_test.go api/metadata_helpers_test.go apiclient/metadata_test.go cmd/end2endtest/ scripts/live-csp-elections.sh`
+
+Interfaces this task provides: chain rules for the V3 and legacy CSP origins; end2endtest operations
+`cspelectionv3` and `cspelectionv3blind`.
 
 ### Task 5: saas-backend per-election key derivation (electionkey)
 
@@ -4481,9 +4459,10 @@ census) with census root = the per-question key, stored on the question (origin 
 `census.Published.Root` stays empty for V3; readers use `questionCensusRoot`. Publication is
 idempotent per question: an election mined after a lost ack is adopted, never duplicated. The
 integration tests run sequencer `voconed` as a subprocess built from the nested module
-`test/sequencer` (production `go.mod` untouched apart from `go mod tidy`): `TestMain` starts chain
-`test-csp-key` with `--cspKeyForkHeight 0`; `TestCSPLegacyQuestionsAfterFork` starts its own chain
-`test-csp-legacy` with fork 25 (see deviation 1).
+`test/sequencer` (production `go.mod` untouched apart from `go mod tidy`): `TestMain` starts one
+chain, `test-vocone`. The chain creates no legacy CSP process, so `TestCSPLegacyPublishRejected`
+checks that a legacy publish is rejected, and `TestCSPLegacyQuestionsSign` that a legacy question
+signs with the legacy `proofType` (see deviation 1).
 
 Step 1 (failing test): add the nested module, the harness, and the tests.
 
@@ -4548,20 +4527,10 @@ index 35fd246..4ec69c4 100644
  // boundary: empty and "READY" (case-insensitive) resolve to READY, "PAUSED" resolves to
  // PAUSED, anything else is rejected.
 diff --git a/api/api_test.go b/api/api_test.go
-index 167be76..58707ac 100644
+index 167be763..3bddaa1a 100644
 --- a/api/api_test.go
 +++ b/api/api_test.go
-@@ -209,6 +209,9 @@ var testSMSService = new(testutil.MockSMS)
- // testAPIEndpoint is the Voconed API endpoint for the tests. Make it global so it can be accessed by the tests directly.
- var testAPIEndpoint string
- 
-+// testVoconedBin is the voconed binary TestMain builds, for tests that start a chain of their own.
-+var testVoconedBin string
-+
- // testCSP is the CSP service for the tests. Make it global so it can be accessed by the tests directly.
- var (
- 	testCSP *csp.CSP
-@@ -313,14 +316,28 @@ func TestMain(m *testing.M) {
+@@ -313,12 +313,24 @@ func TestMain(m *testing.M) {
  		panic(err)
  	}
  	defer testDB.Close()
@@ -4569,32 +4538,27 @@ index 167be76..58707ac 100644
 -	// includes the batch-transaction endpoint the /processes publish path relies on)
 -	voconed, err := test.SharedVoconed()
 +	// build the vochain-sequencer voconed pinned by test/sequencer and start the chain the API
-+	// publishes on, whose CSP key fork is active from genesis. The legacy CSP test starts a second
-+	// chain of its own (see TestCSPLegacyQuestionsAfterFork).
++	// publishes on
 +	binDir, err := os.MkdirTemp("", "voconed-bin-*")
-+	if err != nil {
-+		panic(err)
-+	}
+ 	if err != nil {
+ 		panic(err)
+ 	}
 +	defer func() { _ = os.RemoveAll(binDir) }()
 +	voconedBin, err := test.BuildVoconed(ctx, binDir)
 +	if err != nil {
 +		panic(err)
 +	}
 +	voconed, err := test.StartVoconed(test.VoconedConfig{
-+		Binary: voconedBin, ChainID: "test-csp-key", CSPKeyForkHeight: 0,
++		Binary: voconedBin, ChainID: "test-vocone",
 +	})
- 	if err != nil {
- 		panic(err)
- 	}
--	// set the test API endpoint global variable
++	if err != nil {
++		panic(err)
++	}
 +	defer voconed.Close()
-+	// set the test API endpoint global variables
+ 	// set the test API endpoint global variable
  	testAPIEndpoint = voconed.Endpoint
-+	testVoconedBin = voconedBin
  	// start test mail server
- 	testMailServer, err := test.StartMailService(ctx)
- 	if err != nil {
-@@ -723,21 +740,24 @@ func fetchCSPUserWeight(t *testing.T, pid string, authToken internal.HexBytes) i
+@@ -723,21 +735,24 @@ func fetchCSPUserWeight(t *testing.T, pid string, authToken internal.HexBytes) i
  	return weightResp.Weight
  }
  
@@ -4629,7 +4593,7 @@ index 167be76..58707ac 100644
  	t.Logf("Received signature: %s", signResp.Signature.String())
  	return signResp.Signature
  }
-@@ -748,7 +768,7 @@ func testAuthenthicateAndVote(t *testing.T, vocdoniClient *apiclient.HTTPclient,
+@@ -748,7 +763,7 @@ func testAuthenthicateAndVote(t *testing.T, vocdoniClient *apiclient.HTTPclient,
  	t.Helper()
  	c := qt.New(t)
  
@@ -4638,7 +4602,7 @@ index 167be76..58707ac 100644
  	c.Assert(err, qt.IsNil)
  
  	// Create the voting address for the first user
-@@ -785,7 +805,7 @@ func testAuthenthicateAndVote(t *testing.T, vocdoniClient *apiclient.HTTPclient,
+@@ -785,7 +800,7 @@ func testAuthenthicateAndVote(t *testing.T, vocdoniClient *apiclient.HTTPclient,
  	t.Logf("Vote cast successfully with nullifier: %x", nullifier)
  
  	// Verify the vote was counted
@@ -4647,7 +4611,7 @@ index 167be76..58707ac 100644
  	c.Assert(err, qt.IsNil)
  	c.Assert(votesAfter, qt.Equals, votesBefore+1, qt.Commentf("expected 1 more vote, got %d", votesAfter))
  }
-@@ -824,13 +844,23 @@ func postProcessAuth1(t *testing.T, pid string, request *handlers.AuthChallengeR
+@@ -824,13 +839,23 @@ func postProcessAuth1(t *testing.T, pid string, request *handlers.AuthChallengeR
  	return resp.AuthToken
  }
  
@@ -4676,10 +4640,10 @@ index 167be76..58707ac 100644
  					ProcessId:  processID,
 diff --git a/api/csp_key_per_election_test.go b/api/csp_key_per_election_test.go
 new file mode 100644
-index 0000000..f110171
+index 00000000..fcee1952
 --- /dev/null
 +++ b/api/csp_key_per_election_test.go
-@@ -0,0 +1,303 @@
+@@ -0,0 +1,268 @@
 +package api
 +
 +import (
@@ -4696,18 +4660,13 @@ index 0000000..f110171
 +	"github.com/vocdoni/saas-backend/csp/signers/electionkey"
 +	"github.com/vocdoni/saas-backend/db"
 +	"github.com/vocdoni/saas-backend/internal"
-+	"github.com/vocdoni/saas-backend/test"
 +	"go.mongodb.org/mongo-driver/v2/bson"
 +	"go.vocdoni.io/dvote/apiclient"
 +	"go.vocdoni.io/dvote/crypto/ethereum"
 +	"go.vocdoni.io/dvote/types"
++	"go.vocdoni.io/dvote/util"
 +	"go.vocdoni.io/proto/build/go/models"
-+	"google.golang.org/protobuf/proto"
 +)
-+
-+// legacyForkHeight is the CSP key fork height of the chain TestCSPLegacyQuestionsAfterFork starts:
-+// high enough that its legacy elections are created before it, low enough to wait for.
-+const legacyForkHeight = 25
 +
 +// twoQuestionCSPRequest returns a draft request over every member of the organization, with an
 +// email-OTP census authenticated by name and surname and two yes/no questions open to everyone.
@@ -4846,37 +4805,60 @@ index 0000000..f110171
 +	c.Assert(index, qt.Equals, uint32(2), qt.Commentf("the publish created a duplicate election"))
 +}
 +
-+// createLegacyElection creates a READY election on a legacy CSP census origin, owned by the funded
-+// account of the chain, and returns its id.
-+func createLegacyElection(t *testing.T, client *apiclient.HTTPclient, signer *ethereum.SignKeys,
-+	origin models.CensusOrigin, root []byte,
-+) internal.HexBytes {
++// signAsOrgAndSubmitVocdoniTx funds tx, signs it as the organization and submits it, returning
++// the submit error of the chain.
++func signAsOrgAndSubmitVocdoniTx(t *testing.T, tx *models.Tx, orgAddress common.Address,
++	vocdoniClient *apiclient.HTTPclient,
++) error {
 +	t.Helper()
-+	tx := legacyElectionTx(t, client, signer, origin, root)
-+	return internal.HexBytes(signAndSendVocdoniTx(t, tx, signer, client))
++	c := qt.New(t)
++	org, err := testDB.Organization(orgAddress)
++	c.Assert(err, qt.IsNil)
++	signer, err := account.OrganizationSigner(testSecret, org.SignerSeedValue(), org.Nonce)
++	c.Assert(err, qt.IsNil)
++	tx, _, err = testAPI.account.FundTransaction(tx, signer.Address())
++	c.Assert(err, qt.IsNil)
++	stx, err := testAPI.account.SignTransaction(tx, signer)
++	c.Assert(err, qt.IsNil)
++	_, _, err = vocdoniClient.SendTx(stx)
++	return err
 +}
 +
-+// legacyElectionTx builds a NEW_PROCESS tx of an election on a legacy CSP census origin, owned by
-+// signer.
-+func legacyElectionTx(t *testing.T, client *apiclient.HTTPclient, signer *ethereum.SignKeys,
-+	origin models.CensusOrigin, root []byte,
-+) *models.Tx {
-+	t.Helper()
-+	return &models.Tx{Payload: &models.Tx_NewProcess{NewProcess: &models.NewProcessTx{
-+		Txtype: models.TxType_NEW_PROCESS,
-+		Nonce:  fetchVocdoniAccountNonce(t, client, signer.Address()),
-+		Process: &models.Process{
-+			EntityId:      signer.Address().Bytes(),
-+			Duration:      3600,
-+			Status:        models.ProcessStatus_READY,
-+			CensusOrigin:  origin,
-+			CensusRoot:    root,
-+			MaxCensusSize: 10,
-+			EnvelopeType:  &models.EnvelopeType{},
-+			VoteOptions:   &models.ProcessVoteOptions{MaxCount: 1, MaxValue: 1},
-+			Mode:          &models.ProcessMode{AutoStart: true, Interruptible: true},
-+		},
-+	}}}
++// TestCSPLegacyPublishRejected builds the election of a question the way a saas-backend without
++// per-election CSP keys publishes it, on the legacy OFF_CHAIN_CA (ECDSA) and OFF_CHAIN_CA_V2
++// (blind) census origins with the CSP's salted root keys: the chain rejects both, and the
++// organization gets no election.
++func TestCSPLegacyPublishRejected(t *testing.T) {
++	c := qt.New(t)
++	token := testCreateUser(t, "adminpassword123")
++	orgAddress := testCreateProvisionedOrganization(t, token)
++	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
++	members := postOrgMembers(t, token, orgAddress, newOrgMembers(1)...)
++	created := requestAndParse[apicommon.CreateVotingProcessResponse](t, http.MethodPost, token,
++		twoQuestionCSPRequest(orgAddress, members), processesCreateEndpoint)
++	vp, questions, census := loadProcess(c, created.ProcessID)
++	ep, err := electionParamsForQuestion(vp, &questions[0], census)
++	c.Assert(err, qt.IsNil)
++
++	ecdsaRoot, err := testCSP.PubKey()
++	c.Assert(err, qt.IsNil)
++	blindRoot, err := testCSP.BlindPubKey()
++	c.Assert(err, qt.IsNil)
++	vc := testNewVocdoniClient(t)
++	for origin, root := range map[models.CensusOrigin]internal.HexBytes{
++		models.CensusOrigin_OFF_CHAIN_CA:    ecdsaRoot,
++		models.CensusOrigin_OFF_CHAIN_CA_V2: blindRoot,
++	} {
++		tx, err := testAPI.account.BuildNewProcessTx(&account.NewProcessParams{
++			OrgAddress: orgAddress, Params: ep, CensusRoot: root, CensusURI: testAPI.serverURL, CensusOrigin: origin,
++		})
++		c.Assert(err, qt.IsNil)
++		err = signAsOrgAndSubmitVocdoniTx(t, tx, orgAddress, vc)
++		c.Assert(err, qt.ErrorMatches, `(?s).*census origin `+origin.String()+` retired for new processes.*`)
++	}
++	index, err := testAPI.account.AccountElectionIndex(orgAddress)
++	c.Assert(err, qt.IsNil)
++	c.Assert(index, qt.Equals, uint32(0))
 +}
 +
 +// markLegacyPublished records a single-question draft process as published on election, with the
@@ -4891,36 +4873,12 @@ index 0000000..f110171
 +	c.Assert(testDB.SetVotingProcessPublished(vp.ID, "", time.Now()), qt.IsNil)
 +}
 +
-+// waitForHeight blocks until the chain is past height.
-+func waitForHeight(c *qt.C, client *apiclient.HTTPclient, height uint32) {
-+	deadline := time.Now().Add(2 * time.Minute)
-+	for {
-+		info, err := client.ChainInfo()
-+		c.Assert(err, qt.IsNil)
-+		if info.Height > height {
-+			return
-+		}
-+		c.Assert(time.Now().Before(deadline), qt.IsTrue, qt.Commentf("chain stuck at height %d", info.Height))
-+		time.Sleep(time.Second)
-+	}
-+}
-+
-+// TestCSPLegacyQuestionsAfterFork covers the questions published before the CSP key fork: an
-+// OFF_CHAIN_CA election (ECDSA) and an OFF_CHAIN_CA_V2 election (blind) are created on a chain
-+// whose fork height is above genesis, and once the chain is past the fork their questions, stored
-+// with an empty census origin, still sign with the legacy salted keys and their votes are accepted.
-+func TestCSPLegacyQuestionsAfterFork(t *testing.T) {
++// TestCSPLegacyQuestionsSign covers the questions published on a legacy CSP origin, stored with an
++// empty census origin: an ECDSA question signs with the OFF_CHAIN_CA salted proof type and a blind
++// one with the OFF_CHAIN_CA_V2 one. test/sequencer/legacycsp checks that these signatures verify
++// with the vochain-sequencer verifiers of those origins.
++func TestCSPLegacyQuestionsSign(t *testing.T) {
 +	c := qt.New(t)
-+	chain, err := test.StartVoconed(test.VoconedConfig{
-+		Binary: testVoconedBin, ChainID: "test-csp-legacy", CSPKeyForkHeight: legacyForkHeight,
-+	})
-+	c.Assert(err, qt.IsNil)
-+	defer chain.Close()
-+	client, err := apiclient.New(chain.Endpoint)
-+	c.Assert(err, qt.IsNil)
-+	funded := &ethereum.SignKeys{}
-+	c.Assert(funded.AddHexKey(test.VoconedFoundedPrivKey), qt.IsNil)
-+
 +	token := testCreateUser(t, "adminpassword123")
 +	orgAddress := testCreateProvisionedOrganization(t, token)
 +	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
@@ -4933,33 +4891,11 @@ index 0000000..f110171
 +			t, http.MethodPost, token, req, processesCreateEndpoint).ProcessID
 +	}
 +	ecdsaPid, blindPid := draft(false), draft(true)
-+
-+	// before the fork: create one election per legacy origin with the CSP's salted root keys
-+	ecdsaRoot, err := testCSP.PubKey()
-+	c.Assert(err, qt.IsNil)
-+	blindRoot, err := testCSP.BlindPubKey()
-+	c.Assert(err, qt.IsNil)
-+	ecdsaElection := createLegacyElection(t, client, funded, models.CensusOrigin_OFF_CHAIN_CA, ecdsaRoot)
-+	blindElection := createLegacyElection(t, client, funded, models.CensusOrigin_OFF_CHAIN_CA_V2, blindRoot)
-+	info, err := client.ChainInfo()
-+	c.Assert(err, qt.IsNil)
-+	c.Assert(info.Height < legacyForkHeight, qt.IsTrue,
-+		qt.Commentf("legacy elections created at height %d, not before the fork", info.Height))
++	ecdsaElection := internal.HexBytes(util.RandomBytes(types.ProcessIDsize))
++	blindElection := internal.HexBytes(util.RandomBytes(types.ProcessIDsize))
 +	markLegacyPublished(c, ecdsaPid, ecdsaElection)
 +	markLegacyPublished(c, blindPid, blindElection)
 +
-+	// past the fork the chain refuses new legacy elections...
-+	waitForHeight(c, client, legacyForkHeight)
-+	txBytes, err := proto.Marshal(legacyElectionTx(t, client, funded, models.CensusOrigin_OFF_CHAIN_CA, ecdsaRoot))
-+	c.Assert(err, qt.IsNil)
-+	txSignature, err := funded.SignVocdoniTx(txBytes, fetchVocdoniChainID(t, client))
-+	c.Assert(err, qt.IsNil)
-+	stx, err := proto.Marshal(&models.SignedTx{Tx: txBytes, Signature: txSignature})
-+	c.Assert(err, qt.IsNil)
-+	_, _, err = client.SendTx(stx)
-+	c.Assert(err, qt.ErrorMatches, `(?s).*OFF_CHAIN_CA.*`)
-+
-+	// ...but the legacy questions still sign with the salted keys and vote
 +	voter := ethereum.SignKeys{}
 +	c.Assert(voter.Generate(), qt.IsNil)
 +	address := internal.HexBytes(voter.Address().Bytes())
@@ -4969,19 +4905,12 @@ index 0000000..f110171
 +	signature := testCSPSignProof(t, ecdsaPid, &handlers.SignRequest{
 +		AuthToken: ecdsaTok, ProcessID: ecdsaElection, Payload: hex.EncodeToString(address),
 +	}, models.ProofCA_ECDSA_PIDSALTED)
-+	proof := testGenerateVoteProof(ecdsaElection, address, signature, 1)
-+	proof.GetCa().Type = models.ProofCA_ECDSA_PIDSALTED
-+	testCastVote(t, client, &voter, ecdsaElection, proof, []byte(`{"votes":[0]}`))
++	c.Assert(signature, qt.HasLen, 65)
 +
 +	blindTok := authProcessCSP(t, blindPid, authReq)
++	// testBlindSignProof also checks that the response carries no weight certificate
 +	blindProof := testBlindSignProof(t, blindPid, blindTok, blindElection, address, models.ProofCA_ECDSA_BLIND_PIDSALTED)
-+	testCastVote(t, client, &voter, blindElection, blindProof, []byte(`{"votes":[0]}`))
-+
-+	for _, election := range []internal.HexBytes{ecdsaElection, blindElection} {
-+		count, err := electionVoteCount(client, election)
-+		c.Assert(err, qt.IsNil)
-+		c.Assert(count, qt.Equals, uint64(1))
-+	}
++	c.Assert(blindProof.GetCa().GetSignature(), qt.Not(qt.HasLen), 0)
 +}
 diff --git a/api/process_vote_test.go b/api/process_vote_test.go
 index 53f1dd1..b381565 100644
@@ -5504,7 +5433,7 @@ index 0000000..5be1255
 +
 +replace go.vocdoni.io/proto => /home/user/src/vd/dvote-protobuf/.claude/worktrees/csp-key-per-election
 diff --git a/test/voconed.go b/test/voconed.go
-index c06bedf..a78c0a9 100644
+index c06bedf0..ce44fe93 100644
 --- a/test/voconed.go
 +++ b/test/voconed.go
 @@ -1,5 +1,5 @@
@@ -5538,7 +5467,7 @@ index c06bedf..a78c0a9 100644
  )
  
  const (
-@@ -36,121 +30,91 @@ const (
+@@ -36,121 +30,111 @@ const (
  	VoconedFunds = 100000000
  )
  
@@ -5570,18 +5499,6 @@ index c06bedf..a78c0a9 100644
 +	}
 +	return bin, nil
 +}
-+
-+// VoconedConfig configures a test chain.
-+type VoconedConfig struct {
-+	// Binary is the voconed binary, as returned by BuildVoconed.
-+	Binary string
-+	// ChainID must not be listed in the sequencer's fork configuration.
-+	ChainID string
-+	// CSPKeyForkHeight is the height from which the chain applies the CSP key fork rules. Below it
-+	// the chain accepts new OFF_CHAIN_CA and OFF_CHAIN_CA_V2 elections; from it on, only the
-+	// per-election origins.
-+	CSPKeyForkHeight uint32
-+}
  
 -// SharedVoconed returns the process-wide in-process Vocone chain, starting it on first call
 -// and returning the same instance to every later caller. vocone registers global Prometheus
@@ -5593,12 +5510,12 @@ index c06bedf..a78c0a9 100644
 -		sharedVoconed, sharedVoconedErr = startVoconed(context.Background())
 -	})
 -	return sharedVoconed, sharedVoconedErr
-+// Voconed is a vochain-sequencer voconed chain running as a subprocess, with
-+// VoconedFundedAccount funded and every transaction costing VoconedTxCosts.
-+type Voconed struct {
-+	Endpoint string
-+	cmd      *exec.Cmd
-+	dataDir  string
++// VoconedConfig configures a test chain.
++type VoconedConfig struct {
++	// Binary is the voconed binary, as returned by BuildVoconed.
++	Binary string
++	// ChainID is the chain id of the test chain.
++	ChainID string
  }
  
 -// startVoconed brings up an in-process Vocone chain built from the pinned dvote dependency
@@ -5607,25 +5524,51 @@ index c06bedf..a78c0a9 100644
 -// exactly one instance runs per process; the chain stops when ctx is canceled. Unlike a
 -// pulled container image, this cannot drift from the version the code is compiled against.
 -func startVoconed(ctx context.Context) (*Voconed, error) {
-+// StartVoconed starts a test chain and waits until it has produced its first block. The caller
-+// must Close it.
-+func StartVoconed(cfg VoconedConfig) (*Voconed, error) {
- 	dataDir, err := os.MkdirTemp("", "voconed-test-*")
- 	if err != nil {
- 		return nil, fmt.Errorf("could not create voconed data dir: %w", err)
- 	}
--
+-	dataDir, err := os.MkdirTemp("", "voconed-test-*")
+-	if err != nil {
+-		return nil, fmt.Errorf("could not create voconed data dir: %w", err)
+-	}
++// Voconed is a vochain-sequencer voconed chain running as a subprocess, with
++// VoconedFundedAccount funded and every transaction costing VoconedTxCosts.
++type Voconed struct {
++	Endpoint string
++	cmd      *exec.Cmd
++	dataDir  string
++	// exited is closed once the subprocess has exited and been reaped.
++	exited chan struct{}
++}
+ 
 -	keymng := &ethereum.SignKeys{}
 -	if err := keymng.AddHexKey(VoconedFoundedPrivKey); err != nil {
 -		return nil, fmt.Errorf("could not load voconed key: %w", err)
--	}
--
++// voconedStartAttempts bounds how many times StartVoconed launches the chain: freePort only
++// reserves a port momentarily, so another process can take it before voconed binds it.
++const voconedStartAttempts = 10
++
++// StartVoconed starts a test chain and waits until it has produced its first block. A start that
++// fails (for example because the port was taken) is retried on a fresh port. The caller must
++// Close it.
++func StartVoconed(cfg VoconedConfig) (*Voconed, error) {
++	var err error
++	for range voconedStartAttempts {
++		var v *Voconed
++		if v, err = startVoconedOnce(cfg); err == nil {
++			return v, nil
++		}
+ 	}
++	return nil, fmt.Errorf("voconed did not start after %d attempts: %w", voconedStartAttempts, err)
++}
+ 
 -	// IPFS is disabled: it binds fixed ports (colliding with a local daemon or parallel
 -	// test binaries) and the SaaS never uses the chain's IPFS-backed census — it runs an
 -	// off-chain (CSP) census. We therefore also enable only the API handlers the SaaS uses
 -	// (see enableVoconeAPI); census/SIK need the IPFS census DB and are skipped.
 -	vc, err := vocone.NewVocone(dataDir, keymng, true, "", nil)
--	if err != nil {
++// startVoconedOnce launches voconed once on a free port and waits until it has produced its first
++// block, stopping it and removing its data on failure.
++func startVoconedOnce(cfg VoconedConfig) (*Voconed, error) {
++	dataDir, err := os.MkdirTemp("", "voconed-test-*")
+ 	if err != nil {
 -		return nil, fmt.Errorf("could not create vocone: %w", err)
 -	}
 -	vc.App.SetChainID("test-vocone")
@@ -5649,7 +5592,8 @@ index c06bedf..a78c0a9 100644
 -		if err = enableVoconeAPI(vc, "127.0.0.1", port, VoconedURLPath); err == nil {
 -			break
 -		}
--	}
++		return nil, fmt.Errorf("could not create voconed data dir: %w", err)
+ 	}
 +	port, err := freePort()
  	if err != nil {
 -		return nil, fmt.Errorf("could not enable vocone api: %w", err)
@@ -5658,6 +5602,7 @@ index c06bedf..a78c0a9 100644
 -
 -	// wait until the chain has produced its first block before touching state
 -	if err := waitForVocone(endpoint); err != nil {
++		_ = os.RemoveAll(dataDir)
  		return nil, err
  	}
 -
@@ -5672,11 +5617,11 @@ index c06bedf..a78c0a9 100644
 +		"--logLevel", "warn",
 +		"--fundedAccounts", fmt.Sprintf("%s:%d", VoconedFundedAccount, VoconedFunds),
 +		"--setTxCosts", "--txCosts", strconv.Itoa(VoconedTxCosts),
-+		"--cspKeyForkHeight", strconv.FormatUint(uint64(cfg.CSPKeyForkHeight), 10),
 +	)
 +	cmd.Stdout = os.Stdout
 +	cmd.Stderr = os.Stderr
 +	if err := cmd.Start(); err != nil {
++		_ = os.RemoveAll(dataDir)
 +		return nil, fmt.Errorf("could not start voconed: %w", err)
  	}
 -	if err := vc.SetElectionPrice(); err != nil {
@@ -5685,12 +5630,17 @@ index c06bedf..a78c0a9 100644
 +		Endpoint: fmt.Sprintf("http://127.0.0.1:%d%s", port, VoconedURLPath),
 +		cmd:      cmd,
 +		dataDir:  dataDir,
++		exited:   make(chan struct{}),
  	}
 -	if err := vc.CreateAccount(common.HexToAddress(VoconedFundedAccount), &state.Account{
 -		Account: models.Account{Balance: VoconedFunds},
 -	}); err != nil {
 -		return nil, fmt.Errorf("could not fund voconed account: %w", err)
-+	if err := waitForVocone(v.Endpoint); err != nil {
++	go func() {
++		_ = cmd.Wait()
++		close(v.exited)
++	}()
++	if err := waitForVocone(v.Endpoint, cfg.ChainID, v.exited); err != nil {
 +		v.Close()
 +		return nil, err
  	}
@@ -5705,12 +5655,7 @@ index c06bedf..a78c0a9 100644
 -	vc.Router = new(httprouter.HTTProuter)
 -	if err := vc.Router.Init(host, port); err != nil {
 -		return err
-+// Close stops the chain and removes its data.
-+func (v *Voconed) Close() {
-+	if v.cmd.Process != nil {
-+		_ = v.cmd.Process.Kill()
-+		_ = v.cmd.Wait()
- 	}
+-	}
 -	uAPI, err := api.NewAPI(vc.Router, urlPath, vc.Config.DataDir, db.TypePebble)
 -	if err != nil {
 -		return err
@@ -5723,23 +5668,36 @@ index c06bedf..a78c0a9 100644
 -		api.WalletHandler,
 -		api.AccountHandler,
 -	)
++// Close stops the chain and removes its data.
++func (v *Voconed) Close() {
++	_ = v.cmd.Process.Kill()
++	<-v.exited
 +	_ = os.RemoveAll(v.dataDir)
  }
  
  // freePort returns an available local TCP port.
-@@ -163,9 +127,9 @@ func freePort() (int, error) {
+@@ -163,16 +147,22 @@ func freePort() (int, error) {
  	return l.Addr().(*net.TCPAddr).Port, nil
  }
  
 -// waitForVocone blocks until the Vocone API is reachable and has produced at least one block.
-+// waitForVocone blocks until the chain API is reachable and has produced at least one block.
- func waitForVocone(endpoint string) error {
+-func waitForVocone(endpoint string) error {
 -	deadline := time.Now().Add(30 * time.Second)
++// waitForVocone blocks until the API of chain chainID is reachable and has produced at least one
++// block. It fails early when exited is closed: the chain process is gone.
++func waitForVocone(endpoint, chainID string, exited <-chan struct{}) error {
 +	deadline := time.Now().Add(60 * time.Second)
  	for time.Now().Before(deadline) {
- 		if cli, err := apiclient.New(endpoint); err == nil {
+-		if cli, err := apiclient.New(endpoint); err == nil {
++		select {
++		case <-exited:
++			return fmt.Errorf("voconed at %s exited before producing a block", endpoint)
++		default:
++		}
++		if cli, err := apiclient.New(endpoint); err == nil && cli.ChainID() == chainID {
  			if info, err := cli.ChainInfo(); err == nil && info.Height >= 1 {
-@@ -174,5 +138,5 @@ func waitForVocone(endpoint string) error {
+ 				return nil
+ 			}
  		}
  		time.Sleep(200 * time.Millisecond)
  	}
@@ -5750,7 +5708,7 @@ index c06bedf..a78c0a9 100644
 
 ```bash
 cd SAAS/test/sequencer && go mod tidy && cd SAAS     # writes test/sequencer/go.sum
-cd SAAS && go test ./db/ ./account/ ./api/ -run 'SetQuestionPublishedCensusOrigin|BuildNewProcessTxCensusOrigin|MatchOrphanElections|CSPKeyPerElection|AdoptsOrphan|CSPLegacyQuestionsAfterFork' -count=1
+cd SAAS && go test ./db/ ./account/ ./api/ -run 'SetQuestionPublishedCensusOrigin|BuildNewProcessTxCensusOrigin|MatchOrphanElections|CSPKeyPerElection|AdoptsOrphan|CSPLegacy' -count=1
 ```
 Expected failure: build errors `undefined: db.QuestionPublishedParams`,
 `NewProcessParams.CensusOrigin`, `matchOrphanElections`, `account.ElectionID`.
@@ -6398,7 +6356,7 @@ index 1f13545..1c890c7 100644
 go mod tidy    # drops git.sr.ht/~sircmpwn/go-bare (dvote Vocone no longer linked by tests); proto stays v1.15.14
 grep -c vochain-sequencer go.mod     # 0
 go test ./db/ ./account/ -count=1
-go test ./api/ -run 'MatchOrphanElections|CSPKeyPerElection|AdoptsOrphan|CSPLegacyQuestionsAfterFork|BlindCSP|ProcessVote' -count=1 -timeout 30m
+go test ./api/ -run 'MatchOrphanElections|CSPKeyPerElection|AdoptsOrphan|CSPLegacy|BlindCSP|ProcessVote' -count=1 -timeout 30m
 ~/go/bin/golangci-lint-v2 run ./... && scripts/check-qt-patterns.sh && make swagger && git diff --exit-code docs/swagger.yaml
 ```
 Step 2b (two fixes the full scratch run found; UNVERIFIED (verified at implementation)). The full
@@ -6431,8 +6389,8 @@ Run: `go test ./api/ -run 'PublishWorkerStopsWithoutClaim|VotingProcessMemos' -c
 
 Expected pass: TestSetQuestionPublishedCensusOrigin, TestBuildNewProcessTxCensusOrigin,
 TestMatchOrphanElections, TestCSPKeyPerElectionPublish, TestPublishAdoptsOrphanElection,
-TestCSPLegacyQuestionsAfterFork and the updated blind/vote tests pass (AC5 subset took 158s on
-scratch); `TestPublishAdoptsOrphanElection` fails if the adoption guard is disabled (mutation-checked);
+TestCSPLegacyPublishRejected, TestCSPLegacyQuestionsSign and the updated blind/vote tests pass;
+`TestPublishAdoptsOrphanElection` fails if the adoption guard is disabled (mutation-checked);
 lint shows only the 5 base findings; swagger unchanged by this task.
 
 Step 3: `git commit -m "feat(api): publish csp questions as per-election csp elections" -- db/processes_questions.go db/voting_processes_test.go db/census_revocation_test.go account/process.go account/process_test.go account/elections.go api/processes_publish.go api/processes_publish_orphans.go api/processes_publish_orphans_test.go api/processes_admin.go api/processes_publish_state_test.go api/api_test.go api/process_vote_test.go api/processes_blind_csp_test.go api/statussync_test.go api/processes_encryption_keys_test.go api/csp_key_per_election_test.go test/voconed.go test/sequencer/go.mod test/sequencer/go.sum go.mod go.sum`
@@ -6440,7 +6398,23 @@ Step 3: `git commit -m "feat(api): publish csp questions as per-election csp ele
 Interfaces this task provides: `db.QuestionPublishedParams{ID, UpstreamID, MetadataURL, Status, CensusOrigin, CensusRoot}`,
 `(*MongoStorage).SetQuestionPublished(QuestionPublishedParams) error`, `account.NewProcessParams.CensusOrigin`,
 `(*Account).AccountElectionIndex`, `ElectionCensusRoot`, `ElectionID(*ElectionIDParams)`;
-`test.BuildVoconed`, `test.StartVoconed(VoconedConfig{Binary, ChainID, CSPKeyForkHeight})`.
+`test.BuildVoconed`, `test.StartVoconed(VoconedConfig{Binary, ChainID})`.
+
+Step 4 (legacy signatures against the sequencer verifiers): add the nested module
+`test/sequencer/legacycsp` (own `go.mod` with `replace github.com/vocdoni/saas-backend => ../../..`
+and the vochain-sequencer pin of `test/sequencer`). `TestLegacyECDSASignatureVerifies` signs with
+`csp.SignBallot` on a question with an empty origin and checks the proof with
+`cspproof.ProofVerifierCSP{}`; `TestLegacyBlindSignatureVerifies` runs the blind flow
+(`NewBlindBallotRequest`, `BlindSignBallot`, unblind) and checks it with `ProofVerifierCSP{V2: true}`;
+both check that another voter or a forged weight fails. The module imports only `csp`, `db` and
+`internal` from saas-backend: `test` links `go.vocdoni.io/dvote/apiclient`, which does not build
+against the proto version the sequencer requires.
+
+```bash
+cd SAAS/test/sequencer/legacycsp && go mod tidy && go vet ./... && go test -count=1 ./...
+```
+
+Commit: `git commit -m "test(csp): verify legacy csp signatures with the sequencer verifiers" -- test/sequencer/legacycsp`
 
 ### Task 8: integrator-sdk V3 CSP proofs (api-types, api-voting, react-providers)
 
@@ -7589,32 +7563,34 @@ Owner OK required before (pushing branches and opening DRAFT PRs is already auth
 - merging any of the six PRs (D6);
 - tagging dvote-protobuf v1.18.0 (Go tag) and publishing `@vocdoni/proto` 1.18.0 to npm;
 - publishing `@vocdoni/api-types`, `@vocdoni/api-voting`, `@vocdoni/react-providers` (changesets) and `@vocdoni/sdk` to npm;
-- the vochain-sequencer release that sets `CSPKeyFork` for LTS/1.3 (`config/forks.go:31`) to the height expected at the agreed time on 2026-11-02, and the DEV/36 height (`:38`);
+- the vochain-sequencer release with the census origin rules;
 - every deploy: sequencer nodes, vocdoni-app, saas-backend.
 
 Flag-day runbook (spec, Compatibility and rollout):
-1. Commit `chore(release): 1.18.0` bumping PROTO package.json (and package-lock.json) to 1.18.0, then merge and
-   tag dvote-protobuf v1.18.0 (npm + Go).
-2. Re-pin consumers to 1.18.0. Merge and release vochain-sequencer with the LTS `CSPKeyFork`
-   height; deploy it to all LTS nodes before that height (check every node reports the release).
-3. Release vocdoni-sdk and the integrator-sdk packages; deploy vocdoni-app with them (backward
-   compatible, can go before the fork).
-4. When the LTS chain reaches the fork height: deploy saas-backend. Between the fork and this
-   deploy, CSP publication is paused (new legacy processes fail at CheckTx); announce the window.
-Rollback: before the fork height, redeploy the previous sequencer or move the height with a new
-release; clients need no rollback; once V3 elections exist only roll forward.
+1. Beforehand: commit `chore(release): 1.18.0` bumping PROTO package.json (and package-lock.json) to
+   1.18.0, then merge and tag dvote-protobuf v1.18.0 (npm + Go). Re-pin consumers to 1.18.0.
+2. Beforehand: release vocdoni-sdk and the integrator-sdk packages; deploy vocdoni-app with them
+   (backward compatible with legacy elections and the current saas-backend).
+3. Morning of 2026-11-02: the LTS cutover from vocdoni-node to vochain-sequencer runs and is
+   verified (separate operation).
+4. Afternoon of 2026-11-02, once the cutover is verified: merge and release vochain-sequencer with
+   the census origin rules and deploy it, then deploy saas-backend right after. Between the two, a
+   legacy publish by the old saas-backend fails at CheckTx and the idempotent publish retries it as
+   V3 once the new saas-backend runs.
+Rollback: before saas-backend is deployed, redeploy the previous sequencer; clients need no
+rollback; once V3 elections exist only roll forward.
 
 Follow-up issue (label `epic-csp-key-per-election`, link #597): remove the legacy CSP signers
 (salted ECDSA and V2 blind), the empty-origin path in `csp/election.go`, and `Published.Root` reads,
 once no legacy question is open (last legacy LTS elections end 2026-11-07).
 
 Post-release checks:
-- LTS height ≥ fork: `GET /chain/info` height, and a test org publishes a CSP election whose
+- A test org publishes a CSP election whose
   `census.censusOrigin` is `OFF_CHAIN_CA_V3_ECDSA` (blind: `OFF_CHAIN_CA_V3_BLIND`) with a 33-byte root
   different per question.
 - A vote on each V3 election is counted (`voteCount` in `GET /elections/{id}`); a weighted blind vote
   carries the certificate.
-- A legacy question published before the fork still signs (`proofType` `ECDSA_PIDSALTED` /
+- A legacy question published before the flag day still signs (`proofType` `ECDSA_PIDSALTED` /
   `ECDSA_BLIND_PIDSALTED`) and its vote is counted.
 - A new `OFF_CHAIN_CA`/`V2` NewProcessTx is rejected with `retired for new processes`.
 - saas logs: no publish retries stuck on unattributed elections (the 2s orphan wait loop); no key
