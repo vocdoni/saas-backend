@@ -84,7 +84,9 @@ func (a *API) paidProcessProjection(
 // envelope it would have paid for its census as it stands: that much stays free, growth past
 // it is charged like any other. It runs on the first growth check, which every census growth
 // path goes through before writing, so the census it prices is the one the process was
-// published with. Branding is left out, as the growth quote leaves out an unpaid add-on.
+// published with. Branding is left out, as the growth quote leaves out an unpaid add-on. A
+// quote-only census gets a €0 envelope, which only records that it was published:
+// censusGrowthPaymentError refuses every growth check of it.
 func (a *API) grandfatherProcessPayment(
 	vp *db.VotingProcess, census *db.Census, org *db.Organization,
 ) (*db.ProcessPayment, error) {
@@ -129,8 +131,9 @@ type censusGrowth struct {
 
 // censusGrowthPaymentError returns the 402 for growing g.vp's census by g.by members when that
 // would raise the price past what vp was paid, and nil when the growth fits. It is a price
-// check, not a size check: the formula rounds to €5, so a few extra voters usually cost nothing
-// and are let through. A payment state it cannot read refuses too: this is the only guard
+// check, not a size check: growth fits while the paid amount (raised by headroom purchases)
+// covers it, and a size that is quote-only is refused with ErrQuoteRequired (422) whatever was
+// paid. A payment state it cannot read refuses too: this is the only guard
 // between published elections and free growth, on the census routes and — through
 // preflightCensusGrowth — on the memberbase changes that propagate into censuses.
 //
@@ -154,6 +157,10 @@ func (a *API) censusGrowthPaymentError(g censusGrowth) error {
 	quote, err := quoteProcessAtCensusSize(p, size)
 	if err != nil {
 		return err
+	}
+	// quote-only has no price: its zero total is never "within what was paid"
+	if quote.QuoteRequired {
+		return errors.ErrQuoteRequired.Withf("the census of process %s would need a custom quote", vp.ID.Hex())
 	}
 	if quote.TotalCents <= p.payment.AmountCents {
 		return nil
@@ -184,7 +191,9 @@ func (a *API) censusGrowthPaymentError(g censusGrowth) error {
 //	@Description	when the payment is verified by webhook — never before, so the census stays
 //	@Description	refused until the money lands. A managed organization pays from its integrator
 //	@Description	wallet instead: the difference is debited synchronously and the response carries
-//	@Description	no checkout session, so the census can grow immediately. 400 when the process has
+//	@Description	no checkout session, so the census can grow immediately. A card difference below
+//	@Description	the €1 minimum charge is billed as €1 (amountCents); the paid amount is still
+//	@Description	raised to the target price only. 400 when the process has
 //	@Description	no completed payment, or when the target does not cost more than was already
 //	@Description	paid. Requires Admin role.
 //	@Tags			processes
@@ -298,11 +307,14 @@ func (a *API) createProcessCensusCheckoutHandler(w http.ResponseWriter, r *http.
 		return
 	}
 	// One line for the difference, not the re-priced breakdown: the customer is buying the
-	// increase, and billing them the full new total would charge the base price twice.
+	// increase, and billing them the full new total would charge the base price twice. A
+	// difference below the minimum charge bills the minimum (Stripe cannot charge less); the
+	// envelope is still raised to the target price only.
+	chargeCents := max(dueCents, pricing.MinimumChargeCents)
 	session, err := a.paymentGW.CreatePaymentSession(&stripe.PaymentSessionParams{
 		LineItems: []stripe.PaymentLineItem{{
 			Description: fmt.Sprintf("census headroom up to %d voters", req.CensusSize),
-			AmountCents: dueCents,
+			AmountCents: chargeCents,
 		}},
 		Metadata: map[string]string{
 			stripe.MetadataKeyProcessID:             oid.Hex(),
@@ -325,11 +337,12 @@ func (a *API) createProcessCensusCheckoutHandler(w http.ResponseWriter, r *http.
 	// base, the first paid raises it and the other is refunded: its difference was priced from
 	// an amount the payment no longer has.
 	log.Infow("census headroom checkout opened", "processId", oid.Hex(), "censusSize", req.CensusSize,
-		"paidCents", p.payment.AmountCents, "targetCents", quote.TotalCents, "sessionId", session.ID)
+		"paidCents", p.payment.AmountCents, "targetCents", quote.TotalCents, "chargedCents", chargeCents,
+		"sessionId", session.ID)
 	apicommon.HTTPWriteJSON(w, &apicommon.ProcessCheckoutResponse{
 		ClientSecret: session.ClientSecret,
 		SessionID:    session.ID,
-		AmountCents:  dueCents,
+		AmountCents:  chargeCents,
 		Currency:     "eur",
 	})
 }

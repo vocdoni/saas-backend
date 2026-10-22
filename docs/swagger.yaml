@@ -5413,7 +5413,9 @@ paths:
         when the payment is verified by webhook — never before, so the census stays
         refused until the money lands. A managed organization pays from its integrator
         wallet instead: the difference is debited synchronously and the response carries
-        no checkout session, so the census can grow immediately. 400 when the process has
+        no checkout session, so the census can grow immediately. A card difference below
+        the €1 minimum charge is billed as €1 (amountCents); the paid amount is still
+        raised to the target price only. 400 when the process has
         no completed payment, or when the target does not cost more than was already
         paid. Requires Admin role.
       parameters:
@@ -5740,9 +5742,10 @@ paths:
     get:
       description: |-
         Server-side price of the draft in EUR cents, VAT excluded: base price from the
-        census size plus the selected add-ons, with the current payment status. Prices
-        above 15 000 voters recommend a custom quote; above 50 000 self-service checkout
-        is unavailable. Requires Manager/Admin of the organization.
+        census size plus the selected add-ons, with the current payment status. Above
+        15 000 voters a custom quote is recommended; above 50 000 the process is
+        quote-only: no price (empty lines, totalCents 0, quoteRequired true), and publish
+        and checkout answer 422 (40176). Requires Manager/Admin of the organization.
       parameters:
       - description: Process ID
         in: path
@@ -5786,6 +5789,7 @@ paths:
         402 (40178) means the process is priced and unpaid — the current quote travels in the
         error data; start checkout via POST /processes/{processId}/checkout. For a managed
         organization, 402 (40175) means its integrator's wallet does not cover the price.
+        422 (40176) means the census is above 50 000 voters: quote-only, no self-service price.
       parameters:
       - description: Process ID
         in: path
@@ -5826,7 +5830,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "422":
-          description: 'Managed organization: census size requires a custom quote'
+          description: Census size requires a custom quote
           schema:
             $ref: '#/definitions/errors.Error'
         "503":

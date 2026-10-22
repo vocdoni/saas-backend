@@ -17,10 +17,20 @@ import (
 // A non-nil quote is what is still owed (answer 402 with it). Nil means clear to
 // publish: the process is free, already paid, or managed (its integrator wallet is
 // debited inside the publish path instead). A free process with a checkout still open or
-// processing is refused with a 409 errors.Error instead.
+// processing is refused with a 409 errors.Error instead, and a quote-only one, managed or not,
+// with ErrQuoteRequired.
 func (a *API) paymentDueForPublish(vp *db.VotingProcess) (*pricing.Quote, error) {
 	if err := a.refuseRefundedDraft(vp.ID); err != nil {
 		return nil, err
+	}
+	quote, input, err := a.processQuote(vp)
+	if err != nil {
+		return nil, err
+	}
+	// quote-only: there is no price, and its zero total must never read as free — for a card
+	// payer or a managed organization's wallet alike
+	if quote.QuoteRequired {
+		return nil, errors.ErrQuoteRequired
 	}
 	org, err := a.db.Organization(vp.OrgAddress)
 	if err != nil {
@@ -28,10 +38,6 @@ func (a *API) paymentDueForPublish(vp *db.VotingProcess) (*pricing.Quote, error)
 	}
 	if org.ManagedBy != (common.Address{}) {
 		return nil, nil
-	}
-	quote, input, err := a.processQuote(vp)
-	if err != nil {
-		return nil, err
 	}
 	payment, err := a.db.ProcessPayment(vp.ID)
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
@@ -97,7 +103,8 @@ func (a *API) debitManagedProcessWallet(vp *db.VotingProcess, org *db.Organizati
 		a.releaseRefusedBrandingClaim(vp, claimedAt)
 		return err
 	}
-	if quote.TotalCents == 0 {
+	// a quote-only total is not free: chargeManagedProcessWallet refuses it
+	if quote.TotalCents == 0 && !quote.QuoteRequired {
 		return nil
 	}
 	_, err = a.chargeManagedProcessWallet(managedProcessCharge{
@@ -138,6 +145,12 @@ type managedProcessCharge struct {
 // before any money moves; a record write that still fails is an error the caller must stop on,
 // and a retry heals it, since the debit key is already applied and charges nothing.
 func (a *API) chargeManagedProcessWallet(c managedProcessCharge) (pricing.Cents, error) {
+	// above the self-service limit there is no price, only a custom quote, never a wallet debit:
+	// the same refusal card checkout answers. Checked first: a quote-only total of 0 would read
+	// as "already covered" by any payment.
+	if c.quote.QuoteRequired {
+		return 0, errors.ErrQuoteRequired
+	}
 	// ponytail: in-memory lock, like orgTxLocks — one API instance; a DB CAS if that changes
 	walletLock := a.walletLocks.lock(c.org.ManagedBy)
 	defer walletLock.Unlock()
@@ -157,11 +170,6 @@ func (a *API) chargeManagedProcessWallet(c managedProcessCharge) (pricing.Cents,
 	}
 	if alreadyCents >= c.quote.TotalCents {
 		return 0, nil // this price is already covered
-	}
-	// above the self-service limit a price is a custom quote, never a wallet debit: the same
-	// refusal card checkout answers, so a managed organization cannot self-serve past it either
-	if c.quote.QuoteRequired {
-		return 0, errors.ErrQuoteRequired
 	}
 	dueCents := c.quote.TotalCents - alreadyCents
 	if err := a.db.DebitWalletForProcess(db.WalletDebit{
@@ -284,7 +292,7 @@ func (a *API) publishPaidProcess(processID bson.ObjectID) error {
 	// group-backed census), so publishing on the strength of the paid status alone would put
 	// a bigger election on chain at the smaller price.
 	due, err := a.paymentDueForPublish(vp)
-	if errors.Is(err, errors.ErrPaymentSessionConflict) {
+	if errors.Is(err, errors.ErrPaymentSessionConflict) || errors.Is(err, errors.ErrQuoteRequired) {
 		log.Warnw("paid process payment refuses publication, staying paid for a manual publish",
 			"processId", processID.Hex(), "error", err)
 		return nil

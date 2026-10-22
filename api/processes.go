@@ -768,7 +768,7 @@ func (a *API) validateVotingProcessHandler(w http.ResponseWriter, r *http.Reques
 		if err == nil && due != nil {
 			problems = append(problems,
 				fmt.Sprintf("publication requires payment of %d eur cents", due.TotalCents))
-		} else if errors.Is(err, errors.ErrPaymentSessionConflict) {
+		} else if errors.Is(err, errors.ErrPaymentSessionConflict) || errors.Is(err, errors.ErrQuoteRequired) {
 			problems = append(problems, err.Error())
 		}
 	}

@@ -237,9 +237,10 @@ func (*API) pricingHandler(w http.ResponseWriter, r *http.Request) {
 //
 //	@Summary		Get the price of a voting process
 //	@Description	Server-side price of the draft in EUR cents, VAT excluded: base price from the
-//	@Description	census size plus the selected add-ons, with the current payment status. Prices
-//	@Description	above 15 000 voters recommend a custom quote; above 50 000 self-service checkout
-//	@Description	is unavailable. Requires Manager/Admin of the organization.
+//	@Description	census size plus the selected add-ons, with the current payment status. Above
+//	@Description	15 000 voters a custom quote is recommended; above 50 000 the process is
+//	@Description	quote-only: no price (empty lines, totalCents 0, quoteRequired true), and publish
+//	@Description	and checkout answer 422 (40176). Requires Manager/Admin of the organization.
 //	@Tags			processes
 //	@Produce		json
 //	@Security		BearerAuth

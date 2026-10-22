@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -615,4 +616,37 @@ func TestManagedCensusGrowthChargesIntegratorWallet(t *testing.T) {
 	wallet, err = testDB.Wallet(integratorAddr)
 	c.Assert(err, qt.IsNil)
 	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-growthGrownCents))
+}
+
+// TestCensusCheckoutChargesTheMinimum: a card headroom purchase worth less than the minimum
+// charge (one voter in the first band, €0.66) bills the minimum, since Stripe cannot charge
+// less, while the paid envelope is still raised to the target price only.
+func TestCensusCheckoutChargesTheMinimum(t *testing.T) {
+	c := qt.New(t)
+	fake := installFakePaymentGW(t)
+	installStripeWebhookService(t)
+	token := testCreateUser(t, "censusminimum123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	pid := newPricedVotingProcess(t, token, orgAddress)
+	oid, err := bson.ObjectIDFromHex(pid)
+	c.Assert(err, qt.IsNil)
+	paidCents := markProcessPaid(t, pid)
+
+	headroom := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, token,
+		&apicommon.ProcessCensusCheckoutRequest{CensusSize: pricedProcessVoters + 1, ReturnURL: "https://example.com/r"},
+		"processes", pid, "census", "checkout")
+	c.Assert(headroom.AmountCents, qt.Equals, pricing.MinimumChargeCents)
+	session := fake.created[len(fake.created)-1]
+	c.Assert(session.LineItems, qt.HasLen, 1)
+	c.Assert(session.LineItems[0].AmountCents, qt.Equals, pricing.MinimumChargeCents)
+	targetCents := paidCents + 66 // one more voter in the first band
+	c.Assert(session.Metadata[stripe.MetadataKeyProcessTopUpCents], qt.Equals, strconv.FormatInt(int64(targetCents), 10))
+
+	code := postSignedStripeEvent(t, testWebhookSecret, "evt_headroom_minimum", "checkout.session.completed",
+		checkoutSessionObject(headroom.SessionID, "paid", pricing.MinimumChargeCents, session.Metadata))
+	c.Assert(code, qt.Equals, http.StatusOK)
+	payment, err := testDB.ProcessPayment(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.AmountCents, qt.Equals, targetCents)
 }
