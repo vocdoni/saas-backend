@@ -321,3 +321,65 @@ func TestMembersWithUsedCSPProcess(t *testing.T) {
 		c.Assert(got[fixture.alice.ID.Hex()], qt.IsFalse)
 	})
 }
+
+func TestCSPProcessesByMembers(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	fixture := setupCheckBundleFixture(t)
+	alice, bob := fixture.alice.ID.Hex(), fixture.bob.ID.Hex()
+	p1 := internal.HexBytes{0xAA, 0xBB, 0xCC, 0xDD}
+	p2 := internal.HexBytes{0xDE, 0xAD, 0xBE, 0xEF}
+	seedUsedCSPProcess(t, alice, fixture.bundleID, p1)
+	seedUsedCSPProcess(t, alice, fixture.bundleID, p2)
+
+	// no elections or no (valid) members: nothing to ask
+	got, err := testDB.CSPProcessesByMembers(nil, []string{alice})
+	c.Assert(err, qt.IsNil)
+	c.Assert(got, qt.HasLen, 0)
+	got, err = testDB.CSPProcessesByMembers([]internal.HexBytes{p1}, []string{"not-hex"})
+	c.Assert(err, qt.IsNil)
+	c.Assert(got, qt.HasLen, 0)
+
+	// only the asked elections, only members with a row; a non-hex id is skipped
+	got, err = testDB.CSPProcessesByMembers([]internal.HexBytes{p1}, []string{alice, bob, "not-hex"})
+	c.Assert(err, qt.IsNil)
+	c.Assert(got, qt.HasLen, 1)
+	c.Assert(got[0].UserID.String(), qt.Equals, alice)
+	c.Assert(got[0].ProcessID, qt.DeepEquals, p1)
+	c.Assert(got[0].Used, qt.IsTrue)
+	c.Assert(got[0].VotedOnChain, qt.IsFalse)
+
+	got, err = testDB.CSPProcessesByMembers([]internal.HexBytes{p1, p2}, []string{alice, bob})
+	c.Assert(err, qt.IsNil)
+	c.Assert(got, qt.HasLen, 2)
+}
+
+func TestMarkCSPProcessVotedOnChain(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	fixture := setupCheckBundleFixture(t)
+	alice := fixture.alice.ID.Hex()
+	aliceID := internal.HexBytesFromString(alice)
+	p1 := internal.HexBytes{0xAA, 0xBB, 0xCC, 0xDD}
+	p2 := internal.HexBytes{0xDE, 0xAD, 0xBE, 0xEF}
+	seedUsedCSPProcess(t, alice, fixture.bundleID, p1)
+	seedUsedCSPProcess(t, alice, fixture.bundleID, p2)
+
+	c.Assert(testDB.MarkCSPProcessVotedOnChain(nil, p1), qt.ErrorIs, ErrBadInputs)
+	c.Assert(testDB.MarkCSPProcessVotedOnChain(aliceID, nil), qt.ErrorIs, ErrBadInputs)
+	// a pair with no row has nothing to cache on, and is not an error
+	c.Assert(testDB.MarkCSPProcessVotedOnChain(aliceID, internal.HexBytes{0x01}), qt.IsNil)
+
+	c.Assert(testDB.MarkCSPProcessVotedOnChain(aliceID, p1), qt.IsNil)
+	row, err := testDB.CSPProcessByUserAndProcess(aliceID, p1)
+	c.Assert(err, qt.IsNil)
+	c.Assert(row.VotedOnChain, qt.IsTrue)
+	c.Assert(row.Used, qt.IsTrue, qt.Commentf("the flag must not touch the consumption"))
+	c.Assert(row.TimesVoted, qt.Equals, 1)
+	// only that row
+	other, err := testDB.CSPProcessByUserAndProcess(aliceID, p2)
+	c.Assert(err, qt.IsNil)
+	c.Assert(other.VotedOnChain, qt.IsFalse)
+}

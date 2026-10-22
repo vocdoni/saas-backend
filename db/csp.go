@@ -43,6 +43,10 @@ type CSPProcess struct {
 	UsedAt      time.Time         `json:"usedAt" bson:"consumedat"`
 	UsedAddress internal.HexBytes `json:"usedAddress" bson:"consumedaddress"`
 	TimesVoted  int               `json:"timesVoted" bson:"timesVoted"`
+	// VotedOnChain caches that the chain has a vote under this row's nullifier. It is set once a
+	// lookup finds the vote and never cleared (a vote cannot leave the chain), so a row that has
+	// it needs no further chain read. A missing field reads false: there is no migration.
+	VotedOnChain bool `json:"votedOnChain" bson:"votedonchain,omitempty"`
 	// BlindSecret holds the CSP's one-time blind-signature nonce k between the two rounds of a
 	// blind (OFF_CHAIN_CA_V2) signature: armed in round 1 and atomically claimed in round 2.
 	// Never leaves the server; absent for the non-anonymous ECDSA flow and once claimed.
@@ -510,6 +514,50 @@ func (ms *MongoStorage) MembersWithUsedCSPProcess(
 		}
 	}
 	return result, nil
+}
+
+// CSPProcessesByMembers returns, in one query, every CSP process row of the given members
+// (memberIDs are OrgMember ObjectID hex strings; ids that are not hex are skipped) on any of the
+// given elections. Rows exist only for (member, election) pairs the CSP has touched, so a missing
+// pair means "not signed".
+func (ms *MongoStorage) CSPProcessesByMembers(processIDs []internal.HexBytes, memberIDs []string) ([]CSPProcess, error) {
+	userIDs := normalizeCSPUserIDs(memberIDs)
+	if len(processIDs) == 0 || len(userIDs) == 0 {
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
+	defer cancel()
+	// covered by the userid+processid index on cspTokensStatus
+	cursor, err := ms.cspTokensStatus.Find(ctx, bson.M{
+		"processid": bson.M{"$in": processIDs},
+		"userid":    bson.M{"$in": userIDs},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to query CSP processes of members: %w", err)
+	}
+	var rows []CSPProcess
+	if err := cursor.All(ctx, &rows); err != nil {
+		return nil, fmt.Errorf("failed to decode CSP processes of members: %w", err)
+	}
+	return rows, nil
+}
+
+// MarkCSPProcessVotedOnChain sets the VotedOnChain cache flag on the CSP process row of
+// (userID, processID), and on nothing else. A missing row is not an error: there is nothing to
+// cache on.
+func (ms *MongoStorage) MarkCSPProcessVotedOnChain(userID, processID internal.HexBytes) error {
+	if userID == nil || processID == nil {
+		return ErrBadInputs
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	if _, err := ms.cspTokensStatus.UpdateOne(ctx,
+		bson.M{"_id": cspAuthTokenStatusID(userID, processID)},
+		bson.M{"$set": bson.M{"votedonchain": true}},
+	); err != nil {
+		return fmt.Errorf("failed to mark CSP process voted on chain: %w", err)
+	}
+	return nil
 }
 
 // DeleteCSPAuthByAnchor removes every CSP authentication token tied to the given bundle.
