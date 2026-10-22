@@ -55,6 +55,32 @@ func TestParseMultipartFormBodyTooLarge(t *testing.T) {
 	c.Assert(rec.Code, qt.Equals, http.StatusRequestEntityTooLarge)
 }
 
+func TestProcessFileRejectsUnsupportedTypeAsBadRequest(t *testing.T) {
+	c := qt.New(t)
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	part, err := mw.CreateFormFile("file", "notes.txt")
+	c.Assert(err, qt.IsNil)
+	_, err = part.Write([]byte("plain text, not an image"))
+	c.Assert(err, qt.IsNil)
+	c.Assert(mw.Close(), qt.IsNil)
+
+	req := httptest.NewRequest(http.MethodPost, "/storage", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	c.Assert(req.ParseMultipartForm(32*1024), qt.IsNil)
+	fileHeader := req.MultipartForm.File["file"][0]
+
+	// the client must carry the real supported types, otherwise every type would be rejected
+	osc, err := New(&Config{})
+	c.Assert(err, qt.IsNil)
+	c.Assert(osc.supportedTypes[FileTypePNG], qt.IsTrue)
+
+	rec := httptest.NewRecorder()
+	_, ok := osc.processFile(rec, fileHeader, "user@example.com")
+	c.Assert(ok, qt.IsFalse)
+	c.Assert(rec.Code, qt.Equals, http.StatusBadRequest)
+}
+
 func TestPutRejectsEmptyAndOversizedObjects(t *testing.T) {
 	c := qt.New(t)
 	osc := &Client{}

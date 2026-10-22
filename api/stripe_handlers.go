@@ -85,7 +85,7 @@ func (h *StripeHandlers) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 //	@Security		BearerAuth
 //	@Param			request	body		apicommon.SubscriptionCheckout	true	"Checkout information"
 //	@Success		200		{object}	map[string]string				"Contains clientSecret and sessionID"
-//	@Failure		400		{object}	errors.Error					"Invalid input data"
+//	@Failure		400		{object}	errors.Error					"Invalid input data, or the plan has no price for the billing period"
 //	@Failure		401		{object}	errors.Error					"Unauthorized"
 //	@Failure		404		{object}	errors.Error					"Organization or plan not found"
 //	@Failure		409		{object}	errors.Error					"Organization already has a paid subscription"

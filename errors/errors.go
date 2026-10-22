@@ -16,7 +16,7 @@ type Error struct {
 	Err        error  `json:"error"` // Original error
 	Code       int    // Error code
 	HTTPstatus int    // HTTP status code to return
-	LogLevel   string // Log level for this error (defaults to "debug")
+	LogLevel   string // Log level for this error (defaults to "debug" for 4xx and "error" for 5xx)
 	Data       any    // Optional data to include in the error response
 
 	// public is the client-safe message of a 5xx error: Err without the detail appended
@@ -117,37 +117,36 @@ func (e Error) Write(w http.ResponseWriter) {
 		return
 	}
 
-	// Get caller information for better logging
-	pc, file, line, _ := runtime.Caller(1)
-	caller := runtime.FuncForPC(pc).Name()
-
-	// Log the error with appropriate level
+	// Log at the error's own level, defaulting to error for 5xx and debug for 4xx. The logger
+	// filters by level too, but skipping the Sprintf keeps discarded lines cheap.
 	logLevel := e.LogLevel
 	if logLevel == "" {
-		// Default log level based on HTTP status
+		logLevel = "debug"
 		if e.HTTPstatus >= 500 {
 			logLevel = "error"
-		} else {
-			logLevel = "debug"
 		}
 	}
-
-	// For 5xx errors, always log with Error level and include internal error details
-	if e.HTTPstatus >= 500 {
-		// For internal errors, log the full error details
-		log.Errorw(e.Err, fmt.Sprintf("API error response [%d]: %s (code: %d, caller: %s, file: %s:%d)",
-			e.HTTPstatus, e.Error(), e.Code, caller, file, line))
-	} else {
-		// For 4xx errors, log at the error's own level (debug unless set): the logger filters
-		// by level, so errors tagged info or warn are still logged when running at info.
-		errMsg := fmt.Sprintf("API error response [%d]: %s (code: %d, caller: %s)",
-			e.HTTPstatus, e.Error(), e.Code, caller)
+	if logLevelRank(logLevel) >= logLevelRank(log.Level()) {
+		// Get caller information for better logging, only for the lines that are logged
+		pc, file, line, _ := runtime.Caller(1)
+		caller := runtime.FuncForPC(pc).Name()
+		// For 5xx errors the full error details are logged, the body only has the client-safe message
+		var errMsg string
+		if e.HTTPstatus >= 500 {
+			errMsg = fmt.Sprintf("API error response [%d]: %s (code: %d, caller: %s, file: %s:%d)",
+				e.HTTPstatus, e.Error(), e.Code, caller, file, line)
+		} else {
+			errMsg = fmt.Sprintf("API error response [%d]: %s (code: %d, caller: %s)",
+				e.HTTPstatus, e.Error(), e.Code, caller)
+		}
 
 		switch logLevel {
-		case "info":
-			log.Infow(errMsg)
+		case "error":
+			log.Errorw(e.Err, errMsg)
 		case "warn":
 			log.Warnw(errMsg)
+		case "info":
+			log.Infow(errMsg)
 		default:
 			log.Debugw(errMsg) // Default to debug level for unknown log levels
 		}
@@ -158,6 +157,20 @@ func (e Error) Write(w http.ResponseWriter) {
 	http.Error(w, string(msg), e.HTTPstatus)
 }
 
+// logLevelRank orders the dvote log levels, unknown levels rank as debug like in Write.
+func logLevelRank(level string) int {
+	switch level {
+	case "info":
+		return 1
+	case "warn":
+		return 2
+	case "error":
+		return 3
+	default:
+		return 0
+	}
+}
+
 // Ptr lifts an Error to a pointer, so functions returning *Error can signal "no error" with nil.
 func Ptr(e Error) *Error { return &e }
 
@@ -166,64 +179,41 @@ func Ptr(e Error) *Error { return &e }
 // only logs it. A format without arguments is a constant message and stays client-visible.
 func (e Error) Withf(format string, args ...any) Error {
 	msg := fmt.Sprintf(format, args...)
-	public := e.publicErr()
 	if len(args) == 0 {
-		public = fmt.Errorf("%w: %v", public, msg)
+		e.public = fmt.Errorf("%w: %v", e.publicErr(), msg)
+	} else {
+		e.public = e.publicErr()
 	}
-	return Error{
-		Err:        fmt.Errorf("%w: %v", e.Err, msg),
-		Code:       e.Code,
-		HTTPstatus: e.HTTPstatus,
-		LogLevel:   e.LogLevel,
-		public:     public,
-	}
+	e.Err = fmt.Errorf("%w: %v", e.Err, msg)
+	return e
 }
 
 // With returns a copy of Error with the string appended at the end of e.Err.
 // The string is meant for the client and is included in 5xx response bodies too.
 func (e Error) With(s string) Error {
-	return Error{
-		Err:        fmt.Errorf("%w: %v", e.Err, s),
-		Code:       e.Code,
-		HTTPstatus: e.HTTPstatus,
-		LogLevel:   e.LogLevel,
-		public:     fmt.Errorf("%w: %v", e.publicErr(), s),
-	}
+	e.public = fmt.Errorf("%w: %v", e.publicErr(), s)
+	e.Err = fmt.Errorf("%w: %v", e.Err, s)
+	return e
 }
 
 // WithErr returns a copy of Error with err.Error() appended at the end of e.Err.
 // The original error is preserved for logging purposes; a 5xx response leaves it out of the body.
 func (e Error) WithErr(err error) Error {
-	return Error{
-		Err:        fmt.Errorf("%w: %w", e.Err, err),
-		Code:       e.Code,
-		HTTPstatus: e.HTTPstatus,
-		LogLevel:   e.LogLevel,
-		public:     e.publicErr(),
-	}
+	e.public = e.publicErr()
+	e.Err = fmt.Errorf("%w: %w", e.Err, err)
+	return e
 }
 
 // WithLogLevel returns a copy of Error with the specified log level
 func (e Error) WithLogLevel(level string) Error {
-	return Error{
-		Err:        e.Err,
-		Code:       e.Code,
-		HTTPstatus: e.HTTPstatus,
-		LogLevel:   level,
-		public:     e.public,
-	}
+	e.LogLevel = level
+	return e
 }
 
 // WithData returns a copy of Error carrying data in the response body, for any status.
 func (e Error) WithData(data any) Error {
-	return Error{
-		Err:        e.Err,
-		Code:       e.Code,
-		HTTPstatus: e.HTTPstatus,
-		LogLevel:   e.LogLevel,
-		Data:       data,
-		public:     e.public,
-	}
+	e.Data = data
+	return e
 }
 
 // As finds the first error in err's tree that matches target, and if one is found, sets

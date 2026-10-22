@@ -141,7 +141,11 @@ func (*Client) GetPrice(lookupKey string) (*stripeapi.Price, error) {
 
 	results := stripeprice.Search(params)
 	if !results.Next() {
-		return nil, errors.ErrStripeError.Withf("price with lookup key %s not found", lookupKey)
+		// Next also returns false when the search itself failed, which is not a missing price
+		if err := results.Err(); err != nil {
+			return nil, errors.ErrStripeError.Withf("failed to search price with lookup key %s: %v", lookupKey, err)
+		}
+		return nil, errors.ErrPlanNotFound.Withf("price with lookup key %s not found", lookupKey)
 	}
 
 	return results.Price(), nil

@@ -59,8 +59,11 @@ func (s *Service) CreateCheckoutSessionWithLookupKey(
 	}
 
 	org, err := s.db.Organization(orgAddress)
+	if stderrors.Is(err, db.ErrNotFound) {
+		return nil, errors.ErrOrganizationNotFound
+	}
 	if err != nil {
-		return nil, errors.ErrStripeError.Withf("organization %s not found: %v", orgAddress, err)
+		return nil, errors.ErrStripeError.Withf("could not get organization %s: %v", orgAddress, err)
 	}
 
 	// a private plan (a custom contract, the integrator tier) is only for the organizations
@@ -96,7 +99,7 @@ func (s *Service) CreateCheckoutSessionWithLookupKey(
 	} else if billingPeriod == string(db.BillingPeriodAnnual) && plan.StripeYearlyPriceID != "" {
 		params.PriceID = plan.StripeYearlyPriceID
 	} else {
-		return nil, errors.ErrStripeError.Withf("invalid billing period %s for plan %s", billingPeriod, plan.ID)
+		return nil, errors.ErrInvalidData.Withf("invalid billing period %s for plan %s", billingPeriod, plan.ID)
 	}
 
 	return s.client.CreateCheckoutSession(params)

@@ -139,6 +139,21 @@ func TestCreateSubscriptionCheckoutRefusals(t *testing.T) {
 	requestAndAssertError(errors.ErrStripeError,
 		t, http.MethodPost, adminToken, checkout(privatePlan.ID), "subscriptions", "checkout")
 
+	// a billing period the plan has no price for is refused before reaching Stripe
+	badPeriod := checkout(privatePlan.ID)
+	badPeriod.BillingPeriod = "weekly"
+	requestAndAssertError(errors.ErrInvalidData,
+		t, http.MethodPost, adminToken, badPeriod, "subscriptions", "checkout")
+
+	// an admin role on an organization that no longer exists is a missing organization, not a server error
+	me := requestAndParse[apicommon.UserInfo](t, http.MethodGet, adminToken, nil, usersMeEndpoint)
+	goneOrg := common.Address{0x60, 0x0e}
+	c.Assert(testDB.AddUserToOrganization(me.Email, goneOrg, db.AdminRole), qt.IsNil)
+	gone := checkout(privatePlan.ID)
+	gone.Address = goneOrg
+	requestAndAssertError(errors.ErrOrganizationNotFound,
+		t, http.MethodPost, adminToken, gone, "subscriptions", "checkout")
+
 	// with a paid subscription, no new checkout, for any plan
 	c.Assert(testDB.SetOrganizationSubscription(orgAddress, &db.OrganizationSubscription{
 		PlanID:               mockEssentialPlan.ID,

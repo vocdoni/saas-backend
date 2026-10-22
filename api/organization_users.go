@@ -94,7 +94,7 @@ func (a *API) organizationUsersHandler(w http.ResponseWriter, r *http.Request) {
 //	@Param			orgAddress	path		string							true	"Organization address"
 //	@Param			request		body		apicommon.OrganizationInvite	true	"Invitation information"
 //	@Success		200			{string}	string							"OK"
-//	@Failure		400			{object}	errors.Error					"Invalid input data"
+//	@Failure		400			{object}	errors.Error					"Invalid input data, or the organization's plan allows no more users"
 //	@Failure		401			{object}	errors.Error					"Unauthorized"
 //	@Failure		409			{object}	errors.Error					"User already has a role in the organization"
 //	@Failure		500			{object}	errors.Error					"Internal server error"
@@ -115,8 +115,18 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 
 	// check if the user/org has permission to invite new users
 	hasPermission, err := a.subscriptions.HasDBPermission(user.Email, org.Address, subscriptions.InviteUser)
-	if !hasPermission || err != nil {
-		errors.ErrUnauthorized.Withf("user does not have permission to sign transactions: %v", err).Write(w)
+	// a refusal (the user is not an admin) is an API error the caller is allowed to see as is
+	var apiErr errors.Error
+	if errors.As(err, &apiErr) && apiErr.HTTPstatus < http.StatusInternalServerError {
+		apiErr.Write(w)
+		return
+	}
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if !hasPermission {
+		errors.ErrUnauthorized.With("user does not have permission to invite users to the organization").Write(w)
 		return
 	}
 	// get new admin info from the request body
@@ -137,7 +147,7 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 	}
 	// check if the new user already has a role in the organization
 	if hasAnyRole, err := a.db.UserHasAnyRoleInOrg(invite.Email, org.Address); err != nil && err != db.ErrNotFound {
-		errors.ErrInvalidUserData.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	} else if hasAnyRole {
 		errors.ErrDuplicateConflict.With("user already has a role in the organization").Write(w)
