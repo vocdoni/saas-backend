@@ -1084,6 +1084,8 @@ definitions:
     type: object
   apicommon.ProcessParticipantQuestionVote:
     properties:
+      hasSigned:
+        type: boolean
       hasVoted:
         type: boolean
       questionId:
@@ -2425,6 +2427,8 @@ definitions:
   handlers.ProcessQuestionStatus:
     properties:
       canVote:
+        type: boolean
+      hasSigned:
         type: boolean
       hasVoted:
         type: boolean
@@ -5286,6 +5290,11 @@ paths:
         question eligibility and vote status. The voter is identified solely by the auth token
         (the only voter data the client stores); the token must be verified and issued for this
         process. Ineligibility is reported as belongsToProcess=false with HTTP 200, not an error.
+        Per question, hasSigned reports that the CSP signed the voter's ballot (the vote may not be
+        on chain), and hasVoted that the vote is on chain. In an anonymous (blind) census hasVoted
+        is always false, since the CSP never learns the voting address: hasSigned is the only
+        signal. When the chain cannot be asked about a signed question the call fails with 500
+        rather than report the vote as missing.
       parameters:
       - description: Process ID
         in: path
@@ -5318,7 +5327,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
-          description: Internal server error
+          description: Internal server error or blockchain request failed
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Check a voter's status for a voting process
@@ -5329,8 +5338,12 @@ paths:
       description: |-
         Manager/Admin lookup of organization members by a single field (email, phone,
         memberNumber, nationalId), intersected with the process census, reporting each
-        matched member's per-question voted status. For `phone` pass the plaintext number;
-        it is hashed server-side. Requires Manager/Admin of the owning organization.
+        matched member's per-question vote status: hasSigned when the CSP signed the member's
+        ballot (the vote may not be on chain), hasVoted only when the vote is on chain. In an
+        anonymous (blind) census hasVoted is always false and hasSigned is the only signal. When
+        the chain cannot be asked about a signed question the call fails with 500. For `phone`
+        pass the plaintext number; it is hashed server-side. Requires Manager/Admin of the
+        owning organization.
 
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
@@ -5369,7 +5382,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
-          description: Internal server error
+          description: Internal server error or blockchain request failed
           schema:
             $ref: '#/definitions/errors.Error'
         "503":
