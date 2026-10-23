@@ -126,8 +126,7 @@ Component packages (each is a focused service composed in `main.go`):
 - **`errors/`** — typed API `Error` (code + HTTP status + optional data), JSON-serializable; handlers
   return these. Predefined errors in `errors_definition.go`.
 - **`internal/`** — shared primitives: `HexBytes`, birthdate parsing, phone/argon2 helpers.
-- **`cmd/`** — `service/` (the API server), `cli/` (`--setIntegrator` org switch),
-  `userdel/` (GDPR user erasure), `localsmtp/` (dev SMTP capture).
+- **`cmd/`** — `service/` (the API server), `userdel/` (GDPR user erasure), `localsmtp/` (dev SMTP capture).
 - **`assets/`** are embedded via `embed.go` (`//go:embed all:assets`).
 
 ## Conventions

@@ -260,20 +260,3 @@ read the impact report — a sole-admin org takes its entire voting history down
 Reserve `-yes` for scripted use. Watch for the `WARNING: creator email retained` lines in
 the output; those need manual follow-up. Stripe customer data and database backups are
 explicitly out of scope — handle those separately if the erasure request covers them.
-
-### [cmd/cli](cmd/cli/) — integrator switch
-
-**What it does.** `--setIntegrator` flags an organization as an integrator and sets its
-`maxManagedOrgs` limit. `--maxManagedOrgs` is required and must be greater than 0: the value is
-a per-organization override that replaces the plan's integrator limit, and an override of 0 would
-disable integrator status instead.
-
-**How to run.**
-
-```bash
-go run ./cmd/cli --setIntegrator --orgAddress <hex> --maxManagedOrgs 5 -m <mongoURL> -d <mongoDB>
-```
-
-**Precautions.** It writes to the organizations collection, so treat it like any prod
-mutation: confirm the address and the target database first.
-
