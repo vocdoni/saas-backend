@@ -5,6 +5,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -322,8 +323,7 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 	// them, as in census propagation.
 	targets := make([]censusSizeTarget, 0, len(questions))
 	for i := range questions {
-		open := questions[i].Status == db.QuestionStatusReady || questions[i].Status == db.QuestionStatusPaused
-		if open && len(questions[i].EligibleMemberIDs) == 0 {
+		if isOpenStatus(questions[i].Status) && len(questions[i].EligibleMemberIDs) == 0 {
 			targets = append(targets, censusSizeTarget{
 				question: questions[i], census: census, size: uint64(census.Size),
 			})
@@ -678,6 +678,12 @@ func (a *API) electionSizeAndStatus(q *db.VotingProcessQuestion) (uint64, string
 	return election.Census.MaxCensusSize, election.Status, nil
 }
 
+// isOpenStatus reports whether an election, on chain or stored, still lets its census change:
+// READY or PAUSED. ENDED, CANCELED and RESULTS are terminal and refuse SET_PROCESS_CENSUS.
+func isOpenStatus(status string) bool {
+	return status == db.QuestionStatusReady || status == db.QuestionStatusPaused
+}
+
 // enqueueSetProcessCensus submits one SET_PROCESS_CENSUS tx per target, as a single background job,
 // to raise those elections' maxCensusSize. It returns an empty job id when nothing needs raising.
 //
@@ -701,7 +707,7 @@ func (a *API) enqueueSetProcessCensus(orgAddress common.Address, targets []censu
 		if len(t.question.UpstreamID) == 0 || t.size == 0 {
 			continue // a draft has no election yet, and there is nothing to size against
 		}
-		current, _, err := a.electionSizeAndStatus(&t.question)
+		current, status, err := a.electionSizeAndStatus(&t.question)
 		switch {
 		case err != nil:
 			log.Warnw("could not read election size, enqueueing the resize anyway",
@@ -709,6 +715,8 @@ func (a *API) enqueueSetProcessCensus(orgAddress common.Address, targets []censu
 				"upstreamId", t.question.UpstreamID.String(), "error", err)
 		case t.size <= current:
 			continue // the election already has the room
+		case !isOpenStatus(status):
+			continue // an ended election cannot take a resize, so there is no job to make
 		default:
 			// a genuine increase
 		}
@@ -780,37 +788,44 @@ func (a *API) enqueueSetProcessCensus(orgAddress common.Address, targets []censu
 
 // setProcessCensusSizes submits one SET_PROCESS_CENSUS tx per target, skipping the elections that
 // already have the room: a resize that waited for the organization lock may have been overtaken by
-// a larger one, and the chain refuses a shrink. It also skips the elections the chain no longer
-// has open: a stored status can lag the chain, and the chain refuses a resize of an ended election.
+// a larger one, and the chain refuses a shrink. An election the chain no longer has open is recorded
+// as a no-op rather than submitted: a stored status can lag the chain, and an ended election refuses
+// a resize.
 //
-// A failing target does not stop the rest; its error goes on its question's entry. The job fails
-// only when every target it attempted failed.
+// Every target is attempted even after one fails, so one election cannot hold back the others. The
+// job fails when any attempted target failed, and its error names each failed question; the
+// per-question outcomes are kept on the job either way, as the status-change job does.
 func (a *API) setProcessCensusSizes(orgSigner *ethereum.SignKeys, targets []censusSizeTarget) (*db.JobResult, error) {
 	entries := make([]db.QuestionJobResult, 0, len(targets))
-	failed := 0
+	attempted := 0
+	var failures []string
 	for i := range targets {
 		t := &targets[i]
+		questionID := t.question.ID.Hex()
 		current, status, err := a.electionSizeAndStatus(&t.question)
 		if err == nil && t.size <= current {
 			continue
 		}
-		if err == nil && status != db.QuestionStatusReady && status != db.QuestionStatusPaused {
+		if err == nil && !isOpenStatus(status) {
 			log.Infow("skipping census resize of an election that is no longer open",
-				"question", t.question.ID.Hex(), "upstreamId", t.question.UpstreamID.String(), "status", status)
+				"question", questionID, "upstreamId", t.question.UpstreamID.String(), "status", status)
+			entries = append(entries, db.QuestionJobResult{QuestionID: questionID, Status: db.JobStatusCompleted, NoOp: true})
 			continue
 		}
-		entry := db.QuestionJobResult{QuestionID: t.question.ID.Hex(), Status: db.JobStatusCompleted}
+		attempted++
+		entry := db.QuestionJobResult{QuestionID: questionID, Status: db.JobStatusCompleted}
 		if err := a.submitSetProcessCensus(orgSigner, t); err != nil {
-			log.Warnw("could not resize census of an election", "question", t.question.ID.Hex(), "error", err)
+			log.Warnw("could not resize census of an election", "question", questionID, "error", err)
 			entry.Status = db.JobStatusFailed
 			entry.Error = err.Error()
-			failed++
+			failures = append(failures, fmt.Sprintf("question %s: %v", questionID, err))
 		}
 		entries = append(entries, entry)
 	}
-	result := &db.JobResult{Status: string(db.JobStatusCompleted), Questions: entries}
-	if failed > 0 && failed == len(entries) {
-		return result, fmt.Errorf("none of the %d census resizes succeeded", failed)
+	result := &db.JobResult{Questions: entries}
+	if len(failures) > 0 {
+		return result, fmt.Errorf("%d of %d census resizes failed: %s",
+			len(failures), attempted, strings.Join(failures, "; "))
 	}
 	return result, nil
 }

@@ -1036,7 +1036,7 @@ type JobResult struct {
 	// Votes carries the per-envelope outcome of a batch vote relay, index-aligned with
 	// the votes of the POST /votes request that created the job.
 	Votes []VoteJobResult `json:"votes,omitempty" bson:"votes,omitempty"`
-	// Questions carries the per-question outcome of a status-change job, in target order.
+	// Questions carries the per-question outcome of a status-change or census-update job, in target order.
 	Questions []QuestionJobResult `json:"questions,omitempty" bson:"questions,omitempty"`
 }
 
