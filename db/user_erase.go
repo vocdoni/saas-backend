@@ -56,8 +56,8 @@ func (ms *MongoStorage) IsSoleOrgAdmin(address common.Address, userID uint64) (b
 
 // EraseUser removes a registered user and their personal data (right to
 // erasure). Organizations where the user is the sole admin are torn down
-// entirely (members, groups, censuses, participants, processes, voting processes
-// and their questions, bundles, CSP tokens, jobs, invitations); in organizations with other admins only the
+// entirely (members, groups, censuses, participants, processes, bundles, voting
+// processes, questions, API keys, CSP tokens, jobs, invitations); in organizations with other admins only the
 // user's membership is removed. Invitations addressed to or issued by the
 // user, their verification codes and the user document itself are deleted.
 // Each step is best-effort: failures are accumulated and returned joined, so a
@@ -97,7 +97,7 @@ func (ms *MongoStorage) EraseUser(userID uint64) (*UserErasureReport, error) {
 			continue
 		}
 		if soleAdmin {
-			if err := ms.eraseOrgData(userOrg.Address); err != nil {
+			if err := ms.EraseOrganizationData(userOrg.Address); err != nil {
 				errs = append(errs, fmt.Errorf("tearing down org %s: %w", userOrg.Address, err))
 			}
 			report.DeletedOrgs = append(report.DeletedOrgs, userOrg.Address)
@@ -143,12 +143,16 @@ func (ms *MongoStorage) deleteAllVerificationCodes(userID uint64) error {
 	return err
 }
 
-// eraseOrgData tears down every collection owned by the organization and
-// finally the organization document itself. It mirrors the cascade used by the
-// managed-organization deletion handler, minus the on-chain election guards
+// EraseOrganizationData tears down every collection owned by the organization (including the
+// /processes voting processes, questions and API keys, and their CSP tokens and status) and
+// finally the organization document itself. It is the single cascade shared by user erasure and
+// the managed-organization deletion handler; callers run any on-chain election guards beforehand
 // (erasure is an operator decision, not an API call). Failures are accumulated
 // so one stuck collection does not abort the rest of the teardown.
-func (ms *MongoStorage) eraseOrgData(address common.Address) error {
+func (ms *MongoStorage) EraseOrganizationData(address common.Address) error {
+	if address.Cmp(common.Address{}) == 0 {
+		return ErrInvalidData
+	}
 	var errs []error
 	// a managed organization's spending under its integrator's cap goes with it, as a managed
 	// organization's deletion drops it
@@ -173,6 +177,35 @@ func (ms *MongoStorage) eraseOrgData(address common.Address) error {
 		if _, err := ms.DeleteCSPAuthByAnchor(*bundleID); err != nil {
 			errs = append(errs, fmt.Errorf("deleting CSP auth tokens of bundle %s: %w", b.ID.Hex(), err))
 		}
+	}
+	// /processes: CSP tokens are anchored on the voting process id (ObjectID bytes) and the CSP
+	// status is keyed by each question's upstream id. List before deleting what the listing reads.
+	votingIDs, err := ms.VotingProcessIDsByOrg(address)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("listing voting processes: %w", err))
+	}
+	for _, id := range votingIDs {
+		if _, err := ms.DeleteCSPAuthByAnchor(internal.HexBytes(id[:])); err != nil {
+			errs = append(errs, fmt.Errorf("deleting CSP auth tokens of voting process %s: %w", id.Hex(), err))
+		}
+	}
+	upstreamIDs, err := ms.QuestionUpstreamIDsByOrg(address)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("listing question upstream ids: %w", err))
+	}
+	for _, id := range upstreamIDs {
+		if _, err := ms.DeleteCSPProcessByProcess(id); err != nil {
+			errs = append(errs, fmt.Errorf("deleting CSP status of question %s: %w", id.String(), err))
+		}
+	}
+	if _, err := ms.DeleteQuestionsByOrg(address); err != nil {
+		errs = append(errs, fmt.Errorf("deleting questions: %w", err))
+	}
+	if _, err := ms.DeleteVotingProcessesByOrg(address); err != nil {
+		errs = append(errs, fmt.Errorf("deleting voting processes: %w", err))
+	}
+	if _, err := ms.DeleteAPIKeysByOrg(address); err != nil {
+		errs = append(errs, fmt.Errorf("deleting API keys: %w", err))
 	}
 	published, err := ms.AllProcessesByOrg(address, PublishedOnly)
 	if err != nil {
@@ -203,10 +236,6 @@ func (ms *MongoStorage) eraseOrgData(address common.Address) error {
 	}
 	if _, err := ms.DeleteProcessesByOrg(address); err != nil {
 		errs = append(errs, fmt.Errorf("deleting processes: %w", err))
-	}
-	// published voting processes and their questions; EraseUser refused while drafts remained
-	if _, err := ms.DeleteVotingProcessesByOrg(address); err != nil {
-		errs = append(errs, fmt.Errorf("deleting voting processes: %w", err))
 	}
 	if _, err := ms.DeleteAllOrgMemberGroups(address); err != nil {
 		errs = append(errs, fmt.Errorf("deleting member groups: %w", err))
