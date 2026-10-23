@@ -62,6 +62,13 @@ casts one vote transaction per question, holds one CSP signature per question, a
 per question. Anything taking an on-chain election id resolves it with `db.QuestionByUpstreamID`.
 Voter-facing CSP handlers live in `csp/handlers/processes.go`.
 
+A question may restrict who can vote with `EligibleMemberIDs`; **an empty list means the whole
+census, by design**. The census is never "everyone in the org": it only holds the members an admin
+added to it (directly or through a group). So when a revocation pulls the last named member out of
+a restricted question (`db/census_revocation.go`), the question falls back to the whole census and
+`resizeEmptiedQuestions` grows its on-chain size to fit. That is the intended behaviour, not an
+authorization hole; don't report it as one or "fix" it by refusing the revocation.
+
 The legacy `/process` + `/process/bundle` API (#722) is gone, but its `processes`/`processBundles`
 collections are still **read**: `GET /processes` projects legacy rows, managed-org teardown deletes
 them, and `parseRelayVote` in `api/process_vote.go` tries `db.ProcessByAddress` before
