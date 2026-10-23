@@ -16,6 +16,7 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/crypto/ethereum"
+	"go.vocdoni.io/proto/build/go/models"
 )
 
 // publishedProcess creates and publishes a process over the given member ids and returns its id
@@ -827,6 +828,71 @@ func TestGroupAdditionGrowsPublishedCensus(t *testing.T) {
 
 	// and the added member is really signed for by the CSP
 	c.Assert(signAs(t, pid, members[2], election), qt.Equals, http.StatusOK)
+}
+
+// TestGroupAdditionSkipsEndedElectionOnSharedCensus covers a stale stored status: two whole-census
+// questions share one census, the first election ends on chain while its stored status still reads
+// READY, and a member joins the group. The resize must skip the ended election instead of letting
+// the chain's refusal abort the job, and still raise the live one.
+func TestGroupAdditionSkipsEndedElectionOnSharedCensus(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
+	ids := memberIDs(members)
+
+	group := requestAndParse[apicommon.OrganizationMemberGroupInfo](
+		t, http.MethodPost, token, &apicommon.CreateOrganizationMemberGroupRequest{
+			Title: "voters", Description: "group census", MemberIDs: ids[:2],
+		}, "organizations", orgAddress.String(), "groups",
+	)
+
+	req := newVotingProcessRequest(orgAddress, ids[:2])
+	req.StartDate = ""
+	req.Census = apicommon.CensusSpec{
+		TwoFaFields: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail},
+		AuthFields:  db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname},
+		GroupID:     group.ID,
+	}
+	req.Questions[1].Eligibility = nil // both questions open to the whole census
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint,
+	)
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", created.ProcessID, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
+
+	got := requestAndParse[apicommon.VotingProcessResponse](
+		t, http.MethodGet, token, nil, "processes", created.ProcessID,
+	)
+	ended, live := got.Questions[0], got.Questions[1]
+
+	// the first election ends on chain; nothing reconciles the stored status in this test, so it
+	// keeps reading READY
+	setSyncTestElectionStatus(t, orgAddress, ended.UpstreamID, models.ProcessStatus_ENDED)
+	waitForElectionStatus(t, ended.UpstreamID, "ENDED", "RESULTS")
+	stored, err := testDB.Question(ended.ID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(stored.Status, qt.Equals, db.QuestionStatusReady)
+
+	upd := requestAndParse[apicommon.UpdateOrganizationMemberGroupResponse](
+		t, http.MethodPut, token, &apicommon.UpdateOrganizationMemberGroupsRequest{
+			AddMembers: []string{ids[2]},
+		}, "organizations", orgAddress.String(), "groups", group.ID,
+	)
+	c.Assert(upd.Errors, qt.HasLen, 0)
+	c.Assert(upd.CensusJobIDs, qt.HasLen, 1)
+
+	resize := pollJob(t, upd.CensusJobIDs[0])
+	c.Assert(resize.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("resize job error: %s", resize.Errors))
+
+	elec, err := testAPI.account.Election(live.UpstreamID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(elec.Census.MaxCensusSize, qt.Equals, uint64(3))
+
+	endedElec, err := testAPI.account.Election(ended.UpstreamID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(endedElec.Census.MaxCensusSize, qt.Equals, uint64(2), qt.Commentf("an ended election must not be resized"))
 }
 
 // TestGroupCensusGuards pins the ordering of the removal guard: a refused removal must leave the
