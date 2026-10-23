@@ -3,7 +3,8 @@
 Epic: vocdoni/saas-backend#769. Follows the design in
 [Pau's comment](https://github.com/vocdoni/saas-backend/issues/769#issuecomment-6313755166); the
 differences are listed at the end. Step-by-step detail lives in the
-[plan](../plans/2026-10-22-csp-key-per-election-plan.md).
+[plan](../plans/2026-10-22-csp-key-per-election-plan.md); the full design, with current state, acceptance
+criteria and failure modes, is [design-full](2026-10-22-csp-key-per-election-design-full.md).
 
 ## Problem
 
