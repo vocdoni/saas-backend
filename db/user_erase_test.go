@@ -172,3 +172,23 @@ func TestEraseOrganizationDataProcesses(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(keysB, qt.HasLen, 1)
 }
+
+func TestOrganizationDataSummary(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	orgA, orgB := common.Address{0x2A}, common.Address{0x2B}
+	pidA, _, _ := seedProcessesData(t, orgA, 1)
+	seedProcessesData(t, orgB, 2)
+	_, err := testDB.SetQuestion(&VotingProcessQuestion{
+		ProcessID: pidA, OrgAddress: orgA, Order: 2, Status: QuestionStatusPaused,
+	})
+	c.Assert(err, qt.IsNil)
+
+	s, err := testDB.OrganizationDataSummary(orgA)
+	c.Assert(err, qt.IsNil)
+	c.Assert(s.VotingProcesses, qt.Equals, int64(1))
+	c.Assert(s.Questions, qt.Equals, int64(3))
+	c.Assert(s.Keys, qt.Equals, int64(1))
+	c.Assert(s.ActiveQuestions, qt.Equals, int64(1))
+}

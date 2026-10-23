@@ -262,3 +262,71 @@ func (ms *MongoStorage) EraseOrganizationData(address common.Address) error {
 	}
 	return errors.Join(errs...)
 }
+
+// OrgDataSummary counts the data an organization teardown would remove.
+type OrgDataSummary struct {
+	Members, Groups, Censuses, Participants                   int64
+	Processes, Bundles, Invitations                           int64
+	VotingProcesses, Drafts, Questions, ActiveQuestions, Keys int64
+}
+
+// OrganizationDataSummary counts the data EraseOrganizationData would remove.
+// ActiveQuestions are those whose stored status is READY or PAUSED (possibly live on-chain).
+func (ms *MongoStorage) OrganizationDataSummary(address common.Address) (*OrgDataSummary, error) {
+	s := &OrgDataSummary{}
+	var err error
+	if s.Members, err = ms.CountOrgMembers(address); err != nil {
+		return nil, fmt.Errorf("could not count members of org %s: %w", address, err)
+	}
+	if s.Groups, _, err = ms.OrganizationMemberGroups(address, 1, 1); err != nil {
+		return nil, fmt.Errorf("could not count groups of org %s: %w", address, err)
+	}
+	censuses, err := ms.CensusesByOrg(address)
+	if err != nil {
+		return nil, fmt.Errorf("could not list censuses of org %s: %w", address, err)
+	}
+	s.Censuses = int64(len(censuses))
+	for _, census := range censuses {
+		n, err := ms.CountCensusParticipants(census.ID.Hex())
+		if err != nil {
+			return nil, fmt.Errorf("could not count participants of census %s: %w", census.ID.Hex(), err)
+		}
+		s.Participants += n
+	}
+	if s.Processes, err = ms.CountProcesses(address, AllProcesses); err != nil {
+		return nil, fmt.Errorf("could not count processes of org %s: %w", address, err)
+	}
+	bundles, err := ms.ProcessBundlesByOrg(address)
+	if err != nil {
+		return nil, fmt.Errorf("could not list bundles of org %s: %w", address, err)
+	}
+	s.Bundles = int64(len(bundles))
+	invites, err := ms.PendingInvitations(address)
+	if err != nil {
+		return nil, fmt.Errorf("could not list invitations of org %s: %w", address, err)
+	}
+	s.Invitations = int64(len(invites))
+	if s.VotingProcesses, err = ms.CountVotingProcesses(address, AllProcesses); err != nil {
+		return nil, fmt.Errorf("could not count voting processes of org %s: %w", address, err)
+	}
+	if s.Drafts, err = ms.CountVotingProcesses(address, DraftOnly); err != nil {
+		return nil, fmt.Errorf("could not count drafts of org %s: %w", address, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	if s.Questions, err = ms.processesQuestions.CountDocuments(ctx, bson.M{"orgAddress": address}); err != nil {
+		return nil, fmt.Errorf("could not count questions of org %s: %w", address, err)
+	}
+	if s.ActiveQuestions, err = ms.processesQuestions.CountDocuments(ctx, bson.M{
+		"orgAddress": address,
+		"status":     bson.M{"$in": []string{QuestionStatusReady, QuestionStatusPaused}},
+	}); err != nil {
+		return nil, fmt.Errorf("could not count active questions of org %s: %w", address, err)
+	}
+	keys, err := ms.APIKeysByOrg(address)
+	if err != nil {
+		return nil, fmt.Errorf("could not list api keys of org %s: %w", address, err)
+	}
+	s.Keys = int64(len(keys))
+	return s, nil
+}
