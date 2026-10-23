@@ -76,7 +76,7 @@ type QueueConfig struct {
 // Queue is a FIFO queue that delivers notifications concurrently. A pool of
 // workers drains the queue; each send is guarded by a per-provider circuit
 // breaker so that a failing provider is given time to recover instead of being
-// hammered. Permanent failures are not retried (see isPermanentSendError);
+// hammered. Permanent failures are not retried (see IsPermanentSendError);
 // every other error is treated as transient and retried within the MaxRetries
 // and TTL bounds. The result of every item (delivered or given up) is reported
 // on the Done channel.

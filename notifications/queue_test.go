@@ -270,6 +270,52 @@ func TestQueuePermanentFailure(t *testing.T) {
 	}
 }
 
+// A PermanentError must not count against the breaker: with a threshold of one,
+// a counted failure would open it and block the next item for the cooldown.
+func TestQueuePermanentErrorDoesNotTripBreaker(t *testing.T) {
+	c := qt.New(t)
+	c.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	svc := &configurableSvc{
+		sendErr: &PermanentError{Err: fmt.Errorf("provider rejected the number")},
+		failFor: 1, // only the first send is rejected
+	}
+	q := NewQueue(ctx, QueueConfig{
+		Workers:            1,
+		MailService:        svc,
+		BreakerMaxFailures: 1,
+		BreakerCooldown:    time.Minute,
+	})
+	q.Start()
+
+	first := &QueueItem{Notification: testNotification(), Type: Email, Label: "first"}
+	second := &QueueItem{Notification: testNotification(), Type: Email, Label: "second"}
+	c.Assert(q.Push(first), qt.IsNil)
+	c.Assert(q.Push(second), qt.IsNil)
+
+	select {
+	case res := <-q.Done:
+		c.Assert(res.Label, qt.Equals, "first")
+		c.Assert(res.Success, qt.IsFalse)
+		c.Assert(res.Retries, qt.Equals, 0)
+	case <-time.After(5 * time.Second):
+		c.Fatal("timed out waiting for permanent failure")
+	}
+
+	// the breaker stayed closed, so the second item is attempted and delivered
+	select {
+	case res := <-q.Done:
+		c.Assert(res.Label, qt.Equals, "second")
+		c.Assert(res.Success, qt.IsTrue)
+	case <-time.After(5 * time.Second):
+		c.Fatal("second item blocked: breaker opened on a permanent error")
+	}
+	c.Assert(svc.callCount(), qt.Equals, 2)
+	c.Assert(q.mailBreaker.Allow(), qt.IsTrue)
+}
+
 func TestQueuePushWait(t *testing.T) {
 	c := qt.New(t)
 	c.Parallel()
