@@ -397,36 +397,31 @@ func (c *CSP) VerifyAuthToken(token internal.HexBytes, solution string) error {
 			"token", token)
 		return ErrTokenExpired
 	}
-	// reject tokens that exhausted the maximum number of attempts
-	if authTokenData.Attempts >= MaxChallengeAttempts {
+	// claim one attempt before comparing the code: the conditional increment only
+	// succeeds while attempts are below the cap, so concurrent requests cannot all
+	// evaluate a guess against the same stale count
+	recorded, err := c.Storage.IncrementCSPAuthAttempts(token, MaxChallengeAttempts)
+	if err != nil {
+		// fail closed: if we cannot persist the attempt, do not allow the
+		// verification to proceed, otherwise attempt limiting could be
+		// bypassed while the database is unhealthy
+		log.Warnw("error claiming challenge attempt",
+			"token", token,
+			"error", err)
+		return ErrStorageFailure
+	}
+	if !recorded {
 		log.Warnw("too many challenge attempts",
 			"userID", authTokenData.UserID,
 			"anchorID", authTokenData.AnchorID,
-			"token", token,
-			"attempts", authTokenData.Attempts)
+			"token", token)
 		return ErrTooManyAttempts
 	}
-	// verify the solution, and if the solution is not correct, atomically record
-	// the failed attempt while enforcing the cap
 	if !c.verifySolution(authTokenData.Secret, solution) {
 		log.Warnw("challenge code does not match",
 			"userID", authTokenData.UserID,
 			"anchorID", authTokenData.AnchorID,
 			"token", token)
-		recorded, err := c.Storage.IncrementCSPAuthAttempts(token, MaxChallengeAttempts)
-		if err != nil {
-			// fail closed: if we cannot persist the attempt, do not allow the
-			// verification to proceed, otherwise attempt limiting could be
-			// bypassed while the database is unhealthy
-			log.Warnw("error incrementing challenge attempts",
-				"token", token,
-				"error", err)
-			return ErrStorageFailure
-		}
-		if !recorded {
-			// a concurrent request already pushed attempts to the cap
-			return ErrTooManyAttempts
-		}
 		return ErrChallengeCodeFailure
 	}
 	// set the token as verified
