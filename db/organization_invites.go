@@ -204,6 +204,27 @@ func (ms *MongoStorage) DeleteInvitationsByOrg(orgAddress common.Address) (int64
 	return res.DeletedCount, nil
 }
 
+// DeleteInvitationsByInviter removes every pending invitation of the organization issued by the given
+// user ID. Used when that user loses the right to invite (removed or demoted), so their invitations
+// cannot be accepted later. Returns the number of deleted invitations.
+func (ms *MongoStorage) DeleteInvitationsByInviter(orgAddress common.Address, userID uint64) (int64, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return 0, ErrInvalidData
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
+	defer cancel()
+	res, err := ms.organizationInvites.DeleteMany(ctx, bson.M{
+		"organizationAddress": orgAddress,
+		"currentUserID":       userID,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete invitations by inviter: %w", err)
+	}
+	return res.DeletedCount, nil
+}
+
 // DeleteInvitationsByUser removes every invitation addressed to the given email
 // or issued by the given user ID. Used when erasing a user, so no invitation
 // keeps their personal data or a dangling issuer reference. Returns the number
