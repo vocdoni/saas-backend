@@ -4,10 +4,13 @@ package twilio
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 
 	t "github.com/twilio/twilio-go"
+	"github.com/twilio/twilio-go/client"
 	api "github.com/twilio/twilio-go/rest/api/v2010"
 	"github.com/vocdoni/saas-backend/notifications"
 )
@@ -85,6 +88,22 @@ func (tsms *SMS) SendNotification(ctx context.Context, notification *notificatio
 	case <-ctx.Done():
 		return ctx.Err()
 	case err := <-errCh:
+		return classifySendError(err)
+	}
+}
+
+// classifySendError marks a Twilio 4xx REST error (invalid or unsubscribed
+// number, rejected sender...) as permanent, since retrying the same message
+// cannot succeed. 429 is a rate limit, so it stays transient. Other errors are
+// returned unchanged.
+func classifySendError(err error) error {
+	var restErr *client.TwilioRestError
+	if !errors.As(err, &restErr) {
 		return err
 	}
+	if restErr.Status < http.StatusBadRequest || restErr.Status >= http.StatusInternalServerError ||
+		restErr.Status == http.StatusTooManyRequests {
+		return err
+	}
+	return &notifications.PermanentError{Err: err}
 }

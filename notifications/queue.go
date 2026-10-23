@@ -340,10 +340,24 @@ func (q *Queue) sleep(d time.Duration) {
 	}
 }
 
+// PermanentError marks a send error that retrying will never fix, such as a
+// provider rejecting the recipient. Providers wrap their own permanent errors in
+// it so the queue gives up on them instead of retrying.
+type PermanentError struct {
+	Err error
+}
+
+// Error implements the error interface.
+func (e *PermanentError) Error() string { return e.Err.Error() }
+
+// Unwrap returns the provider error.
+func (e *PermanentError) Unwrap() error { return e.Err }
+
 // IsPermanentSendError reports whether a send error is permanent (retrying
-// will never succeed). Permanent errors are SMTP 5xx replies. Everything else
-// (network timeouts, transient deferrals, context cancellations) is treated as
-// transient and will be retried up to the queue's MaxRetries/TTL bounds.
+// will never succeed). Permanent errors are SMTP 5xx replies and errors wrapped
+// in a PermanentError. Everything else (network timeouts, transient deferrals,
+// context cancellations) is treated as transient and will be retried up to the
+// queue's MaxRetries/TTL bounds.
 //
 // When delivery goes through a failover service the result is an errors.Join of
 // every provider's error. Such a joined error is only permanent if all branches
@@ -362,6 +376,10 @@ func IsPermanentSendError(err error) bool {
 				return false
 			}
 		}
+		return true
+	}
+	var permErr *PermanentError
+	if errors.As(err, &permErr) {
 		return true
 	}
 	var protoErr *textproto.Error

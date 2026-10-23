@@ -108,6 +108,19 @@ func TestIsPermanentSendError(t *testing.T) {
 		fmt.Errorf("p0: %w", perm),
 		fmt.Errorf("p1: %w", transientProto),
 	)), qt.IsFalse)
+
+	// provider errors marked permanent by a PermanentError
+	marked := &PermanentError{Err: fmt.Errorf("provider rejected the number")}
+	c.Assert(IsPermanentSendError(marked), qt.IsTrue)
+	c.Assert(IsPermanentSendError(fmt.Errorf("sms: %w", marked)), qt.IsTrue)
+	c.Assert(IsPermanentSendError(errors.Join(
+		fmt.Errorf("p0: %w", marked),
+		fmt.Errorf("p1: %w", perm),
+	)), qt.IsTrue)
+	c.Assert(IsPermanentSendError(errors.Join(
+		fmt.Errorf("p0: %w", marked),
+		netErr,
+	)), qt.IsFalse)
 }
 
 func TestQueuePush(t *testing.T) {
