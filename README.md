@@ -325,3 +325,22 @@ read the impact report — a sole-admin org takes its entire voting history down
 Reserve `-yes` for scripted use. Watch for the `WARNING: creator email retained` lines in
 the output; those need manual follow-up. Stripe customer data and database backups are
 explicitly out of scope — handle those separately if the erasure request covers them.
+
+### [cmd/orgdel](cmd/orgdel/) — single organization erasure
+
+**What it does.** Erases one organization and everything it owns in MongoDB (members, groups,
+censuses, participants, processes, bundles, voting processes, questions, API keys, CSP tokens,
+jobs, invitations), using the same teardown as `userdel`. It prints an impact report first and
+warns about READY/PAUSED questions and managed organizations.
+
+**How to run.**
+
+```bash
+go run ./cmd/orgdel -org 0xABC... -dryRun   # impact report only
+go run ./cmd/orgdel -org 0xABC...           # report + "type 'yes'" prompt
+go run ./cmd/orgdel -org 0xABC... -yes      # skip confirmation
+```
+
+**Precautions.** Stripe, database backups and on-chain state are not touched. For managed
+organizations prefer `DELETE /integrator/organizations/{orgAddress}`, which also credits paid
+drafts back to the integrator wallet.
