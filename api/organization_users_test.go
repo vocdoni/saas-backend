@@ -1174,6 +1174,41 @@ func TestRevokedInviterInvitations(t *testing.T) {
 		_, err = testDB.UserByEmail(inviteeEmail)
 		c.Assert(err, qt.ErrorIs, db.ErrNotFound)
 	})
+
+	t.Run("ConcurrentRefusedAcceptsReleaseSlotOnce", func(t *testing.T) {
+		c := qt.New(t)
+		o := newInvitedOrg(t)
+		adminToken, adminInfo := o.newAdmin(t)
+		countBefore := o.usersCounter(t)
+		_, code := o.inviteAsAdmin(t, adminToken)
+		removed, err := testDB.RemoveOrganizationUser(o.address, adminInfo.ID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(removed, qt.IsTrue)
+
+		// several accepts of the same revoked code race each other; only one may release the slot
+		const nAccepts = 10
+		acceptPath := append(append([]string{}, o.usersPath...), "accept")
+		body := &apicommon.AcceptOrganizationInvitation{
+			Code: code,
+			User: &apicommon.UserInfo{FirstName: "Invitee", LastName: "Test", Password: "inviteepassword123"},
+		}
+		statuses := make(chan int, nAccepts)
+		var wg sync.WaitGroup
+		for range nAccepts {
+			wg.Go(func() {
+				_, status := testRequest(t, http.MethodPost, "", body, acceptPath...)
+				statuses <- status
+			})
+		}
+		wg.Wait()
+		close(statuses)
+		for status := range statuses {
+			c.Assert(status, qt.Equals, http.StatusUnauthorized)
+		}
+
+		c.Assert(o.pendingCount(t), qt.Equals, 0)
+		c.Assert(o.usersCounter(t), qt.Equals, countBefore)
+	})
 }
 
 // invitationCodeFromEmail extracts the invitation code from the latest email sent to the given address.

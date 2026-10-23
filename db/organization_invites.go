@@ -149,8 +149,8 @@ func (ms *MongoStorage) PendingInvitations(organizationAddress common.Address) (
 	return invitations, nil
 }
 
-// deleteInvitation is a helper function to delete an invitation based on the provided filter.
-func (ms *MongoStorage) deleteInvitationHelper(filter bson.M) error {
+// deleteInvitationHelper deletes at most one invitation matching the filter and returns how many it deleted.
+func (ms *MongoStorage) deleteInvitationHelper(filter bson.M) (int64, error) {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
@@ -158,11 +158,11 @@ func (ms *MongoStorage) deleteInvitationHelper(filter bson.M) error {
 	defer cancel()
 
 	// Delete the invitation from the database
-	_, err := ms.organizationInvites.DeleteOne(ctx, filter)
+	res, err := ms.organizationInvites.DeleteOne(ctx, filter)
 	if err != nil {
-		return fmt.Errorf("failed to delete invitation: %w", err)
+		return 0, fmt.Errorf("failed to delete invitation: %w", err)
 	}
-	return nil
+	return res.DeletedCount, nil
 }
 
 // DeleteInvitation removes the invitation from the database by its ID.
@@ -172,17 +172,27 @@ func (ms *MongoStorage) DeleteInvitation(invitationID string) error {
 		return fmt.Errorf("invalid invitation ID: %w", err)
 	}
 
-	return ms.deleteInvitationHelper(bson.M{"_id": objID})
+	_, err = ms.deleteInvitationHelper(bson.M{"_id": objID})
+	return err
 }
 
 // DeleteInvitationByCode removes the invitation from the database.
 func (ms *MongoStorage) DeleteInvitationByCode(invitationCode string) error {
-	return ms.deleteInvitationHelper(bson.M{"invitationCode": invitationCode})
+	_, err := ms.deleteInvitationHelper(bson.M{"invitationCode": invitationCode})
+	return err
+}
+
+// RevokeInvitationByCode removes the invitation with the given code and reports whether this call deleted it,
+// so that of several concurrent revocations of the same invitation only one releases its slot.
+func (ms *MongoStorage) RevokeInvitationByCode(invitationCode string) (bool, error) {
+	deleted, err := ms.deleteInvitationHelper(bson.M{"invitationCode": invitationCode})
+	return deleted == 1, err
 }
 
 // DeleteInvitationByEmail removes the invitation from the database.
 func (ms *MongoStorage) DeleteInvitationByEmail(email string) error {
-	return ms.deleteInvitationHelper(bson.M{"newUserEmail": email})
+	_, err := ms.deleteInvitationHelper(bson.M{"newUserEmail": email})
+	return err
 }
 
 // DeleteInvitationsByOrg removes every pending invitation addressed to the given organization.
