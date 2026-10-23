@@ -827,6 +827,7 @@ func (a *API) setProcessCensusSizes(orgSigner *ethereum.SignKeys, targets []cens
 		return result, fmt.Errorf("%d of %d census resizes failed: %s",
 			len(failures), attempted, strings.Join(failures, "; "))
 	}
+	result.Status = string(db.JobStatusCompleted)
 	return result, nil
 }
 

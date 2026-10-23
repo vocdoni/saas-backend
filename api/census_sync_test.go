@@ -149,6 +149,8 @@ func TestUpdateQuestionCensusReopen(t *testing.T) {
 
 	job := pollJob(t, upd.JobID)
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("resize job error: %s", job.Errors))
+	c.Assert(job.Result, qt.Not(qt.IsNil))
+	c.Assert(job.Result.Status, qt.Equals, string(db.JobStatusCompleted))
 
 	// the election now holds the whole census...
 	elec, err = testAPI.account.Election(restricted.UpstreamID)
