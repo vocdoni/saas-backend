@@ -226,6 +226,11 @@ func (h *StripeHandlers) GetCheckoutSession(w http.ResponseWriter, r *http.Reque
 //	@Failure		500			{object}	errors.Error		"Internal server error"
 //	@Router			/subscriptions/{orgAddress}/portal [get]
 func (h *StripeHandlers) CreateSubscriptionPortalSession(w http.ResponseWriter, r *http.Request, a *API) {
+	if h == nil || h.service == nil {
+		errors.ErrStripeError.Withf("stripe service not available").Write(w)
+		return
+	}
+
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)

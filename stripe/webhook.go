@@ -251,6 +251,9 @@ func (s *Service) handleInvoicePayment(event *stripeapi.Event) error {
 	if err != nil {
 		return fmt.Errorf("failed to parse invoice from event: %w", err)
 	}
+	if invoiceInfo == nil {
+		return nil
+	}
 
 	// Use per-organization locking
 	unlock := s.lockManager.LockOrganization(invoiceInfo.OrgAddress)
@@ -302,10 +305,11 @@ func (s *Service) handleProductUpsert(event *stripeapi.Event) error {
 	// Webhook event payloads don't expand default_price, but isDefaultPlan reads
 	// product.DefaultPrice.Metadata. Re-fetch the product with default_price expanded
 	// (as the full sync does) so a product.updated event can't clear the Default flag.
-	product, err = s.client.GetProduct(product.ID)
+	expanded, err := s.client.GetProduct(product.ID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch product %s with expanded default price: %w", product.ID, err)
 	}
+	product = expanded
 
 	prices, err := s.client.GetProductPrices(product.ID)
 	if err != nil {
@@ -406,19 +410,21 @@ func newSubscriptionInfo(subscription *stripeapi.Subscription) (*SubscriptionInf
 	return subscriptionInfo, nil
 }
 
-// parseInvoiceFromEvent extracts invoice information from a webhook event
+// parseInvoiceFromEvent extracts invoice information from a webhook event, or nil for an invoice
+// that is not a subscription's (e.g. the receipt of a one-time payment).
 func parseInvoiceFromEvent(event *stripeapi.Event) (*InvoiceInfo, error) {
 	var invoice stripeapi.Invoice
 	if err := json.Unmarshal(event.Data.Raw, &invoice); err != nil {
 		return nil, fmt.Errorf("failed to parse invoice from event: %v", err)
 	}
 
-	if invoice.EffectiveAt == 0 {
-		return nil, fmt.Errorf("invoice missing effective date")
+	// not a subscription invoice: nothing to record
+	if invoice.Parent == nil || invoice.Parent.SubscriptionDetails == nil {
+		return nil, nil
 	}
 
-	if invoice.Parent.SubscriptionDetails == nil {
-		return nil, fmt.Errorf("invoice missing subscription details")
+	if invoice.EffectiveAt == 0 {
+		return nil, fmt.Errorf("invoice missing effective date")
 	}
 	orgAddress := common.HexToAddress(invoice.Parent.SubscriptionDetails.Metadata["address"])
 	if orgAddress.Cmp(common.Address{}) == 0 {

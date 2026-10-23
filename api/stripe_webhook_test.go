@@ -365,10 +365,18 @@ func TestStripeWebhook(t *testing.T) {
 		}
 
 		{
+			// not a subscription invoice: ignored, not retried
 			s := mockStripeInvoicePayment(orgAddress, date)
 			s.Parent.SubscriptionDetails = nil
 			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeInvoicePaymentSucceeded, s))
-			c.Assert(err, qt.ErrorMatches, ".* invoice missing subscription details")
+			c.Assert(err, qt.IsNil)
+		}
+
+		{
+			s := mockStripeInvoicePayment(orgAddress, date)
+			s.Parent = nil
+			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeInvoicePaymentSucceeded, s))
+			c.Assert(err, qt.IsNil)
 		}
 
 		{
