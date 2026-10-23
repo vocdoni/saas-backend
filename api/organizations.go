@@ -317,42 +317,49 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// update just the fields that can be updated and are not empty
+	// only the editable fields are written, so the counters, subscription and limits that were
+	// read with the organization above cannot be put back over changes made since
+	profile := &db.Organization{Address: org.Address}
 	updateOrg := false
 	if newOrgInfo.Website != "" {
-		org.Website = newOrgInfo.Website
+		profile.Website = newOrgInfo.Website
 		updateOrg = true
 	}
 	if newOrgInfo.Size != "" {
-		org.Size = newOrgInfo.Size
+		profile.Size = newOrgInfo.Size
 		updateOrg = true
 	}
 	if newOrgInfo.Color != "" {
-		org.Color = newOrgInfo.Color
+		profile.Color = newOrgInfo.Color
 		updateOrg = true
 	}
 	if newOrgInfo.Subdomain != "" {
-		org.Subdomain = newOrgInfo.Subdomain
+		profile.Subdomain = newOrgInfo.Subdomain
 		updateOrg = true
 	}
 	if newOrgInfo.Country != "" {
-		org.Country = newOrgInfo.Country
+		profile.Country = newOrgInfo.Country
 		updateOrg = true
 	}
 	if newOrgInfo.Timezone != "" {
-		org.Timezone = newOrgInfo.Timezone
+		profile.Timezone = newOrgInfo.Timezone
 		updateOrg = true
 	}
 	if newOrgInfo.DefaultLang != "" {
-		org.DefaultLang = newOrgInfo.DefaultLang
+		profile.DefaultLang = newOrgInfo.DefaultLang
 		updateOrg = true
 	}
 	if newOrgInfo.Name != nil || newOrgInfo.Logo != nil || newOrgInfo.Description != nil || len(newOrgInfo.Meta) > 0 {
-		org.Meta = apicommon.BuildOrgMeta(org.Meta, newOrgInfo.Name, newOrgInfo.Logo, newOrgInfo.Description, newOrgInfo.Meta)
+		profile.Meta = apicommon.BuildOrgMeta(org.Meta, newOrgInfo.Name, newOrgInfo.Logo, newOrgInfo.Description, newOrgInfo.Meta)
 		updateOrg = true
 	}
 	// update the organization if any field was changed
 	if updateOrg {
-		if err := a.db.SetOrganization(org); err != nil {
+		if err := a.db.UpdateOrganizationProfile(profile); err != nil {
+			if err == db.ErrNotFound {
+				errors.ErrOrganizationNotFound.Write(w)
+				return
+			}
 			errors.ErrGenericInternalServerError.Withf("could not update organization: %v", err).Write(w)
 			return
 		}

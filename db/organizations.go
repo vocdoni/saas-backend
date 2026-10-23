@@ -338,6 +338,44 @@ func (ms *MongoStorage) SetOrganizationLastPaymentDate(address common.Address, d
 	return ms.updateOrganizationFields(address, bson.M{"subscription.lastPaymentDate": date})
 }
 
+// UpdateOrganizationProfile $sets only the profile fields that are not zero on the existing
+// organization with profile's address. Unlike SetOrganization it never upserts, and it leaves
+// every other field (counters, subscription, limits, memberships...) alone, so a write based on
+// an earlier read cannot undo changes made since. Returns ErrNotFound if there is no organization
+// with that address.
+func (ms *MongoStorage) UpdateOrganizationProfile(profile *Organization) error {
+	fields := bson.M{}
+	if profile.Website != "" {
+		fields["website"] = profile.Website
+	}
+	if profile.Size != "" {
+		fields["size"] = profile.Size
+	}
+	if profile.Color != "" {
+		fields["color"] = profile.Color
+	}
+	if profile.Subdomain != "" {
+		fields["subdomain"] = profile.Subdomain
+	}
+	if profile.Country != "" {
+		fields["country"] = profile.Country
+	}
+	if profile.Timezone != "" {
+		fields["timezone"] = profile.Timezone
+	}
+	if profile.DefaultLang != "" {
+		fields["defaultLang"] = profile.DefaultLang
+	}
+	if profile.Meta != nil {
+		fields["meta"] = profile.Meta
+	}
+	// nothing to write, the organization is left as it is
+	if len(fields) == 0 {
+		return nil
+	}
+	return ms.updateOrganizationFields(profile.Address, fields)
+}
+
 // updateOrganizationFields $sets the given fields of an existing organization, returning
 // ErrNotFound if there is no organization with that address.
 func (ms *MongoStorage) updateOrganizationFields(address common.Address, fields bson.M) error {
