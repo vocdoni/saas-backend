@@ -126,8 +126,7 @@ Component packages (each is a focused service composed in `main.go`):
 - **`errors/`** — typed API `Error` (code + HTTP status + optional data), JSON-serializable; handlers
   return these. Predefined errors in `errors_definition.go`.
 - **`internal/`** — shared primitives: `HexBytes`, birthdate parsing, phone/argon2 helpers.
-- **`cmd/`** — `service/` (the API server), `cli/` (`--setIntegrator` org switch),
-  `userdel/` (GDPR user erasure), `localsmtp/` (dev SMTP capture).
+- **`cmd/`** — `service/` (the API server), `userdel/` (GDPR user erasure), `localsmtp/` (dev SMTP capture).
 - **`assets/`** are embedded via `embed.go` (`//go:embed all:assets`).
 
 ## Conventions
@@ -203,7 +202,36 @@ user's call.
 `./scripts/check-qt-patterns.sh`, a clean `go mod tidy` diff, and `go test -failfast -timeout=30m ./...`
 with coverage (a diff report is posted as a PR comment). It runs on pull requests and on pushes to
 `main` only, so in practice every push to `main` builds and pushes a Docker image, while its `-race`
-step and the `stage`/`release*`/`aragon` Docker conditions never fire. The branch flow is
+step and the `stage`/`release*` Docker conditions never fire. The branch flow is
 `main → stage → lts` (`lts` is production), and promotion PRs (head branch `main`) skip commit
 linting. `.github/workflows/swag.yml` regenerates `docs/swagger.yaml` on PRs (posting the diff as a
 comment) and, on pushes to `stage`, commits the regenerated spec and deploys the Swagger UI.
+`.github/workflows/integration.yml` tests against an unmerged vocdoni-node: a writer's PR comment
+`/integration vocdoni-node=<ref>` (SHA, branch, tag or PR number, bare `<N>` or `#<N>`) swaps
+`go.vocdoni.io/dvote` for that commit (a `go.mod` replace) and runs the suite against it. A SHA runs
+once; a branch, tag or PR number sticks to the PR and re-runs on every push until `/integration reset`.
+A failed run's reply includes the failing step's output, and each push run on a sticky PR posts its
+result as a new comment. The workflow also has a `workflow_dispatch` input `vocdoni_node_ref`. Comment
+runs use the workflow from `main`, and the push report runs the report script from the PR's base
+branch, so these changes take effect after merge. See the README's "Testing against an unmerged vocdoni-node" section.
+
+### When to post `/integration`
+
+It checks compatibility, not vocdoni-node itself: that saas-backend still builds against that commit
+(dvote Go API drift) and that the `api` suite still passes on its vocone (tx format, errors, status or
+price rules). Neither repo's CI covers this otherwise.
+
+Post the comment (as the first line, from an account with write access) on a saas-backend PR when:
+
+- the PR needs a vocdoni-node change that is not merged or tagged yet (a new tx type or endpoint, a
+  vocone fix, a dvote API change). Pin the vocdoni-node PR with `/integration vocdoni-node=<N>`
+  (bare number; `#<N>` also works, but GitHub autolinks it to this repo) instead of committing a `replace` or a pseudo-version of an unmerged branch;
+- a vocdoni-node PR touches packages this repo imports (`api`, `apiclient`, `vochain`, `vocone`,
+  `crypto`...) and you want to know whether it breaks saas-backend before it merges;
+- you are about to bump `go.vocdoni.io/dvote` in `go.mod`: check the target commit first.
+
+Use a PR number or a branch to follow an in-flight vocdoni-node PR (sticky: every push here re-runs it), and a
+SHA to check one exact commit once. A pin never ships: before merging, bump `go.mod` to the merged
+vocdoni-node commit, then post `/integration reset`. Mention the pin and its result in the PR
+description. Agents should post it on PRs they were asked to open or maintain, and otherwise suggest it.
+Locally, `scripts/integration-pin-node.sh <ref> <dir>` does the same `replace`; never commit it.

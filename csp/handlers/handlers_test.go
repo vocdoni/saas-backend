@@ -61,13 +61,24 @@ func TestHandlePhoneContact(t *testing.T) {
 	c := qt.New(t)
 
 	test := func(org *db.Organization, phone, want string) {
+		// the member's stored phone, hashed from the raw input as on member creation
 		hashedPhone, err := db.NewHashedPhone(phone, org)
 		c.Assert(err, qt.IsNil)
 
-		phone, challengeType, err := handlePhoneContact(org, phone, hashedPhone)
+		submitted, err := parseVoterPhone(phone, org)
 		c.Assert(err, qt.IsNil)
-		c.Assert(phone, qt.Equals, want)
+		normalized, challengeType, err := handlePhoneContact(submitted, hashedPhone)
+		c.Assert(err, qt.IsNil)
+		c.Assert(normalized, qt.Equals, want)
 		c.Assert(challengeType, qt.Equals, notifications.SMSChallenge)
+
+		// another number, or none at all, fails with the same error as an unknown participant
+		other, err := parseVoterPhone("+34699999999", org)
+		c.Assert(err, qt.IsNil)
+		_, _, err = handlePhoneContact(other, hashedPhone)
+		c.Assert(err, qt.ErrorIs, errors.ErrCSPAuthFailed)
+		_, _, err = handlePhoneContact(nil, hashedPhone)
+		c.Assert(err, qt.ErrorIs, errors.ErrCSPAuthFailed)
 	}
 
 	org := &db.Organization{
@@ -85,8 +96,8 @@ func TestHandlePhoneContact(t *testing.T) {
 }
 
 // TestMemberPasswordMatches covers the password check behind auth step 0: it matches the stored
-// argon2 hash of the client hash and nothing else, and a check waiting for a slot gives up, with its
-// request or after a bounded wait, instead of blocking forever.
+// argon2 hash of the client hash and nothing else, and a check that finds no free argon2 slot gives
+// up and answers ErrServerBusy instead of blocking.
 func TestMemberPasswordMatches(t *testing.T) {
 	c := qt.New(t)
 	h := New(&csp.CSP{PasswordSalt: "salt"}, nil)
@@ -113,19 +124,12 @@ func TestMemberPasswordMatches(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsFalse)
 
-	// every slot taken: a cancelled request does not wait for one
-	for range cap(h.passwordSlots) {
-		h.passwordSlots <- struct{}{}
+	// no argon2 slot freed up in time: the check gives up, and the voter is told to retry later
+	h.hashPassword = func(context.Context, string, bson.ObjectID, string) ([]byte, error) {
+		return nil, internal.ErrHashingBusy
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	_, err = h.memberPasswordMatches(ctx, clientHash, stored)
-	c.Assert(err, qt.ErrorIs, context.Canceled)
-
-	// nor does one waiting longer than passwordSlotWait: it tells the voter to retry later
-	h.passwordSlotWait = time.Millisecond
 	_, err = h.memberPasswordMatches(context.Background(), clientHash, stored)
-	c.Assert(err, qt.ErrorIs, errors.ErrAttemptCoolDownTime)
-	c.Assert(passwordCheckFailed(err), qt.ErrorIs, errors.ErrAttemptCoolDownTime)
+	c.Assert(err, qt.ErrorIs, internal.ErrHashingBusy)
+	c.Assert(passwordCheckFailed(err), qt.ErrorIs, errors.ErrServerBusy)
 	c.Assert(passwordCheckFailed(context.Canceled), qt.ErrorIs, errors.ErrGenericInternalServerError)
 }

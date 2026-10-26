@@ -22,6 +22,32 @@ import (
 // rejected.
 const MaxChallengeAttempts = 5
 
+// MaxChallengeResends is the number of times the challenge of a single authentication token can
+// be resent. New tokens are already spaced by the notification cooldown, so this bounds the
+// emails/SMS a member can be sent per cooldown period.
+const MaxChallengeResends = 3
+
+// DefaultMaxDailyChallengeSends is the default cap on the OTP challenges (new tokens and resends
+// together) one member can be sent for one voting process per UTC day. The cooldown only spaces
+// sends out; this bounds their total, so a voter's contact cannot be flooded all day at the
+// platform's expense. Stored in Mongo, so it survives restarts.
+const DefaultMaxDailyChallengeSends = 10
+
+// DefaultMaxHourlyAuthFailures is the default cap on failed step-0 authentications for one
+// submission (the submitted login and contact fields) on one voting process per UTC hour. Once
+// reached, that submission is refused on that process until the next hour. The claimed voter (the
+// login fields alone) gets VoterAuthFailuresFactor times this budget across every contact tried,
+// which bounds guessing one voter's contact (to 2400 guesses a day at the default) without letting
+// whoever knows a voter's login fields lock them out cheaply: it takes that many failures in the
+// hour, and the voter's own submission with the right contact keeps its separate budget until then.
+// There is deliberately no process-wide cap: anyone could spend it with junk requests and lock
+// every voter out of the election.
+const DefaultMaxHourlyAuthFailures = 10
+
+// VoterAuthFailuresFactor multiplies MaxHourlyAuthFailures into the hourly failure budget of one
+// claimed voter across all the contacts submitted with their login fields.
+const VoterAuthFailuresFactor = 10
+
 // Config struct contains the configuration for the CSP service. It includes
 // the database name, the MongoDB client, the notification cooldown time, the
 // notification queue settings, the SMS service and the mail service.
@@ -33,6 +59,15 @@ type Config struct {
 	RootKey      internal.HexBytes
 	// notification stuff
 	NotificationCoolDownTime time.Duration
+	// MaxDailyChallengeSends caps the challenges (new tokens + resends) one member can be sent for
+	// one voting process per UTC day. Zero uses DefaultMaxDailyChallengeSends; a negative value
+	// disables the cap.
+	MaxDailyChallengeSends int
+	// MaxHourlyAuthFailures caps the failed step-0 authentications of one submission (login plus
+	// contact fields) on one voting process per UTC hour; one claimed voter gets
+	// VoterAuthFailuresFactor times it. Zero uses DefaultMaxHourlyAuthFailures; a negative value
+	// disables the cap.
+	MaxHourlyAuthFailures int
 	// NotificationTTL is how long a CSP OTP challenge remains valid. After
 	// this window ResendChallenge returns ErrTokenExpired and queued but
 	// undelivered notifications are dropped. Distinct from
@@ -71,6 +106,8 @@ type CSP struct {
 
 	notificationCoolDownTime time.Duration
 	notificationTTL          time.Duration
+	maxDailyChallengeSends   int
+	maxHourlyAuthFailures    int
 	notifySync               bool
 }
 
@@ -128,6 +165,14 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 	if notificationTTL <= 0 {
 		notificationTTL = saasNotifications.DefaultOTPExpiry
 	}
+	maxDailyChallengeSends := config.MaxDailyChallengeSends
+	if maxDailyChallengeSends == 0 {
+		maxDailyChallengeSends = DefaultMaxDailyChallengeSends
+	}
+	maxHourlyAuthFailures := config.MaxHourlyAuthFailures
+	if maxHourlyAuthFailures == 0 {
+		maxHourlyAuthFailures = DefaultMaxHourlyAuthFailures
+	}
 	return &CSP{
 		Storage:                  config.DB,
 		Signer:                   s,
@@ -135,6 +180,8 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 		ctx:                      ctx,
 		notificationCoolDownTime: notificationCoolDownTime,
 		notificationTTL:          notificationTTL,
+		maxDailyChallengeSends:   maxDailyChallengeSends,
+		maxHourlyAuthFailures:    maxHourlyAuthFailures,
 		notifySync:               config.SyncDelivery,
 	}, nil
 }
@@ -159,9 +206,13 @@ func (c *CSP) pushChallenge(ch *notifications.NotificationChallenge) error {
 	case <-done:
 		return nil
 	case <-ctx.Done():
-		return ctx.Err()
+		return fmt.Errorf("%w: %w", errChallengeStillQueued, ctx.Err())
 	}
 }
+
+// errChallengeStillQueued reports a synchronous delivery that timed out with the challenge already
+// in the queue: it may still be sent, so its send unit must stay spent.
+var errChallengeStillQueued = fmt.Errorf("challenge queued but not confirmed delivered")
 
 // PubKey method returns the root public key of the CSP.
 func (c *CSP) PubKey() (internal.HexBytes, error) {

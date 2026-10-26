@@ -121,7 +121,7 @@ func (a *API) preflightCensusGrowth(org *db.Organization, censusIDs []string, co
 			return err
 		}
 	}
-	if _, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce); err != nil {
+	if _, err := account.OrganizationSigner(a.secret, org.SignerSeedValue(), org.Nonce); err != nil {
 		return fmt.Errorf("could not restore organization signer: %w", err)
 	}
 	return nil

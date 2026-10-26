@@ -90,12 +90,20 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 //	@Description	memberNumber, nationalId, birthDate, email, phone, password); which are required depends
 //	@Description	on the census auth configuration. If valid, a challenge is sent and a token returned.
 //	@Description	`password` is the member password's client hash (64 lowercase hex characters, see
-//	@Description	handlers.AuthRequest); a wrong one answers exactly like an unknown participant (404,
-//	@Description	code 40029). When too many password checks are already running, it answers 401, code
-//	@Description	40103: retry later.
+//	@Description	handlers.AuthRequest); a wrong one answers exactly like an unknown participant (40802)
+//	@Description	and spends the same failed-attempt budget. When the server's password-hashing capacity
+//	@Description	is exhausted, it answers 503, code 50302: retry later (this spends no budget).
 //	@Description	- Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
 //	@Description	If valid the token is marked verified and returned. Auth-only censuses may not require
 //	@Description	a challenge solution.
+//	@Description	Step 0 returns the same error (40802) whether the login data matches no census participant
+//	@Description	or the contact data does not match an existing one. Failed attempts are capped per UTC hour
+//	@Description	on the process for each submitted set of login and contact fields, and, ten times higher,
+//	@Description	for each set of login fields across all contacts tried. Once either is exhausted, step 0
+//	@Description	answers 40017 until the hour ends (the voter cap even with the right contact data);
+//	@Description	data.retryAfter gives the seconds left.
+//	@Description	A member's challenge sends (new tokens + resends) are capped per UTC day, also answering
+//	@Description	40017 with data.retryAfter.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -103,10 +111,11 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 //	@Param			step		path		string					true	"Authentication step (0 or 1)"
 //	@Param			request		body		handlers.AuthRequest	true	"Step 0 body; step 1 uses AuthChallengeRequest (see description)"
 //	@Success		200			{object}	handlers.AuthResponse
-//	@Failure		400			{object}	errors.Error	"Invalid input data"
-//	@Failure		401			{object}	errors.Error	"Unauthorized, cooldown not reached, or invalid challenge"
-//	@Failure		404			{object}	errors.Error	"Process, census, organization, or participant not found"
+//	@Failure		400			{object}	errors.Error	"Invalid input data, or failed-attempt or daily send limit reached (40017)"
+//	@Failure		401			{object}	errors.Error	"Invalid authentication data, cooldown not reached, or invalid challenge"
+//	@Failure		404			{object}	errors.Error	"Process, census, or organization not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		503			{object}	errors.Error	"Password-hashing capacity exhausted, retry later (50302)"
 //	@Router			/processes/{processId}/auth/{step} [post]
 func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request) {
 	oid, anchor, ok := parseProcessID(w, r)
@@ -136,13 +145,15 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 //	@Description	Resend the challenge for an existing (non-verified) authentication token of a voting
 //	@Description	process. The request must include the auth token and a valid contact method for the
 //	@Description	census type (email/phone). The same token is returned if the challenge is queued.
+//	@Description	A token can be resent at most 3 times, and a contact that does not match the member spends
+//	@Description	one of them too.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
 //	@Param			processId	path		string						true	"Process ID"
 //	@Param			request		body		handlers.AuthResendRequest	true	"Resend request with auth token and contact data"
 //	@Success		200			{object}	handlers.AuthResponse
-//	@Failure		400			{object}	errors.Error	"Malformed body, missing auth token, invalid contact, or token already verified"
+//	@Failure		400			{object}	errors.Error	"Malformed body, missing token, invalid contact, verified token, or resend limit (40017)"
 //	@Failure		401			{object}	errors.Error	"Invalid/expired token, token not belonging to the process, or contact mismatch"
 //	@Failure		404			{object}	errors.Error	"Census or organization not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
@@ -188,8 +199,21 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	lang := apicommon.NotificationLang(r.Context(), org)
+	var phone *voterPhone
+	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone) {
+		if phone, err = parseVoterPhone(req.Phone, org); err != nil {
+			errors.ErrInvalidData.WithErr(err).Write(w)
+			return
+		}
+	}
+	// spend one of the token's resends before checking the contact, so that guessing a member's
+	// contact through resends is bounded like the resends themselves
+	if err := c.csp.ClaimChallengeResend(req.AuthToken); err != nil {
+		writeResendError(w, err)
+		return
+	}
 	toDestination, challengeType, err := determineContactMethod(
-		census, org, &AuthRequest{Email: req.Email, Phone: req.Phone}, member,
+		census, &AuthRequest{Email: req.Email, Phone: req.Phone}, phone, member,
 	)
 	if err != nil {
 		if apiErr, ok := err.(errors.Error); ok {
@@ -375,7 +399,7 @@ func authorizeLoadedQuestion(
 // bytes each leaves ample headroom. The cap tracks db.MaxQuestionsPerProcess (a voter holds at
 // most one ballot per question); like the relay endpoints this one is public, so the body has to
 // be bounded before it is buffered.
-const maxSignBatchBodyBytes = db.MaxQuestionsPerProcess*512 + 4<<10
+const maxSignBatchBodyBytes = db.MaxQuestionsPerProcess*512 + 4*internal.KiB
 
 // authorizedBallot is one item of a sign batch that survived the authorization pass: the
 // question's on-chain election id, resolved from the request, and the voter address.
@@ -408,9 +432,9 @@ type authorizedBallot struct {
 //	@Description	already signed for a different address; re-send with the address sign-info
 //	@Description	reports) or sign_failed (internal failure; retry). Retry ONLY the entries that
 //	@Description	carry a retryable code: re-sending the whole batch re-signs the ballots that
-//	@Description	already succeeded, and each re-sign counts toward the election's finite overwrite
-//	@Description	budget (MaxVoteOverwritesPerProcess, 10) — past it the election is permanently
-//	@Description	locked.
+//	@Description	already succeeded, and every signature, re-signs included, counts toward the election's
+//	@Description	limit (MaxCSPSignaturesPerElection, 10 in total) — past it the election is permanently
+//	@Description	locked for the voter.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -916,6 +940,7 @@ func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Reques
 //	@Param			request		body		handlers.CheckMembershipRequest	true	"Request with auth token"
 //	@Success		200			{object}	handlers.ProcessCheckResponse
 //	@Failure		400			{object}	errors.Error	"Malformed body or missing auth token"
+//	@Failure		401			{object}	errors.Error	"Auth token not verified or not issued for this process"
 //	@Failure		404			{object}	errors.Error	"Process or census not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/check [post]
@@ -939,6 +964,12 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 	}
 	if !bytes.Equal(anchor, auth.AnchorID) {
 		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
+		return
+	}
+	// an unverified token only proves knowledge of the member's census fields, not control of their
+	// contact, so it must not reveal their weight or which questions they have voted
+	if !auth.Verified {
+		errors.ErrUnauthorized.WithErr(csp.ErrAuthTokenNotVerified).Write(w)
 		return
 	}
 	memberID := auth.UserID.String()

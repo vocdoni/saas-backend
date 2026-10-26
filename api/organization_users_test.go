@@ -499,9 +499,8 @@ func TestOrganizationUsers(t *testing.T) {
 		)
 		c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
-		// Test 4: Try to remove a non-existent user
-		// Note: The current implementation returns 200 OK even for non-existent users
-		// because the MongoDB UpdateOne operation doesn't return an error if no documents match
+		// Test 4: Try to remove a non-existent user: nothing is removed, so it is refused
+		// rather than decrementing the users counter
 		resp, code = testRequest(
 			t,
 			http.MethodDelete,
@@ -512,7 +511,7 @@ func TestOrganizationUsers(t *testing.T) {
 			"users",
 			"999999",
 		)
-		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+		c.Assert(code, qt.Equals, http.StatusBadRequest, qt.Commentf("response: %s", resp))
 
 		// Test 5: Try to remove yourself (which should fail)
 		// Get the admin's user ID
@@ -936,6 +935,20 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 	})
 
+	t.Run("InviteRefusedForNonAdmin", func(t *testing.T) {
+		adminToken := testCreateUser(t, "adminpassword123")
+		orgAddress := testCreateOrganization(t, adminToken)
+		// a user with no role in the organization is refused as a non-admin, not as a server fault
+		strangerToken := testCreateUser(t, "strangerpassword123")
+
+		inviteRequest := &apicommon.OrganizationInvite{
+			Email: "nonadmin@example.com",
+			Role:  db.ViewerRole,
+		}
+		requestAndAssertError(errors.ErrUserHasNoAdminRole,
+			t, http.MethodPost, strangerToken, inviteRequest, "organizations", orgAddress.String(), "users")
+	})
+
 	t.Run("MaxUsersReached", func(t *testing.T) {
 		c := qt.New(t)
 
@@ -952,11 +965,12 @@ func TestOrganizationUsers(t *testing.T) {
 		// Set the organization's subscription plan to the free plan and set the user counter to
 		// the maximum allowed by the plan, so a further invite must be rejected.
 		org.Subscription.PlanID = mockFreePlan.ID
+		c.Assert(testDB.SetOrganizationSubscription(orgAddress, &org.Subscription), qt.IsNil)
 		org.Counters.Users = 10
 		err = testDB.SetOrganization(org)
 		c.Assert(err, qt.IsNil)
 
-		// Try to invite a user to the organization (should fail with "max users reached")
+		// Try to invite a user to the organization (should fail with "the organization's plan allows no more users")
 		inviteRequest := &apicommon.OrganizationInvite{
 			Email: "maxusers@example.com",
 			Role:  db.ViewerRole,
@@ -970,16 +984,17 @@ func TestOrganizationUsers(t *testing.T) {
 			orgAddress.String(),
 			"users",
 		)
-		c.Assert(code, qt.Not(qt.Equals), http.StatusOK, qt.Commentf("expected error, got success: %s", resp))
 
-		// Verify the error message contains "max users reached"
+		// Verify the plan limit is reported as a 400 with its own error code
+		c.Assert(code, qt.Equals, http.StatusBadRequest, qt.Commentf("response: %s", resp))
 		var errorResp struct {
 			Error string `json:"error"`
 			Code  int    `json:"code"`
 		}
 		err = json.Unmarshal(resp, &errorResp)
 		c.Assert(err, qt.IsNil)
-		c.Assert(errorResp.Error, qt.Contains, "max users reached")
+		c.Assert(errorResp.Code, qt.Equals, errors.ErrMaxUsersReached.Code)
+		c.Assert(errorResp.Error, qt.Contains, "the organization's plan allows no more users")
 	})
 
 	t.Run("OrganizationRoles", func(t *testing.T) {

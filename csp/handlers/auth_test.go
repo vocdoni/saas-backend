@@ -56,11 +56,11 @@ func TestAuthFirstStepUnknownParticipantPasswordWork(t *testing.T) {
 	withPassword := newCensus(db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber, db.OrgMemberAuthFieldsPassword})
 	withoutPassword := newCensus(db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber})
 
-	h := New(&csp.CSP{PasswordSalt: salt}, mainDB)
+	h := New(&csp.CSP{PasswordSalt: salt, Storage: mainDB}, mainDB)
 	checks := 0
-	h.hashPassword = func(salt string, memberID bson.ObjectID, clientHash string) []byte {
+	h.hashPassword = func(ctx context.Context, salt string, memberID bson.ObjectID, clientHash string) ([]byte, error) {
 		checks++
-		return db.HashMemberPassword(salt, memberID, clientHash)
+		return db.HashMemberPasswordContext(ctx, salt, memberID, clientHash)
 	}
 	// auth0 runs auth step 0 and returns its API error code and the password checks it ran
 	auth0 := func(censusID, memberNumber, password string) (int, int) {
@@ -73,7 +73,7 @@ func TestAuthFirstStepUnknownParticipantPasswordWork(t *testing.T) {
 		c.Assert(ok, qt.IsTrue, qt.Commentf("error: %v", err))
 		return apiErr.Code, checks
 	}
-	notFound := errors.ErrCensusParticipantNotFound.Code
+	notFound := errors.ErrCSPAuthFailed.Code
 
 	type answer struct{ code, checks int }
 	for _, tc := range []struct {

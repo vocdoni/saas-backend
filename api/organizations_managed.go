@@ -160,6 +160,7 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		Address:        signer.Address(),
 		Website:        req.Website,
 		Creator:        creatorEmail,
+		SignerSeed:     creatorEmail,
 		CreatedAt:      time.Now(),
 		Nonce:          nonce,
 		Type:           db.OrganizationType(req.Type),
@@ -211,7 +212,9 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	apicommon.HTTPWriteJSON(w, apicommon.OrganizationFromDB(dbOrg, nil))
+	info := apicommon.OrganizationFromDB(dbOrg, nil)
+	redactBillingEmails(info, user)
+	apicommon.HTTPWriteJSON(w, info)
 }
 
 // managedOrganizationsHandler godoc
@@ -263,7 +266,9 @@ func (a *API) managedOrganizationsHandler(w http.ResponseWriter, r *http.Request
 	}
 	list := make([]*apicommon.OrganizationInfo, 0, len(orgs))
 	for i := range orgs {
-		list = append(list, apicommon.OrganizationFromDB(&orgs[i], nil))
+		info := apicommon.OrganizationFromDB(&orgs[i], nil)
+		redactBillingEmails(info, user)
+		list = append(list, info)
 	}
 	apicommon.HTTPWriteJSON(w, &apicommon.ListManagedOrganizations{
 		Pagination:    pagination,

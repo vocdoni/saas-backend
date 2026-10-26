@@ -590,4 +590,37 @@ func TestEffectiveQuestionType(t *testing.T) {
 			BallotProtocol: &db.BallotProtocol{MaxCount: 1, MaxValue: 2},
 		}), qt.Equals, db.VotingTypeSingleChoice)
 	})
+
+	c.Run("vote overwrites do not hide the layout", func(c *qt.C) {
+		// overwrites are gated by Features.Overwrite, not the voting type, so a singlechoice that
+		// allows them must still be classified (and gated) as singlechoice
+		c.Assert(EffectiveQuestionType(&db.VotingProcessQuestion{
+			Choices:        choices(3),
+			BallotProtocol: &db.BallotProtocol{MaxCount: 1, MaxValue: 2, MaxVoteOverwrites: 3},
+		}), qt.Equals, db.VotingTypeSingleChoice)
+		c.Assert(EffectiveQuestionType(&db.VotingProcessQuestion{
+			Choices:        choices(3),
+			BallotProtocol: &db.BallotProtocol{MaxCount: 3, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2, MaxVoteOverwrites: 1},
+		}), qt.Equals, db.VotingTypeMultiChoice)
+	})
+
+	c.Run("a weighted budget is cumulative", func(c *qt.C) {
+		c.Assert(EffectiveQuestionType(&db.VotingProcessQuestion{
+			Choices:        choices(3),
+			BallotProtocol: &db.BallotProtocol{MaxCount: 3, CostExponent: 1, CostFromWeight: true},
+		}), qt.Equals, db.VotingTypeCumulative)
+		c.Assert(EffectiveQuestionType(&db.VotingProcessQuestion{
+			Choices:        choices(3),
+			BallotProtocol: &db.BallotProtocol{MaxCount: 3, CostExponent: 2, MaxTotalCost: 10, CostFromWeight: true},
+		}), qt.Equals, db.VotingTypeCumulative)
+	})
+
+	c.Run("a near-canonical shape is unnamed", func(c *qt.C) {
+		// the multichoice ballot field-for-field bar costExponent: not recognised, so the plan gate
+		// sees an unnamed layout and demands a plan allowing every voting type
+		c.Assert(EffectiveQuestionType(&db.VotingProcessQuestion{
+			Choices:        choices(2),
+			BallotProtocol: &db.BallotProtocol{MaxCount: 2, MaxValue: 1, CostExponent: 2, MaxTotalCost: 2},
+		}), qt.Equals, "")
+	})
 }

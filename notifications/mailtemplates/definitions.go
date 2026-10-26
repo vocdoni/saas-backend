@@ -23,6 +23,13 @@ var PasswordResetNotification = MailTemplate{
 	WebAppURI: "/account/password/reset",
 }
 
+// VerifyEmailChangeNotification is the notification sent to the new address
+// when a user asks to change their account email, with the code that confirms it.
+var VerifyEmailChangeNotification = MailTemplate{
+	File:      "verify_email_change",
+	WebAppURI: "/account/email/verify",
+}
+
 // InviteNotification is the notification to be sent when a user is invited
 // to be an admin of an organization.
 var InviteNotification = MailTemplate{

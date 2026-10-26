@@ -45,7 +45,7 @@ func TestCSPAuthPassword(t *testing.T) {
 		return string(body), code
 	}
 	unknownBody, unknownCode := auth0(t, &handlers.AuthRequest{MemberNumber: "PW-9", Password: alicePass})
-	c.Assert(unknownCode, qt.Equals, errors.ErrCensusParticipantNotFound.HTTPstatus, qt.Commentf("response: %s", unknownBody))
+	c.Assert(unknownCode, qt.Equals, errors.ErrCSPAuthFailed.HTTPstatus, qt.Commentf("response: %s", unknownBody))
 
 	t.Run("the right password logs in", func(t *testing.T) {
 		postProcessAuth0(t, pid, &handlers.AuthRequest{MemberNumber: "PW-1", Password: alicePass})

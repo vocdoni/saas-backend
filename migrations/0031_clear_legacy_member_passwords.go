@@ -10,7 +10,7 @@ import (
 )
 
 func init() {
-	AddMigration(26, "clear_legacy_member_passwords", upClearLegacyMemberPasswords, downClearLegacyMemberPasswords)
+	AddMigration(31, "clear_legacy_member_passwords", upClearLegacyMemberPasswords, downClearLegacyMemberPasswords)
 }
 
 // upClearLegacyMemberPasswords unsets the stored password (`pass`) of every organization member.

@@ -10,7 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-// TestClearLegacyMemberPasswordsMigration asserts migration 0026 unsets every member's stored
+// TestClearLegacyMemberPasswordsMigration asserts migration 0031 unsets every member's stored
 // password, which predates the client hash and can never match, leaves the rest of the member
 // alone, and that its down is a no-op.
 func TestClearLegacyMemberPasswordsMigration(t *testing.T) {
@@ -39,7 +39,7 @@ func TestClearLegacyMemberPasswordsMigration(t *testing.T) {
 		return m
 	}
 
-	mig := migrationByVersion(c, 26)
+	mig := migrationByVersion(c, 31)
 	c.Assert(mig.Up(ctx, database), qt.IsNil)
 	for _, id := range []bson.ObjectID{legacy, without} {
 		m := raw(id)
