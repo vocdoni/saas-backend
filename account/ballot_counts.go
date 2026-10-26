@@ -104,37 +104,46 @@ func (bt *ballotTally) counts() *db.BallotCounts {
 }
 
 // ElectionBallotCounts computes the blank, invalid and per-option ballot counts and weights of the
-// on-chain election with the given id. It pages the votes list and fetches every listed vote (the list
-// rows carry neither package nor weight) with at most ballotCountsFetchers fetches in flight, then
-// classifies each ballot with c. Rows are one per nullifier carrying the latest package, so overwritten
-// votes count once.
+// on-chain election with the given id. It pages the votes list (GET /votes?electionId=, ballotCountsPageSize
+// rows per page, up to the last page the first one reports) and fetches every listed vote (the list rows
+// carry neither package nor weight) with at most ballotCountsFetchers fetches in flight, then classifies
+// each ballot with c. Rows are one per nullifier carrying the latest package, so overwritten votes count
+// once. An election with no votes makes no request.
 //
-// It is all-or-nothing, so wrong counts are never returned: the first chain error, listed vote the node
-// cannot find, unparsable weight, or ctx cancellation stops scheduling
-// pages and fetches (the ones already in flight finish on the client's timeout) and is returned;
-// and so is a listed row count different from voteCount (an index still catching up).
-// A package the tally would skip is not an error: it counts as invalid.
+// Every request is tried up to voteReadAttempts times (transport errors, 5xx, 429 and 404 are retried
+// after voteReadBackoff). It is still all-or-nothing after the retries, so wrong counts are never
+// returned: the first read that exhausts them, unparsable weight, or ctx cancellation (which also stops
+// the in-flight reads) stops scheduling pages and fetches and is returned; and so is a listed row count
+// different from voteCount (an index still catching up). A package the tally would skip is not an error:
+// it counts as invalid.
 func (a *Account) ElectionBallotCounts(
 	ctx context.Context, electionID []byte, voteCount uint64, c BallotClassifier,
 ) (*db.BallotCounts, error) {
 	tally := newBallotTally(c.Width())
+	if voteCount == 0 {
+		return tally.counts(), nil
+	}
 	g, gctx := errgroup.WithContext(ctx)
 	// one slot for the page loop below, which itself schedules the vote fetches into the group
 	g.SetLimit(ballotCountsFetchers + 1)
 	var listed uint64
 	g.Go(func() error {
-		for page := 0; ; page++ {
+		lastPage := uint64(0)
+		for page := 0; uint64(page) <= lastPage; page++ {
 			if err := gctx.Err(); err != nil {
 				return err
 			}
-			rows, err := a.electionVotesPage(electionID, page)
+			list, err := a.votes.listPage(gctx, electionID, page)
 			if err != nil {
 				return err
 			}
-			if len(rows) == 0 {
-				return nil
+			if page == 0 {
+				if list.Pagination == nil {
+					return fmt.Errorf("votes list has no pagination")
+				}
+				lastPage = list.Pagination.LastPage
 			}
-			for _, row := range rows {
+			for _, row := range list.Votes {
 				if err := gctx.Err(); err != nil {
 					return err
 				}
@@ -144,10 +153,11 @@ func (a *Account) ElectionBallotCounts(
 					if err := gctx.Err(); err != nil {
 						return err
 					}
-					return a.countVote(voteID, c, tally)
+					return a.countVote(gctx, voteID, c, tally)
 				})
 			}
 		}
+		return nil
 	})
 	if err := g.Wait(); err != nil {
 		return nil, fmt.Errorf("could not count ballots of election %x: %w", electionID, err)
@@ -160,8 +170,8 @@ func (a *Account) ElectionBallotCounts(
 }
 
 // countVote fetches one vote, classifies its ballot and adds it to the tally.
-func (a *Account) countVote(voteID internal.HexBytes, c BallotClassifier, tally *ballotTally) error {
-	vote, err := a.VoteByNullifier(voteID)
+func (a *Account) countVote(ctx context.Context, voteID internal.HexBytes, c BallotClassifier, tally *ballotTally) error {
+	vote, err := a.votes.vote(ctx, voteID)
 	if err != nil {
 		return err
 	}
