@@ -13,6 +13,10 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
+// MongoImage is the MongoDB image the tests run against. It is pinned by digest so every machine
+// tests the same server and a bump is a source change, which also invalidates Go's test cache.
+const MongoImage = "mongo:7.0.45@sha256:9650758f83af117fc96699f030a44f9300bed839734e67012f56df05b2fd6290"
+
 // StartMongoContainer creates and starts an instance of the mongodb container
 // The caller is responsible for terminating the container.
 func StartMongoContainer(ctx context.Context) (*mongodb.MongoDBContainer, error) {
@@ -35,7 +39,7 @@ func StartMongoContainer(ctx context.Context) (*mongodb.MongoDBContainer, error)
 		}),
 	}
 
-	mongodbContainer, err := mongodb.Run(ctx, "mongo:7", opts...)
+	mongodbContainer, err := mongodb.Run(ctx, MongoImage, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start container: %w", err)
 	}

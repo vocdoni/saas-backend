@@ -1088,6 +1088,26 @@ definitions:
           $ref: '#/definitions/apicommon.ProcessParticipantEntry'
         type: array
     type: object
+  apicommon.ProcessPriceResponse:
+    properties:
+      currency:
+        type: string
+      lines:
+        items:
+          $ref: '#/definitions/pricing.QuoteLine'
+        type: array
+      quoteRecommended:
+        description: 'QuoteRecommended: census above 15 000 voters — suggest requesting
+          a custom quote.'
+        type: boolean
+      quoteRequired:
+        description: |-
+          QuoteRequired: census above 50 000 voters — quote-only: no price (no lines, totalCents 0,
+          which is not free) and no self-service payment.
+        type: boolean
+      totalCents:
+        $ref: '#/definitions/pricing.Cents'
+    type: object
   apicommon.PublicQuestionResponse:
     properties:
       ballotProtocol:
@@ -1405,6 +1425,12 @@ definitions:
         type: string
       progress:
         type: integer
+      questions:
+        description: Questions is the per-question outcome of a status-change job,
+          in target order
+        items:
+          $ref: '#/definitions/db.QuestionJobResult'
+        type: array
       status:
         type: string
       total:
@@ -2045,6 +2071,17 @@ definitions:
       teamMembers:
         type: integer
     type: object
+  db.QuestionJobResult:
+    properties:
+      error:
+        type: string
+      noOp:
+        type: boolean
+      questionId:
+        type: string
+      status:
+        $ref: '#/definitions/db.JobStatus'
+    type: object
   db.QuestionResults:
     properties:
       finalResults:
@@ -2206,7 +2243,8 @@ definitions:
         description: HTTP status code to return
         type: integer
       logLevel:
-        description: Log level for this error (defaults to "debug")
+        description: Log level for this error (defaults to "debug" for 4xx and "error"
+          for 5xx)
         type: string
     type: object
   github_com_vocdoni_saas-backend_stripe.CheckoutSessionStatus:
@@ -2482,6 +2520,42 @@ definitions:
         format: hex
         type: string
     type: object
+  pricing.Cents:
+    enum:
+    - 1
+    - 100
+    - 1
+    - 5
+    - 3900
+    - 14900
+    - 9900
+    - 100
+    format: int64
+    type: integer
+    x-enum-comments:
+      signedCertPrice: per process
+      smsTwoFAPerVoter: per eligible voter
+    x-enum-descriptions:
+    - per eligible voter
+    - per process
+    x-enum-varnames:
+    - Cent
+    - Euro
+    - integratorEmailTwoFAPerVoter
+    - smsTwoFAPerVoter
+    - signedCertPrice
+    - BrandingCents
+    - CustomURLCents
+    - MinimumChargeCents
+  pricing.QuoteLine:
+    properties:
+      amountCents:
+        $ref: '#/definitions/pricing.Cents'
+      description:
+        type: string
+      kind:
+        type: string
+    type: object
 host: localhost:8080
 info:
   contact:
@@ -2552,6 +2626,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
+          schema:
+            $ref: '#/definitions/errors.Error'
       summary: Login to get a JWT token
       tags:
       - auth
@@ -2584,6 +2662,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -3105,6 +3187,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
+          schema:
+            $ref: '#/definitions/errors.Error'
       summary: Login using OAuth service or classic credentials
       tags:
       - auth
@@ -3137,11 +3223,12 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.OrganizationInfo'
         "400":
-          description: Invalid input data
+          description: Invalid input data, or the user has reached the maximum number
+            of organizations
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Unauthorized
+          description: Unauthorized, or the user is not an admin of the parent organization
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
@@ -4128,7 +4215,8 @@ paths:
           schema:
             type: string
         "400":
-          description: Invalid input data
+          description: Invalid input data, or the organization's plan allows no more
+            users
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -4288,6 +4376,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Accept an invitation to an organization
@@ -4486,6 +4578,58 @@ paths:
       summary: Get all subscription plans
       tags:
       - plans
+  /pricing:
+    get:
+      description: |-
+        Public calculator over the published pricing formula: pass the inputs, get the
+        same breakdown GET /processes/{processId}/price returns for a draft. EUR cents,
+        VAT excluded (Stripe Tax adds VAT at checkout). No organization context: branding
+        is charged as requested and legacy plan credits are not applied. Base price on
+        graduated bands, free up to 25 voters; add-ons are charged on free processes too.
+        A priced total below €1 is raised to €1 by a minimumCharge line. Above 15 000
+        voters a custom quote is recommended (quoteRecommended). Above 50 000 the process
+        is quote-only: quoteRequired is true and there is no price (empty lines,
+        totalCents 0 — not free).
+      parameters:
+      - description: Eligible voters (census size), at least 1
+        in: query
+        name: voters
+        required: true
+        type: integer
+      - description: Email 2FA add-on (free for standard organizations)
+        in: query
+        name: emailTwoFA
+        type: boolean
+      - description: SMS 2FA add-on (€0.05 per voter)
+        in: query
+        name: smsTwoFA
+        type: boolean
+      - description: Signed results certificate add-on (€39)
+        in: query
+        name: signedCertificate
+        type: boolean
+      - description: Custom URL add-on (€99, once per organization)
+        in: query
+        name: customUrl
+        type: boolean
+      - description: Branding / white label add-on (€149, once per organization)
+        in: query
+        name: branding
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessPriceResponse'
+        "400":
+          description: Missing or invalid voters
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Compute a pay-per-process price
+      tags:
+      - processes
   /processes:
     get:
       description: |-
@@ -4632,7 +4776,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Process already published
+          description: Process already published, partially published (40904), or
+            being published
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -4675,7 +4820,9 @@ paths:
       consumes:
       - application/json
       description: |-
-        Update a voting process while it is still a draft (not published). 409 if already published.
+        Update a voting process while it is still a draft (not published). 409 if already published,
+        and 409 (40904) if partially published — an earlier publish already mined some of its
+        questions on-chain, so the draft can only be published again (resuming the rest), not edited.
         The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
         as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
         `typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
@@ -4741,6 +4888,14 @@ paths:
         - Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
         If valid the token is marked verified and returned. Auth-only censuses may not require
         a challenge solution.
+        Step 0 returns the same error (40802) whether the login data matches no census participant
+        or the contact data does not match an existing one. Failed attempts are capped per UTC hour
+        on the process for each submitted set of login and contact fields, and, ten times higher,
+        for each set of login fields across all contacts tried. Once either is exhausted, step 0
+        answers 40017 until the hour ends (the voter cap even with the right contact data);
+        data.retryAfter gives the seconds left.
+        A member's challenge sends (new tokens + resends) are capped per UTC day, also answering
+        40017 with data.retryAfter.
       parameters:
       - description: Process ID
         in: path
@@ -4766,15 +4921,17 @@ paths:
           schema:
             $ref: '#/definitions/handlers.AuthResponse'
         "400":
-          description: Invalid input data
+          description: Invalid input data, or failed-attempt or daily send limit reached
+            (40017)
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Unauthorized, cooldown not reached, or invalid challenge
+          description: Invalid authentication data, cooldown not reached, or invalid
+            challenge
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
-          description: Process, census, organization, or participant not found
+          description: Process, census, or organization not found
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -4792,6 +4949,8 @@ paths:
         Resend the challenge for an existing (non-verified) authentication token of a voting
         process. The request must include the auth token and a valid contact method for the
         census type (email/phone). The same token is returned if the challenge is queued.
+        A token can be resent at most 3 times, and a contact that does not match the member spends
+        one of them too.
       parameters:
       - description: Process ID
         in: path
@@ -4812,8 +4971,8 @@ paths:
           schema:
             $ref: '#/definitions/handlers.AuthResponse'
         "400":
-          description: Malformed body, missing auth token, invalid contact, or token
-            already verified
+          description: Malformed body, missing token, invalid contact, verified token,
+            or resend limit (40017)
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -5090,6 +5249,10 @@ paths:
             $ref: '#/definitions/handlers.ProcessCheckResponse'
         "400":
           description: Malformed body or missing auth token
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Auth token not verified or not issued for this process
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
@@ -5383,6 +5546,14 @@ paths:
           description: Accepted
           schema:
             $ref: '#/definitions/apicommon.EnqueuedResponse'
+        "400":
+          description: Invalid status, or a question in a terminal status cannot change
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Organization transaction in progress (50303), or tx queue full
+          schema:
+            $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
       summary: Change status of one question
@@ -5411,6 +5582,14 @@ paths:
           description: Accepted
           schema:
             $ref: '#/definitions/apicommon.EnqueuedResponse'
+        "400":
+          description: Invalid status, or a question in a terminal status cannot change
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Organization transaction in progress (50303), or tx queue full
+          schema:
+            $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
       summary: Change status of many questions
@@ -5879,7 +6058,8 @@ paths:
               type: string
             type: object
         "400":
-          description: Invalid input data
+          description: Invalid input data, or the plan has no price for the billing
+            period
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -5888,6 +6068,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "404":
           description: Organization or plan not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Organization already has a paid subscription
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -5903,7 +6087,10 @@ paths:
     get:
       consumes:
       - application/json
-      description: Retrieve the status of a Stripe checkout session
+      description: |-
+        Retrieve the status of a Stripe checkout session. Only an admin of the organization
+        the session was created for may read it; any other session id answers 404, so the
+        existence of a session is never revealed.
       parameters:
       - description: Checkout session ID
         in: path
@@ -5921,10 +6108,20 @@ paths:
           description: Invalid session ID
           schema:
             $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Checkout session not found
+          schema:
+            $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
       summary: Get checkout session status
       tags:
       - plans
@@ -5991,6 +6188,10 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
+          schema:
+            $ref: '#/definitions/errors.Error'
       summary: Register a new user
       tags:
       - users
@@ -6022,7 +6223,15 @@ paths:
     put:
       consumes:
       - application/json
-      description: Update information for the authenticated user
+      description: |-
+        Update information for the authenticated user. Changing the email does not take
+        effect immediately: a verification code is sent to the requested address and the
+        email is switched only once the code is confirmed via POST /users/me/email/verify.
+        Changing the email of an account with a password requires the current password in
+        the password field; accounts without a password (OAuth-only) cannot change it, and
+        neither can any account when the service runs without a mail service.
+        A new change code can be requested once per OTP cooldown. The code is mailed to the
+        new address with a link to the web app page /account/email/verify?code=<code>.
       parameters:
       - description: User information to update
         in: body
@@ -6045,6 +6254,10 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
+        "409":
+          description: Email already in use
+          schema:
+            $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
           schema:
@@ -6054,11 +6267,60 @@ paths:
       summary: Update user information
       tags:
       - users
+  /users/me/email/verify:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Confirm the email change requested via PUT /users/me with the code sent to the
+        new address. On success the account email is switched, every existing session is
+        revoked and a fresh token is returned.
+      parameters:
+      - description: Verification code
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.UserVerification'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.LoginResponse'
+        "400":
+          description: Invalid input data or max attempts reached
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized or code mismatch
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Email already in use
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "410":
+          description: Verification code expired
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Confirm a pending email change
+      tags:
+      - users
   /users/password:
     put:
       consumes:
       - application/json
-      description: Update the password for the authenticated user
+      description: |-
+        Update the password for the authenticated user. Every existing session is revoked;
+        a fresh token for the current client is returned in the response.
       parameters:
       - description: Password update information
         in: body
@@ -6072,7 +6334,7 @@ paths:
         "200":
           description: OK
           schema:
-            type: string
+            $ref: '#/definitions/apicommon.LoginResponse'
         "400":
           description: Invalid input data
           schema:
@@ -6083,6 +6345,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -6159,6 +6425,10 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
+          schema:
+            $ref: '#/definitions/errors.Error'
       summary: Reset user password
       tags:
       - users
@@ -6224,18 +6494,6 @@ paths:
             $ref: '#/definitions/apicommon.UserVerification'
         "400":
           description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: User not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "409":
-          description: User already verified
           schema:
             $ref: '#/definitions/errors.Error'
         "500":

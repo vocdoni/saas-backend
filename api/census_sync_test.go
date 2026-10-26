@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 
@@ -713,7 +714,7 @@ func TestVotingProcessMutationsRefusedWhilePublishing(t *testing.T) {
 	oid := objectID(c, pid)
 
 	// claim it directly: no chain work needed to reproduce the window
-	won, err := testDB.ClaimVotingProcessForPublish(oid)
+	_, won, err := testDB.ClaimVotingProcessForPublish(oid, time.Time{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue)
 
@@ -738,9 +739,24 @@ func TestVotingProcessMutationsRefusedWhilePublishing(t *testing.T) {
 	c.Assert(after.Questions[0].ID, qt.Equals, before.Questions[0].ID)
 
 	// releasing the claim lets the same requests through
-	c.Assert(testDB.ClearVotingProcessPublishing(oid), qt.IsNil)
+	c.Assert(testDB.ClearVotingProcessPublishing(oid, ""), qt.IsNil)
 	_, code = testRequest(t, http.MethodPut, token, edit, "processes", pid)
 	c.Assert(code, qt.Equals, http.StatusOK)
+
+	// the eligibility update takes the publish claim itself and gives it back when done
+	edited := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	_, code = testRequest(t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: []string{ids[0]}},
+		"processes", pid, "questions", edited.Questions[0].ID.Hex(), "census")
+	c.Assert(code, qt.Equals, http.StatusOK)
+	_, won, err = testDB.ClaimVotingProcessForPublish(oid, time.Time{})
+	c.Assert(err, qt.IsNil)
+	c.Assert(won, qt.IsTrue)
+	c.Assert(testDB.ClearVotingProcessPublishing(oid, ""), qt.IsNil)
+
+	// a draft flagged as having mined an election cannot be deleted, even with no stored election id
+	c.Assert(testDB.MarkVotingProcessMined(oid), qt.IsNil)
+	requestAndAssertError(errors.ErrProcessPartiallyPublished, t, http.MethodDelete, token, nil, "processes", pid)
 }
 
 func objectID(c *qt.C, hexID string) bson.ObjectID {
@@ -1089,4 +1105,52 @@ func TestRemoveProcessCensusIsOrgScoped(t *testing.T) {
 	}, "processes", victimPID, "sign")
 	c.Assert(code, qt.Equals, http.StatusOK,
 		qt.Commentf("another organization deleted this voter's CSP auth session"))
+}
+
+// TestResizeWaitsForBusyOrgLock pins that a census resize is not dropped while the organization
+// has a tx in flight: a publish holds the org lock through every mining round, so the resize job
+// is created at once, stays pending while the lock is held, and runs once it is released.
+func TestResizeWaitsForBusyOrgLock(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
+	ids := memberIDs(members)
+
+	pid, got := publishedProcess(t, token, orgAddress, ids)
+	restricted := got.Questions[1]
+
+	restore := orgTxLockTimeout
+	orgTxLockTimeout = 50 * time.Millisecond
+	defer func() { orgTxLockTimeout = restore }()
+	held := testAPI.orgTxLocks.lock(orgAddress)
+	released := false
+	defer func() {
+		if !released {
+			held.Unlock()
+		}
+	}()
+
+	upd := requestAndParseWithAssertCode[apicommon.UpdateQuestionCensusResponse](
+		http.StatusAccepted, t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: []string{}},
+		"processes", pid, "questions", restricted.ID.Hex(), "census",
+	)
+	c.Assert(upd.JobID, qt.Not(qt.Equals), "")
+
+	// well past the bounded wait, the job is still pending rather than dropped
+	time.Sleep(10 * orgTxLockTimeout)
+	pending, err := testDB.Job(upd.JobID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(pending.Status, qt.Equals, db.JobStatusPending)
+
+	held.Unlock()
+	released = true
+	job := pollJob(t, upd.JobID)
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("resize job error: %s", job.Errors))
+
+	elec, err := testAPI.account.Election(restricted.UpstreamID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(elec.Census.MaxCensusSize, qt.Equals, uint64(3))
 }

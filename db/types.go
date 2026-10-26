@@ -31,17 +31,33 @@ type User struct {
 	OAuth         map[string]OAuthProvider `json:"oauth,omitempty" bson:"oauth,omitempty"` // OAuth providers by name
 	Organizations []OrganizationUser       `json:"organizations" bson:"organizations"`
 	Verified      bool                     `json:"verified" bson:"verified"`
+	// SessionVersion is the version every JWT session of the user is bound to. It is bumped
+	// (atomically, by the credential-update methods) whenever all existing sessions must be
+	// revoked: password change, password reset or email change. Tokens minted with an older
+	// version are rejected by the authenticator. It is never written by SetUser, so a stale
+	// snapshot cannot roll a revocation back.
+	SessionVersion uint64 `json:"-" bson:"sessionVersion"`
 }
 
 type CodeType string
 
 type UserVerification struct {
-	ID         uint64    `json:"id" bson:"_id"`
+	UserID     uint64    `json:"userId" bson:"userId"`
 	SealedCode []byte    `json:"sealedCode" bson:"sealedCode"`
 	Type       CodeType  `json:"type" bson:"type"`
 	CreatedAt  time.Time `json:"createdAt" bson:"createdAt"`
 	Expiration time.Time `json:"expiration" bson:"expiration"`
-	Attempts   int       `json:"attempts" bson:"attempts"`
+	// PendingEmail is the address an email-update code (CodeTypeUpdateEmail) was sent to; the
+	// user's email is switched to it only once the code is confirmed.
+	PendingEmail string `json:"pendingEmail,omitempty" bson:"pendingEmail,omitempty"`
+	// Attempts counts failed guesses of the code; it starts at zero and is bounded by
+	// VerificationCodeCheckAndAddAttempt.
+	Attempts int `json:"attempts" bson:"attempts"`
+	// Sends counts deliveries of the code (the initial email plus resends); it starts at one
+	// and is bounded by VerificationCodeTrySend, independently of the guess budget.
+	Sends int `json:"sends" bson:"sends"`
+	// LastSentAt is when the code was last delivered, used to enforce the send cooldown.
+	LastSentAt time.Time `json:"lastSentAt" bson:"lastSentAt"`
 }
 
 // TODO this is the default role function while it should be
@@ -78,11 +94,17 @@ type Organization struct {
 	Creator   string           `json:"creator" bson:"creator"`
 	CreatedAt time.Time        `json:"createdAt" bson:"createdAt"`
 	Nonce     string           `json:"nonce" bson:"nonce"`
-	Size      string           `json:"size" bson:"size"`
-	Color     string           `json:"color" bson:"color"`
-	Subdomain string           `json:"subdomain" bson:"subdomain"`
-	Country   string           `json:"country" bson:"country"`
-	Timezone  string           `json:"timezone" bson:"timezone"`
+	// SignerSeed is the immutable per-organization component of the signer key derivation
+	// (secret + seed + nonce). It is set once at creation to the creator's email (migration
+	// 0028 backfills it from Creator) and never rewritten — unlike Creator, which
+	// ReplaceCreatorEmail rewrites on an email change — so the derived on-chain key cannot
+	// silently change. Never exposed over the API.
+	SignerSeed string `json:"-" bson:"signerSeed,omitempty"`
+	Size       string `json:"size" bson:"size"`
+	Color      string `json:"color" bson:"color"`
+	Subdomain  string `json:"subdomain" bson:"subdomain"`
+	Country    string `json:"country" bson:"country"`
+	Timezone   string `json:"timezone" bson:"timezone"`
 	// DefaultLang is the language of the notifications sent on behalf of the organization
 	// (see apicommon.NotificationLang). Every organization has one, defaulting to "en".
 	// It can be changed but not cleared, dynamicUpdateDocument skipping zero-valued fields.
@@ -136,6 +158,16 @@ func (o *Organization) DisplayName() string {
 		return ""
 	}
 	return metaDefaultString(o.Meta["name"])
+}
+
+// SignerSeedValue returns the seed component used to derive the organization signer,
+// falling back to the creator email for rows the backfill migration has not stamped yet
+// (the value the backfill copies into the seed).
+func (o *Organization) SignerSeedValue() string {
+	if o.SignerSeed != "" {
+		return o.SignerSeed
+	}
+	return o.Creator
 }
 
 // LogoURL returns the organization logo URL stored in its metadata,
@@ -777,8 +809,18 @@ type VotingProcess struct {
 	// and the stale sweep on it being old, so a zero date persisted as a value would make every
 	// draft ever created look like a crashed publish.
 	Publishing time.Time `json:"-" bson:"publishing,omitempty"`
-	CreatedAt  time.Time `json:"createdAt" bson:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt" bson:"updatedAt"`
+	// PublishingOwner is the random token held by the publish worker that owns the Publishing
+	// claim; renewal and the owner-conditional clear/publish writes match on it, so a worker
+	// whose stale claim was reclaimed cannot overwrite the new claimant's state.
+	PublishingOwner string `json:"-" bson:"publishingOwner,omitempty"`
+	// HasMinedElections is set as soon as a publish persists the first on-chain election of one of
+	// the process's questions, and never cleared. SetVotingProcessDraft refuses to replace such a
+	// process: a draft edit would rewrite the questions and erase their election ids. Keeping the
+	// flag on the process document makes that refusal part of the draft write itself, rather than
+	// a check of the questions collection that a publish could invalidate before the write lands.
+	HasMinedElections bool      `json:"-" bson:"hasMinedElections,omitempty"`
+	CreatedAt         time.Time `json:"createdAt" bson:"createdAt"`
+	UpdatedAt         time.Time `json:"updatedAt" bson:"updatedAt"`
 }
 
 // PublishInProgress reports whether a publish worker currently holds this process. A marker older
@@ -972,8 +1014,18 @@ type VoteJobResult struct {
 	Error     string            `json:"error,omitempty" bson:"error,omitempty"`
 }
 
+// QuestionJobResult is the outcome of one question inside a status-change job
+// (JobTypeSetProcessStatus). NoOp marks a question that was already in the requested
+// status, reported as completed without an on-chain transaction.
+type QuestionJobResult struct {
+	QuestionID string    `json:"questionId" bson:"questionId"`
+	Status     JobStatus `json:"status,omitempty" bson:"status,omitempty"`
+	Error      string    `json:"error,omitempty" bson:"error,omitempty"`
+	NoOp       bool      `json:"noOp,omitempty" bson:"noOp,omitempty"`
+}
+
 // JobResult carries the public on-chain outcome of a transaction job. Fields are
-// populated depending on the job type (publish → Address+Status; status → Status;
+// populated depending on the job type (publish → Address+Status; status → Status+Questions;
 // vote → ProcessID+Nullifier+VoteID; batch vote → Votes) and are omitted when empty.
 type JobResult struct {
 	Address   internal.HexBytes `json:"address,omitempty" bson:"address,omitempty" swaggertype:"string" example:"deadbeef"`
@@ -984,6 +1036,8 @@ type JobResult struct {
 	// Votes carries the per-envelope outcome of a batch vote relay, index-aligned with
 	// the votes of the POST /votes request that created the job.
 	Votes []VoteJobResult `json:"votes,omitempty" bson:"votes,omitempty"`
+	// Questions carries the per-question outcome of a status-change job, in target order.
+	Questions []QuestionJobResult `json:"questions,omitempty" bson:"questions,omitempty"`
 }
 
 // Job represents a persistent import or transaction job with its results and errors.
@@ -1005,4 +1059,10 @@ type Job struct {
 	Status JobStatus  `json:"status,omitempty" bson:"status,omitempty"` // pending|completed|failed
 	Result *JobResult `json:"result,omitempty" bson:"result,omitempty"` // on-chain outcome when completed
 	Error  string     `json:"error,omitempty" bson:"error,omitempty"`   // failure reason when failed
+	// Instance identifies the service process whose in-memory tx queue holds a pending
+	// transaction job, and HeartbeatAt is the last time that process vouched it is still
+	// alive. Together they let any replica close the jobs of a process that died without
+	// touching the jobs another live replica is still running (see FailInterruptedTxJobs).
+	Instance    string    `json:"-" bson:"instance,omitempty"`
+	HeartbeatAt time.Time `json:"-" bson:"heartbeatAt,omitempty"`
 }

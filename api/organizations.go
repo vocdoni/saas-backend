@@ -20,6 +20,18 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
+// writePermissionError answers an error from a Subscriptions permission check. A refusal below 500
+// (no admin role, organization limit reached) is written as is; any other error is an internal one,
+// whose detail is only logged.
+func writePermissionError(w http.ResponseWriter, err error) {
+	var apiErr errors.Error
+	if errors.As(err, &apiErr) && apiErr.HTTPstatus < http.StatusInternalServerError {
+		apiErr.Write(w)
+		return
+	}
+	errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+}
+
 // validateDefaultLang reports whether lang is a supported notification language, writing the
 // error response when it is not. An empty value is accepted, meaning "unchanged".
 func validateDefaultLang(w http.ResponseWriter, lang string) bool {
@@ -48,8 +60,8 @@ func validateDefaultLang(w http.ResponseWriter, lang string) bool {
 //	@Security		BearerAuth
 //	@Param			request	body		apicommon.CreateOrganizationRequest	true	"Organization info (+ optional provisionAccount / integrator)"
 //	@Success		200		{object}	apicommon.OrganizationInfo
-//	@Failure		400		{object}	errors.Error	"Invalid input data"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		400		{object}	errors.Error	"Invalid input data, or the user has reached the maximum number of organizations"
+//	@Failure		401		{object}	errors.Error	"Unauthorized, or the user is not an admin of the parent organization"
 //	@Failure		404		{object}	errors.Error	"Parent org not found, or free integrator plan unavailable (integrator=true)"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/organizations [post]
@@ -100,8 +112,12 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	// check if the user has permission to create new organizations
 	hasPermission, err := a.subscriptions.HasDBPermission(user.Email, common.Address{}, subscriptions.CreateOrg)
-	if !hasPermission || err != nil {
-		errors.ErrUnauthorized.WithErr(err).Write(w)
+	if err != nil {
+		writePermissionError(w, err)
+		return
+	}
+	if !hasPermission {
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	parentOrg := common.Address{}
@@ -109,8 +125,12 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	if orgInfo.Parent != nil {
 		// check if the org has permission to create suborganizations
 		hasPermission, err := a.subscriptions.HasDBPermission(user.Email, orgInfo.Parent.Address, subscriptions.CreateSubOrg)
-		if !hasPermission || err != nil {
-			errors.ErrUnauthorized.Withf("user does not have permission to create suborganizations: %v", err).Write(w)
+		if err != nil {
+			writePermissionError(w, err)
+			return
+		}
+		if !hasPermission {
+			errors.ErrUnauthorized.With("user does not have permission to create suborganizations").Write(w)
 			return
 		}
 
@@ -123,7 +143,8 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 			errors.ErrGenericInternalServerError.Withf("could not get parent organization: %v", err).Write(w)
 			return
 		}
-		if len(dbParentOrg.Parent) > 0 {
+		// Parent is a fixed-size address, so its length is always 20: test for the zero address
+		if dbParentOrg.Parent != (common.Address{}) {
 			errors.ErrMalformedBody.Withf("parent organization is already a suborganization").Write(w)
 			return
 		}
@@ -141,6 +162,10 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		parentOrg = orgInfo.Parent.Address
 		// update the parent organization counter
 		if err := a.db.IncrementOrganizationSubOrgsCounter(parentOrg); err != nil {
+			if errors.Is(err, db.ErrMaxSubOrgsReached) {
+				errors.ErrMaxSubOrgsReached.Write(w)
+				return
+			}
 			errors.ErrGenericInternalServerError.Withf("increment suborgs: %v", err).Write(w)
 			return
 		}
@@ -150,6 +175,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		Address:         signer.Address(),
 		Website:         orgInfo.Website,
 		Creator:         user.Email,
+		SignerSeed:      user.Email,
 		CreatedAt:       time.Now(),
 		Nonce:           nonce,
 		Type:            db.OrganizationType(orgInfo.Type),
@@ -226,8 +252,24 @@ func (a *API) organizationInfoHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrNoOrganizationProvided.Write(w)
 		return
 	}
+	info := apicommon.OrganizationFromDB(org, parent)
+	// the endpoint is public, but the billing email is only for the organization's admins, as on
+	// the dedicated subscription endpoint
+	redactBillingEmails(info, a.optionalCallerUser(r))
 	// send the organization back to the user
-	apicommon.HTTPWriteJSON(w, apicommon.OrganizationFromDB(org, parent))
+	apicommon.HTTPWriteJSON(w, info)
+}
+
+// redactBillingEmails clears the subscription billing email of every organization in info's
+// parent chain that user is not an admin of (all of them when user is nil). The billing email is
+// admin-only data, as on the dedicated subscription endpoint, and each level is checked against
+// its own organization: an admin of a suborganization is not an admin of its parent.
+func redactBillingEmails(info *apicommon.OrganizationInfo, user *db.User) {
+	for o := info; o != nil; o = o.Parent {
+		if o.Subscription != nil && (user == nil || !user.HasRoleFor(o.Address, db.AdminRole)) {
+			o.Subscription.Email = ""
+		}
+	}
 }
 
 // updateOrganizationHandler godoc

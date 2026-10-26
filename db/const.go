@@ -20,6 +20,7 @@ const (
 	CodeTypePasswordReset   CodeType = "password_reset"
 	CodeTypeOrgInvite       CodeType = "organization_invite"
 	CodeTypeOrgInviteUpdate CodeType = "organization_invite_update"
+	CodeTypeUpdateEmail     CodeType = "update_email"
 
 	// max census size allowed for user test purposes
 	TestMaxCensusSize = 10

@@ -140,12 +140,30 @@ func TestProcessCSP(t *testing.T) {
 			ProcessID: openElection,
 			Payload:   hex.EncodeToString(voter.Address().Bytes()),
 		}, "processes", pid, "sign")
+	// nor read the member's weight and voted status
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "",
+		&handlers.CheckMembershipRequest{AuthToken: step0.AuthToken}, "processes", pid, "check")
+
+	// a resend with a contact that does not match the member fails with the same
+	// indistinguishable error that an unknown participant gets at step 0
+	requestAndAssertError(errors.ErrCSPAuthFailed, t, http.MethodPost, "",
+		&handlers.AuthResendRequest{AuthToken: step0.AuthToken, Email: "wrong-contact@example.com"},
+		"processes", pid, "auth", "resend")
 
 	// resend the OTP challenge for the mid-challenge token
 	resend := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "",
 		&handlers.AuthResendRequest{AuthToken: step0.AuthToken, Email: members[0].Email},
 		"processes", pid, "auth", "resend")
 	c.Assert(resend.AuthToken, qt.Not(qt.HasLen), 0)
+
+	// wrong contacts spend the token's resends like real ones (two spent so far, the cap is 3), so a
+	// token holder cannot probe a member's contact endlessly: once spent, even the right one is refused
+	requestAndAssertError(errors.ErrCSPAuthFailed, t, http.MethodPost, "",
+		&handlers.AuthResendRequest{AuthToken: step0.AuthToken, Email: "another-wrong@example.com"},
+		"processes", pid, "auth", "resend")
+	requestAndAssertError(errors.ErrVerificationMaxAttempts, t, http.MethodPost, "",
+		&handlers.AuthResendRequest{AuthToken: step0.AuthToken, Email: members[0].Email},
+		"processes", pid, "auth", "resend")
 
 	// complete verification
 	tok0 := verifyProcessCSP(t, pid, members[0].Email, step0.AuthToken)

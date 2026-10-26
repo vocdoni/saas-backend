@@ -13,12 +13,34 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"go.vocdoni.io/dvote/util"
 )
 
 // These consts define the keywords for query (?param=), url (/url/param/) and POST params.
+const (
+	// maxCredentialsBodyBytes caps the body of the login, registration and password endpoints,
+	// whose payloads are a handful of short strings.
+	maxCredentialsBodyBytes = 16 * internal.KiB
+	// maxPublicBodyBytes caps every request body on the public route group; the largest public
+	// body is a full batch vote relay (maxVotesBodyBytes).
+	maxPublicBodyBytes = maxVotesBodyBytes + 64*internal.KiB
+	// maxProtectedBodyBytes caps every request body on the authenticated route group. It is sized
+	// for bulk member imports (a few hundred thousand members per request); handlers with smaller
+	// natural sizes cap their body further.
+	maxProtectedBodyBytes = 128 * internal.MiB
+
+	// HTTP server socket deadlines. The read timeout leaves room for large authenticated uploads
+	// (census imports) on slow links; the write timeout runs from the end of the headers, so it
+	// covers reading the body as well and must exceed the read timeout.
+	serverReadHeaderTimeout = 10 * time.Second
+	serverReadTimeout       = 120 * time.Second
+	serverWriteTimeout      = 180 * time.Second
+	serverIdleTimeout       = 120 * time.Second
+)
+
 // Note: In JS/TS acronyms like "ID" are camelCased as in "Id".
 const (
 	ParamPage      = "page"
@@ -49,10 +71,13 @@ func (a *API) organizationFromRequest(r *http.Request) (org *db.Organization, pa
 	return nil, nil, false
 }
 
-// buildLoginResponse creates a JWT token for the given user identifier.
-// The token is signed with the API secret, following the JWT specification.
-// The token is valid for the period specified on jwtExpiration constant.
-func (a *API) buildLoginResponse(id string) (*apicommon.LoginResponse, error) {
+// buildLoginResponse creates a JWT token for the given user. The token is signed
+// with the API secret, following the JWT specification, and is valid for the
+// period specified on the jwtExpiration constant. The userId claim carries the
+// user's immutable numeric ID (never the email, which can be freed and re-registered
+// by someone else), and the sessionVersion claim binds the token to the user's
+// current session version so a credential change revokes it.
+func (a *API) buildLoginResponse(user *db.User) (*apicommon.LoginResponse, error) {
 	// pass a time.Time so jwx encodes a proper NumericDate (seconds). An int64 here would be
 	// read as Unix *seconds*, so a nanosecond value would push expiry ~55 billion years out
 	// and jwt.Validate would never reject the token on expiry.
@@ -60,7 +85,11 @@ func (a *API) buildLoginResponse(id string) (*apicommon.LoginResponse, error) {
 	lr := apicommon.LoginResponse{}
 	lr.Expirity = expiry
 	var err error
-	if _, lr.Token, err = a.auth.Encode(map[string]any{"userId": id, jwt.ExpirationKey: expiry}); err != nil {
+	if _, lr.Token, err = a.auth.Encode(map[string]any{
+		"userId":          strconv.FormatUint(user.ID, 10),
+		"sessionVersion":  strconv.FormatUint(user.SessionVersion, 10),
+		jwt.ExpirationKey: expiry,
+	}); err != nil {
 		return nil, err
 	}
 	return &lr, nil
@@ -103,7 +132,11 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 	// the verification code will not be sent but stored in the database
 	// generated with just the user email to mock the verification process
 	if a.mail != nil {
-		verificationCode = util.RandomHex(apicommon.VerificationCodeLength)
+		codeLength := apicommon.VerificationCodeLength
+		if codeType == db.CodeTypeOrgInvite || codeType == db.CodeTypeOrgInviteUpdate {
+			codeLength = apicommon.InvitationCodeLength
+		}
+		verificationCode = util.RandomHex(codeLength)
 	}
 	var webAppURI string
 	var linkParams map[string]any
@@ -121,7 +154,12 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 		}
 		exp := time.Now().Add(a.otpExpiry)
 		// store the verification code in the database
-		if err := a.db.SetVerificationCode(&db.User{ID: user.ID}, sealedCode, codeType, exp); err != nil {
+		if err := a.db.SetVerificationCode(&db.UserVerification{
+			UserID:     user.ID,
+			SealedCode: sealedCode,
+			Type:       codeType,
+			Expiration: exp,
+		}); err != nil {
 			return "", "", err
 		}
 		// set the web app URI and the link parameters
@@ -183,11 +221,14 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 }
 
 // generateVerificationLink method generates a verification link for the user
-// provided using the code provided and the API web app configuration.
-// It returns the generated verification link and an error if the link
-// could not be generated.
-func (a *API) generateVerificationLink(user *db.User, code string) (string, error) {
+// provided using the code provided, the code type and the API web app
+// configuration. It returns the generated verification link and an error if
+// the link could not be generated.
+func (a *API) generateVerificationLink(user *db.User, codeType db.CodeType, code string) (string, error) {
 	webAppURI := mailtemplates.VerifyAccountNotification.WebAppURI
+	if codeType == db.CodeTypePasswordReset {
+		webAppURI = mailtemplates.PasswordResetNotification.WebAppURI
+	}
 	linkParams := map[string]any{
 		"email": user.Email,
 		"code":  code,
@@ -301,4 +342,18 @@ func parseLimit(s string) (int64, error) {
 		limit = apicommon.DefaultItemsPerPage
 	}
 	return limit, nil
+}
+
+// hashPassword hashes a password (or OAuth signature) on behalf of a request handler. Hashing is
+// deliberately expensive and runs on unauthenticated endpoints, so the number of hashes in flight
+// is bounded; when no slot frees up in time it writes a 503 and returns false instead of letting
+// requests queue up behind it.
+func hashPassword(w http.ResponseWriter, r *http.Request, password string) (string, bool) {
+	hash, err := internal.HexHashPasswordContext(r.Context(), passwordSalt, password)
+	if err != nil {
+		w.Header().Set("Retry-After", strconv.Itoa(int(internal.HashSlotWait.Seconds())))
+		errors.ErrServerBusy.WithErr(err).Write(w)
+		return "", false
+	}
+	return hash, true
 }

@@ -2,9 +2,11 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,27 +35,47 @@ func bearerToken(r *http.Request) string {
 var (
 	errInvalidUserClaim = fmt.Errorf("invalid or missing userId claim")
 	errUserNotVerified  = fmt.Errorf("user account not verified")
+	errSessionRevoked   = fmt.Errorf("session is no longer valid")
 )
 
 // userFromToken resolves and validates the user referenced by an already signature/temporal-verified
-// JWT (the userId claim carries the user's email). It is shared by authenticator (required auth) and
-// optionalUser (optional auth): the callers verify the token first (via the Verifier middleware or
-// jwtauth.VerifyToken), and this does the claim → user → verified checks in one place so the two
-// paths cannot drift. Returns a nil user with a typed error the caller maps to a response.
+// JWT (the userId claim carries the user's immutable numeric ID). It is shared by authenticator
+// (required auth) and optionalUser (optional auth): the callers verify the token first (via the
+// Verifier middleware or jwtauth.VerifyToken), and this does the claim → user → verified → session
+// version checks in one place so the two paths cannot drift. Returns a nil user with a typed error
+// the caller maps to a response.
+//
+// Tokens minted before the ID-subject change carried the user's email in userId; they are rejected
+// (the claim does not parse as an ID), because an email can be freed by its owner and re-registered
+// by someone else, which would hand the old session to the new account — and they carry no session
+// version to check revocation against.
 func (a *API) userFromToken(token jwt.Token) (*db.User, error) {
 	if token == nil || jwt.Validate(token, jwt.WithRequiredClaim("userId")) != nil {
 		return nil, errInvalidUserClaim
 	}
-	var email string
-	if err := token.Get("userId", &email); err != nil {
+	var subject string
+	if err := token.Get("userId", &subject); err != nil {
 		return nil, errInvalidUserClaim
 	}
-	user, err := a.db.UserByEmail(email)
+	userID, err := strconv.ParseUint(subject, 10, 64)
+	if err != nil {
+		return nil, errInvalidUserClaim
+	}
+	user, err := a.db.User(userID)
 	if err != nil {
 		return nil, err // db.ErrNotFound or an unexpected DB error
 	}
 	if !user.Verified {
 		return nil, errUserNotVerified
+	}
+	// reject tokens minted before the last credential change (password/email update or reset):
+	// the session version is bumped on those events to revoke every outstanding session
+	var version string
+	if err := token.Get("sessionVersion", &version); err != nil {
+		return nil, errSessionRevoked
+	}
+	if version != strconv.FormatUint(user.SessionVersion, 10) {
+		return nil, errSessionRevoked
 	}
 	return user, nil
 }
@@ -83,12 +105,43 @@ func (a *API) optionalUser(r *http.Request) *db.User {
 // user is missing or unverified. Single source of truth for "which user does a key act as", shared by
 // authenticateAPIKey (required auth) and userFromAPIKey (optional public-read auth) so the two cannot
 // drift — a future hardening check on the acting user (e.g. a suspended-user flag) lives here once.
+//
+// The returned user is a copy whose role list is confined to the key's organization and the
+// organizations it manages: a key belongs to one organization, so it must not inherit its creator's
+// roles in unrelated organizations. Downstream HasRoleFor checks then deny those automatically.
 func (a *API) apiKeyActingUser(key *db.APIKey) *db.User {
 	user, err := a.db.UserByEmail(key.CreatedBy)
 	if err != nil || !user.Verified {
 		return nil
 	}
-	return user
+	// split the user's memberships into the key's own org (kept as-is) and candidates that are
+	// only kept when they are organizations managed by the key's org
+	var kept []db.OrganizationUser
+	var candidates []common.Address
+	for _, orgUser := range user.Organizations {
+		if orgUser.Address == key.OrgAddress {
+			kept = append(kept, orgUser)
+			continue
+		}
+		candidates = append(candidates, orgUser.Address)
+	}
+	if len(candidates) > 0 {
+		managed, err := a.db.OrgAddressesManagedBy(key.OrgAddress, candidates)
+		if err != nil {
+			// fail closed: an authorization boundary that cannot be checked is not crossed
+			log.Warnw("could not resolve organizations managed by the api key org",
+				"org", key.OrgAddress, "error", err)
+			managed = nil
+		}
+		for _, orgUser := range user.Organizations {
+			if orgUser.Address != key.OrgAddress && slices.Contains(managed, orgUser.Address) {
+				kept = append(kept, orgUser)
+			}
+		}
+	}
+	scoped := *user
+	scoped.Organizations = kept
+	return &scoped
 }
 
 // userFromAPIKey resolves the db.User an API key acts as, but only when the key is valid (not
@@ -154,6 +207,8 @@ func (a *API) authenticator(next http.Handler) http.Handler {
 				errors.ErrUnauthorized.Withf("user not found").Write(w)
 			case errInvalidUserClaim:
 				errors.ErrUnauthorized.Withf("invalid or missing userId claim").Write(w)
+			case errSessionRevoked:
+				errors.ErrUnauthorized.Withf("session is no longer valid").Write(w)
 			default:
 				errors.ErrGenericInternalServerError.Withf("could not retrieve user from database: %v", err).Write(w)
 			}
@@ -214,4 +269,38 @@ func (*API) setLang(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// limitBody caps the body of every request it wraps at limit bytes, so no handler behind it can
+// buffer an unbounded body even if it decodes with a bare json.Decoder. Handlers with a smaller
+// natural size still cap their own body further.
+func limitBody(limit int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.ContentLength > limit {
+				errors.ErrRequestBodyTooLarge.Withf("the limit is %d bytes", limit).Write(w)
+				return
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// originSecretHeader carries the secret the edge proxy adds to every request it forwards.
+const originSecretHeader = "X-Origin-Secret"
+
+// requireOriginSecret refuses requests that don't carry the origin secret, i.e. that reached the
+// server without going through the edge proxy. /ping stays open for the platform health checks.
+func requireOriginSecret(secret string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			got := r.Header.Get(originSecretHeader)
+			if r.URL.Path != "/ping" && subtle.ConstantTimeCompare([]byte(got), []byte(secret)) != 1 {
+				errors.ErrOriginNotAllowed.Write(w)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }

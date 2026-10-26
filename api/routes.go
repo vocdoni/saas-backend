@@ -34,6 +34,8 @@ const (
 	// GET /users/me to get the current user information
 	// PUT /users/me to update the current user information
 	usersMeEndpoint = "/users/me"
+	// POST /users/me/email/verify to confirm a pending email change with the code sent to the new address
+	usersMeEmailVerifyEndpoint = "/users/me/email/verify"
 	// PUT /users/me/password to update the current user password
 	usersPasswordEndpoint = "/users/password"
 	// POST /users/password/recovery to recover the user password
@@ -154,6 +156,9 @@ const (
 	processesCensusEndpoint = "/processes/{processId}/census"
 	// GET /processes/{processId}/validation publish-readiness dry-run (protected)
 	processesValidateEndpoint = "/processes/{processId}/validation"
+
+	// GET routes to compute a price from formula inputs (public calculator)
+	pricingEndpoint = "/pricing"
 	// POST /processes/{processId}/check voter eligibility/status (public CSP)
 	processesCheckEndpoint = "/processes/{processId}/check"
 	// POST /processes/{processId}/publish to publish the process (one election per question)

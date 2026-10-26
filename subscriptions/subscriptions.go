@@ -238,16 +238,17 @@ func (p *Subscriptions) OrgCanCreateVotingProcessDraft(orgAddress common.Address
 }
 
 // OrgAllowsVotingType checks that the organization's plan permits the given question ballot
-// type. It maps the friendly type to the plan's VotingTypes feature flags. An empty type is
-// allowed (it is validated elsewhere), which is how a ballot shape with no named type at all
-// (vote overwrites, weighted cost, or a hand-crafted non-canonical protocol) passes: there is no
-// flag for a shape that carries no name. Callers pass account.EffectiveQuestionType, so a
-// question is gated on the ballot it encodes rather than the type it is labelled with. Weighted
-// elections stay gated separately via CostFromWeight in hasElectionMetadataPermissions.
+// type. It maps the friendly type to the plan's VotingTypes feature flags. Callers pass
+// account.EffectiveQuestionType, so a question is gated on the ballot it encodes rather than the
+// type it is labelled with. Weighted elections and vote overwrites stay gated separately in
+// hasElectionMetadataPermissions.
+//
+// An empty type is a ballot layout matching no named type: a raw protocol hand-crafted away from
+// every canonical shape. Such a protocol can approximate any named type (a multichoice ballot with
+// a tweaked costExponent is still a multiple-choice ballot), so no single flag can stand for it.
+// It is allowed only when the plan permits every named voting type (single, multiple, ranked and
+// cumulative), which is exactly when it cannot be used to evade the gate.
 func (p *Subscriptions) OrgAllowsVotingType(orgAddress common.Address, voteType string) error {
-	if voteType == "" {
-		return nil
-	}
 	org, err := p.db.Organization(orgAddress)
 	if err != nil {
 		return errors.ErrOrganizationNotFound.WithErr(err)
@@ -264,6 +265,15 @@ func (p *Subscriptions) OrgAllowsVotingType(orgAddress common.Address, voteType 
 		db.VotingTypeMultiChoice:  plan.VotingTypes.Multiple,
 		db.VotingTypeRanked:       plan.VotingTypes.Ranked,
 		db.VotingTypeCumulative:   plan.VotingTypes.Cumulative,
+	}
+	if voteType == "" {
+		for _, ok := range allowed {
+			if !ok {
+				return errors.ErrVotingTypeNotAllowed.With(
+					"(custom ballot protocol: requires a plan allowing every voting type)")
+			}
+		}
+		return nil
 	}
 	ok, known := allowed[voteType]
 	if !known {
