@@ -23,6 +23,8 @@ type fakeVote struct {
 	pkg     string
 	weight  string
 	missing bool
+	// keys marks the vote as encrypted (key indexes present)
+	keys bool
 }
 
 var fakeElectionID = []byte(strings.Repeat("e", 32))
@@ -63,6 +65,9 @@ func fakeVoteNode(t *testing.T, pages ...[]fakeVote) *Account {
 				return
 			}
 			vote := &api.Vote{VoteWeight: v.weight}
+			if v.keys {
+				vote.EncryptionKeyIndexes = []uint32{0}
+			}
 			if v.pkg != "" {
 				vote.VotePackage = json.RawMessage(v.pkg)
 			}
@@ -105,7 +110,7 @@ func TestElectionBallotCounts(t *testing.T) {
 		},
 		[]fakeVote{
 			{pkg: `["0"]`, weight: "5"},             // not an object: invalid
-			{pkg: `{}`},                             // no votes key: invalid, weight defaults to 1
+			{pkg: `{}`},                             // no votes key: an empty ballot, blank; weight defaults to 1
 			{pkg: `{"votes":[1,1,1]}`, weight: "4"}, // over maxTotalCost 2: invalid
 		},
 		[]fakeVote{
@@ -115,10 +120,10 @@ func TestElectionBallotCounts(t *testing.T) {
 	counts, err := a.ElectionBallotCounts(context.Background(), fakeElectionID, 7, multiChoiceClassifier(t))
 	c.Assert(err, qt.IsNil)
 	c.Assert(counts, qt.DeepEquals, &db.BallotCounts{
-		BlankVoteCount:    2,
-		BlankVoteWeight:   "3",
-		InvalidVoteCount:  3,
-		InvalidVoteWeight: "10",
+		BlankVoteCount:    3,
+		BlankVoteWeight:   "4",
+		InvalidVoteCount:  2,
+		InvalidVoteWeight: "9",
 		OptionVoteCounts:  []uint64{1, 1, 1},
 		OptionVoteWeights: []string{"3", "7", "3"},
 	})
@@ -147,12 +152,6 @@ func TestElectionBallotCountsAborts(t *testing.T) {
 		voteCount uint64
 		want      string
 	}{
-		{
-			"encrypted package", context.Background(),
-			[]fakeVote{ok, {pkg: `{"encrypted":"c2VjcmV0"}`}},
-			2, ".*still encrypted.*",
-		},
-		{"empty package", context.Background(), []fakeVote{ok, {}}, 2, ".*empty package.*"},
 		{"listed vote not found", context.Background(), []fakeVote{ok, {missing: true}}, 2, ".*vote not found.*"},
 		{
 			"unparsable weight", context.Background(),
@@ -173,37 +172,52 @@ func TestElectionBallotCountsAborts(t *testing.T) {
 	}
 }
 
-// TestDecodeVotePackage pins which packages decode, which are invalid ballots and which abort.
+// TestElectionBallotCountsUnreadable: a voter cannot block the counts with an empty or undecryptable package.
+func TestElectionBallotCountsUnreadable(t *testing.T) {
+	c := qt.New(t)
+	a := fakeVoteNode(t, []fakeVote{
+		{pkg: `{"votes":[1,0,0]}`, weight: "1"},
+		{weight: "2"},
+		{pkg: `{"encrypted":"AQID"}`, weight: "3", keys: true},
+	})
+	counts, err := a.ElectionBallotCounts(context.Background(), fakeElectionID, 3, multiChoiceClassifier(t))
+	c.Assert(err, qt.IsNil)
+	c.Assert(counts, qt.DeepEquals, &db.BallotCounts{
+		BlankVoteWeight:   "0",
+		InvalidVoteCount:  2,
+		InvalidVoteWeight: "5",
+		OptionVoteCounts:  []uint64{1, 0, 0},
+		OptionVoteWeights: []string{"1", "0", "0"},
+	})
+}
+
+// TestDecodeVotePackage pins which packages decode and which the chain skips as invalid.
 func TestDecodeVotePackage(t *testing.T) {
 	tests := []struct {
-		pkg     string
-		votes   []int
-		ok      bool
-		wantErr bool
+		pkg   string
+		keys  []uint32
+		votes []int
+		ok    bool
 	}{
-		{`{"votes":[1,0]}`, []int{1, 0}, true, false},
-		{`{"votes":[]}`, []int{}, true, false},
-		{`{"Votes":[2]}`, []int{2}, true, false}, // the chain decodes keys case-insensitively too
-		{`{"votes":[1],"nonce":"ab"}`, []int{1}, true, false},
-		{`["0"]`, nil, false, false},
-		{`{}`, nil, false, false},
-		{`{"votes":null}`, nil, false, false},
-		{`{"votes":["1"]}`, nil, false, false},
-		{`{"votes":[1.5]}`, nil, false, false},
-		{`"text"`, nil, false, false},
-		{`null`, nil, false, false},
-		{`{"encrypted":"c2VjcmV0"}`, nil, false, true},
-		{``, nil, false, true},
+		{`{"votes":[1,0]}`, nil, []int{1, 0}, true},
+		{`{"votes":[]}`, nil, []int{}, true},
+		{`{"Votes":[2]}`, nil, []int{2}, true},
+		{`{"nonce":"n","votes":[1]}`, nil, []int{1}, true},
+		{`{}`, nil, nil, true},
+		{`null`, nil, nil, true},
+		{`{"votes":null}`, nil, nil, true},
+		{`{"encrypted":"AQID"}`, nil, nil, true},
+		{`{"encrypted":"AQID"}`, []uint32{0}, nil, false},
+		{`["0"]`, nil, nil, false},
+		{`{"votes":[1,"x"]}`, nil, nil, false},
+		{`{"nonce":1,"votes":[1]}`, nil, nil, false},
+		{`"text"`, nil, nil, false},
+		{``, nil, nil, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.pkg, func(t *testing.T) {
 			c := qt.New(t)
-			votes, ok, err := decodeVotePackage(&api.Vote{VotePackage: json.RawMessage(tc.pkg)})
-			if tc.wantErr {
-				c.Assert(err, qt.Not(qt.IsNil))
-				return
-			}
-			c.Assert(err, qt.IsNil)
+			votes, ok := decodeVotePackage(&api.Vote{VotePackage: json.RawMessage(tc.pkg), EncryptionKeyIndexes: tc.keys})
 			c.Assert(ok, qt.Equals, tc.ok)
 			c.Assert(votes, qt.DeepEquals, tc.votes)
 		})

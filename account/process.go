@@ -413,8 +413,8 @@ func (a *Account) voteSelectedValues(voteID internal.HexBytes) ([]int, error) {
 	if err != nil {
 		return nil, err
 	}
-	votes, ok, err := decodeVotePackage(vote)
-	if err != nil || !ok {
+	votes, ok := decodeVotePackage(vote)
+	if !ok {
 		return nil, nil // an unreadable package selects nothing: the memo is dropped
 	}
 	return votes, nil

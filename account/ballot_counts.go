@@ -16,28 +16,28 @@ import (
 // ballotCountsFetchers bounds the concurrent single-vote fetches of one ElectionBallotCounts run.
 const ballotCountsFetchers = 8
 
-// decodeVotePackage decodes a vote's package the way the chain's tally does (a JSON object with an
-// integer "votes" array, keys matched case-insensitively). ok is false for a package the tally skips
-// as undecodable: valid JSON that is not such an object, has no "votes" key, or whose votes are not
-// integers. A present but empty "votes" array decodes to an empty, ok ballot. It errors, instead of
-// classifying, when the package is empty or is the node's {"encrypted": ...} fallback for a vote it
-// could not decrypt: both mean the ballot could not be read, not that it is invalid.
-func decodeVotePackage(vote *api.Vote) (votes []int, ok bool, err error) {
+// decodeVotePackage decodes a vote's package exactly as the chain's tally does (json.Unmarshal into a
+// struct with a string "nonce" and an integer "votes" array, keys matched case-insensitively), so no
+// voter can make the counts unreadable. ok is false for a ballot the tally skips: an empty package, one
+// that does not decode, or the node's {"encrypted": ...} fallback for a vote with key indexes that it
+// could not decrypt (the chain could not either). Anything else is tallied, with nil votes (an empty
+// ballot) when the package has no "votes". It never errors and never panics.
+func decodeVotePackage(vote *api.Vote) (votes []int, ok bool) {
 	if len(vote.VotePackage) == 0 {
-		return nil, false, fmt.Errorf("vote %x has an empty package", []byte(vote.VoteID))
+		return nil, false
 	}
 	var pkg struct {
-		Votes     *[]int          `json:"votes"`
+		Nonce     string          `json:"nonce,omitempty"`
+		Votes     []int           `json:"votes"`
 		Encrypted json.RawMessage `json:"encrypted"`
 	}
-	decodeErr := json.Unmarshal(vote.VotePackage, &pkg)
-	if len(pkg.Encrypted) > 0 && string(pkg.Encrypted) != "null" {
-		return nil, false, fmt.Errorf("vote %x package is still encrypted", []byte(vote.VoteID))
+	if err := json.Unmarshal(vote.VotePackage, &pkg); err != nil {
+		return nil, false
 	}
-	if decodeErr != nil || pkg.Votes == nil {
-		return nil, false, nil
+	if len(vote.EncryptionKeyIndexes) > 0 && len(pkg.Encrypted) > 0 && string(pkg.Encrypted) != "null" {
+		return nil, false
 	}
-	return *pkg.Votes, true, nil
+	return pkg.Votes, true
 }
 
 // voteWeight parses a vote's weight (a decimal big integer); the node omits it for weight 1.
@@ -109,7 +109,7 @@ func (bt *ballotTally) counts() *db.BallotCounts {
 // votes count once.
 //
 // It is all-or-nothing, so wrong counts are never returned: the first chain error, listed vote the node
-// cannot find, empty or still-encrypted package, unparsable weight, or ctx cancellation stops scheduling
+// cannot find, unparsable weight, or ctx cancellation stops scheduling
 // pages and fetches (the ones already in flight finish on the client's timeout) and is returned;
 // and so is a listed row count different from voteCount (an index still catching up).
 // A package the tally would skip is not an error: it counts as invalid.
@@ -167,10 +167,7 @@ func (a *Account) countVote(voteID internal.HexBytes, c BallotClassifier, tally 
 	if len(vote.VoteID) == 0 {
 		vote.VoteID = voteID.Bytes()
 	}
-	votes, ok, err := decodeVotePackage(vote)
-	if err != nil {
-		return err
-	}
+	votes, ok := decodeVotePackage(vote)
 	weight, err := voteWeight(vote)
 	if err != nil {
 		return err
