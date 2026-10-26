@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	stderrors "errors"
 	"net/http"
 
@@ -381,6 +382,12 @@ func (a *API) parseRelayVote(payload internal.HexBytes) (*parsedVote, *errors.Er
 	pid := internal.HexBytes(vote.ProcessId)
 	if len(pid) == 0 {
 		return nil, errors.Ptr(errors.ErrInvalidTxFormat.With("vote has no process id"))
+	}
+	// the chain accepts any package bytes, but the node answers GET /votes/{id} with a 500 for a
+	// plaintext package that is not JSON, which would block the ballot counts of the question
+	// forever. Encrypted packages are ciphertext and cannot be checked.
+	if len(vote.EncryptionKeyIndexes) == 0 && !json.Valid(vote.VotePackage) {
+		return nil, errors.Ptr(errors.ErrInvalidTxFormat.With("vote package is not valid JSON"))
 	}
 
 	// ensure we manage this election, resolving its owning organization. Legacy elections
