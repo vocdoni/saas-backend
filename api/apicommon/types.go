@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -48,11 +49,11 @@ func (m *MultilingualText) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// multilingualFromAny extracts a MultilingualText from a meta map value. It handles:
+// MultilingualFromAny extracts a MultilingualText from a meta map value. It handles:
 //   - plain string (legacy storage): normalised to {"default": "<string>"}
 //   - MultilingualText / map[string]string (in-memory, set at creation time)
 //   - map[string]any (BSON-decoded form; plain, not bson.M — see db/mongo.go)
-func multilingualFromAny(v any) *MultilingualText {
+func MultilingualFromAny(v any) *MultilingualText {
 	switch m := v.(type) {
 	case string:
 		r := MultilingualText{"default": m}
@@ -79,7 +80,7 @@ func multilingualFromAny(v any) *MultilingualText {
 // OrgDisplayName returns the "default" value of meta["name"] as a plain string, falling
 // back to fallback (typically the org's hex address) when the field is absent or empty.
 func OrgDisplayName(meta map[string]any, fallback string) string {
-	if mt := multilingualFromAny(meta["name"]); mt != nil {
+	if mt := MultilingualFromAny(meta["name"]); mt != nil {
 		if def := (*mt)["default"]; def != "" {
 			return def
 		}
@@ -106,6 +107,72 @@ func BuildOrgMeta(base map[string]any, name, logo, description *MultilingualText
 	}
 	maps.Copy(meta, explicit)
 	return meta
+}
+
+// ValidateMetaKeys rejects meta keys MongoDB cannot store and address as written: empty keys,
+// keys containing a dot and keys starting with "$", at every nesting level.
+func ValidateMetaKeys(meta map[string]any) error {
+	for key, value := range meta {
+		if err := ValidateMetaKey(key); err != nil {
+			return err
+		}
+		if err := ValidateMetaValue(value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateMetaPath validates a dot-notation meta path, as used by PUT and DELETE /meta: no
+// segment may be empty or start with "$".
+func ValidateMetaPath(path string) error {
+	for _, segment := range strings.Split(path, ".") {
+		if err := ValidateMetaKey(segment); err != nil {
+			return fmt.Errorf("invalid meta path %q: %w", path, err)
+		}
+	}
+	return nil
+}
+
+// ValidateMetaValue applies ValidateMetaKeys to every object nested in value.
+func ValidateMetaValue(value any) error {
+	switch v := value.(type) {
+	case map[string]any:
+		return ValidateMetaKeys(v)
+	case []any:
+		for _, item := range v {
+			if err := ValidateMetaValue(item); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+// ValidateMetaShorthands applies ValidateMetaKey to the locale keys of the name, logo and description
+// shorthands, which BuildOrgMeta copies into meta without going through ValidateMetaKeys.
+func ValidateMetaShorthands(name, logo, description *MultilingualText) error {
+	for _, text := range []*MultilingualText{name, logo, description} {
+		if text == nil {
+			continue
+		}
+		for locale := range *text {
+			if err := ValidateMetaKey(locale); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// ValidateMetaKey rejects a single key or path segment that MongoDB would reject or misread.
+func ValidateMetaKey(key string) error {
+	if key == "" || strings.Contains(key, ".") || strings.HasPrefix(key, "$") {
+		return fmt.Errorf("invalid meta key %q: keys cannot be empty, contain dots or start with $", key)
+	}
+	return nil
 }
 
 // Pagination contains all the values needed for the UI to easily organize the returned data
@@ -501,6 +568,10 @@ type LoginResponse struct {
 	Expirity time.Time `json:"expirity"`
 }
 
+// IdentityMetaKeys are the organization meta keys that carry the organization identity shown to
+// voters. Each one holds a MultilingualText.
+var IdentityMetaKeys = []string{"name", "logo", "description"}
+
 // OrganizationFromDB converts a db.Organization to an OrganizationInfo, if the parent
 // organization is provided it will be included in the response.
 func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
@@ -523,7 +594,7 @@ func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 	maps.Copy(meta, dbOrg.Meta)
 	// Upgrade any plain-string values for the well-known keys to the object
 	// form so that meta.name and the top-level name field always agree.
-	for _, key := range []string{"name", "logo", "description"} {
+	for _, key := range IdentityMetaKeys {
 		if s, ok := meta[key].(string); ok {
 			meta[key] = MultilingualText{"default": s}
 		}
@@ -548,9 +619,9 @@ func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 		DefaultLang:    dbOrg.DefaultLang,
 		Communications: dbOrg.Communications,
 		Meta:           meta,
-		Name:           multilingualFromAny(meta["name"]),
-		Logo:           multilingualFromAny(meta["logo"]),
-		Description:    multilingualFromAny(meta["description"]),
+		Name:           MultilingualFromAny(meta["name"]),
+		Logo:           MultilingualFromAny(meta["logo"]),
+		Description:    MultilingualFromAny(meta["description"]),
 		Parent:         parentOrg,
 		ManagedBy:      managedBy,
 		Subscription:   &details,

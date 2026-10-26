@@ -3880,7 +3880,11 @@ paths:
     delete:
       consumes:
       - application/json
-      description: Deletes a set of keys from the meta information of an organization.
+      description: |-
+        Deletes a set of keys from the meta information of an organization.
+        Requires Manager/Admin role. Only admins may delete the organization identity keys
+        (name, logo, description); a manager's request naming one of them that is stored is rejected with 401.
+        Keys are dot paths: an empty or "$"-prefixed segment, or a key that is a prefix of another, is rejected with 400.
       parameters:
       - description: Organization address
         in: path
@@ -3900,6 +3904,11 @@ paths:
           description: OK
           schema:
             type: string
+        "400":
+          description: Invalid meta information (e.g. an empty path segment or conflicting
+            keys)
+          schema:
+            $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
           schema:
@@ -3910,10 +3919,6 @@ paths:
             $ref: '#/definitions/errors.Error'
         "404":
           description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "422":
-          description: Invalid meta information
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -3967,8 +3972,12 @@ paths:
     post:
       consumes:
       - application/json
-      description: Overwrite the meta information of an organization. Requires Manager/Admin
-        role.
+      description: |-
+        Overwrite the meta information of an organization. Requires Manager/Admin role.
+        Only admins may change the organization identity keys (name, logo, description): a manager's
+        request must carry them exactly as they are stored, or it is rejected with 401.
+        Keys cannot be empty, contain dots or start with "$", at any level, for any role (400), except that
+        the nested values of a top-level key left unchanged from the stored one are accepted as they are.
       parameters:
       - description: Organization address
         in: path
@@ -3988,6 +3997,10 @@ paths:
           description: OK
           schema:
             type: string
+        "400":
+          description: Invalid meta information (e.g. a key containing a dot)
+          schema:
+            $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
           schema:
@@ -3998,10 +4011,6 @@ paths:
             $ref: '#/definitions/errors.Error'
         "404":
           description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "422":
-          description: Invalid meta information
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -4020,7 +4029,12 @@ paths:
         Updates existing or adds new key/value pairs in the meta information of an organization.
         Has only one layer of depth. If a second layer document is provided, for example meta.doc = [a,b,c],
         the entire document will be updated.
-        Requires Manager/Admin role.
+        Requires Manager/Admin role. Only admins may change the organization identity keys
+        (name, logo, description, including dotted sub-keys such as name.default): a manager may
+        resend them with their stored value, but any other write to them is rejected with 401.
+        Keys are dot paths: an empty or "$"-prefixed segment, or a key that is a prefix of another, is rejected with 400.
+        Nested keys cannot be empty, contain dots or start with "$" (400), unless the top-level key's value
+        is unchanged from the stored one, which is accepted as it is.
       parameters:
       - description: Organization address
         in: path
@@ -4040,6 +4054,11 @@ paths:
           description: OK
           schema:
             type: string
+        "400":
+          description: Invalid meta information (e.g. an empty path segment or conflicting
+            keys)
+          schema:
+            $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
           schema:
@@ -4050,10 +4069,6 @@ paths:
             $ref: '#/definitions/errors.Error'
         "404":
           description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "422":
-          description: Invalid meta information
           schema:
             $ref: '#/definitions/errors.Error'
         "500":

@@ -93,6 +93,14 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	if !validateDefaultLang(w, orgInfo.DefaultLang) {
 		return
 	}
+	if err := apicommon.ValidateMetaKeys(orgInfo.Meta); err != nil {
+		errors.ErrInvalidUserData.WithErr(err).Write(w)
+		return
+	}
+	if err := apicommon.ValidateMetaShorthands(orgInfo.Name, orgInfo.Logo, orgInfo.Description); err != nil {
+		errors.ErrInvalidUserData.WithErr(err).Write(w)
+		return
+	}
 	// find default plan
 	defaultPlan, err := a.db.DefaultPlan()
 	if err != nil || defaultPlan == nil {
@@ -314,6 +322,14 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if !validateDefaultLang(w, newOrgInfo.DefaultLang) {
+		return
+	}
+	if err := apicommon.ValidateMetaKeys(newOrgInfo.Meta); err != nil {
+		errors.ErrInvalidUserData.WithErr(err).Write(w)
+		return
+	}
+	if err := apicommon.ValidateMetaShorthands(newOrgInfo.Name, newOrgInfo.Logo, newOrgInfo.Description); err != nil {
+		errors.ErrInvalidUserData.WithErr(err).Write(w)
 		return
 	}
 	// update just the fields that can be updated and are not empty
