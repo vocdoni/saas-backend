@@ -208,6 +208,7 @@ func TestDecodeVotePackage(t *testing.T) {
 		{`{"votes":null}`, nil, nil, true},
 		{`{"encrypted":"AQID"}`, nil, nil, true},
 		{`{"encrypted":"AQID"}`, []uint32{0}, nil, false},
+		{`{"encrypted":null}`, nil, nil, false},
 		{`["0"]`, nil, nil, false},
 		{`{"votes":[1,"x"]}`, nil, nil, false},
 		{`{"nonce":1,"votes":[1]}`, nil, nil, false},

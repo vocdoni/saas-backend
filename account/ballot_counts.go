@@ -19,8 +19,9 @@ const ballotCountsFetchers = 8
 // decodeVotePackage decodes a vote's package exactly as the chain's tally does (json.Unmarshal into a
 // struct with a string "nonce" and an integer "votes" array, keys matched case-insensitively), so no
 // voter can make the counts unreadable. ok is false for a ballot the tally skips: an empty package, one
-// that does not decode, or the node's {"encrypted": ...} fallback for a vote with key indexes that it
-// could not decrypt (the chain could not either). Anything else is tallied, with nil votes (an empty
+// that does not decode, the node's {"encrypted": null} fallback for a vote stored with a nil package, or
+// its {"encrypted": ...} fallback for a vote with key indexes that it could not decrypt (the chain could
+// not tally either). Anything else is tallied, with nil votes (an empty
 // ballot) when the package has no "votes". It never errors and never panics.
 func decodeVotePackage(vote *api.Vote) (votes []int, ok bool) {
 	if len(vote.VotePackage) == 0 {
@@ -34,7 +35,7 @@ func decodeVotePackage(vote *api.Vote) (votes []int, ok bool) {
 	if err := json.Unmarshal(vote.VotePackage, &pkg); err != nil {
 		return nil, false
 	}
-	if len(vote.EncryptionKeyIndexes) > 0 && len(pkg.Encrypted) > 0 && string(pkg.Encrypted) != "null" {
+	if len(pkg.Encrypted) > 0 && (string(pkg.Encrypted) == "null" || len(vote.EncryptionKeyIndexes) > 0) {
 		return nil, false
 	}
 	return pkg.Votes, true
