@@ -875,6 +875,10 @@ type VotingProcessQuestion struct {
 	// /processes/{id} and the public question read); the list endpoint leaves it nil to avoid an N+1
 	// chain fan-out, so its absence in a LIST response means "not resolved here", not "not published".
 	Results *QuestionResults `json:"results,omitempty" bson:"-"`
+	// BallotCounts is the per-ballot breakdown of this question's final tally, computed once in the
+	// background by the status syncer's results processors after the election reports finalResults and
+	// persisted first-write-wins (SetQuestionBallotCounts). Served inside Results by the read paths.
+	BallotCounts *BallotCounts `json:"-" bson:"ballotCounts,omitempty"`
 }
 
 // QuestionResults is one question's on-chain election tally, resolved on read from its own election.
@@ -894,6 +898,39 @@ type QuestionResults struct {
 	// an openValue choice. Live: empty while a secretUntilTheEnd election is still encrypted (the memo
 	// cannot be correlated to a choice until the vote package is decryptable at RESULTS).
 	Memos []string `json:"memos,omitempty"`
+	// BallotCounts is embedded without a json tag so its fields flatten into the results object; it is
+	// nil, and its fields absent, until the counts have been computed after finalResults.
+	*BallotCounts
+}
+
+// BallotCounts breaks a question's final on-chain tally down per ballot, which the tally matrix alone
+// cannot give. Every ballot the chain stored (voteCount) is exactly one of: invalid, blank, or a valid
+// non-blank ballot, decided in that order. An invalid ballot is one the chain's tally skipped: a package
+// that is not an object with an integer `votes` array, or whose values break the question's ballot
+// protocol (so an all-zero ballot the tally rejects, e.g. a ranked `[0,0,0]`, is invalid, not blank).
+// Among tallied ballots a blank one is `{"votes":[]}` for a singlechoice question (`[0]` selects the
+// choice valued 0) and `[]` or all zeros for every other type. Weights are stringified big integers
+// (equal to the counts in an unweighted census). The option arrays are parallel to Results: a
+// singlechoice question is indexed by Choice.Value (length maxChoiceValue+1), a multichoice or
+// cumulative question by choice position (length len(choices)); a valid ballot counts once in every
+// option it selected (multichoice: field 1, cumulative: field > 0). They are absent for ranked and
+// raw-protocol questions. The whole object is absent until it has been computed, in the background,
+// after the election reports finalResults.
+type BallotCounts struct {
+	// BlankVoteCount is the number of blank ballots (present once computed, after finalResults).
+	BlankVoteCount uint64 `json:"blankVoteCount" bson:"blankVoteCount"`
+	// BlankVoteWeight is the summed weight of the blank ballots (stringified big integer).
+	BlankVoteWeight string `json:"blankVoteWeight" bson:"blankVoteWeight"`
+	// InvalidVoteCount is the number of ballots the on-chain tally skipped as invalid.
+	InvalidVoteCount uint64 `json:"invalidVoteCount" bson:"invalidVoteCount"`
+	// InvalidVoteWeight is the summed weight of the invalid ballots (stringified big integer).
+	InvalidVoteWeight string `json:"invalidVoteWeight" bson:"invalidVoteWeight"`
+	// OptionVoteCounts is, per option (parallel to results), the number of valid ballots selecting it.
+	// Absent for ranked and raw-protocol questions.
+	OptionVoteCounts []uint64 `json:"optionVoteCounts,omitempty" bson:"optionVoteCounts,omitempty"`
+	// OptionVoteWeights is, per option (parallel to results), the summed weight of the valid ballots
+	// selecting it (stringified big integers). Absent for ranked and raw-protocol questions.
+	OptionVoteWeights []string `json:"optionVoteWeights,omitempty" bson:"optionVoteWeights,omitempty"`
 }
 
 // QuestionStatusRef is the minimal projection of a published question the status syncer and the

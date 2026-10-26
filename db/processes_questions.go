@@ -353,6 +353,22 @@ func (ms *MongoStorage) SetQuestionEndedAt(upstreamID internal.HexBytes, endedAt
 	return nil
 }
 
+// SetQuestionBallotCounts persists the ballot counts of a question (by on-chain id). The update applies
+// only while no counts are stored, so the first computation wins and a concurrent or repeated one is a
+// no-op: the counts of a final election cannot change, so there is nothing to overwrite.
+func (ms *MongoStorage) SetQuestionBallotCounts(upstreamID internal.HexBytes, counts *BallotCounts) error {
+	if len(upstreamID) == 0 || counts == nil {
+		return ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	filter := bson.M{"upstreamId": upstreamID, "ballotCounts": bson.M{"$exists": false}}
+	if _, err := ms.processesQuestions.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"ballotCounts": counts}}); err != nil {
+		return fmt.Errorf("failed to set question ballot counts: %w", err)
+	}
+	return nil
+}
+
 // SetQuestionStatusSynced conditionally reconciles a question (by on-chain id) to next, stamping
 // syncedAt. The update applies only while the stored status still equals prev, so a concurrent
 // direct write (publish/status-change) is never clobbered by a stale syncer value — a mismatch
