@@ -24,8 +24,9 @@ const (
 
 	// max census size allowed for user test purposes
 	TestMaxCensusSize = 10
-	// max vote overwrites per process
-	MaxVoteOverwritesPerProcess = 10
+	// MaxCSPSignaturesPerElection is the total number of CSP signatures (first one included) a voter
+	// can get for one election; past it the election is locked for that voter.
+	MaxCSPSignaturesPerElection = 10
 	// MaxQuestionsPerProcess bounds the number of questions a voting process may hold, and so the
 	// number of ballots a voter can sign for one. Shared by the /processes validation and the CSP
 	// sign-batch cap (which cannot reach the api-package constant through the import cycle).

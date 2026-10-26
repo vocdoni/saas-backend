@@ -246,7 +246,7 @@ func (ms *MongoStorage) IsCSPProcessConsumed(userID, processID internal.HexBytes
 	default:
 		return false, err
 	}
-	return currentStatus.TimesVoted > MaxVoteOverwritesPerProcess, nil
+	return currentStatus.TimesVoted >= MaxCSPSignaturesPerElection, nil
 }
 
 // ConsumeCSPProcess method consumes a CSP process for a user. It returns an
@@ -280,7 +280,7 @@ func (ms *MongoStorage) ConsumeCSPProcess(token, processID, address internal.Hex
 	// which we resolve by reading the row to name the refusal.
 	filter := bson.M{
 		"_id":             id,
-		"timesVoted":      bson.M{"$not": bson.M{"$gt": MaxVoteOverwritesPerProcess}},
+		"timesVoted":      bson.M{"$not": bson.M{"$gte": MaxCSPSignaturesPerElection}},
 		"consumedaddress": bson.M{"$in": bson.A{nil, address}},
 	}
 	update := bson.M{
@@ -309,7 +309,7 @@ func (ms *MongoStorage) ConsumeCSPProcess(token, processID, address internal.Hex
 		if ferr != nil {
 			return ferr
 		}
-		if existing.TimesVoted > MaxVoteOverwritesPerProcess {
+		if existing.TimesVoted >= MaxCSPSignaturesPerElection {
 			return ErrProcessAlreadyConsumed
 		}
 		// check if the address is the same as the previous one used to vote

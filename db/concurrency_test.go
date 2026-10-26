@@ -57,8 +57,8 @@ func TestConcurrentSetUserInserts(t *testing.T) {
 	}
 }
 
-// TestConcurrentConsumeCSPProcess pins that the vote overwrite budget holds under
-// concurrency across replicas: exactly MaxVoteOverwritesPerProcess+1 consumptions
+// TestConcurrentConsumeCSPProcess pins that the CSP signature budget holds under
+// concurrency across replicas: exactly MaxCSPSignaturesPerElection consumptions
 // succeed, every further one is refused as already consumed.
 func TestConcurrentConsumeCSPProcess(t *testing.T) {
 	c := qt.New(t)
@@ -72,7 +72,7 @@ func TestConcurrentConsumeCSPProcess(t *testing.T) {
 	address := internal.HexBytes{0x01, 0x02, 0x03}
 	c.Assert(testDB.SetCSPAuth(token, userID, testCSPBundleID, ""), qt.IsNil)
 
-	const n = MaxVoteOverwritesPerProcess + 10
+	const n = MaxCSPSignaturesPerElection + 10
 	errs := make([]error, n)
 	var wg sync.WaitGroup
 	for i := range n {
@@ -90,7 +90,7 @@ func TestConcurrentConsumeCSPProcess(t *testing.T) {
 		}
 		c.Assert(errs[i], qt.ErrorIs, ErrProcessAlreadyConsumed)
 	}
-	c.Assert(consumed, qt.Equals, MaxVoteOverwritesPerProcess+1)
+	c.Assert(consumed, qt.Equals, MaxCSPSignaturesPerElection)
 
 	// once over budget, even another address is refused as consumed
 	other := internal.HexBytes{0xaa, 0xbb}

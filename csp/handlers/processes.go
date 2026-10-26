@@ -427,9 +427,9 @@ type authorizedBallot struct {
 //	@Description	already signed for a different address; re-send with the address sign-info
 //	@Description	reports) or sign_failed (internal failure; retry). Retry ONLY the entries that
 //	@Description	carry a retryable code: re-sending the whole batch re-signs the ballots that
-//	@Description	already succeeded, and each re-sign counts toward the election's finite overwrite
-//	@Description	budget (MaxVoteOverwritesPerProcess, 10) — past it the election is permanently
-//	@Description	locked.
+//	@Description	already succeeded, and every signature, re-signs included, counts toward the election's
+//	@Description	limit (MaxCSPSignaturesPerElection, 10 in total) — past it the election is permanently
+//	@Description	locked for the voter.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json

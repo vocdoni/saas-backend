@@ -173,7 +173,7 @@ func TestCSPProcess(t *testing.T) {
 
 	c.Run("consume token", func(c *qt.C) {
 		// set the token and consume it
-		for i := 1; i <= 10; i++ {
+		for i := 1; i < MaxCSPSignaturesPerElection; i++ {
 			c.Assert(testDB.ConsumeCSPProcess(testAuthToken, testCSPProcessID, testUserAddress), qt.IsNil)
 			status, err := testDB.CSPProcess(testAuthToken, testCSPProcessID)
 			c.Assert(err, qt.IsNil)
