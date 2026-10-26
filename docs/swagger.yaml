@@ -1768,8 +1768,24 @@ definitions:
     type: object
   apicommon.VotingProcessQuestionResults:
     properties:
+      blankVoteCount:
+        description: BlankVoteCount is the number of blank ballots (present once computed,
+          after finalResults).
+        type: integer
+      blankVoteWeight:
+        description: BlankVoteWeight is the summed weight of the blank ballots (stringified
+          big integer).
+        type: string
       finalResults:
         type: boolean
+      invalidVoteCount:
+        description: InvalidVoteCount is the number of ballots the on-chain tally
+          skipped as invalid.
+        type: integer
+      invalidVoteWeight:
+        description: InvalidVoteWeight is the summed weight of the invalid ballots
+          (stringified big integer).
+        type: string
       maxVoters:
         type: integer
       memos:
@@ -1778,6 +1794,20 @@ definitions:
           per such vote. Manager/Admin-only — absent for public callers — and only for a question that has
           an openValue choice. Live: empty while a secretUntilTheEnd election is still encrypted (the memo
           cannot be correlated to a choice until the vote package is decryptable at RESULTS).
+        items:
+          type: string
+        type: array
+      optionVoteCounts:
+        description: |-
+          OptionVoteCounts is, per option (parallel to results), the number of valid ballots selecting it.
+          Absent for ranked and raw-protocol questions.
+        items:
+          type: integer
+        type: array
+      optionVoteWeights:
+        description: |-
+          OptionVoteWeights is, per option (parallel to results), the summed weight of the valid ballots
+          selecting it (stringified big integers). Absent for ranked and raw-protocol questions.
         items:
           type: string
         type: array
@@ -2084,8 +2114,24 @@ definitions:
     type: object
   db.QuestionResults:
     properties:
+      blankVoteCount:
+        description: BlankVoteCount is the number of blank ballots (present once computed,
+          after finalResults).
+        type: integer
+      blankVoteWeight:
+        description: BlankVoteWeight is the summed weight of the blank ballots (stringified
+          big integer).
+        type: string
       finalResults:
         type: boolean
+      invalidVoteCount:
+        description: InvalidVoteCount is the number of ballots the on-chain tally
+          skipped as invalid.
+        type: integer
+      invalidVoteWeight:
+        description: InvalidVoteWeight is the summed weight of the invalid ballots
+          (stringified big integer).
+        type: string
       maxVoters:
         type: integer
       memos:
@@ -2094,6 +2140,20 @@ definitions:
           per such vote. Manager/Admin-only — absent for public callers — and only for a question that has
           an openValue choice. Live: empty while a secretUntilTheEnd election is still encrypted (the memo
           cannot be correlated to a choice until the vote package is decryptable at RESULTS).
+        items:
+          type: string
+        type: array
+      optionVoteCounts:
+        description: |-
+          OptionVoteCounts is, per option (parallel to results), the number of valid ballots selecting it.
+          Absent for ranked and raw-protocol questions.
+        items:
+          type: integer
+        type: array
+      optionVoteWeights:
+        description: |-
+          OptionVoteWeights is, per option (parallel to results), the summed weight of the valid ballots
+          selecting it (stringified big integers). Absent for ranked and raw-protocol questions.
         items:
           type: string
         type: array
