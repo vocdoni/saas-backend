@@ -1029,9 +1029,10 @@ func (a *API) resolveQuestionResults(ctx context.Context, q *db.VotingProcessQue
 		return nil
 	}
 	// lazy backfill: if the election was manually ended and we haven't recorded endedAt yet,
-	// persist it now. statussync does not re-sync terminal (RESULTS) questions, so this is the
-	// only path that fills historical ones. Set on the in-memory question too so this response
-	// carries the field without a round-trip.
+	// persist it now. The status syncer records it too when a read-triggered reconcile visits the
+	// question, but GET /processes/{id}/results enqueues no reconcile and the syncer may be disabled,
+	// so the read fills it as well. Set on the in-memory question too so this response carries the
+	// field without a round-trip.
 	if election.ManuallyEnded && !election.EndDate.IsZero() && q.EndedAt.IsZero() {
 		if err := a.db.SetQuestionEndedAt(q.UpstreamID, election.EndDate); err != nil {
 			log.Warnw("results: set endedAt failed",
@@ -1041,10 +1042,21 @@ func (a *API) resolveQuestionResults(ctx context.Context, q *db.VotingProcessQue
 		}
 	}
 	qr := questionResultsFromElection(election)
+	a.attachBallotCounts(q, &qr)
 	if withMemos {
 		qr.Memos = a.resolveQuestionMemos(ctx, q)
 	}
 	return &qr
+}
+
+// attachBallotCounts serves a question's stored ballot counts inside its results, and asks the syncer
+// to compute them when the election is final but none are stored yet. It never computes, and adds no
+// chain or DB call: the counts ride on the question document the caller already loaded.
+func (a *API) attachBallotCounts(q *db.VotingProcessQuestion, qr *db.QuestionResults) {
+	qr.BallotCounts = q.BallotCounts
+	if qr.FinalResults && q.BallotCounts == nil {
+		a.enqueueResults(q.UpstreamID)
+	}
 }
 
 // resolveQuestionResultsBatch resolves the on-chain tally of every published question concurrently
@@ -1080,6 +1092,7 @@ func (a *API) electionResultsBatch(
 			return
 		}
 		qr := questionResultsFromElection(election)
+		a.attachBallotCounts(q, &qr)
 		if withMemos {
 			qr.Memos = a.resolveQuestionMemos(ctx, q)
 		}
