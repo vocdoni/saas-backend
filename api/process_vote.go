@@ -470,18 +470,23 @@ func voteNullifier(signedTx *models.SignedTx, vote *models.VoteEnvelope, pid int
 // the vote nullifier as assigned on chain.
 func (a *API) submitRelayVote(vote *parsedVote) func() (*db.JobResult, error) {
 	return func() (*db.JobResult, error) {
-		relay, err := a.account.SubmitVote(context.Background(), vote.payload, vote.nullifier)
+		voteID, err := a.account.SubmitVote(context.Background(), vote.payload, vote.nullifier)
 		if err != nil {
 			return nil, err
 		}
 		// meter the relayed vote for billing/quota; best-effort, never fail the relay on a
 		// counter error. The quota itself is enforced at election publish, not here. A vote is
-		// metered once per voter and election: only when this relay landed it and the chain shows
-		// it as the nullifier's first vote, so neither an overwrite nor a re-relay of a vote
-		// already cast (its bytes are public on chain) is metered again.
-		if relay.FirstVote {
-			if err := a.db.IncrementOrganizationSentVotesCounter(vote.org); err != nil {
-				log.Errorw(err, "failed to increment org sent votes counter")
+		// metered once per nullifier, i.e. once per voter and election, whoever relays it: neither
+		// an overwrite nor a re-relay of a vote already cast (its bytes are public on chain) is
+		// metered again. The node's vote id is the nullifier, for an envelope we could not derive
+		// it from.
+		meterKey := vote.nullifier
+		if len(meterKey) == 0 {
+			meterKey = internal.HexBytes(voteID)
+		}
+		if len(meterKey) > 0 {
+			if _, err := a.db.MeterRelayedVote(vote.org, meterKey); err != nil {
+				log.Errorw(err, "failed to meter relayed vote")
 			}
 		}
 		// the vote is on chain: cache it on the voter's CSP row, so /check and the participants
@@ -495,7 +500,7 @@ func (a *API) submitRelayVote(vote *parsedVote) func() (*db.JobResult, error) {
 		return &db.JobResult{
 			ProcessID: vote.processID,
 			Nullifier: vote.nullifier,
-			VoteID:    internal.HexBytes(relay.VoteID),
+			VoteID:    internal.HexBytes(voteID),
 		}, nil
 	}
 }

@@ -62,6 +62,7 @@ type MongoStorage struct {
 	cspCounters         *mongo.Collection
 	jobs                *mongo.Collection
 	apiKeys             *mongo.Collection
+	meteredVotes        *mongo.Collection
 	migrations          *mongo.Collection
 	counters            *mongo.Collection
 }
