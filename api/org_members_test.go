@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
 	"testing"
@@ -62,7 +63,7 @@ func TestOrganizationMembers(t *testing.T) {
 				BirthDate:    "1992-05-15",
 				Email:        "john.doe@example.com",
 				Phone:        "+34612345678",
-				Password:     "password123",
+				Password:     testMemberPassword("password123"),
 				Weight:       "1",
 				Other: map[string]any{
 					"department": "Engineering",
@@ -77,7 +78,7 @@ func TestOrganizationMembers(t *testing.T) {
 				BirthDate:    "1995-08-22",
 				Email:        "jane.smith@example.com",
 				Phone:        "+34698765432",
-				Password:     "password456",
+				Password:     testMemberPassword("password456"),
 				Weight:       "0",
 				Other: map[string]any{
 					"department": "Marketing",
@@ -133,7 +134,7 @@ func TestOrganizationMembers(t *testing.T) {
 				BirthDate:  "1985-07-10",
 				Email:      "carlos@example.com",
 				Phone:      "+34600111222",
-				Password:   "password999",
+				Password:   testMemberPassword("password999"),
 				Weight:     "0",
 				Other: map[string]any{
 					"department": "Finance",
@@ -147,7 +148,7 @@ func TestOrganizationMembers(t *testing.T) {
 				BirthDate: "1992-11-25",
 				Email:     "maria.garcia@example.com",
 				Phone:     "+34600333444",
-				Password:  "passwordxyz",
+				Password:  testMemberPassword("passwordxyz"),
 				Weight:    "1",
 				Other: map[string]any{
 					"department": "Legal",
@@ -162,7 +163,7 @@ func TestOrganizationMembers(t *testing.T) {
 				BirthDate:  "invalid-birthdate",
 				Email:      "invalid-email",
 				Phone:      "invalid-phone",
-				Password:   "passwordabc",
+				Password:   testMemberPassword("passwordabc"),
 				Weight:     "2",
 				Other: map[string]any{
 					"department": "Operations",
@@ -177,7 +178,7 @@ func TestOrganizationMembers(t *testing.T) {
 				BirthDate:    "1990-03-15",
 				Email:        "joan.lopez@example.com",
 				Phone:        "+34600444555",
-				Password:     "passworddef",
+				Password:     testMemberPassword("passworddef"),
 				// Weight is missing, should default to 1 and no error produced
 				Other: map[string]any{
 					"department": "IT",
@@ -276,7 +277,7 @@ func TestOrganizationMembers(t *testing.T) {
 				BirthDate:    "1988-12-03",
 				Email:        "bob.johnson@example.com",
 				Phone:        "+34611223344",
-				Password:     "password789",
+				Password:     testMemberPassword("password789"),
 				Other: map[string]any{
 					"department": "Sales",
 					"age":        35,
@@ -290,7 +291,7 @@ func TestOrganizationMembers(t *testing.T) {
 				BirthDate:    "invalid-birthdate",
 				Email:        "invalid-email",
 				Phone:        "invalid-phone",
-				Password:     "passwordabc",
+				Password:     testMemberPassword("passwordabc"),
 				Other: map[string]any{
 					"department": "HR",
 					"age":        42,
@@ -374,7 +375,7 @@ func TestOrganizationMembers(t *testing.T) {
 				Surname:      "User10",
 				Email:        "test10@example.com",
 				Phone:        "+34600000010",
-				Password:     "password10",
+				Password:     testMemberPassword("password10"),
 			},
 		},
 	}
@@ -967,4 +968,53 @@ func TestAddOrganizationMembersAsyncInsertFailure(t *testing.T) {
 	c.Assert(job.Result.Total, qt.Equals, 2)
 	c.Assert(job.Errors, qt.HasLen, 1)
 	c.Assert(job.Errors[0], qt.Matches, "lines 1-2: .*duplicate key.*")
+}
+
+// TestAddMembersLargeSyncImportRunsAsJob pins that a synchronous import needing more than
+// maxSyncMemberHashes argon2 hashes (phones and passwords) runs as a job, like async=true, while one
+// at the limit still completes in the request.
+func TestAddMembersLargeSyncImportRunsAsJob(t *testing.T) {
+	c := qt.New(t)
+	adminToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+
+	membersWithPasswords := func(prefix string, n int) []apicommon.OrgMember {
+		members := make([]apicommon.OrgMember, n)
+		for i := range members {
+			members[i] = apicommon.OrgMember{
+				MemberNumber: fmt.Sprintf("%s-%d", prefix, i),
+				Password:     testMemberPassword(fmt.Sprintf("%s-%d", prefix, i)),
+			}
+		}
+		return members
+	}
+
+	// at the limit: answered in the request
+	inRequest := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, adminToken,
+		&apicommon.AddMembersRequest{Members: membersWithPasswords("at", maxSyncMemberHashes)},
+		organizationMembersURL(orgAddress.String()))
+	c.Assert(inRequest.JobID, qt.HasLen, 0)
+	c.Assert(inRequest.Added, qt.Equals, uint32(maxSyncMemberHashes))
+
+	// one hash over: a job, though async was not asked for
+	over := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, adminToken,
+		&apicommon.AddMembersRequest{Members: membersWithPasswords("over", maxSyncMemberHashes+1)},
+		organizationMembersURL(orgAddress.String()))
+	c.Assert(over.JobID, qt.HasLen, 16)
+	var jobID internal.HexBytes
+	jobID.SetBytes(over.JobID)
+	job := pollOrgJob(t, adminToken, orgAddress.String(), jobID.String())
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted)
+	c.Assert(job.Result.Added, qt.Equals, maxSyncMemberHashes+1)
+}
+
+func TestMemberHashCount(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(memberHashCount([]apicommon.OrgMember{
+		{},
+		{Phone: "+34612345601"},
+		{Password: "x"},
+		{Phone: "+34612345602", Password: "y"},
+	}), qt.Equals, 4)
 }

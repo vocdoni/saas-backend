@@ -120,3 +120,33 @@ func HexHashPasswordContext(ctx context.Context, salt, password string) (string,
 func HashOrgData(orgAddress common.Address, data string) []byte {
 	return argon2hash([]byte(data), orgAddress.Bytes())
 }
+
+// HashOrgDataContext hashes organization data like HashOrgData, but returns ErrHashingBusy when no
+// hashing slot frees up within HashSlotWait or before ctx is done.
+func HashOrgDataContext(ctx context.Context, orgAddress common.Address, data string) ([]byte, error) {
+	return argon2hashContext(ctx, HashSlotWait, []byte(data), orgAddress.Bytes())
+}
+
+// backgroundGate admits one background hash at a time into hashSlots. Bulk work (member imports)
+// hashes one field after another with nobody waiting on each answer, so it could otherwise hold a
+// slot per running import and leave the request handlers, which give up after HashSlotWait, with
+// none. Through the gate all the background work together holds at most one slot.
+var backgroundGate = make(chan struct{}, 1)
+
+// argon2hashBackground is argon2hash for background work: it first waits for backgroundGate, as
+// long as needed, then for a hashing slot.
+func argon2hashBackground(data, salt []byte) []byte {
+	backgroundGate <- struct{}{}
+	defer func() { <-backgroundGate }()
+	return argon2hash(data, salt)
+}
+
+// HashPasswordBackground is HashPassword for background work (see backgroundGate).
+func HashPasswordBackground(salt, password string) []byte {
+	return argon2hashBackground([]byte(password), []byte(salt))
+}
+
+// HashOrgDataBackground is HashOrgData for background work (see backgroundGate).
+func HashOrgDataBackground(orgAddress common.Address, data string) []byte {
+	return argon2hashBackground([]byte(data), orgAddress.Bytes())
+}

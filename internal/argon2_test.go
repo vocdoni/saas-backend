@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"golang.org/x/crypto/argon2"
 )
@@ -64,4 +65,61 @@ func TestHashPasswordContextBusy(t *testing.T) {
 	_, err = HashPasswordContext(context.Background(), "salt", "password")
 	c.Assert(err, qt.IsNil)
 	c.Assert(hashSlots, qt.HasLen, 0)
+}
+
+func TestHashOrgDataVariantsAgree(t *testing.T) {
+	c := qt.New(t)
+	org := common.Address{0x42}
+	want := HashOrgData(org, "+34600000000")
+	got, err := HashOrgDataContext(context.Background(), org, "+34600000000")
+	c.Assert(err, qt.IsNil)
+	c.Assert(got, qt.DeepEquals, want)
+	c.Assert(HashOrgDataBackground(org, "+34600000000"), qt.DeepEquals, want)
+	c.Assert(HashPasswordBackground("salt", "password"), qt.DeepEquals, HashPassword("salt", "password"))
+}
+
+func TestHashOrgDataContextBusy(t *testing.T) {
+	c := qt.New(t)
+	for range cap(hashSlots) {
+		hashSlots <- struct{}{}
+	}
+	defer func() {
+		for range cap(hashSlots) {
+			<-hashSlots
+		}
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := HashOrgDataContext(ctx, common.Address{0x42}, "+34600000000")
+	c.Assert(errors.Is(err, ErrHashingBusy), qt.IsTrue)
+}
+
+// TestBackgroundHashingHoldsOneSlot pins the background gate: while one background hash holds it,
+// another waits for the gate rather than taking a second hashing slot, and a request handler's hash
+// still gets a slot meanwhile.
+func TestBackgroundHashingHoldsOneSlot(t *testing.T) {
+	c := qt.New(t)
+	// stand in for a background hash in progress
+	backgroundGate <- struct{}{}
+	done := make(chan struct{})
+	go func() {
+		HashPasswordBackground("salt", "password")
+		close(done)
+	}()
+
+	_, err := HashPasswordContext(context.Background(), "salt", "password")
+	c.Assert(err, qt.IsNil)
+	select {
+	case <-done:
+		c.Fatal("a second background hash ran while the gate was held")
+	case <-time.After(50 * time.Millisecond):
+	}
+	c.Assert(hashSlots, qt.HasLen, 0, qt.Commentf("the waiting background hash must not hold a slot"))
+
+	<-backgroundGate
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		c.Fatal("the background hash did not run once the gate was free")
+	}
 }

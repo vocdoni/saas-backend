@@ -30,6 +30,17 @@ func ValidEmail(email string) bool {
 	return emailRegex.MatchString(email)
 }
 
+// memberPasswordHashRegex matches a member password client hash: the SHA-256 hex digest a client
+// computes from the plaintext, so exactly 64 lowercase hex characters.
+var memberPasswordHashRegex = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// ValidMemberPasswordHash reports whether s has the form of a member password client hash, 64
+// lowercase hex characters. It checks the form only: it is how the API refuses a plaintext
+// password before it can be stored or compared.
+func ValidMemberPasswordHash(s string) bool {
+	return memberPasswordHashRegex.MatchString(s)
+}
+
 // NormalizeEmail returns the canonical form of an email address used for
 // storage and login matching: trimmed of surrounding whitespace and
 // lowercased. Storing and comparing emails in this canonical form makes the

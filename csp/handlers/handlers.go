@@ -4,8 +4,11 @@
 package handlers
 
 import (
+	"context"
+
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/db"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 const (
@@ -21,13 +24,17 @@ const (
 type CSPHandlers struct {
 	csp    *csp.CSP
 	mainDB *db.MongoStorage
+	// hashPassword computes a member password hash in the service-wide argon2 slots; a seam so tests
+	// can count the checks run.
+	hashPassword func(ctx context.Context, salt string, memberID bson.ObjectID, clientHash string) ([]byte, error)
 }
 
 // New creates a new instance of the CSP handlers instance. It receives the CSP
 // instance and the main database instance as parameters.
 func New(c *csp.CSP, mainDB *db.MongoStorage) *CSPHandlers {
 	return &CSPHandlers{
-		csp:    c,
-		mainDB: mainDB,
+		csp:          c,
+		mainDB:       mainDB,
+		hashPassword: db.HashMemberPasswordContext,
 	}
 }

@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -13,6 +16,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.vocdoni.io/dvote/log"
 )
 
 // parseAuthStep parses the authentication step from the URL parameters
@@ -104,8 +108,10 @@ type voterPhone struct {
 // parseVoterPhone normalizes and hashes a submitted phone number, returning nil for an empty one.
 // The hash is deliberately expensive (Argon2), so step 0 computes it once, before the participant
 // lookup, and reuses it for the contact check: hashing it only for a found participant would make
-// a found participant measurably slower to answer than an unknown one.
-func parseVoterPhone(phone string, org *db.Organization) (*voterPhone, error) {
+// a found participant measurably slower to answer than an unknown one. It runs in the service-wide
+// argon2 slots for ctx, the voter's request, and gives up with internal.ErrHashingBusy when none
+// frees up in time (see phoneParseFailed).
+func parseVoterPhone(ctx context.Context, phone string, org *db.Organization) (*voterPhone, error) {
 	if phone == "" {
 		return nil, nil
 	}
@@ -113,11 +119,20 @@ func parseVoterPhone(phone string, org *db.Organization) (*voterPhone, error) {
 	if err != nil {
 		return nil, err
 	}
-	hashed, err := db.NewHashedPhone(normalized, org)
+	hashed, err := db.NewHashedPhoneContext(ctx, normalized, org)
 	if err != nil {
 		return nil, err
 	}
 	return &voterPhone{normalized: normalized, hashed: hashed}, nil
+}
+
+// phoneParseFailed is the answer to a parseVoterPhone error: ErrServerBusy, a 503 to retry later,
+// when no argon2 slot freed up in time; otherwise the phone itself is invalid.
+func phoneParseFailed(err error) errors.Error {
+	if errors.Is(err, internal.ErrHashingBusy) {
+		return errors.ErrServerBusy.WithErr(err)
+	}
+	return errors.ErrInvalidData.WithErr(err)
 }
 
 // handlePhoneContact verifies the phone and returns the appropriate contact method.
@@ -172,13 +187,52 @@ func determineContactMethod(
 // never spend the budget of the voter's own submission. The voter key covers the login fields
 // alone, and is set only when the census has both login and contact fields: it is the coarser
 // bound on trying many contacts for one voter. A census with only one kind of field has nothing
-// coarser to key on and uses the submission key alone.
+// coarser to key on and uses the submission key alone. The member password takes part in neither
+// key, so every wrong password tried for one voter spends the same budget.
 func authAttemptKeys(census *db.Census, member *db.OrgMember) (submission, voter []byte) {
 	submission = db.HashAuthTwoFaFields(*member, census.AuthFields, census.TwoFaFields)
 	if len(census.AuthFields) > 0 && len(census.TwoFaFields) > 0 {
 		voter = db.HashAuthTwoFaFields(*member, census.AuthFields, nil)
 	}
 	return submission, voter
+}
+
+// memberPasswordMatches reports whether the client hash a voter sent matches the member's stored
+// password, hashing it as db.HashMemberPassword does and comparing the argon2 hashes in constant
+// time. A member without a stored password never matches. The hash runs in the service-wide
+// argon2 slots shared with the account passwords (internal.HashPasswordContext): when none frees
+// up in time, or the request is cancelled first, it gives up with internal.ErrHashingBusy.
+func (c *CSPHandlers) memberPasswordMatches(ctx context.Context, clientHash string, member *db.OrgMember) (bool, error) {
+	computed, err := c.hashPassword(ctx, c.csp.PasswordSalt, member.ID, clientHash)
+	if err != nil {
+		return false, err
+	}
+	return len(member.HashedPass) > 0 && subtle.ConstantTimeCompare(computed, member.HashedPass) == 1, nil
+}
+
+// unknownParticipant answers a login whose participant or member was not found. password is the
+// request's client hash, set exactly when the census uses the password (authFirstStep only reads it
+// then, and refuses it empty). With one, it first runs a password check against no stored password,
+// the work a wrong password costs, so the answer takes as long whether the other fields name a member
+// or not and the response time does not list the census. A failed check answers like it does for a
+// member.
+func (c *CSPHandlers) unknownParticipant(ctx context.Context, password string, notFound error) error {
+	if password != "" {
+		if _, err := c.memberPasswordMatches(ctx, password, &db.OrgMember{}); err != nil {
+			return passwordCheckFailed(err)
+		}
+	}
+	return notFound
+}
+
+// passwordCheckFailed is the answer to a password check that could not run. No argon2 slot freeing
+// up in time (or the request ending first) is ErrServerBusy, a 503 to retry later; it is not
+// ErrCSPAuthFailed, so it spends none of the failed-attempt budget.
+func passwordCheckFailed(err error) error {
+	if errors.Is(err, internal.ErrHashingBusy) {
+		return errors.ErrServerBusy.WithErr(err)
+	}
+	return errors.ErrGenericInternalServerError.WithErr(err)
 }
 
 // authFirstStep is the first step of the authentication process. It receives
@@ -204,6 +258,14 @@ func authAttemptKeys(census *db.Census, member *db.OrgMember) (submission, voter
 // it generates and returns an authentication token that will be used in the
 // second step. If the cooldown period between authentication attempts has not
 // elapsed, the underlying AuthToken call may return ErrAttemptCoolDownTime.
+//
+// When the census auth fields include the member password, the request must carry it as the client
+// hash. It takes no part in the lookup: once the other fields have found the participant, it is
+// compared with the member's stored password before anything else about the member is revealed, and
+// a mismatch answers exactly like an unknown participant (ErrCSPAuthFailed, spending the budget). An
+// unknown participant pays for a password check too (see unknownParticipant), so the two cannot be
+// told apart by their timing either. When no argon2 slot frees up in time, both answer
+// ErrServerBusy, which spends no budget.
 func (c *CSPHandlers) authFirstStep(
 	r *http.Request,
 	anchorID internal.HexBytes,
@@ -246,11 +308,23 @@ func (c *CSPHandlers) authFirstStep(
 	var phone *voterPhone
 	var hashedPhone db.HashedPhone
 	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone) {
-		if phone, err = parseVoterPhone(req.Phone, org); err != nil {
-			return nil, errors.ErrInvalidData.WithErr(err)
+		// hashed before the failed-attempt budget is claimed, so a busy answer spends none of it
+		if phone, err = parseVoterPhone(r.Context(), req.Phone, org); err != nil {
+			return nil, phoneParseFailed(err)
 		}
 		if phone != nil {
 			hashedPhone = phone.hashed
+		}
+	}
+
+	// the password is only read when the census asks for it; an empty one fails below like any other
+	// missing login field
+	usesPassword := slices.Contains(census.AuthFields, db.OrgMemberAuthFieldsPassword)
+	password := ""
+	if usesPassword {
+		password = req.Password
+		if password != "" && !internal.ValidMemberPasswordHash(password) {
+			return nil, errors.ErrInvalidUserData.Withf("invalid password format")
 		}
 	}
 
@@ -270,8 +344,13 @@ func (c *CSPHandlers) authFirstStep(
 	}).Normalized()
 
 	// a voter must supply every login field the census requires: an empty value would otherwise hash
-	// like a member stored without it, letting that member in on the remaining fields alone
-	if inputMember.MissingLoginData(census.AuthFields, census.TwoFaFields) {
+	// like a member stored without it, letting that member in on the remaining fields alone. The
+	// password is checked apart, since the request carries it as a client hash and inputMember has
+	// no field for that (HashedPass is the stored argon2 hash).
+	lookupFields := slices.DeleteFunc(slices.Clone(census.AuthFields), func(f db.OrgMemberAuthField) bool {
+		return f == db.OrgMemberAuthFieldsPassword
+	})
+	if inputMember.MissingLoginData(lookupFields, census.TwoFaFields) || (usesPassword && password == "") {
 		return nil, errors.ErrInvalidUserData.Withf("missing required auth data")
 	}
 
@@ -295,7 +374,7 @@ func (c *CSPHandlers) authFirstStep(
 	censusParticipant, err := c.mainDB.CensusParticipantByLoginHash(*census, *inputMember)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			return nil, errors.ErrCSPAuthFailed
+			return nil, c.unknownParticipant(r.Context(), password, errors.ErrCSPAuthFailed)
 		}
 		return nil, errors.ErrGenericInternalServerError.WithErr(err)
 	}
@@ -304,9 +383,24 @@ func (c *CSPHandlers) authFirstStep(
 	orgMember, err := c.mainDB.OrgMember(census.OrgAddress, censusParticipant.ParticipantID)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			return nil, errors.ErrCSPAuthFailed
+			// logged rather than put in the body, which must match the unknown-participant answer exactly
+			log.Warnw("census participant without org member", "participantID", censusParticipant.ParticipantID, "error", err)
+			return nil, c.unknownParticipant(r.Context(), password, errors.ErrCSPAuthFailed)
 		}
 		return nil, errors.ErrGenericInternalServerError.WithErr(err)
+	}
+
+	// the password goes first: the weight and contact checks below answer differently, so running
+	// them before it would tell a caller without the password things about the member. A mismatch is
+	// an ErrCSPAuthFailed, which keeps the reserved failed-attempt unit spent.
+	if usesPassword {
+		matches, err := c.memberPasswordMatches(r.Context(), password, orgMember)
+		if err != nil {
+			return nil, passwordCheckFailed(err)
+		}
+		if !matches {
+			return nil, errors.ErrCSPAuthFailed
+		}
 	}
 	uID := internal.HexBytesFromString(orgMember.ID.Hex())
 

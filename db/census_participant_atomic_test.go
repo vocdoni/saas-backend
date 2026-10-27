@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -79,7 +80,7 @@ func TestUpsertOrgMemberCensusUpdateIsAllOrNothing(t *testing.T) {
 	c.Assert(before, qt.HasLen, 1)
 
 	// updating m0 to m1's identity conflicts in census B and must fail...
-	_, _, err = testDB.UpsertOrgMemberAndCensusParticipants(testOrg, &OrgMemberUpdate{
+	_, _, err = testDB.UpsertOrgMemberAndCensusParticipants(context.Background(), testOrg, &OrgMemberUpdate{
 		ID:           stored0.ID,
 		MemberNumber: new(m1.MemberNumber),
 		Name:         new(m1.Name),

@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	stderrors "errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func TestSignOutcome(t *testing.T) {
@@ -54,6 +57,14 @@ func TestValidateVoterAddress(t *testing.T) {
 	c.Assert(validateVoterAddress(internal.HexBytes(make([]byte, common.AddressLength+1))), qt.Not(qt.IsNil))
 }
 
+// TestPhoneParseFailed pins the answers to a phone that could not be parsed: a hash that found no
+// free argon2 slot is a 503 to retry, anything else an invalid phone.
+func TestPhoneParseFailed(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(phoneParseFailed(internal.ErrHashingBusy), qt.ErrorIs, errors.ErrServerBusy)
+	c.Assert(phoneParseFailed(fmt.Errorf("not a phone number")), qt.ErrorIs, errors.ErrInvalidData)
+}
+
 func TestHandlePhoneContact(t *testing.T) {
 	c := qt.New(t)
 
@@ -62,7 +73,7 @@ func TestHandlePhoneContact(t *testing.T) {
 		hashedPhone, err := db.NewHashedPhone(phone, org)
 		c.Assert(err, qt.IsNil)
 
-		submitted, err := parseVoterPhone(phone, org)
+		submitted, err := parseVoterPhone(context.Background(), phone, org)
 		c.Assert(err, qt.IsNil)
 		normalized, challengeType, err := handlePhoneContact(submitted, hashedPhone)
 		c.Assert(err, qt.IsNil)
@@ -70,7 +81,7 @@ func TestHandlePhoneContact(t *testing.T) {
 		c.Assert(challengeType, qt.Equals, notifications.SMSChallenge)
 
 		// another number, or none at all, fails with the same error as an unknown participant
-		other, err := parseVoterPhone("+34699999999", org)
+		other, err := parseVoterPhone(context.Background(), "+34699999999", org)
 		c.Assert(err, qt.IsNil)
 		_, _, err = handlePhoneContact(other, hashedPhone)
 		c.Assert(err, qt.ErrorIs, errors.ErrCSPAuthFailed)
@@ -90,4 +101,43 @@ func TestHandlePhoneContact(t *testing.T) {
 
 	org.Country = "US" // a valid phone with prefix, should keep it regardless of org country
 	t.Run(org.Country, func(*testing.T) { test(org, "+34612345601", "+34612345601") })
+}
+
+// TestMemberPasswordMatches covers the password check behind auth step 0: it matches the stored
+// argon2 hash of the client hash and nothing else, and a check that finds no free argon2 slot gives
+// up and answers ErrServerBusy instead of blocking.
+func TestMemberPasswordMatches(t *testing.T) {
+	c := qt.New(t)
+	h := New(&csp.CSP{PasswordSalt: "salt"}, nil)
+	clientHash := strings.Repeat("ab", 32)
+	stored := &db.OrgMember{ID: bson.NewObjectID()}
+	stored.HashedPass = db.HashMemberPassword("salt", stored.ID, clientHash)
+
+	ok, err := h.memberPasswordMatches(context.Background(), clientHash, stored)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+
+	ok, err = h.memberPasswordMatches(context.Background(), strings.Repeat("cd", 32), stored)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+
+	// the hash is salted with the member ID: another member's stored hash does not match
+	ok, err = h.memberPasswordMatches(context.Background(), clientHash,
+		&db.OrgMember{ID: bson.NewObjectID(), HashedPass: stored.HashedPass})
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+
+	// a member without a stored password never matches
+	ok, err = h.memberPasswordMatches(context.Background(), clientHash, &db.OrgMember{ID: stored.ID})
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+
+	// no argon2 slot freed up in time: the check gives up, and the voter is told to retry later
+	h.hashPassword = func(context.Context, string, bson.ObjectID, string) ([]byte, error) {
+		return nil, internal.ErrHashingBusy
+	}
+	_, err = h.memberPasswordMatches(context.Background(), clientHash, stored)
+	c.Assert(err, qt.ErrorIs, internal.ErrHashingBusy)
+	c.Assert(passwordCheckFailed(err), qt.ErrorIs, errors.ErrServerBusy)
+	c.Assert(passwordCheckFailed(context.Canceled), qt.ErrorIs, errors.ErrGenericInternalServerError)
 }

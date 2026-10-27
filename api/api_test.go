@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -1003,7 +1004,7 @@ func newOrgMembers(n int) []apicommon.OrgMember {
 			Surname:      fmt.Sprintf("Surname %d", i+1),
 			Email:        fmt.Sprintf("user%d@example.com", i+1),
 			Phone:        fmt.Sprintf("+346%08d", i+1),
-			Password:     fmt.Sprintf("password%d", i+1),
+			Password:     testMemberPassword(fmt.Sprintf("password%d", i+1)),
 			Other:        map[string]any{"some": "data"},
 			NationalID:   fmt.Sprintf("DNI%03d", i+1),
 			BirthDate:    time.Date(1980, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, i).Format("2006-01-02"),
@@ -1011,6 +1012,14 @@ func newOrgMembers(n int) []apicommon.OrgMember {
 		}
 	}
 	return members
+}
+
+// testMemberPassword returns a member password in the form the API takes it, the client hash: the
+// API accepts any 64 lowercase hex characters, so a SHA-256 of the plaintext stands in for the
+// client formula (which also salts with the organization address).
+func testMemberPassword(plaintext string) string {
+	sum := sha256.Sum256([]byte(plaintext))
+	return hex.EncodeToString(sum[:])
 }
 
 // organizationMembers methods

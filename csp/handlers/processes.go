@@ -87,8 +87,12 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 //	@Description	Two-step voter authentication for a multi-question voting process (the /processes
 //	@Description	replacement of the bundle auth flow); the issued token is anchored to the process.
 //	@Description	- Step 0: handlers.AuthRequest — member identification fields (name, surname,
-//	@Description	memberNumber, nationalId, birthDate, email, phone); which are required depends on the
-//	@Description	census auth configuration. If valid, a challenge is sent and a token returned.
+//	@Description	memberNumber, nationalId, birthDate, email, phone, password); which are required depends
+//	@Description	on the census auth configuration. If valid, a challenge is sent and a token returned.
+//	@Description	`password` is the member password's client hash (64 lowercase hex characters, see
+//	@Description	handlers.AuthRequest); a wrong one answers exactly like an unknown participant (40802)
+//	@Description	and spends the same failed-attempt budget. When the server's password-hashing capacity
+//	@Description	is exhausted, it answers 503, code 50302: retry later (this spends no budget).
 //	@Description	- Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
 //	@Description	If valid the token is marked verified and returned. Auth-only censuses may not require
 //	@Description	a challenge solution.
@@ -111,6 +115,7 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 //	@Failure		401			{object}	errors.Error	"Invalid authentication data, cooldown not reached, or invalid challenge"
 //	@Failure		404			{object}	errors.Error	"Process, census, or organization not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		503			{object}	errors.Error	"Password- or phone-hashing capacity exhausted, retry later (50302)"
 //	@Router			/processes/{processId}/auth/{step} [post]
 func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request) {
 	oid, anchor, ok := parseProcessID(w, r)
@@ -152,6 +157,7 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 //	@Failure		401			{object}	errors.Error	"Invalid/expired token, token not belonging to the process, or contact mismatch"
 //	@Failure		404			{object}	errors.Error	"Census or organization not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		503			{object}	errors.Error	"Phone-hashing capacity exhausted, retry later (50302)"
 //	@Router			/processes/{processId}/auth/resend [post]
 func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Request) {
 	oid, anchor, ok := parseProcessID(w, r)
@@ -196,8 +202,9 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 	lang := apicommon.NotificationLang(r.Context(), org)
 	var phone *voterPhone
 	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone) {
-		if phone, err = parseVoterPhone(req.Phone, org); err != nil {
-			errors.ErrInvalidData.WithErr(err).Write(w)
+		// parsed before a resend is claimed, so a busy answer spends none of the token's resends
+		if phone, err = parseVoterPhone(r.Context(), req.Phone, org); err != nil {
+			phoneParseFailed(err).Write(w)
 			return
 		}
 	}

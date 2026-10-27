@@ -4,6 +4,7 @@ package db
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -448,7 +449,8 @@ func (f *OrgMemberAuthField) UnmarshalJSON(data []byte) error {
 		OrgMemberAuthFieldsSurname,
 		OrgMemberAuthFieldsMemberNumber,
 		OrgMemberAuthFieldsNationalID,
-		OrgMemberAuthFieldsBirthDate:
+		OrgMemberAuthFieldsBirthDate,
+		OrgMemberAuthFieldsPassword:
 		*f = OrgMemberAuthField(s)
 		return nil
 	default:
@@ -462,6 +464,10 @@ const (
 	OrgMemberAuthFieldsMemberNumber OrgMemberAuthField = "memberNumber"
 	OrgMemberAuthFieldsNationalID   OrgMemberAuthField = "nationalId"
 	OrgMemberAuthFieldsBirthDate    OrgMemberAuthField = "birthDate"
+	// OrgMemberAuthFieldsPassword is the member password. It never takes part in the login hash:
+	// the CSP finds the participant on the other fields, then checks the password against the
+	// member's stored hash (see OrgMember.MissingLoginData and ValidateCensusFields).
+	OrgMemberAuthFieldsPassword OrgMemberAuthField = "password"
 )
 
 // OrgMemberAuthFields is a list of fields that can be used for member authentication.
@@ -530,6 +536,10 @@ func (f OrgMemberTwoFaFields) GetCensusType() CensusType {
 // emails. A full Unicode case-fold would be marginally more correct for a few
 // scripts, but diverging from the existing convention would be worse: the two
 // sides of the comparison only agree because they fold identically.
+//
+// The password auth field is not part of the hash (memberAuthFieldValue reports it unknown): it is
+// checked after the participant lookup instead, so passwords never affect loginHash, uniqueness or
+// duplicate detection.
 //
 // IMPORTANT: migrations.hashMemberFields mirrors this function byte for byte so
 // that the repair tooling can recompute stored hashes without importing db. Any
@@ -910,16 +920,35 @@ type HashedPhone []byte
 // NewHashedPhone creates a HashedPhone from a phone and organization.
 // If phone is the empty string, returns an empty Phone and no error.
 func NewHashedPhone(phone string, organization *Organization) (HashedPhone, error) {
+	return hashPhoneWith(phone, organization, func(org common.Address, normalized string) ([]byte, error) {
+		return internal.HashOrgData(org, normalized), nil
+	})
+}
+
+// NewHashedPhoneContext is NewHashedPhone for a request handler: the hash gives up with
+// internal.ErrHashingBusy when no hashing slot frees up in time (see internal.HashOrgDataContext).
+func NewHashedPhoneContext(ctx context.Context, phone string, organization *Organization) (HashedPhone, error) {
+	return hashPhoneWith(phone, organization, func(org common.Address, normalized string) ([]byte, error) {
+		return internal.HashOrgDataContext(ctx, org, normalized)
+	})
+}
+
+// hashPhoneWith normalizes phone for the organization's country and hashes it with hash.
+func hashPhoneWith(phone string, organization *Organization,
+	hash func(org common.Address, normalized string) ([]byte, error),
+) (HashedPhone, error) {
 	if phone == "" {
 		return HashedPhone{}, nil
 	}
-
-	// Normalize and hash in one operation
 	normalized, err := internal.SanitizeAndVerifyPhoneNumber(phone, organization.Country)
 	if err != nil {
 		return nil, err
 	}
-	return HashedPhone(internal.HashOrgData(organization.Address, normalized)), nil
+	hashed, err := hash(organization.Address, normalized)
+	if err != nil {
+		return nil, err
+	}
+	return HashedPhone(hashed), nil
 }
 
 // Matches checks if a HashedPhone matches another phone

@@ -14,6 +14,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
@@ -126,6 +127,7 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		404			{object}	errors.Error	"Process not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		503			{object}	errors.Error	"Server busy hashing the phone, retry after Retry-After (50302)"
 //	@Router			/processes/{processId}/participants [get]
 func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)
@@ -154,7 +156,11 @@ func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Re
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
-		hashed, err := db.NewHashedPhone(value, org)
+		hashed, err := db.NewHashedPhoneContext(r.Context(), value, org)
+		if errors.Is(err, internal.ErrHashingBusy) {
+			writeHashingBusy(w, err)
+			return
+		}
 		if err != nil || hashed.IsEmpty() {
 			errors.ErrMalformedBody.Withf("invalid phone").Write(w)
 			return
