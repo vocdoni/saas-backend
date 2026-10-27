@@ -262,8 +262,8 @@ func (s *Service) handleInvoicePayment(event *stripeapi.Event) error {
 	// Update last payment date
 	err = s.db.SetOrganizationLastPaymentDate(invoiceInfo.OrgAddress, invoiceInfo.PaymentTime)
 	if errors.Is(err, db.ErrNotFound) {
-		return fmt.Errorf("organization %s not found for payment %s: %w",
-			invoiceInfo.OrgAddress, invoiceInfo.ID, err)
+		return fmt.Errorf("organization %s not found for payment %s: %w: %w",
+			invoiceInfo.OrgAddress, invoiceInfo.ID, err, errPermanentEvent)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to update payment date for organization %s: %w",
@@ -415,7 +415,7 @@ func newSubscriptionInfo(subscription *stripeapi.Subscription) (*SubscriptionInf
 func parseInvoiceFromEvent(event *stripeapi.Event) (*InvoiceInfo, error) {
 	var invoice stripeapi.Invoice
 	if err := json.Unmarshal(event.Data.Raw, &invoice); err != nil {
-		return nil, fmt.Errorf("failed to parse invoice from event: %v", err)
+		return nil, fmt.Errorf("failed to parse invoice from event: %v: %w", err, errPermanentEvent)
 	}
 
 	// not a subscription invoice: nothing to record
@@ -424,15 +424,15 @@ func parseInvoiceFromEvent(event *stripeapi.Event) (*InvoiceInfo, error) {
 	}
 
 	if invoice.EffectiveAt == 0 {
-		return nil, fmt.Errorf("invoice missing effective date")
+		return nil, fmt.Errorf("invoice %s missing effective date: %w", invoice.ID, errPermanentEvent)
 	}
 	orgAddress := common.HexToAddress(invoice.Parent.SubscriptionDetails.Metadata["address"])
 	if orgAddress.Cmp(common.Address{}) == 0 {
-		return nil, fmt.Errorf("invoice missing address metadata")
+		return nil, fmt.Errorf("invoice %s missing address metadata: %w", invoice.ID, errPermanentEvent)
 	}
 
 	if invoice.Status != stripeapi.InvoiceStatusPaid {
-		return nil, fmt.Errorf("invoice is not paid")
+		return nil, fmt.Errorf("invoice %s is not paid: %w", invoice.ID, errPermanentEvent)
 	}
 
 	return &InvoiceInfo{

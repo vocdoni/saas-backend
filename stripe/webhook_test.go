@@ -2,6 +2,7 @@ package stripe
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -46,6 +47,29 @@ func TestParseInvoiceFromEventNonSubscription(t *testing.T) {
 
 			// the handler must return without touching the database, which is nil here
 			c.Assert((&Service{}).HandleEvent(event), qt.IsNil)
+		})
+	}
+}
+
+// TestParseInvoiceFromEventPermanentErrors pins that a subscription invoice that can never be
+// recorded is marked permanent, so the webhook drops it instead of Stripe retrying it for days.
+func TestParseInvoiceFromEventPermanentErrors(t *testing.T) {
+	c := qt.New(t)
+
+	const parent = `"parent":{"subscription_details":{"metadata":{"address":"0x00000000000000000000000000000000000000aa"}}}`
+	for name, raw := range map[string]string{
+		"malformed payload":      `{"id":`,
+		"missing effective date": `{"id":"in_1","status":"paid",` + parent + `}`,
+		"missing address":        `{"id":"in_1","status":"paid","effective_at":1700000000,"parent":{"subscription_details":{}}}`,
+		"not paid":               `{"id":"in_1","status":"open","effective_at":1700000000,` + parent + `}`,
+	} {
+		c.Run(name, func(c *qt.C) {
+			_, err := parseInvoiceFromEvent(&stripeapi.Event{
+				ID:   "evt_test",
+				Type: stripeapi.EventTypeInvoicePaymentSucceeded,
+				Data: &stripeapi.EventData{Raw: json.RawMessage(raw)},
+			})
+			c.Assert(errors.Is(err, errPermanentEvent), qt.IsTrue, qt.Commentf("%v", err))
 		})
 	}
 }
