@@ -9,6 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
@@ -16,6 +17,7 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/crypto/ethereum"
+	"go.vocdoni.io/proto/build/go/models"
 )
 
 // publishedProcess creates and publishes a process over the given member ids and returns its id
@@ -148,6 +150,8 @@ func TestUpdateQuestionCensusReopen(t *testing.T) {
 
 	job := pollJob(t, upd.JobID)
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("resize job error: %s", job.Errors))
+	c.Assert(job.Result, qt.Not(qt.IsNil))
+	c.Assert(job.Result.Status, qt.Equals, string(db.JobStatusCompleted))
 
 	// the election now holds the whole census...
 	elec, err = testAPI.account.Election(restricted.UpstreamID)
@@ -829,6 +833,220 @@ func TestGroupAdditionGrowsPublishedCensus(t *testing.T) {
 	c.Assert(signAs(t, pid, members[2], election), qt.Equals, http.StatusOK)
 }
 
+// TestGroupAdditionFailsJobOnlyForTheBrokenTarget covers a target the chain refuses while another live
+// target is fine: the job fails and its error names the broken question, but the healthy election is
+// still resized and its outcome is kept on the job.
+func TestGroupAdditionFailsJobOnlyForTheBrokenTarget(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
+	ids := memberIDs(members)
+
+	group := requestAndParse[apicommon.OrganizationMemberGroupInfo](
+		t, http.MethodPost, token, &apicommon.CreateOrganizationMemberGroupRequest{
+			Title: "voters", Description: "group census", MemberIDs: ids[:2],
+		}, "organizations", orgAddress.String(), "groups",
+	)
+
+	req := newVotingProcessRequest(orgAddress, ids[:2])
+	req.StartDate = ""
+	req.Census = apicommon.CensusSpec{
+		TwoFaFields: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail},
+		AuthFields:  db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname},
+		GroupID:     group.ID,
+	}
+	req.Questions[1].Eligibility = nil // both questions open to the whole census
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint,
+	)
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", created.ProcessID, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
+
+	got := requestAndParse[apicommon.VotingProcessResponse](
+		t, http.MethodGet, token, nil, "processes", created.ProcessID,
+	)
+	healthy, broken := got.Questions[0], got.Questions[1]
+
+	// the broken question points at an election the chain does not know, so its resize is refused
+	missing := make(internal.HexBytes, 32)
+	c.Assert(testDB.SetQuestionPublished(broken.ID, missing, "", db.QuestionStatusReady), qt.IsNil)
+
+	upd := requestAndParse[apicommon.UpdateOrganizationMemberGroupResponse](
+		t, http.MethodPut, token, &apicommon.UpdateOrganizationMemberGroupsRequest{
+			AddMembers: []string{ids[2]},
+		}, "organizations", orgAddress.String(), "groups", group.ID,
+	)
+	c.Assert(upd.Errors, qt.HasLen, 0)
+	c.Assert(upd.CensusJobIDs, qt.HasLen, 1)
+
+	resize := pollJob(t, upd.CensusJobIDs[0])
+	c.Assert(resize.Status, qt.Equals, db.JobStatusFailed)
+	c.Assert(resize.Errors, qt.HasLen, 1)
+	c.Assert(resize.Errors[0], qt.Contains, broken.ID.Hex())
+
+	c.Assert(resize.Result, qt.Not(qt.IsNil))
+	outcomes := make(map[string]db.QuestionJobResult, len(resize.Result.Questions))
+	for _, q := range resize.Result.Questions {
+		outcomes[q.QuestionID] = q
+	}
+	c.Assert(outcomes, qt.HasLen, 2)
+	c.Assert(outcomes[healthy.ID.Hex()].Status, qt.Equals, db.JobStatusCompleted)
+	c.Assert(outcomes[broken.ID.Hex()].Status, qt.Equals, db.JobStatusFailed)
+	c.Assert(outcomes[broken.ID.Hex()].Error, qt.Not(qt.Equals), "")
+
+	elec, err := testAPI.account.Election(healthy.UpstreamID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(elec.Census.MaxCensusSize, qt.Equals, uint64(3), qt.Commentf("the healthy election must still be resized"))
+}
+
+// TestResizeSkipsElectionEndedWhileQueued covers an election that is still READY when the resize is
+// planned and ends on chain while the job waits for the organization lock. The job must record it as
+// a no-op instead of submitting a resize the chain would refuse.
+func TestResizeSkipsElectionEndedWhileQueued(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
+	ids := memberIDs(members)
+
+	group := requestAndParse[apicommon.OrganizationMemberGroupInfo](
+		t, http.MethodPost, token, &apicommon.CreateOrganizationMemberGroupRequest{
+			Title: "voters", Description: "group census", MemberIDs: ids[:2],
+		}, "organizations", orgAddress.String(), "groups",
+	)
+
+	req := newVotingProcessRequest(orgAddress, ids[:2])
+	req.StartDate = ""
+	req.Census = apicommon.CensusSpec{
+		TwoFaFields: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail},
+		AuthFields:  db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname},
+		GroupID:     group.ID,
+	}
+	req.Questions[1].Eligibility = nil // both questions open to the whole census
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint,
+	)
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", created.ProcessID, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
+
+	got := requestAndParse[apicommon.VotingProcessResponse](
+		t, http.MethodGet, token, nil, "processes", created.ProcessID,
+	)
+	ended, live := got.Questions[0], got.Questions[1]
+
+	// hold the organization lock so the resize is queued behind it
+	restore := orgTxLockTimeout
+	orgTxLockTimeout = 50 * time.Millisecond
+	defer func() { orgTxLockTimeout = restore }()
+	held := testAPI.orgTxLocks.lock(orgAddress)
+	released := false
+	defer func() {
+		if !released {
+			held.Unlock()
+		}
+	}()
+
+	upd := requestAndParse[apicommon.UpdateOrganizationMemberGroupResponse](
+		t, http.MethodPut, token, &apicommon.UpdateOrganizationMemberGroupsRequest{
+			AddMembers: []string{ids[2]},
+		}, "organizations", orgAddress.String(), "groups", group.ID,
+	)
+	c.Assert(upd.Errors, qt.HasLen, 0)
+	c.Assert(upd.CensusJobIDs, qt.HasLen, 1)
+
+	// the first election ends on chain while the job waits: the planning read saw it READY
+	setSyncTestElectionStatus(t, orgAddress, ended.UpstreamID, models.ProcessStatus_ENDED)
+	waitForElectionStatus(t, ended.UpstreamID, "ENDED", "RESULTS")
+
+	held.Unlock()
+	released = true
+	resize := pollJob(t, upd.CensusJobIDs[0])
+	c.Assert(resize.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("resize job error: %s", resize.Errors))
+	c.Assert(resize.Result, qt.Not(qt.IsNil))
+	outcomes := make(map[string]db.QuestionJobResult, len(resize.Result.Questions))
+	for _, q := range resize.Result.Questions {
+		outcomes[q.QuestionID] = q
+	}
+	c.Assert(outcomes[ended.ID.Hex()].NoOp, qt.IsTrue)
+	c.Assert(outcomes[live.ID.Hex()].NoOp, qt.IsFalse)
+
+	elec, err := testAPI.account.Election(live.UpstreamID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(elec.Census.MaxCensusSize, qt.Equals, uint64(3))
+
+	endedElec, err := testAPI.account.Election(ended.UpstreamID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(endedElec.Census.MaxCensusSize, qt.Equals, uint64(2), qt.Commentf("an ended election must not be resized"))
+}
+
+// TestGroupAdditionSkipsEndedElectionOnSharedCensus covers a stale stored status: two whole-census
+// questions share one census, the first election ends on chain while its stored status still reads
+// READY, and a member joins the group. The resize must skip the ended election instead of letting
+// the chain's refusal abort the job, and still raise the live one.
+func TestGroupAdditionSkipsEndedElectionOnSharedCensus(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
+	ids := memberIDs(members)
+
+	group := requestAndParse[apicommon.OrganizationMemberGroupInfo](
+		t, http.MethodPost, token, &apicommon.CreateOrganizationMemberGroupRequest{
+			Title: "voters", Description: "group census", MemberIDs: ids[:2],
+		}, "organizations", orgAddress.String(), "groups",
+	)
+
+	req := newVotingProcessRequest(orgAddress, ids[:2])
+	req.StartDate = ""
+	req.Census = apicommon.CensusSpec{
+		TwoFaFields: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail},
+		AuthFields:  db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname},
+		GroupID:     group.ID,
+	}
+	req.Questions[1].Eligibility = nil // both questions open to the whole census
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint,
+	)
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", created.ProcessID, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
+
+	got := requestAndParse[apicommon.VotingProcessResponse](
+		t, http.MethodGet, token, nil, "processes", created.ProcessID,
+	)
+	ended, live := got.Questions[0], got.Questions[1]
+
+	// the first election ends on chain; nothing reconciles the stored status in this test, so it
+	// keeps reading READY
+	setSyncTestElectionStatus(t, orgAddress, ended.UpstreamID, models.ProcessStatus_ENDED)
+	waitForElectionStatus(t, ended.UpstreamID, "ENDED", "RESULTS")
+	stored, err := testDB.Question(ended.ID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(stored.Status, qt.Equals, db.QuestionStatusReady)
+
+	upd := requestAndParse[apicommon.UpdateOrganizationMemberGroupResponse](
+		t, http.MethodPut, token, &apicommon.UpdateOrganizationMemberGroupsRequest{
+			AddMembers: []string{ids[2]},
+		}, "organizations", orgAddress.String(), "groups", group.ID,
+	)
+	c.Assert(upd.Errors, qt.HasLen, 0)
+	c.Assert(upd.CensusJobIDs, qt.HasLen, 1)
+
+	resize := pollJob(t, upd.CensusJobIDs[0])
+	c.Assert(resize.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("resize job error: %s", resize.Errors))
+
+	elec, err := testAPI.account.Election(live.UpstreamID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(elec.Census.MaxCensusSize, qt.Equals, uint64(3))
+
+	endedElec, err := testAPI.account.Election(ended.UpstreamID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(endedElec.Census.MaxCensusSize, qt.Equals, uint64(2), qt.Commentf("an ended election must not be resized"))
+}
+
 // TestGroupCensusGuards pins the ordering of the removal guard: a refused removal must leave the
 // member in the group *and* in the census. Refusing after the group write is the failure mode this
 // whole cascade exists to remove.
@@ -1153,4 +1371,28 @@ func TestResizeWaitsForBusyOrgLock(t *testing.T) {
 	elec, err := testAPI.account.Election(restricted.UpstreamID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(elec.Census.MaxCensusSize, qt.Equals, uint64(3))
+}
+
+// TestResizeRecordsAlreadyLargeElectionAsNoOp covers a resize overtaken while it waited: the election
+// already holds the target size, so no tx is sent and the target still gets a no-op outcome.
+func TestResizeRecordsAlreadyLargeElectionAsNoOp(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+
+	_, got := publishedProcess(t, token, orgAddress, memberIDs(members))
+	question := got.Questions[0]
+
+	org, err := testDB.Organization(orgAddress)
+	c.Assert(err, qt.IsNil)
+	orgSigner, err := account.OrganizationSigner(testSecret, org.SignerSeedValue(), org.Nonce)
+	c.Assert(err, qt.IsNil)
+
+	result, err := testAPI.setProcessCensusSizes(orgSigner, []censusSizeTarget{{question: question, size: 1}})
+	c.Assert(err, qt.IsNil)
+	c.Assert(result.Questions, qt.DeepEquals, []db.QuestionJobResult{
+		{QuestionID: question.ID.Hex(), Status: db.JobStatusCompleted, NoOp: true},
+	})
 }

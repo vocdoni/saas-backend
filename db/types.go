@@ -1015,8 +1015,9 @@ type VoteJobResult struct {
 }
 
 // QuestionJobResult is the outcome of one question inside a status-change job
-// (JobTypeSetProcessStatus). NoOp marks a question that was already in the requested
-// status, reported as completed without an on-chain transaction.
+// (JobTypeSetProcessStatus) or a census-update job (JobTypeSetProcessCensus). NoOp marks a
+// question that needed no on-chain transaction: already in the requested status, or, for a
+// census update, an election that already has the room or is no longer open on chain.
 type QuestionJobResult struct {
 	QuestionID string    `json:"questionId" bson:"questionId"`
 	Status     JobStatus `json:"status,omitempty" bson:"status,omitempty"`
@@ -1036,7 +1037,7 @@ type JobResult struct {
 	// Votes carries the per-envelope outcome of a batch vote relay, index-aligned with
 	// the votes of the POST /votes request that created the job.
 	Votes []VoteJobResult `json:"votes,omitempty" bson:"votes,omitempty"`
-	// Questions carries the per-question outcome of a status-change job, in target order.
+	// Questions carries the per-question outcome of a status-change or census-update job, in target order.
 	Questions []QuestionJobResult `json:"questions,omitempty" bson:"questions,omitempty"`
 }
 

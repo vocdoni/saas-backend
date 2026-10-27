@@ -1426,8 +1426,8 @@ definitions:
       progress:
         type: integer
       questions:
-        description: Questions is the per-question outcome of a status-change job,
-          in target order
+        description: Questions is the per-question outcome of a status-change or census-update
+          job, in target order
         items:
           $ref: '#/definitions/db.QuestionJobResult'
         type: array

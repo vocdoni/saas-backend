@@ -5,6 +5,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -318,10 +319,11 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	// only whole-census questions grow when participants are added; one that names an eligibility
-	// subset is unaffected by who else joined the census.
+	// subset is unaffected by who else joined the census. A terminal question has no room to take
+	// them, as in census propagation.
 	targets := make([]censusSizeTarget, 0, len(questions))
 	for i := range questions {
-		if len(questions[i].EligibleMemberIDs) == 0 {
+		if isOpenStatus(questions[i].Status) && len(questions[i].EligibleMemberIDs) == 0 {
 			targets = append(targets, censusSizeTarget{
 				question: questions[i], census: census, size: uint64(census.Size),
 			})
@@ -663,16 +665,23 @@ type censusSizeTarget struct {
 	size uint64
 }
 
-// electionMaxCensusSize reads a published question's current on-chain maxCensusSize.
-func (a *API) electionMaxCensusSize(q *db.VotingProcessQuestion) (uint64, error) {
+// electionSizeAndStatus reads a published question's current on-chain maxCensusSize and status,
+// from one read of the election.
+func (a *API) electionSizeAndStatus(q *db.VotingProcessQuestion) (uint64, string, error) {
 	election, err := a.account.Election(q.UpstreamID)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	if election.Census == nil {
-		return 0, fmt.Errorf("election %s carries no census", q.UpstreamID.String())
+		return 0, "", fmt.Errorf("election %s carries no census", q.UpstreamID.String())
 	}
-	return election.Census.MaxCensusSize, nil
+	return election.Census.MaxCensusSize, election.Status, nil
+}
+
+// isOpenStatus reports whether an election, on chain or stored, still lets its census change:
+// READY or PAUSED. ENDED, CANCELED and RESULTS are terminal and refuse SET_PROCESS_CENSUS.
+func isOpenStatus(status string) bool {
+	return status == db.QuestionStatusReady || status == db.QuestionStatusPaused
 }
 
 // enqueueSetProcessCensus submits one SET_PROCESS_CENSUS tx per target, as a single background job,
@@ -698,7 +707,7 @@ func (a *API) enqueueSetProcessCensus(orgAddress common.Address, targets []censu
 		if len(t.question.UpstreamID) == 0 || t.size == 0 {
 			continue // a draft has no election yet, and there is nothing to size against
 		}
-		current, err := a.electionMaxCensusSize(&t.question)
+		current, status, err := a.electionSizeAndStatus(&t.question)
 		switch {
 		case err != nil:
 			log.Warnw("could not read election size, enqueueing the resize anyway",
@@ -706,6 +715,8 @@ func (a *API) enqueueSetProcessCensus(orgAddress common.Address, targets []censu
 				"upstreamId", t.question.UpstreamID.String(), "error", err)
 		case t.size <= current:
 			continue // the election already has the room
+		case !isOpenStatus(status):
+			continue // an ended election cannot take a resize, so there is no job to make
 		default:
 			// a genuine increase
 		}
@@ -730,8 +741,19 @@ func (a *API) enqueueSetProcessCensus(orgAddress common.Address, targets []censu
 	if err := a.db.CreateTxJob(jobID, db.JobTypeSetProcessCensus, org.Address); err != nil {
 		return "", fmt.Errorf("could not create tx job: %w", err)
 	}
+	// record keeps the per-question outcomes on the job when it fails as a whole; the default
+	// recorder would drop them.
+	record := func(result *db.JobResult, runErr error) {
+		jobStatus, errMsg := db.JobStatusCompleted, ""
+		if runErr != nil {
+			jobStatus, errMsg = db.JobStatusFailed, runErr.Error()
+		}
+		if e := a.db.SetJobStatus(jobID, jobStatus, result, errMsg); e != nil {
+			log.Warnw("could not record census resize job", "jobId", jobID, "error", e)
+		}
+	}
 	submit := func(orgLock *orgTxLock) error {
-		if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
+		if !a.enqueueTx(txTask{jobID: jobID, record: record, run: func() (*db.JobResult, error) {
 			defer orgLock.Unlock()
 			return a.setProcessCensusSizes(orgSigner, growing)
 		}}) {
@@ -764,33 +786,68 @@ func (a *API) enqueueSetProcessCensus(orgAddress common.Address, targets []censu
 	return jobID, nil
 }
 
-// setProcessCensusSizes submits one SET_PROCESS_CENSUS tx per target, skipping the elections that
-// already have the room: a resize that waited for the organization lock may have been overtaken by
-// a larger one, and the chain refuses a shrink.
+// setProcessCensusSizes submits one SET_PROCESS_CENSUS tx per target, recording a no-op instead for
+// the elections that already have the room (a resize that waited for the organization lock may have
+// been overtaken by a larger one, and the chain refuses a shrink) and for those the chain no longer
+// has open (a stored status can lag the chain, and an ended election refuses a resize).
+//
+// Every target is attempted even after one fails, so one election cannot hold back the others. The
+// job fails when any attempted target failed, and its error names each failed question; the
+// per-question outcomes are kept on the job either way, as the status-change job does.
 func (a *API) setProcessCensusSizes(orgSigner *ethereum.SignKeys, targets []censusSizeTarget) (*db.JobResult, error) {
+	entries := make([]db.QuestionJobResult, 0, len(targets))
+	attempted := 0
+	var failures []string
 	for i := range targets {
 		t := &targets[i]
-		if current, err := a.electionMaxCensusSize(&t.question); err == nil && t.size <= current {
+		questionID := t.question.ID.Hex()
+		current, status, err := a.electionSizeAndStatus(&t.question)
+		if err == nil && t.size <= current {
+			entries = append(entries, db.QuestionJobResult{QuestionID: questionID, Status: db.JobStatusCompleted, NoOp: true})
 			continue
 		}
-		tx, err := a.account.BuildSetProcessCensusTx(
-			orgSigner.Address(), t.question.UpstreamID,
-			t.census.Published.Root, t.census.Published.URI, t.size,
-		)
-		if err != nil {
-			return nil, err
+		if err == nil && !isOpenStatus(status) {
+			log.Infow("skipping census resize of an election that is no longer open",
+				"question", questionID, "upstreamId", t.question.UpstreamID.String(), "status", status)
+			entries = append(entries, db.QuestionJobResult{QuestionID: questionID, Status: db.JobStatusCompleted, NoOp: true})
+			continue
 		}
-		fundedTx, _, err := a.account.FundTransaction(tx, orgSigner.Address())
-		if err != nil {
-			return nil, err
+		attempted++
+		entry := db.QuestionJobResult{QuestionID: questionID, Status: db.JobStatusCompleted}
+		if err := a.submitSetProcessCensus(orgSigner, t); err != nil {
+			log.Warnw("could not resize census of an election", "question", questionID, "error", err)
+			entry.Status = db.JobStatusFailed
+			entry.Error = err.Error()
+			failures = append(failures, fmt.Sprintf("question %s: %v", questionID, err))
 		}
-		stx, err := a.account.SignTransaction(fundedTx, orgSigner)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := a.account.SubmitSignedTx(stx); err != nil {
-			return nil, err
-		}
+		entries = append(entries, entry)
 	}
-	return &db.JobResult{Status: string(db.JobStatusCompleted)}, nil
+	result := &db.JobResult{Questions: entries}
+	if len(failures) > 0 {
+		return result, fmt.Errorf("%d of %d census resizes failed: %s",
+			len(failures), attempted, strings.Join(failures, "; "))
+	}
+	result.Status = string(db.JobStatusCompleted)
+	return result, nil
+}
+
+// submitSetProcessCensus builds, funds, signs and submits one SET_PROCESS_CENSUS tx for a target.
+func (a *API) submitSetProcessCensus(orgSigner *ethereum.SignKeys, t *censusSizeTarget) error {
+	tx, err := a.account.BuildSetProcessCensusTx(
+		orgSigner.Address(), t.question.UpstreamID,
+		t.census.Published.Root, t.census.Published.URI, t.size,
+	)
+	if err != nil {
+		return err
+	}
+	fundedTx, _, err := a.account.FundTransaction(tx, orgSigner.Address())
+	if err != nil {
+		return err
+	}
+	stx, err := a.account.SignTransaction(fundedTx, orgSigner)
+	if err != nil {
+		return err
+	}
+	_, err = a.account.SubmitSignedTx(stx)
+	return err
 }

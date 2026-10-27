@@ -1464,7 +1464,7 @@ type UnifiedJobResult struct {
 	VoteID    internal.HexBytes `json:"voteID,omitempty" swaggertype:"string" example:"deadbeef"`
 	// Votes is the per-envelope outcome of a batch vote relay, in request order
 	Votes []db.VoteJobResult `json:"votes,omitempty"`
-	// Questions is the per-question outcome of a status-change job, in target order
+	// Questions is the per-question outcome of a status-change or census-update job, in target order
 	Questions []db.QuestionJobResult `json:"questions,omitempty"`
 	Added     int                    `json:"added,omitempty"`
 	Progress  int                    `json:"progress,omitempty"`
