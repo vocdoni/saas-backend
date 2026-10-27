@@ -167,12 +167,10 @@ const (
 	// POST starts a one-time checkout that tops up an organization's wallet
 	walletTopUpEndpoint = "/organizations/{orgAddress}/wallet/topup"
 
-	// GET lists the organization's process payments, filtered by status
-	organizationPaymentsEndpoint = "/organizations/{orgAddress}/payments"
-	// POST starts (or resumes) the one-time checkout of a voting process;
+	// POST starts (or resumes) the wallet top-up checkout of a voting process;
 	// GET reports its payment status; DELETE cancels its open checkout
 	processesCheckoutEndpoint = "/processes/{processId}/checkout"
-	// POST buys census headroom for an already-paid process (raises the paid envelope)
+	// POST buys census headroom for an already-paid process from the wallet (raises the paid envelope)
 	processesCensusCheckoutEndpoint = "/processes/{processId}/census/checkout"
 	// POST /processes/{processId}/check voter eligibility/status (public CSP)
 	processesCheckEndpoint = "/processes/{processId}/check"

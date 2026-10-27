@@ -80,12 +80,8 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 			log.Warnw("could not release the delete's claim on a draft", "processId", oid.Hex(), "error", e)
 		}
 	}()
-	// a processing payment refuses deletion: money is in flight and its outcome unknown.
-	// A paid one is refunded below; a pending one is released by expiring its open session
-	// so it can never be paid, and its payment record goes with the draft.
-	if a.refusePaymentLocked(w, oid) {
-		return
-	}
+	// a paid draft is credited back below; a pending one is released by expiring its open
+	// session so it can no longer be paid, and its payment record goes with the draft.
 	payment, err := a.db.ProcessPayment(oid)
 	if err != nil {
 		if !errors.Is(err, db.ErrNotFound) {

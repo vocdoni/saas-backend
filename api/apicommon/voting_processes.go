@@ -191,12 +191,12 @@ type ProcessPriceResponse struct {
 	// QuoteRequired: census above 50 000 voters — quote-only: no price (no lines, totalCents 0,
 	// which is not free) and no self-service payment.
 	QuoteRequired bool `json:"quoteRequired"`
-	// PaymentStatus is the process's current payment state (pending, processing, failed,
-	// paid); empty when no payment exists yet.
+	// PaymentStatus is the process's current payment state (pending, failed, paid, refunded);
+	// empty when no payment exists yet.
 	PaymentStatus db.ProcessPaymentStatus `json:"paymentStatus,omitempty"`
 }
 
-// ProcessCheckoutRequest starts (or resumes) the one-time checkout of a voting process.
+// ProcessCheckoutRequest starts (or resumes) the wallet top-up checkout of a voting process.
 type ProcessCheckoutRequest struct {
 	// ReturnURL is where Stripe redirects after checkout; the session id is appended.
 	ReturnURL string `json:"returnURL"`
@@ -272,26 +272,6 @@ type WalletTopUpRequest struct {
 	Locale      string        `json:"locale,omitempty"`
 }
 
-// OrganizationProcessPayment is one process payment of an organization, as stored: no live
-// Stripe state (GET /processes/{processId}/checkout has it). Title is empty and Published
-// false when the process no longer exists — a refunded payment outlives its deleted draft.
-type OrganizationProcessPayment struct {
-	ProcessID   string                  `json:"processId"`
-	Title       db.MultiLangString      `json:"title,omitempty"`
-	Published   bool                    `json:"published"`
-	Status      db.ProcessPaymentStatus `json:"status"`
-	AmountCents pricing.Cents           `json:"amountCents"`
-	Currency    string                  `json:"currency"`
-	CreatedAt   string                  `json:"createdAt"`
-	PaidAt      string                  `json:"paidAt,omitempty"`
-}
-
-// OrganizationProcessPaymentsResponse is a page of an organization's process payments.
-type OrganizationProcessPaymentsResponse struct {
-	Payments   []OrganizationProcessPayment `json:"payments"`
-	Pagination *Pagination                  `json:"pagination"`
-}
-
 // ProcessPaymentStatusResponse reports the payment state of a voting process, combining
 // the stored payment with the live checkout session state when one is open.
 type ProcessPaymentStatusResponse struct {
@@ -299,8 +279,8 @@ type ProcessPaymentStatusResponse struct {
 	AmountCents pricing.Cents           `json:"amountCents"`
 	Currency    string                  `json:"currency"`
 	PaidAt      string                  `json:"paidAt,omitempty"`
-	// SessionStatus is the live Stripe session state (open, complete, expired) when a
-	// checkout session exists; empty for wallet-paid processes.
+	// SessionStatus is the live Stripe session state (open, complete, expired) of the top-up
+	// checkout opened for the process, when there is one.
 	SessionStatus string `json:"sessionStatus,omitempty"`
 	// SessionPaymentStatus is the live Stripe payment state of that session (paid,
 	// unpaid, no_payment_required).

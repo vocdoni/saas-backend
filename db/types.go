@@ -846,36 +846,27 @@ func (o *Organization) AddOnClaim(addOn OrgAddOn) (bson.ObjectID, time.Time) {
 	return o.BrandingClaimedBy, o.BrandingClaimedAt
 }
 
-// ProcessCharge is what a card checkout took: the payment intent to refund against, and the
-// amounts before and after VAT.
-type ProcessCharge struct {
-	PaymentIntentID string
-	SubtotalCents   pricing.Cents
-	TotalCents      pricing.Cents
-}
-
 // ProcessPaymentStatus is the lifecycle state of a voting process payment.
 type ProcessPaymentStatus string
 
 // Process payment statuses. A process with no payment document is free or not quoted yet.
 const (
-	// ProcessPaymentPending: a checkout session is open for the process.
+	// ProcessPaymentPending: a wallet top-up checkout is open for the process (CheckoutSessionID).
+	// Consumed once that top-up was credited; it then only holds the add-on claims until the
+	// publish it paid for debits the wallet.
 	ProcessPaymentPending ProcessPaymentStatus = "pending"
-	// ProcessPaymentProcessing: checkout completed with a delayed payment method; outcome unknown.
-	ProcessPaymentProcessing ProcessPaymentStatus = "processing"
-	// ProcessPaymentFailed: the payment failed; the process is payable again.
+	// ProcessPaymentFailed: a wallet payment a failed publish reverted; the process is payable again.
 	ProcessPaymentFailed ProcessPaymentStatus = "failed"
-	// ProcessPaymentPaid: verified by webhook or debited from a wallet. Only a refund leaves it.
+	// ProcessPaymentPaid: debited from the payer's wallet. Only a refund leaves it.
 	ProcessPaymentPaid ProcessPaymentStatus = "paid"
-	// ProcessPaymentRefunded: returned on draft delete. Terminal; kept as the audit record.
+	// ProcessPaymentRefunded: credited back on draft delete. Terminal; kept as the audit record.
 	ProcessPaymentRefunded ProcessPaymentStatus = "refunded"
 )
 
 // IsValid reports whether s is one of the declared process payment statuses.
 func (s ProcessPaymentStatus) IsValid() bool {
 	switch s {
-	case ProcessPaymentPending, ProcessPaymentProcessing, ProcessPaymentFailed, ProcessPaymentPaid,
-		ProcessPaymentRefunded:
+	case ProcessPaymentPending, ProcessPaymentFailed, ProcessPaymentPaid, ProcessPaymentRefunded:
 		return true
 	default:
 		return false
@@ -883,7 +874,8 @@ func (s ProcessPaymentStatus) IsValid() bool {
 }
 
 // ProcessPayment is the payment state of a voting process, keyed by process id. It lives in its
-// own collection so a draft save (a full replace) cannot wipe it.
+// own collection so a draft save (a full replace) cannot wipe it. Every payment is a wallet
+// debit: the card only ever tops a wallet up.
 type ProcessPayment struct {
 	ProcessID  bson.ObjectID        `json:"-" bson:"_id"`
 	OrgAddress common.Address       `json:"-" bson:"orgAddress"`
@@ -891,49 +883,36 @@ type ProcessPayment struct {
 	// Payer is the wallet debited (the organization, or its integrator when managed). Every
 	// credit-back goes to it, never to a payer re-resolved from the organization.
 	Payer common.Address `json:"-" bson:"payer,omitempty"`
-	// CheckoutSessionID is the Stripe checkout session; empty when wallet-paid.
+	// CheckoutSessionID is the wallet top-up checkout opened for this process, if any: the open
+	// one while pending, the one that funded the debit once paid.
 	CheckoutSessionID string `json:"-" bson:"checkoutSessionId,omitempty"`
 	// Consumed marks a pending payment whose top-up the webhook credited: the session is spent,
 	// and the publish it was opened for pays from the wallet like any other.
 	Consumed bool `json:"-" bson:"consumed,omitempty"`
-	// QuoteHash is pricing.QuoteHash of what the session was opened for.
-	QuoteHash string `json:"-" bson:"quoteHash,omitempty"`
-	// AmountCents is the net total in EUR cents, VAT excluded.
+	// AmountCents is the net total in EUR cents, VAT excluded: the price paid, or, while
+	// pending, the price the top-up was opened for.
 	AmountCents pricing.Cents `json:"amountCents" bson:"amountCents"`
 	// TopUpCents is what the pending top-up checkout charges (the shortfall, at least the
 	// minimum charge).
 	TopUpCents pricing.Cents `json:"-" bson:"topUpCents,omitempty"`
 	Currency   string        `json:"currency" bson:"currency"`
-	// PaymentIntentID is what a card refund is issued against; empty when wallet-paid.
-	PaymentIntentID string `json:"-" bson:"paymentIntentId,omitempty"`
-	// ChargeSubtotalCents and ChargeTotalCents are the first card charge before and after VAT;
-	// their ratio gives the VAT a partial refund withholds.
-	ChargeSubtotalCents pricing.Cents `json:"-" bson:"chargeSubtotalCents,omitempty"`
-	ChargeTotalCents    pricing.Cents `json:"-" bson:"chargeTotalCents,omitempty"`
-	// RefundID is the Stripe refund id, or the wallet credit's idempotency key.
-	RefundID string `json:"-" bson:"refundId,omitempty"`
 	// RefundWithheldCents is the refund a delete fixed before moving any money: the net amount it
 	// keeps back (the relied-on once-per-organization add-ons, or 0). Set once, so a retried delete
-	// repeats the same refunds under the same keys; nil until a delete starts. While it is set the
+	// repeats the same credit under the same key; nil until a delete starts. While it is set the
 	// payment is locked: nothing may raise it, and the draft can only be deleted.
 	RefundWithheldCents *pricing.Cents `json:"-" bson:"refundWithheldCents,omitempty"`
 	// RefundWithheldAddOns are the add-ons RefundWithheldCents keeps back, fixed with it: they stay
 	// the organization's, every other charged add-on is released with the refund.
 	RefundWithheldAddOns []OrgAddOn `json:"-" bson:"refundWithheldAddOns,omitempty"`
-	// RequestedBy is the checkout user's email; fulfillment publishes as this user.
+	// RequestedBy is the checkout user's email; the top-up webhook publishes as this user.
 	RequestedBy string `json:"-" bson:"requestedBy,omitempty"`
 	// Branding and CustomURL are whether this payment charged each once-per-organization add-on,
-	// so fulfillment stamps the organization (SetOrganizationAddOnPaid).
-	Branding  bool `json:"-" bson:"branding,omitempty"`
-	CustomURL bool `json:"-" bson:"customUrl,omitempty"`
-	// TopUpSessions are the (bounded) sessions that already raised AmountCents, so a replayed
-	// top-up webhook raises nothing.
-	TopUpSessions []string `json:"-" bson:"topUpSessions,omitempty"`
-	// TopUpIntents are the card top-up charges, refunded along with PaymentIntentID.
-	TopUpIntents []string  `json:"-" bson:"topUpIntents,omitempty"`
-	PaidAt       time.Time `json:"paidAt,omitzero" bson:"paidAt,omitempty"`
-	CreatedAt    time.Time `json:"-" bson:"createdAt"`
-	UpdatedAt    time.Time `json:"-" bson:"updatedAt"`
+	// so the debit stamps the organization (SetOrganizationAddOnPaid).
+	Branding  bool      `json:"-" bson:"branding,omitempty"`
+	CustomURL bool      `json:"-" bson:"customUrl,omitempty"`
+	PaidAt    time.Time `json:"paidAt,omitzero" bson:"paidAt,omitempty"`
+	CreatedAt time.Time `json:"-" bson:"createdAt"`
+	UpdatedAt time.Time `json:"-" bson:"updatedAt"`
 }
 
 // Charged reports whether the payment charged the once-per-organization add-on.

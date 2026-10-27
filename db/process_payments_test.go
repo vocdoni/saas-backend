@@ -15,7 +15,6 @@ func newPendingPayment(processID bson.ObjectID, sessionID string) *ProcessPaymen
 		OrgAddress:        testOrgAddress,
 		Payer:             testOrgAddress,
 		CheckoutSessionID: sessionID,
-		QuoteHash:         "hash-" + sessionID,
 		AmountCents:       29_000,
 		TopUpCents:        29_000,
 		Currency:          "eur",

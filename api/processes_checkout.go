@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"slices"
-	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -13,7 +11,6 @@ import (
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/pricing"
 	"github.com/vocdoni/saas-backend/stripe"
-	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -24,39 +21,6 @@ type paymentGateway interface {
 	CreatePaymentSession(params *stripe.PaymentSessionParams) (*stripe.PaymentSessionInfo, error)
 	GetPaymentSession(sessionID string) (*stripe.PaymentSessionInfo, error)
 	ExpirePaymentSession(sessionID string) error
-}
-
-// refusePaymentLocked refuses draft mutations while a payment is processing: money is in
-// flight and its outcome is unknown, so the priced inputs must not move under it. A paid
-// draft is not locked — every publish path re-prices against what was paid, refusing when
-// the draft grew worth more, so an edit can only fix a draft that failed publish preflight,
-// never under-charge. Pending payments do not lock either: the open session is expired and
-// replaced at the next checkout. A paid draft is not refused by DELETE either: the money is
-// returned first (see refundPaidProcess). Callers naming extra statuses in alsoLocked refuse
-// those too.
-// A payment state it cannot read is refused rather than assumed absent: nothing further
-// down the write path consults payment state, so failing open here would let a transient
-// Mongo error unlock exactly the draft this guard exists to protect.
-func (a *API) refusePaymentLocked(w http.ResponseWriter, oid bson.ObjectID, alsoLocked ...db.ProcessPaymentStatus) bool {
-	payment, err := a.db.ProcessPayment(oid)
-	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			return false // no payment: nothing to lock
-		}
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return true
-	}
-	if payment.Status == db.ProcessPaymentProcessing {
-		errors.ErrPaymentSessionConflict.
-			Withf("the draft is locked while its payment is being processed").Write(w)
-		return true
-	}
-	if slices.Contains(alsoLocked, payment.Status) {
-		errors.ErrPaymentSessionConflict.
-			Withf("the draft payment is %s; edit the draft and publish it instead", payment.Status).Write(w)
-		return true
-	}
-	return false
 }
 
 // refuseOrgAddOnsAfterPayment refuses an edit that turns a once-per-organization add-on on for a
@@ -514,121 +478,4 @@ func (a *API) releasePendingCheckout(w http.ResponseWriter, payment *db.ProcessP
 		return false
 	}
 	return true
-}
-
-// defaultPaymentStatuses are the payments that still need action — an open checkout, or one
-// being settled — which is what the payments list answers when no status is asked for.
-var defaultPaymentStatuses = []db.ProcessPaymentStatus{db.ProcessPaymentPending, db.ProcessPaymentProcessing}
-
-// organizationProcessPaymentsHandler godoc
-//
-//	@Summary		List the process payments of an organization
-//	@Description	The organization's process payments as stored, filtered by status — by default the
-//	@Description	ones still open (pending, processing), which is how the drafts whose checkout
-//	@Description	blocks publication are found. No live Stripe state is read: poll
-//	@Description	GET /processes/{processId}/checkout for that. A payment whose process was deleted
-//	@Description	(refunded) is listed with an empty title. Requires Manager/Admin of the organization.
-//	@Tags			organizations
-//	@Produce		json
-//	@Security		BearerAuth
-//	@Param			orgAddress	path		string	true	"Organization address"
-//	@Param			status		query		string	false	"Comma-separated statuses (default: pending,processing)"
-//	@Param			sortOrder	query		string	false	"Order by creation time (default: desc)"	Enums(asc, desc)
-//	@Param			page		query		integer	false	"Page number (default: 1)"
-//	@Param			limit		query		integer	false	"Number of items per page (default: 10)"
-//	@Success		200			{object}	apicommon.OrganizationProcessPaymentsResponse
-//	@Failure		400			{object}	errors.Error	"Invalid status, sortOrder or pagination"
-//	@Failure		401			{object}	errors.Error	"Unauthorized"
-//	@Failure		500			{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{orgAddress}/payments [get]
-func (a *API) organizationProcessPaymentsHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := apicommon.UserFromContext(r.Context())
-	if !ok {
-		errors.ErrUnauthorized.Write(w)
-		return
-	}
-	org, _, ok := a.organizationFromRequest(r)
-	if !ok {
-		errors.ErrNoOrganizationProvided.Write(w)
-		return
-	}
-	if !user.HasRoleFor(org.Address, db.AdminRole) && !user.HasRoleFor(org.Address, db.ManagerRole) {
-		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization").Write(w)
-		return
-	}
-	query := r.URL.Query()
-	statuses := defaultPaymentStatuses
-	if raw := query.Get(ParamStatus); raw != "" {
-		statuses = nil
-		for s := range strings.SplitSeq(raw, ",") {
-			status := db.ProcessPaymentStatus(strings.TrimSpace(s))
-			if !status.IsValid() {
-				errors.ErrMalformedURLParam.Withf("invalid %s %q", ParamStatus, status).Write(w)
-				return
-			}
-			statuses = append(statuses, status)
-		}
-	}
-	ascending := false
-	switch sortOrder := query.Get(ParamSortOrder); sortOrder {
-	case "", "desc":
-	case "asc":
-		ascending = true
-	default:
-		errors.ErrMalformedURLParam.Withf("invalid %s %q", ParamSortOrder, sortOrder).Write(w)
-		return
-	}
-	params, err := parsePaginationParams(query.Get(ParamPage), query.Get(ParamLimit))
-	if err != nil {
-		errors.ErrMalformedURLParam.WithErr(err).Write(w)
-		return
-	}
-	total, payments, err := a.db.OrganizationProcessPayments(org.Address, db.ProcessPaymentsQuery{
-		Statuses:  statuses,
-		Ascending: ascending,
-		Page:      params.Page,
-		Limit:     params.Limit,
-	})
-	if err != nil {
-		errors.ErrGenericInternalServerError.Withf("could not get process payments: %v", err).Write(w)
-		return
-	}
-	pagination, err := calculatePagination(params.Page, params.Limit, total)
-	if err != nil {
-		errors.ErrMalformedURLParam.WithErr(err).Write(w)
-		return
-	}
-	resp := &apicommon.OrganizationProcessPaymentsResponse{
-		Payments:   make([]apicommon.OrganizationProcessPayment, 0, len(payments)),
-		Pagination: pagination,
-	}
-	ids := make([]bson.ObjectID, len(payments))
-	for i := range payments {
-		ids[i] = payments[i].ProcessID
-	}
-	processes, err := a.db.VotingProcessesByIDs(ids)
-	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-	for i := range payments {
-		p := &payments[i]
-		item := apicommon.OrganizationProcessPayment{
-			ProcessID:   p.ProcessID.Hex(),
-			Status:      p.Status,
-			AmountCents: p.AmountCents,
-			Currency:    p.Currency,
-			CreatedAt:   p.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
-		}
-		if !p.PaidAt.IsZero() {
-			item.PaidAt = p.PaidAt.UTC().Format("2006-01-02T15:04:05Z")
-		}
-		// a process no longer there is listed with an empty title
-		if vp, ok := processes[p.ProcessID]; ok {
-			item.Title = vp.Title
-			item.Published = vp.Published
-		}
-		resp.Payments = append(resp.Payments, item)
-	}
-	apicommon.HTTPWriteJSON(w, resp)
 }
