@@ -5589,13 +5589,12 @@ paths:
   /processes/{processId}/checkout:
     delete:
       description: |-
-        Expires the draft's open Stripe checkout session so it can no longer be paid, and
-        returns the payment to failed — which also releases the add-on claims the checkout
-        claimed. It is how a draft that became free while a checkout was open is published
-        (publish refuses it with 409 while the session is payable); a priced draft can
-        simply start a new checkout. Idempotent: an already failed payment answers 200.
-        409 (40177) when the checkout was completed or the payment is processing or paid —
-        money is in flight or taken, so it is not cancelled here. Requires Admin role.
+        Expires the draft's open top-up checkout so it can no longer be paid, drops its pending
+        payment and releases the add-on claims the checkout took. It is how a draft whose
+        checkout is open is published from the wallet instead (publish refuses it with 409
+        while the session is payable). A checkout already completed is not expired: its money
+        lands in the wallet regardless. 404 when there is no pending payment; 409 (40177) when
+        the payment is paid or refunded. Requires Admin role.
       parameters:
       - description: Process ID
         in: path
@@ -5608,7 +5607,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/apicommon.ProcessPaymentStatusResponse'
+            type: string
         "401":
           description: Unauthorized
           schema:
@@ -5618,8 +5617,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Checkout completed or changed, payment processing or paid,
-            or draft busy
+          description: Payment paid or refunded, checkout changed, or draft busy
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -5628,14 +5626,15 @@ paths:
             $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
-      summary: Cancel the open checkout of a voting process
+      summary: Cancel the open top-up checkout of a voting process
       tags:
       - processes
     get:
       description: |-
-        The stored payment state (pending, processing, failed, paid) combined with the
-        live Stripe session state when a checkout session exists. Payment truth comes
-        from webhooks — this endpoint is for polling the outcome, it never fulfills.
+        The stored payment state (pending while a top-up checkout is open, paid, refunded)
+        combined with the live Stripe state of the top-up checkout opened for the process, if
+        any. Payment truth comes from webhooks — this endpoint is for polling the outcome, it
+        never fulfills.
         Requires Manager/Admin of the organization.
       parameters:
       - description: Process ID
@@ -5667,14 +5666,18 @@ paths:
       consumes:
       - application/json
       description: |-
-        Opens a one-time Stripe checkout session for the draft's server-calculated price
-        (VAT added by Stripe Tax at checkout) and returns its client secret. An open
-        session for the same price is reused; an obsolete one (the draft changed) is
-        expired and replaced. 409 (40177) while a payment is processing or completed —
-        a process is never charged twice. 422 (40176) above 50 000 voters (quote-only).
-        Free processes have nothing to pay: publish directly. Managed organizations pay
-        from their integrator's wallet at publish time, not through checkout.
-        Requires Admin role.
+        Opens a one-time Stripe checkout that tops up the organization's wallet by what it
+        lacks to pay the draft's server-calculated price (the shortfall, at least the €1
+        minimum; VAT added by Stripe Tax at checkout), and returns its client secret. Once the
+        payment is verified by webhook the wallet is credited and the process is published as
+        the requesting user, paid from the wallet; if it cannot be (its price rose, it changed
+        or was deleted) the credit stays in the wallet and the process is published by hand.
+        An open session for the same price and shortfall is reused; an obsolete one is
+        expired and replaced. 400 when the process is free or the wallet already covers it
+        (publish directly). 403 (40181) for a managed organization: its integrator's wallet
+        pays at publish. 409 (40177) when the draft is already paid (buy census headroom
+        instead) or its last checkout completed and is being credited. 422 (40176) above
+        50 000 voters (quote-only). Requires Admin role.
       parameters:
       - description: Process ID
         in: path
@@ -5695,11 +5698,15 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.ProcessCheckoutResponse'
         "400":
-          description: Free process, empty census or managed organization
+          description: Free process, wallet covers the price, or empty census
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Managed organization (no wallet of its own)
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
@@ -5707,7 +5714,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Payment processing or completed, or the draft is busy
+          description: Draft already paid, checkout completing, or the draft is busy
           schema:
             $ref: '#/definitions/errors.Error'
         "422":
@@ -5720,7 +5727,7 @@ paths:
             $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
-      summary: Start (or resume) the checkout of a voting process
+      summary: Top up the wallet to publish a voting process
       tags:
       - processes
   /processes/{processId}/participants:
@@ -5860,8 +5867,10 @@ paths:
         GET /jobs/{jobId}. Idempotent once published.
         409 (40172) means the stored questions do not match the process and the draft has to be
         saved again before it can be published.
-        402 (40178) means the process is priced and unpaid — the current quote travels in the
-        error data; start checkout via POST /processes/{processId}/checkout. For a managed
+        A priced process is paid from its payer's wallet (the organization's own, or its
+        integrator's when managed) at publish. 402 (40178) means the organization's wallet does
+        not cover it: the error data carries the quote, balanceCents and shortfallCents; top it
+        up via POST /processes/{processId}/checkout, which publishes once paid. For a managed
         organization, 402 (40175) means its integrator's wallet does not cover the price.
         422 (40176) means the census is above 50 000 voters: quote-only, no self-service price.
       parameters:
@@ -5890,8 +5899,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "402":
-          description: Payment required (quote in data), or insufficient integrator
-            wallet balance
+          description: Wallet short (quote, balance, shortfall in data) or integrator
+            wallet short
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
@@ -5899,8 +5908,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Publish in progress, questions out of sync, or payment still
-            processing
+          description: Publish in progress, questions out of sync, or a top-up checkout
+            is open
           schema:
             $ref: '#/definitions/errors.Error'
         "422":

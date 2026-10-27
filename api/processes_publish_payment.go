@@ -10,6 +10,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/pricing"
+	"github.com/vocdoni/saas-backend/stripe"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/log"
 )
@@ -260,38 +261,128 @@ func walletMayRecord(payment *db.ProcessPayment) bool {
 	}
 }
 
-// publishPaidProcess is the webhook fulfillment hook (stripe.Service.OnProcessPaid): a
-// verified payment landed, publish the process as the user who requested the checkout.
-// It also fires on Stripe's replays of the fulfillment, so it cannot rely on running once:
-// startProcessPublish's claim is what keeps it from double-publishing, against a replay as
-// against a concurrent manual publish. It runs inside the webhook request and can wait on
-// the organization's tx lock; a delivery that times out meanwhile is retried by Stripe and
-// refused by that claim.
+// applyProcessTopUp is the webhook's follow-up of a credited top-up opened for a process
+// (stripe.Service.OnProcessTopUp). The credit already landed in the wallet and stays there
+// whatever happens here: every refusal leaves it for a manual publish (or headroom purchase) and
+// returns nil, and only a failure a retry can clear is returned, so the webhook answers 500 and
+// Stripe redelivers.
 //
-// A refusal that needs the user leaves the process paid for a manual publish — free, never
-// a second charge — and returns nil. A failure a retry can clear (a full tx queue, a publish
-// already in flight, a read error) is returned instead, so the webhook answers 500 and
-// Stripe redelivers the event: nothing else would ever come back to publish it.
-func (a *API) publishPaidProcess(processID bson.ObjectID) error {
-	vp, questions, err := a.db.ProcessWithQuestions(processID)
+// A publish top-up acts only for the pending payment of this very session: it consumes it (a
+// compare-and-set on the session) and publishes, which debits inside startProcessPublish. A
+// redelivery finds it consumed (a crash before the publish: it publishes now) or paid by this
+// session (publishing again is free), and anything else — no payment, another session, refunded
+// or reverted — stops it. So a Stripe retry never debits a draft whose payment was given back.
+func (a *API) applyProcessTopUp(t stripe.ProcessTopUp) error {
+	if t.HeadroomCents > 0 {
+		log.Infow("census headroom top-up credited, kept in the wallet",
+			"processId", t.ProcessID.Hex(), "sessionId", t.SessionID)
+		return nil
+	}
+	payment, err := a.db.ProcessPayment(t.ProcessID)
 	if errors.Is(err, db.ErrNotFound) {
-		log.Warnw("paid process not found for publication", "processId", processID.Hex())
+		log.Infow("top-up credited for a process with no payment, kept in the wallet",
+			"processId", t.ProcessID.Hex(), "sessionId", t.SessionID)
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("failed to get paid process: %w", err)
+		return fmt.Errorf("failed to get process payment: %w", err)
+	}
+	if payment.CheckoutSessionID != t.SessionID ||
+		(payment.Status != db.ProcessPaymentPending && payment.Status != db.ProcessPaymentPaid) {
+		log.Infow("top-up credited for a process that no longer waits on it, kept in the wallet",
+			"processId", t.ProcessID.Hex(), "sessionId", t.SessionID, "paymentStatus", payment.Status)
+		return nil
+	}
+	if payment.Status == db.ProcessPaymentPending && !payment.Consumed {
+		consumed, err := a.db.ConsumeProcessPaymentTopUp(t.ProcessID, t.SessionID)
+		if err != nil {
+			return fmt.Errorf("failed to consume the process top-up: %w", err)
+		}
+		if !consumed {
+			// a concurrent delivery consumed it, or a cancel dropped it: publishPaidProcess
+			// re-reads the payment and acts only on the first
+			log.Infow("process top-up consumed concurrently", "processId", t.ProcessID.Hex(), "sessionId", t.SessionID)
+		}
+	}
+	return a.publishPaidProcess(t)
+}
+
+// dropProcessCheckout is the webhook's handling of a top-up checkout that expired or whose
+// delayed payment failed (stripe.Service.OnProcessCheckoutDropped): nothing was credited, so the
+// pending payment holding the session goes, and with it the add-on claims it held. A newer
+// checkout of the same draft is left alone, and so is a payment whose top-up was already credited
+// (consumed): a late expiry or failure of that session, replayed or out of order, drops nothing.
+func (a *API) dropProcessCheckout(processID bson.ObjectID, sessionID string) error {
+	payment, err := a.db.ProcessPayment(processID)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return fmt.Errorf("failed to get process payment: %w", err)
+	}
+	if err == nil && payment.CheckoutSessionID == sessionID && payment.Consumed {
+		log.Infow("checkout already credited; nothing to drop", "processId", processID.Hex(), "sessionId", sessionID)
+		return nil
+	}
+	vp, err := a.db.VotingProcess(processID)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return fmt.Errorf("failed to get process: %w", err)
+	}
+	var org *db.Organization
+	if vp != nil {
+		// read before the payment is dropped, so the claims released below are its own
+		if org, err = a.db.Organization(vp.OrgAddress); err != nil {
+			return fmt.Errorf("failed to get organization: %w", err)
+		}
+	}
+	dropped, err := a.db.DeleteProcessPaymentCheckout(processID, sessionID)
+	if err != nil {
+		return err
+	}
+	if dropped && vp != nil {
+		a.releaseDroppedCheckoutClaim(vp, org)
+		log.Infow("process top-up checkout dropped", "processId", processID.Hex(), "sessionId", sessionID)
+	}
+	return nil
+}
+
+// publishPaidProcess publishes a process whose top-up was just credited and consumed, as the
+// user who requested the checkout (see applyProcessTopUp). startProcessPublish's claim is what
+// keeps it from double-publishing, against a replay as against a concurrent manual publish. It
+// runs inside the webhook request and can wait on the organization's tx lock; a delivery that
+// times out meanwhile is retried by Stripe and refused by that claim.
+//
+// It publishes only at the price the checkout was opened for or less: a draft whose price rose
+// since (its census grew) is left for a manual publish, never debited more than the customer
+// agreed to. Every refusal that needs the user — price rose, wallet short, draft changed, deleted
+// or already published, preflight — leaves the credit in the wallet and returns nil. A failure a
+// retry can clear (a publish already in flight, a full tx queue, a read error) is returned
+// instead, so the webhook answers 500 and Stripe redelivers the event.
+func (a *API) publishPaidProcess(t stripe.ProcessTopUp) error {
+	processID := t.ProcessID
+	vp, questions, err := a.db.ProcessWithQuestions(processID)
+	if errors.Is(err, db.ErrNotFound) {
+		log.Warnw("topped-up process not found for publication", "processId", processID.Hex())
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to get topped-up process: %w", err)
 	}
 	if vp.Published {
 		return nil
 	}
 	payment, err := a.db.ProcessPayment(processID)
+	if errors.Is(err, db.ErrNotFound) {
+		return nil // cancelled while the top-up landed: the credit stays
+	}
 	if err != nil {
 		return fmt.Errorf("failed to get process payment: %w", err)
+	}
+	waiting := payment.Status == db.ProcessPaymentPending && payment.Consumed
+	if payment.CheckoutSessionID != t.SessionID || (!waiting && payment.Status != db.ProcessPaymentPaid) {
+		return nil
 	}
 	// publishPreflightProblems below re-checks that this user is still an admin of the org
 	user, err := a.db.UserByEmail(payment.RequestedBy)
 	if errors.Is(err, db.ErrNotFound) {
-		log.Warnw("paid process cannot auto-publish: requesting user not found, publish manually",
+		log.Warnw("topped-up process cannot auto-publish: requesting user not found, publish manually",
 			"processId", processID.Hex(), "requestedBy", payment.RequestedBy)
 		return nil
 	}
@@ -300,7 +391,7 @@ func (a *API) publishPaidProcess(processID bson.ObjectID) error {
 	}
 	census, err := a.db.Census(vp.CensusID.Hex())
 	if errors.Is(err, db.ErrNotFound) {
-		log.Warnw("paid process census not found, publish manually", "processId", processID.Hex())
+		log.Warnw("topped-up process census not found, publish manually", "processId", processID.Hex())
 		return nil
 	}
 	if err != nil {
@@ -308,19 +399,27 @@ func (a *API) publishPaidProcess(processID bson.ObjectID) error {
 	}
 	// Re-price before publishing. A Stripe retry can land days after the payment, and the
 	// census behind the draft can have grown in between (memberbase changes propagate to a
-	// group-backed census), so publishing on the strength of the paid status alone would put
-	// a bigger election on chain at the smaller price.
+	// group-backed census).
+	quote, _, err := a.processQuote(vp)
+	if err != nil {
+		return fmt.Errorf("failed to re-price topped-up process: %w", err)
+	}
+	if quote.TotalCents > payment.AmountCents {
+		log.Warnw("topped-up process is now priced above its checkout, the credit stays for a manual publish",
+			"processId", processID.Hex(), "checkoutCents", payment.AmountCents, "quotedCents", quote.TotalCents)
+		return nil
+	}
 	if err := a.paymentDueForPublish(vp); err != nil {
 		if refusedForUser(err) {
-			log.Warnw("paid process payment refuses publication, staying paid for a manual publish",
-				"processId", processID.Hex(), "paidCents", payment.AmountCents, "error", err)
+			log.Warnw("topped-up process refused publication, the credit stays for a manual publish",
+				"processId", processID.Hex(), "error", err)
 			return nil
 		}
-		return fmt.Errorf("failed to re-price paid process: %w", err)
+		return fmt.Errorf("failed to re-check payment of topped-up process: %w", err)
 	}
 	target := publishTarget{vp: vp, questions: questions, census: census, user: user}
 	if problems, _ := a.publishPreflightProblems(target); len(problems) > 0 {
-		log.Warnw("paid process failed publish preflight, staying paid for a manual publish",
+		log.Warnw("topped-up process failed publish preflight, the credit stays for a manual publish",
 			"processId", processID.Hex(), "problems", strings.Join(problems, "; "))
 		return nil
 	}
@@ -328,14 +427,14 @@ func (a *API) publishPaidProcess(processID bson.ObjectID) error {
 	switch {
 	case errors.Is(err, errProcessAlreadyPublished):
 		return nil
-	case errors.Is(err, errors.ErrPaymentSessionConflict):
-		log.Warnw("paid process payment refuses publication, staying paid for a manual publish",
+	case refusedForUser(err):
+		log.Warnw("topped-up process refused publication, the credit stays for a manual publish",
 			"processId", processID.Hex(), "error", err)
 		return nil
 	case err != nil:
-		return fmt.Errorf("failed to start publication of paid process: %w", err)
+		return fmt.Errorf("failed to start publication of topped-up process: %w", err)
 	}
-	log.Infow("paid process publication enqueued", "processId", processID.Hex(), "jobId", jobID)
+	log.Infow("topped-up process publication enqueued", "processId", processID.Hex(), "jobId", jobID)
 	return nil
 }
 

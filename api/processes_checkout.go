@@ -101,15 +101,19 @@ func (a *API) refuseOrgAddOnsAfterPayment(w http.ResponseWriter, vp *db.VotingPr
 
 // createProcessCheckoutHandler godoc
 //
-//	@Summary		Start (or resume) the checkout of a voting process
-//	@Description	Opens a one-time Stripe checkout session for the draft's server-calculated price
-//	@Description	(VAT added by Stripe Tax at checkout) and returns its client secret. An open
-//	@Description	session for the same price is reused; an obsolete one (the draft changed) is
-//	@Description	expired and replaced. 409 (40177) while a payment is processing or completed —
-//	@Description	a process is never charged twice. 422 (40176) above 50 000 voters (quote-only).
-//	@Description	Free processes have nothing to pay: publish directly. Managed organizations pay
-//	@Description	from their integrator's wallet at publish time, not through checkout.
-//	@Description	Requires Admin role.
+//	@Summary		Top up the wallet to publish a voting process
+//	@Description	Opens a one-time Stripe checkout that tops up the organization's wallet by what it
+//	@Description	lacks to pay the draft's server-calculated price (the shortfall, at least the €1
+//	@Description	minimum; VAT added by Stripe Tax at checkout), and returns its client secret. Once the
+//	@Description	payment is verified by webhook the wallet is credited and the process is published as
+//	@Description	the requesting user, paid from the wallet; if it cannot be (its price rose, it changed
+//	@Description	or was deleted) the credit stays in the wallet and the process is published by hand.
+//	@Description	An open session for the same price and shortfall is reused; an obsolete one is
+//	@Description	expired and replaced. 400 when the process is free or the wallet already covers it
+//	@Description	(publish directly). 403 (40181) for a managed organization: its integrator's wallet
+//	@Description	pays at publish. 409 (40177) when the draft is already paid (buy census headroom
+//	@Description	instead) or its last checkout completed and is being credited. 422 (40176) above
+//	@Description	50 000 voters (quote-only). Requires Admin role.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -117,10 +121,11 @@ func (a *API) refuseOrgAddOnsAfterPayment(w http.ResponseWriter, vp *db.VotingPr
 //	@Param			processId	path		string								true	"Process ID"
 //	@Param			request		body		apicommon.ProcessCheckoutRequest	true	"Checkout parameters"
 //	@Success		200			{object}	apicommon.ProcessCheckoutResponse
-//	@Failure		400			{object}	errors.Error	"Free process, empty census or managed organization"
+//	@Failure		400			{object}	errors.Error	"Free process, wallet covers the price, or empty census"
 //	@Failure		401			{object}	errors.Error
+//	@Failure		403			{object}	errors.Error	"Managed organization (no wallet of its own)"
 //	@Failure		404			{object}	errors.Error
-//	@Failure		409			{object}	errors.Error	"Payment processing or completed, or the draft is busy"
+//	@Failure		409			{object}	errors.Error	"Draft already paid, checkout completing, or the draft is busy"
 //	@Failure		422			{object}	errors.Error	"Census size requires a custom quote"
 //	@Failure		500			{object}	errors.Error
 //	@Router			/processes/{processId}/checkout [post]
@@ -158,7 +163,7 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 	// Checkout takes the claim publish, cancel and delete take, until its pending payment is
 	// stored. A draft being published is priced already; a cancel landing between the claim
 	// refresh below and that write would release the add-on claims of the session it stores; a
-	// delete would drop the draft and leave a payable payment behind for a process that is gone.
+	// delete would drop the draft and leave a payable session behind for a process that is gone.
 	// Winning the claim proves the draft is still an unpublished draft, so it is re-read under it.
 	claimed, err := a.db.ClaimVotingProcessForPublish(oid)
 	if err != nil {
@@ -183,7 +188,7 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if org.ManagedBy != (common.Address{}) {
-		errors.ErrMalformedBody.
+		errors.ErrManagedOrgHasNoWallet.
 			Withf("managed organization processes are paid from the integrator wallet at publish time").Write(w)
 		return
 	}
@@ -192,8 +197,8 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 		writeSubscriptionError(w, err)
 		return
 	}
-	// win the add-on claims before the session is priced, so the amount the customer is
-	// asked to pay is the amount this process is entitled to charge
+	// win the add-on claims before the top-up is priced, so the price it is opened for is the
+	// price this process is entitled to charge
 	quote, claims, err := a.claimOrgAddOnsForPayment(vp, org, &input)
 	if err != nil {
 		a.releaseRefusedOrgAddOnClaims(vp, claims)
@@ -216,82 +221,75 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 		errors.ErrMalformedBody.Withf("process is free, publish it directly").Write(w)
 		return
 	}
-	quoteHash := pricing.QuoteHash(input, quote.TotalCents)
-
-	// reconcile with any existing payment before opening a session: never a second
-	// charge for a paid or processing payment, reuse an open session whose price still
-	// matches, expire an obsolete one before replacing it
-	previousSessionID := ""
+	// a payment state we cannot read is never assumed absent
 	payment, err := a.db.ProcessPayment(oid)
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
-		// a payment state we cannot read is never assumed absent
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+	previousSessionID := ""
 	if err == nil {
 		switch payment.Status {
-		case db.ProcessPaymentPending:
-			session, err := a.paymentGW.GetPaymentSession(payment.CheckoutSessionID)
-			if err != nil {
-				errors.ErrStripeError.Withf("cannot reconcile checkout session").WithErr(err).Write(w)
-				return
-			}
-			if session.Status == stripe.SessionStatusComplete {
-				// the customer finished checkout and the webhook has not landed yet:
-				// surface the in-flight payment instead of opening a second charge
-				errors.ErrPaymentSessionConflict.Write(w)
-				return
-			}
-			if session.Status == stripe.SessionStatusOpen {
-				if payment.QuoteHash == quoteHash {
-					kept = true
-					apicommon.HTTPWriteJSON(w, &apicommon.ProcessCheckoutResponse{
-						ClientSecret: session.ClientSecret,
-						SessionID:    session.ID,
-						AmountCents:  payment.AmountCents,
-						Currency:     payment.Currency,
-					})
-					return
-				}
-				// obsolete session: it must be gone before a replacement may exist,
-				// so a failure to expire refuses the checkout rather than risking
-				// two payable sessions
-				if err := a.paymentGW.ExpirePaymentSession(session.ID); err != nil {
-					errors.ErrStripeError.Withf("cannot expire obsolete checkout session").WithErr(err).Write(w)
-					return
-				}
-			}
-			previousSessionID = payment.CheckoutSessionID
-		case db.ProcessPaymentFailed:
+		case db.ProcessPaymentPending, db.ProcessPaymentFailed:
 			previousSessionID = payment.CheckoutSessionID
 		default:
-			// processing, paid, or an unknown stored status: fail closed rather than
-			// risking a second charge
-			errors.ErrPaymentSessionConflict.Write(w)
+			// paid (a draft whose census outgrew its price buys the difference as headroom), or
+			// refunded by a delete that did not finish
+			errors.ErrPaymentSessionConflict.Withf("the process payment is %s; a paid draft buys more voters "+
+				"with POST /processes/{processId}/census/checkout", payment.Status).Write(w)
 			return
 		}
 	}
-
-	lineItems := make([]stripe.PaymentLineItem, 0, len(quote.Lines))
-	for _, line := range quote.Lines {
-		if line.AmountCents == 0 {
-			continue // a free base line (small census with paid add-ons) is not billable
-		}
-		lineItems = append(lineItems, stripe.PaymentLineItem{
-			Description: line.Description,
-			AmountCents: line.AmountCents,
-		})
+	wallet, err := a.db.Wallet(org.Address)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
 	}
-	session, err := a.paymentGW.CreatePaymentSession(&stripe.PaymentSessionParams{
-		LineItems: lineItems,
-		Metadata: map[string]string{
-			stripe.MetadataKeyProcessID:   oid.Hex(),
-			stripe.MetadataKeyRequestedBy: user.Email,
-		},
-		OrgAddress:    vp.OrgAddress.String(),
-		CustomerEmail: user.Email,
-		ReturnURL:     req.ReturnURL,
-		Locale:        req.Locale,
+	shortfall := quote.TotalCents - wallet.BalanceCents
+	if shortfall <= 0 {
+		errors.ErrMalformedBody.Withf("the wallet covers the price; publish the process directly").Write(w)
+		return
+	}
+	chargeCents := max(shortfall, pricing.MinimumChargeCents)
+	if payment != nil && payment.Status == db.ProcessPaymentPending && !payment.Consumed {
+		session, err := a.paymentGW.GetPaymentSession(payment.CheckoutSessionID)
+		if err != nil {
+			errors.ErrStripeError.Withf("cannot reconcile checkout session").WithErr(err).Write(w)
+			return
+		}
+		switch session.Status {
+		case stripe.SessionStatusComplete:
+			// paid and not credited yet: a second top-up now would be priced from a stale balance
+			errors.ErrPaymentSessionConflict.Withf("the last checkout completed and is being credited; retry shortly").Write(w)
+			return
+		case stripe.SessionStatusOpen:
+			if payment.AmountCents == quote.TotalCents && payment.TopUpCents == chargeCents {
+				kept = true
+				apicommon.HTTPWriteJSON(w, &apicommon.ProcessCheckoutResponse{
+					ClientSecret: session.ClientSecret,
+					SessionID:    session.ID,
+					AmountCents:  payment.TopUpCents,
+					Currency:     payment.Currency,
+				})
+				return
+			}
+			// obsolete session: it must be gone before a replacement may exist, so a failure to
+			// expire refuses the checkout rather than leaving two payable sessions
+			if err := a.paymentGW.ExpirePaymentSession(session.ID); err != nil {
+				errors.ErrStripeError.Withf("cannot expire obsolete checkout session").WithErr(err).Write(w)
+				return
+			}
+		default:
+		}
+	}
+	session, err := a.openWalletTopUp(walletTopUp{
+		wallet:      *org,
+		user:        user,
+		amountCents: chargeCents,
+		description: fmt.Sprintf("wallet top-up to publish voting process %s", oid.Hex()),
+		metadata:    map[string]string{stripe.MetadataKeyProcessID: oid.Hex()},
+		returnURL:   req.ReturnURL,
+		locale:      req.Locale,
 	})
 	if err != nil {
 		errors.ErrStripeError.Withf("cannot create checkout session").WithErr(err).Write(w)
@@ -300,20 +298,21 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 	stored, err := a.db.SetProcessPaymentPending(&db.ProcessPayment{
 		ProcessID:         oid,
 		OrgAddress:        vp.OrgAddress,
+		Payer:             org.Address,
 		CheckoutSessionID: session.ID,
-		QuoteHash:         quoteHash,
 		AmountCents:       quote.TotalCents,
+		TopUpCents:        chargeCents,
 		Currency:          "eur",
 		RequestedBy:       user.Email,
 		Branding:          input.Branding,
 		CustomURL:         input.CustomURL,
 	}, previousSessionID)
 	if err != nil || !stored {
-		// the session exists but nothing references it: expire it so it can never be
-		// paid, then surface the refusal (a concurrent payment won the state)
+		// the session exists but nothing references it: expire it so it is not paid for a
+		// publish that will not follow (paid anyway, it would only credit the wallet)
 		if e := a.paymentGW.ExpirePaymentSession(session.ID); e != nil {
-			log.Errorw(fmt.Errorf("session %s: %w", session.ID, e),
-				"could not expire orphaned checkout session; it stays payable until Stripe expires it")
+			log.Warnw("could not expire orphaned checkout session; paying it only credits the wallet",
+				"sessionId", session.ID, "error", e)
 		}
 		if err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -330,7 +329,7 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 	apicommon.HTTPWriteJSON(w, &apicommon.ProcessCheckoutResponse{
 		ClientSecret: session.ClientSecret,
 		SessionID:    session.ID,
-		AmountCents:  quote.TotalCents,
+		AmountCents:  chargeCents,
 		Currency:     "eur",
 	})
 }
@@ -338,9 +337,10 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 // processCheckoutStatusHandler godoc
 //
 //	@Summary		Get the payment status of a voting process
-//	@Description	The stored payment state (pending, processing, failed, paid) combined with the
-//	@Description	live Stripe session state when a checkout session exists. Payment truth comes
-//	@Description	from webhooks — this endpoint is for polling the outcome, it never fulfills.
+//	@Description	The stored payment state (pending while a top-up checkout is open, paid, refunded)
+//	@Description	combined with the live Stripe state of the top-up checkout opened for the process, if
+//	@Description	any. Payment truth comes from webhooks — this endpoint is for polling the outcome, it
+//	@Description	never fulfills.
 //	@Description	Requires Manager/Admin of the organization.
 //	@Tags			processes
 //	@Produce		json
@@ -396,22 +396,21 @@ func (a *API) processCheckoutStatusHandler(w http.ResponseWriter, r *http.Reques
 
 // cancelProcessCheckoutHandler godoc
 //
-//	@Summary		Cancel the open checkout of a voting process
-//	@Description	Expires the draft's open Stripe checkout session so it can no longer be paid, and
-//	@Description	returns the payment to failed — which also releases the add-on claims the checkout
-//	@Description	claimed. It is how a draft that became free while a checkout was open is published
-//	@Description	(publish refuses it with 409 while the session is payable); a priced draft can
-//	@Description	simply start a new checkout. Idempotent: an already failed payment answers 200.
-//	@Description	409 (40177) when the checkout was completed or the payment is processing or paid —
-//	@Description	money is in flight or taken, so it is not cancelled here. Requires Admin role.
+//	@Summary		Cancel the open top-up checkout of a voting process
+//	@Description	Expires the draft's open top-up checkout so it can no longer be paid, drops its pending
+//	@Description	payment and releases the add-on claims the checkout took. It is how a draft whose
+//	@Description	checkout is open is published from the wallet instead (publish refuses it with 409
+//	@Description	while the session is payable). A checkout already completed is not expired: its money
+//	@Description	lands in the wallet regardless. 404 when there is no pending payment; 409 (40177) when
+//	@Description	the payment is paid or refunded. Requires Admin role.
 //	@Tags			processes
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			processId	path		string	true	"Process ID"
-//	@Success		200			{object}	apicommon.ProcessPaymentStatusResponse
+//	@Success		200			{string}	string	"OK"
 //	@Failure		401			{object}	errors.Error
 //	@Failure		404			{object}	errors.Error	"Process not found, or it has no payment"
-//	@Failure		409			{object}	errors.Error	"Checkout completed or changed, payment processing or paid, or draft busy"
+//	@Failure		409			{object}	errors.Error	"Payment paid or refunded, checkout changed, or draft busy"
 //	@Failure		500			{object}	errors.Error	"Stripe could not verify or expire the session"
 //	@Router			/processes/{processId}/checkout [delete]
 func (a *API) cancelProcessCheckoutHandler(w http.ResponseWriter, r *http.Request) {
@@ -441,84 +440,61 @@ func (a *API) cancelProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	switch payment.Status {
-	case db.ProcessPaymentFailed:
-		// already cancelled, or expired on its own
-	case db.ProcessPaymentPending:
-		// cancel takes the claim checkout takes, so a checkout of this draft cannot store a new
-		// session — and take the add-on claims for it — between the reads below and the release
-		claimed, err := a.db.ClaimVotingProcessForPublish(oid)
-		if err != nil {
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
-		}
-		if !claimed {
-			errors.ErrPublishInProgress.Write(w)
-			return
-		}
-		defer func() {
-			if e := a.db.ClearVotingProcessPublishing(oid); e != nil {
-				log.Warnw("could not release the cancel's claim on a draft", "processId", oid.Hex(), "error", e)
-			}
-		}()
-		cancelled := payment.CheckoutSessionID
-		if payment, err = a.db.ProcessPayment(oid); err != nil {
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
-		}
-		if payment.Status != db.ProcessPaymentPending || payment.CheckoutSessionID != cancelled {
-			errors.ErrPaymentSessionConflict.Withf("the checkout changed while it was being cancelled; retry").Write(w)
-			return
-		}
-		// read before the session is expired, so the claim released below is the one it held
-		org, err := a.db.Organization(vp.OrgAddress)
-		if err != nil {
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
-		}
-		if !a.releasePendingCheckout(w, payment) {
-			return
-		}
-		marked, err := a.db.MarkProcessPaymentFailed(oid, cancelled)
-		if err != nil {
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
-		}
-		if !marked {
-			// the expiry webhook may have written the same failed state first; anything else is a
-			// payment this cancel did not drop, so its claim is not this cancel's to release
-			current, err := a.db.ProcessPayment(oid)
-			if err != nil {
-				errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-				return
-			}
-			if current.Status != db.ProcessPaymentFailed || current.CheckoutSessionID != cancelled {
-				errors.ErrPaymentSessionConflict.Withf("the checkout changed while it was being cancelled; retry").Write(w)
-				return
-			}
-		}
-		a.releaseDroppedCheckoutClaim(vp, org)
-		payment.Status = db.ProcessPaymentFailed
-	default:
+	if payment.Status != db.ProcessPaymentPending {
 		errors.ErrPaymentSessionConflict.
-			Withf("the payment is %s and cannot be cancelled", payment.Status).Write(w)
+			Withf("the payment is %s and has no checkout to cancel", payment.Status).Write(w)
 		return
 	}
-	apicommon.HTTPWriteJSON(w, &apicommon.ProcessPaymentStatusResponse{
-		Status:      payment.Status,
-		AmountCents: payment.AmountCents,
-		Currency:    payment.Currency,
-	})
+	// cancel takes the claim checkout takes, so a checkout of this draft cannot store a new
+	// session — and take the add-on claims for it — between the reads below and the release
+	claimed, err := a.db.ClaimVotingProcessForPublish(oid)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if !claimed {
+		errors.ErrPublishInProgress.Write(w)
+		return
+	}
+	defer func() {
+		if e := a.db.ClearVotingProcessPublishing(oid); e != nil {
+			log.Warnw("could not release the cancel's claim on a draft", "processId", oid.Hex(), "error", e)
+		}
+	}()
+	cancelled := payment.CheckoutSessionID
+	if payment, err = a.db.ProcessPayment(oid); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if payment.Status != db.ProcessPaymentPending || payment.CheckoutSessionID != cancelled {
+		errors.ErrPaymentSessionConflict.Withf("the checkout changed while it was being cancelled; retry").Write(w)
+		return
+	}
+	// read before the payment is dropped, so the claim released below is the one it held
+	org, err := a.db.Organization(vp.OrgAddress)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if !payment.Consumed && !a.releasePendingCheckout(w, payment) {
+		return
+	}
+	dropped, err := a.db.DeleteProcessPaymentCheckout(oid, cancelled)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if dropped {
+		// the expiry webhook may have dropped it first and released the same claims
+		a.releaseDroppedCheckoutClaim(vp, org)
+	}
+	apicommon.HTTPWriteOK(w)
 }
 
-// releasePendingCheckout makes sure a pending payment's checkout session can never be paid
-// once its draft is gone (or cancelled), writing the error and reporting false when it cannot.
-//
-// A session the customer already completed has not been webhook-fulfilled yet: deleting
-// now would capture the money and destroy the process. Every way of not knowing the
-// session's state is that case until proven otherwise, so this fails closed exactly like
-// the checkout path does — an unverifiable or unexpirable session is never grounds to
-// delete a draft someone may be paying for.
+// releasePendingCheckout makes sure a pending payment's open checkout session can no longer be
+// paid once the payment goes (cancelled, or deleted with its draft), writing the error and
+// reporting false when it cannot. A session already completed or expired needs nothing: a
+// completed one credits the wallet whatever happens to the process, and nothing else.
 func (a *API) releasePendingCheckout(w http.ResponseWriter, payment *db.ProcessPayment) bool {
 	if a.paymentGW == nil {
 		errors.ErrPaymentSessionConflict.
@@ -530,12 +506,7 @@ func (a *API) releasePendingCheckout(w http.ResponseWriter, payment *db.ProcessP
 		errors.ErrStripeError.Withf("cannot reconcile checkout session").WithErr(err).Write(w)
 		return false
 	}
-	switch session.Status {
-	case stripe.SessionStatusComplete:
-		errors.ErrPaymentSessionConflict.
-			Withf("the checkout was completed; wait for it to settle before deleting").Write(w)
-		return false
-	case stripe.SessionStatusExpired:
+	if session.Status != stripe.SessionStatusOpen {
 		return true
 	}
 	if err := a.paymentGW.ExpirePaymentSession(payment.CheckoutSessionID); err != nil {

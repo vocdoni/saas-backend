@@ -106,107 +106,6 @@ func TestProcessPaymentTopUpCheckout(t *testing.T) {
 	c.Assert(err, qt.ErrorIs, ErrNotFound)
 }
 
-// TestProcessPaymentTransitions walks the payment state machine and asserts every illegal
-// transition loses its CAS instead of applying.
-func TestProcessPaymentTransitions(t *testing.T) {
-	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
-
-	processID := bson.NewObjectID()
-
-	// no payment yet
-	_, err := testDB.ProcessPayment(processID)
-	c.Assert(err, qt.ErrorIs, ErrNotFound)
-
-	// first checkout creates the pending payment
-	ok, err := testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_1"), "")
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsTrue)
-	payment, err := testDB.ProcessPayment(processID)
-	c.Assert(err, qt.IsNil)
-	c.Assert(payment.Status, qt.Equals, ProcessPaymentPending)
-	c.Assert(payment.CheckoutSessionID, qt.Equals, "cs_1")
-
-	// a replacement session while still pending is allowed (obsolete session replaced)
-	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_2"), "cs_1")
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsTrue)
-
-	// transitions demand the stored session id: the stale one loses its CAS
-	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_1", ProcessCharge{})
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsFalse)
-
-	// delayed payment method: pending -> processing
-	ok, err = testDB.MarkProcessPaymentProcessing(processID, "cs_2")
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsTrue)
-
-	// while processing, no new checkout may replace the payment
-	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_3"), "cs_2")
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsFalse)
-
-	// processing -> paid
-	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_2", ProcessCharge{})
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsTrue)
-	payment, err = testDB.ProcessPayment(processID)
-	c.Assert(err, qt.IsNil)
-	c.Assert(payment.Status, qt.Equals, ProcessPaymentPaid)
-	c.Assert(payment.PaidAt.IsZero(), qt.IsFalse)
-
-	// paid is terminal: a duplicate webhook loses the CAS (the idempotency signal) ...
-	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_2", ProcessCharge{})
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsFalse)
-	// ... a failure event cannot regress it ...
-	ok, err = testDB.MarkProcessPaymentFailed(processID, "cs_2")
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsFalse)
-	// ... and no new checkout can replace it
-	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_4"), "cs_2")
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsFalse)
-}
-
-func TestProcessPaymentFailureAndRetry(t *testing.T) {
-	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
-
-	processID := bson.NewObjectID()
-	ok, err := testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_1"), "")
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsTrue)
-
-	// declined payment: pending -> failed
-	ok, err = testDB.MarkProcessPaymentFailed(processID, "cs_1")
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsTrue)
-	payment, err := testDB.ProcessPayment(processID)
-	c.Assert(err, qt.IsNil)
-	c.Assert(payment.Status, qt.Equals, ProcessPaymentFailed)
-
-	// a failed payment is payable again with a fresh session
-	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_2"), "cs_1")
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsTrue)
-	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_2", ProcessCharge{})
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsTrue)
-
-	// an unpaid payment goes with its draft
-	unpaidID := bson.NewObjectID()
-	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(unpaidID, "cs_3"), "")
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsTrue)
-	deleted, err := testDB.DeleteProcessPayment(unpaidID)
-	c.Assert(err, qt.IsNil)
-	c.Assert(deleted, qt.IsTrue)
-	_, err = testDB.ProcessPayment(unpaidID)
-	c.Assert(err, qt.ErrorIs, ErrNotFound)
-}
-
 func TestProcessPaymentPaidByWallet(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
@@ -261,6 +160,35 @@ func TestProcessPaymentPaidByWallet(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 }
 
+// TestProcessPaymentEnvelopeOverConsumedTopUp: a draft that turned free after its top-up was
+// credited publishes with a €0 envelope over the consumed payment; an open checkout keeps its row.
+func TestProcessPaymentEnvelopeOverConsumedTopUp(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	consumedID, openID := bson.NewObjectID(), bson.NewObjectID()
+	for id, session := range map[bson.ObjectID]string{consumedID: "cs_consumed", openID: "cs_open"} {
+		ok, err := testDB.SetProcessPaymentPending(newPendingPayment(id, session), "")
+		c.Assert(err, qt.IsNil)
+		c.Assert(ok, qt.IsTrue)
+	}
+	ok, err := testDB.ConsumeProcessPaymentTopUp(consumedID, "cs_consumed")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+
+	ok, err = testDB.SetProcessPaymentEnvelope(consumedID, testOrgAddress, 0)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	payment, err := testDB.ProcessPayment(consumedID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, ProcessPaymentPaid)
+	c.Assert(payment.AmountCents, qt.Equals, pricing.Cents(0))
+
+	ok, err = testDB.SetProcessPaymentEnvelope(openID, testOrgAddress, 0)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+}
+
 // TestProcessPaymentPendingPinsReplacedSession: a pending payment is replaced only by a caller
 // that observed its session, so two concurrent checkouts cannot both store.
 func TestProcessPaymentPendingPinsReplacedSession(t *testing.T) {
@@ -311,18 +239,18 @@ func TestProcessPaymentRefund(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsFalse)
 
-	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_1", ProcessCharge{PaymentIntentID: "pi_1"})
+	ok, err = testDB.ConsumeProcessPaymentTopUp(processID, "cs_1")
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
-	payment, err := testDB.ProcessPayment(processID)
+	ok, err = testDB.SetProcessPaymentPaidByWallet(walletPayment(processID, 29_000))
 	c.Assert(err, qt.IsNil)
-	c.Assert(payment.PaymentIntentID, qt.Equals, "pi_1")
+	c.Assert(ok, qt.IsTrue)
 
 	// paid -> refunded, recording what the money went back as
 	ok, err = testDB.MarkProcessPaymentRefunded(processID, "re_1", 29_000)
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
-	payment, err = testDB.ProcessPayment(processID)
+	payment, err := testDB.ProcessPayment(processID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.Status, qt.Equals, ProcessPaymentRefunded)
 	c.Assert(payment.RefundID, qt.Equals, "re_1")
@@ -382,11 +310,6 @@ func TestProcessPaymentRefundPlan(t *testing.T) {
 	c.Assert(*payment.RefundWithheldCents, qt.Equals, pricing.Cents(14_900))
 	c.Assert(payment.RefundWithheldAddOns, qt.DeepEquals, []OrgAddOn{OrgAddOnBranding})
 
-	ok, err = testDB.RaiseProcessPaymentAmount(ProcessTopUp{
-		ProcessID: processID, FromCents: 29_000, ToCents: 40_000, SessionID: "cs_topup",
-	})
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsFalse)
 	ok, err = testDB.SetProcessPaymentPaidByWallet(walletPayment(processID, 40_000))
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsFalse)

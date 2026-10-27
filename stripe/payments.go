@@ -3,7 +3,7 @@ package stripe
 import (
 	"encoding/json"
 	"fmt"
-	"time"
+	"strconv"
 
 	"github.com/ethereum/go-ethereum/common"
 	stripeapi "github.com/stripe/stripe-go/v87"
@@ -15,11 +15,12 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-// One-time (mode "payment") checkout sessions for the pay-per-process billing model:
-// process purchases and integrator wallet top-ups. Unlike the subscription flow, the
-// org/process identity travels in session-level metadata (a payment session has no
-// SubscriptionData), and fulfillment happens exclusively through verified webhooks —
-// a browser redirect is never proof of payment.
+// One-time (mode "payment") checkout sessions for the pay-per-process billing model. Every one
+// is a wallet top-up: a process is always paid from a wallet, and the card only fills it. The
+// wallet (and, for a top-up opened for a process, the process) travels in session-level
+// metadata, copied onto the payment intent so a refund can be traced back to the wallet, and
+// fulfillment happens exclusively through verified webhooks — a browser redirect is never
+// proof of payment.
 
 // Session metadata keys that route webhook fulfillment.
 const (
@@ -207,163 +208,57 @@ func (s *Service) ExpirePaymentSession(sessionID string) error {
 }
 
 // handleCheckoutSessionResult processes checkout.session.completed and
-// checkout.session.async_payment_succeeded. Sessions from the subscription flow carry
-// none of our metadata keys and are ignored. Fulfillment is idempotent end to end: the
-// payment CAS and the wallet applied-keys guard make replayed events no-ops, so this
-// handler never needs an event store.
+// checkout.session.async_payment_succeeded. It routes on the wallet first: every payment session
+// is a wallet top-up, and the process it may name only selects the follow-up. Sessions from the
+// subscription flow carry none of our metadata keys and are ignored.
 func (s *Service) handleCheckoutSessionResult(event *stripeapi.Event) error {
 	session, err := parseCheckoutSessionFromEvent(event)
 	if err != nil {
 		return err
 	}
-	switch {
-	case session.Metadata[MetadataKeyProcessTopUpCents] != "":
-		// before the process branch: a top-up also carries the process id, but it buys
-		// census headroom for a payment that is already paid, not the payment itself
-		return s.raiseProcessPayment(session)
-	case session.Metadata[MetadataKeyProcessID] != "":
-		return s.fulfillProcessPayment(session)
-	case session.Metadata[MetadataKeyWalletTopUpOrg] != "":
-		return s.creditWalletTopUp(session)
-	default:
+	if session.Metadata[MetadataKeyWalletTopUpOrg] == "" {
 		// a subscription-mode checkout completing; the subscription webhooks own it
 		return nil
 	}
+	return s.creditWalletTopUp(session)
 }
 
 // handleCheckoutSessionFailed processes the two ways a checkout stops short of paying:
 // checkout.session.async_payment_failed (a delayed payment did not clear) and
-// checkout.session.expired (the customer abandoned it and Stripe closed the session). Both
-// return the process payment to the payable (failed) state, which is also what releases the
-// add-on claims the checkout took — without this an abandoned checkout would hold the
-// organization's once-per-organization add-ons forever. A wallet top-up needs nothing (no balance was
-// credited).
+// checkout.session.expired (the customer abandoned it and Stripe closed the session). Nothing
+// was credited. A top-up opened for a process drops the process's pending payment, which also
+// releases the add-on claims the checkout took — without this an abandoned checkout would hold
+// the organization's once-per-organization add-ons until the claims went stale.
 func (s *Service) handleCheckoutSessionFailed(event *stripeapi.Event) error {
 	session, err := parseCheckoutSessionFromEvent(event)
 	if err != nil {
 		return err
 	}
-	rawProcessID := session.Metadata[MetadataKeyProcessID]
-	if rawProcessID == "" {
+	if session.Metadata[MetadataKeyWalletTopUpOrg] == "" || session.Metadata[MetadataKeyProcessID] == "" {
 		return nil
 	}
-	processID, err := bson.ObjectIDFromHex(rawProcessID)
+	processID, err := sessionProcessID(session)
 	if err != nil {
-		return fmt.Errorf("invalid process id %q in session %s metadata (%v): %w",
-			rawProcessID, session.ID, err, errPermanentEvent)
-	}
-	failed, err := s.db.MarkProcessPaymentFailed(processID, session.ID)
-	if err != nil {
-		return fmt.Errorf("failed to mark process payment failed: %w", err)
-	}
-	if failed {
-		log.Warnw("process payment is payable again",
-			"processId", processID.Hex(), "sessionId", session.ID, "reason", string(event.Type))
-	}
-	return nil
-}
-
-// fulfillProcessPayment marks the process paid and triggers publication. A session that
-// completed but is not paid yet (delayed payment method) only advances to processing:
-// it must neither publish nor allow a new charge until the async outcome arrives.
-func (s *Service) fulfillProcessPayment(session *stripeapi.CheckoutSession) error {
-	rawProcessID := session.Metadata[MetadataKeyProcessID]
-	processID, err := bson.ObjectIDFromHex(rawProcessID)
-	if err != nil {
-		return fmt.Errorf("invalid process id %q in session %s metadata (%v): %w",
-			rawProcessID, session.ID, err, errPermanentEvent)
-	}
-	if session.PaymentStatus != stripeapi.CheckoutSessionPaymentStatusPaid {
-		if _, err := s.db.MarkProcessPaymentProcessing(processID, session.ID); err != nil {
-			return fmt.Errorf("failed to mark process payment processing: %w", err)
-		}
-		return nil
-	}
-	if err := s.refuseUnderpaidSession(processID, session); err != nil {
 		return err
 	}
-	// the payment intent is what a refund is issued against; the webhook carries it as a
-	// bare id, which unmarshals into PaymentIntent.ID without an Expand
-	var paymentIntentID string
-	if session.PaymentIntent != nil {
-		paymentIntentID = session.PaymentIntent.ID
-	}
-	won, err := s.db.MarkProcessPaymentPaid(processID, session.ID, db.ProcessCharge{
-		PaymentIntentID: paymentIntentID,
-		SubtotalCents:   netPaidCents(session),
-		TotalCents:      pricing.Cents(session.AmountTotal),
-	})
-	if err != nil {
-		return fmt.Errorf("failed to mark process payment paid: %w", err)
-	}
-	if !won {
-		// either a replayed event (payment already recorded — fine) or money arrived for a
-		// session the process no longer references — that one goes back
-		payment, err := s.db.ProcessPayment(processID)
-		if err != nil && !errors.Is(err, db.ErrNotFound) {
-			// transient: answering 500 has Stripe redeliver, and the replay below needs it
-			return fmt.Errorf("failed to read process payment %s: %w", rawProcessID, err)
-		}
-		if err == nil && payment.CheckoutSessionID == session.ID {
-			switch payment.Status {
-			case db.ProcessPaymentPaid:
-				// A replay of a payment this service already recorded. Run the side effects
-				// again rather than returning: the CAS only proves the status was written, not
-				// that anything after it ran, and a crash (or a full tx queue) between the two
-				// would otherwise strand a paid process unpublished forever — Stripe's retry is
-				// the only thing that ever comes back for it. Both side effects are idempotent.
-				return s.afterProcessPaid(processID)
-			case db.ProcessPaymentRefunded:
-				return nil // a replay of a payment a draft delete already returned
-			default:
-			}
-		}
-		return s.refundSessionForNothing(processID, session, "checkout session the process does not reference")
-	}
-	log.Infow("process payment fulfilled", "processId", processID.Hex(), "sessionId", session.ID)
-	return s.afterProcessPaid(processID)
-}
-
-// refundSessionForNothing returns the money of a paid session that bought nothing: a session the
-// process does not reference (superseded by a newer checkout, or orphaned by a checkout that lost
-// the race to store it, whose expiry did not take), or a census top-up that raised nothing. what
-// names which, in the error and the log. The refund is keyed per intent like every other refund
-// of the process, so a replay of the event cannot refund twice.
-func (s *Service) refundSessionForNothing(processID bson.ObjectID, session *stripeapi.CheckoutSession, what string) error {
-	if session.PaymentIntent == nil || session.PaymentIntent.ID == "" {
-		return fmt.Errorf("%s %s of process %s bought nothing and has no payment intent to refund"+
-			" — needs manual reconciliation: %w", what, session.ID, processID.Hex(), errPermanentEvent)
-	}
-	refund, err := s.RefundProcessPayment(processID, session.PaymentIntent.ID, 0)
-	if err != nil {
-		return fmt.Errorf("failed to refund %s %s: %w", what, session.ID, err)
-	}
-	log.Warnw(what+" bought nothing and was refunded",
-		"processId", processID.Hex(), "sessionId", session.ID, "amountCents", session.AmountTotal,
-		"refundId", refund.ID)
-	return nil
-}
-
-// refuseUnderpaidSession refuses a session that paid less than the payment it settles, which
-// only a discount can cause (payment sessions take no promotion codes today): marking it paid
-// would publish a process for less than its price. Only a payment still waiting on this very
-// session is compared; a replay finds it paid, and census top-ups may have raised it since.
-func (s *Service) refuseUnderpaidSession(processID bson.ObjectID, session *stripeapi.CheckoutSession) error {
-	payment, err := s.db.ProcessPayment(processID)
-	if errors.Is(err, db.ErrNotFound) {
-		return nil // the CAS below misses too, and reports it
-	}
-	if err != nil {
-		return fmt.Errorf("failed to read process payment %s: %w", processID.Hex(), err)
-	}
-	if payment.Status == db.ProcessPaymentPaid || payment.CheckoutSessionID != session.ID {
+	if s.OnProcessCheckoutDropped == nil {
 		return nil
 	}
-	if paid := netPaidCents(session); paid < payment.AmountCents {
-		return fmt.Errorf("session %s paid %d cents for process %s priced %d"+
-			" — needs manual reconciliation: %w", session.ID, paid, processID.Hex(), payment.AmountCents, errPermanentEvent)
+	if err := s.OnProcessCheckoutDropped(processID, session.ID); err != nil {
+		return fmt.Errorf("failed to drop the checkout of process %s: %w", processID.Hex(), err)
 	}
 	return nil
+}
+
+// sessionProcessID parses the process a top-up session was opened for.
+func sessionProcessID(session *stripeapi.CheckoutSession) (bson.ObjectID, error) {
+	raw := session.Metadata[MetadataKeyProcessID]
+	processID, err := bson.ObjectIDFromHex(raw)
+	if err != nil {
+		return bson.NilObjectID, fmt.Errorf("invalid process id %q in session %s metadata (%v): %w",
+			raw, session.ID, err, errPermanentEvent)
+	}
+	return processID, nil
 }
 
 // netPaidCents is what a session's items were paid for, VAT excluded: the subtotal, which
@@ -375,38 +270,20 @@ func netPaidCents(session *stripeapi.CheckoutSession) pricing.Cents {
 	return pricing.Cents(session.AmountSubtotal - session.TotalDetails.AmountDiscount)
 }
 
-// afterProcessPaid runs the side effects of a paid process payment: stamp the
-// once-per-organization add-ons it charged (conditional in the DB, so only the first payment
-// sets each) and hand the process to publication. Idempotent, so it is safe on a webhook
-// replay of a payment already recorded as paid — which is how a failure here is retried:
-// it is returned, the webhook answers 500, and Stripe redelivers the event.
-func (s *Service) afterProcessPaid(processID bson.ObjectID) error {
-	// the payment record, not the draft, says which add-ons were charged: a draft may select
-	// one and still be quoted without it, because another process holds the organization's
-	// claim on the add-on.
-	payment, err := s.db.ProcessPayment(processID)
-	if err != nil {
-		return fmt.Errorf("failed to get paid process payment: %w", err)
-	}
-	for _, addOn := range db.OrgAddOns {
-		if !payment.Charged(addOn) {
-			continue
-		}
-		if _, err := s.db.SetOrganizationAddOnPaid(payment.OrgAddress, addOn, time.Now()); err != nil {
-			return fmt.Errorf("failed to stamp organization %s paid: %w", addOn, err)
-		}
-	}
-	if s.OnProcessPaid != nil {
-		if err := s.OnProcessPaid(processID); err != nil {
-			return fmt.Errorf("failed to publish paid process: %w", err)
-		}
-	}
-	return nil
+// ProcessTopUp is a credited top-up that was opened for a process: the wallet now pays its
+// publish (HeadroomCents zero) or raises its census envelope from FromCents to HeadroomCents.
+type ProcessTopUp struct {
+	ProcessID     bson.ObjectID
+	SessionID     string
+	HeadroomCents pricing.Cents
+	FromCents     pricing.Cents
 }
 
-// creditWalletTopUp credits a verified top-up to the integrator's wallet. The net
-// (pre-tax, after any discount) amount is what was paid for; VAT goes to the tax authority,
-// not the balance. The session id is the idempotency key, so replays cannot double-credit.
+// creditWalletTopUp credits a verified top-up to the wallet named in the session, then hands a
+// top-up opened for a process to OnProcessTopUp. The net (pre-tax, after any discount) amount is
+// what was paid for; VAT goes to the tax authority, not the balance. The session id is the
+// idempotency key, so replays cannot double-credit; the follow-up runs on every delivery and is
+// idempotent on its own.
 func (s *Service) creditWalletTopUp(session *stripeapi.CheckoutSession) error {
 	if session.PaymentStatus != stripeapi.CheckoutSessionPaymentStatusPaid {
 		// delayed payment method still clearing: credit nothing until it does
@@ -418,16 +295,56 @@ func (s *Service) creditWalletTopUp(session *stripeapi.CheckoutSession) error {
 			rawOrg, session.ID, errPermanentEvent)
 	}
 	orgAddress := common.HexToAddress(rawOrg)
-	if err := s.db.CreditWallet(db.WalletCredit{
-		OrgAddress:     orgAddress,
-		AmountCents:    netPaidCents(session),
-		IdempotencyKey: session.ID,
-	}); err != nil {
-		return fmt.Errorf("failed to credit wallet top-up: %w", err)
+	var paymentIntentID string
+	if session.PaymentIntent != nil {
+		paymentIntentID = session.PaymentIntent.ID
 	}
-	log.Infow("wallet top-up credited",
-		"orgAddress", orgAddress.String(), "amountCents", netPaidCents(session), "sessionId", session.ID)
+	// a session discounted to nothing net credits nothing (and would be refused as invalid)
+	if net := netPaidCents(session); net > 0 {
+		if err := s.db.CreditWallet(db.WalletCredit{
+			OrgAddress:      orgAddress,
+			AmountCents:     net,
+			IdempotencyKey:  session.ID,
+			Kind:            db.WalletEntryTopUp,
+			PaymentIntentID: paymentIntentID,
+			GrossCents:      pricing.Cents(session.AmountTotal),
+		}); err != nil {
+			return fmt.Errorf("failed to credit wallet top-up: %w", err)
+		}
+		log.Infow("wallet top-up credited",
+			"orgAddress", orgAddress.String(), "amountCents", net, "sessionId", session.ID)
+	}
+	if session.Metadata[MetadataKeyProcessID] == "" || s.OnProcessTopUp == nil {
+		return nil
+	}
+	// parsed after the credit: metadata that cannot name a process still paid for the credit
+	topUp, err := sessionProcessTopUp(session)
+	if err != nil {
+		return err
+	}
+	if err := s.OnProcessTopUp(*topUp); err != nil {
+		return fmt.Errorf("failed to apply the top-up of process %s: %w", topUp.ProcessID.Hex(), err)
+	}
 	return nil
+}
+
+// sessionProcessTopUp parses the process (and census headroom) a top-up session was opened for.
+func sessionProcessTopUp(session *stripeapi.CheckoutSession) (*ProcessTopUp, error) {
+	processID, err := sessionProcessID(session)
+	if err != nil {
+		return nil, err
+	}
+	topUp := &ProcessTopUp{ProcessID: processID, SessionID: session.ID}
+	if raw := session.Metadata[MetadataKeyProcessTopUpCents]; raw != "" {
+		target, terr := strconv.ParseInt(raw, 10, 64)
+		from, ferr := strconv.ParseInt(session.Metadata[MetadataKeyProcessTopUpFromCents], 10, 64)
+		if terr != nil || ferr != nil || from < 0 || target <= from {
+			return nil, fmt.Errorf("invalid census headroom %q from %q in session %s metadata: %w", raw,
+				session.Metadata[MetadataKeyProcessTopUpFromCents], session.ID, errPermanentEvent)
+		}
+		topUp.HeadroomCents, topUp.FromCents = pricing.Cents(target), pricing.Cents(from)
+	}
+	return topUp, nil
 }
 
 // parseCheckoutSessionFromEvent extracts the checkout session object from a webhook event.

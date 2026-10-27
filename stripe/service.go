@@ -23,11 +23,14 @@ type Service struct {
 	processedEvents sync.Map // map[string]time.Time
 	lockManager     *LockManager
 	config          *Config
-	// OnProcessPaid, when set, is invoked on every fulfillment of a paid process payment,
-	// including Stripe's replays of it, so it must be idempotent. The API layer wires it
-	// to enqueue publication of the paid process. An error makes the webhook answer 500 so
-	// Stripe redelivers the event; a refusal no retry can fix must return nil.
-	OnProcessPaid func(processID bson.ObjectID) error
+	// OnProcessTopUp, when set, is invoked after a top-up opened for a process is credited, on
+	// every delivery including Stripe's replays, so it must be idempotent. The API layer wires
+	// it to pay the process's publish (or census headroom) from the wallet. An error makes the
+	// webhook answer 500 so Stripe redelivers the event; a refusal no retry can fix returns nil.
+	OnProcessTopUp func(ProcessTopUp) error
+	// OnProcessCheckoutDropped, when set, is invoked when a process's top-up checkout expires or
+	// its delayed payment fails, to drop the process's pending payment and its add-on claims.
+	OnProcessCheckoutDropped func(processID bson.ObjectID, sessionID string) error
 }
 
 // NewService creates a new Stripe service

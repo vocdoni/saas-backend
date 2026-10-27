@@ -108,19 +108,19 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	case payment.Status == db.ProcessPaymentRefunded:
 		// an earlier delete refunded it and then failed to drop the draft: the row is
 		// already the audit record, so only the draft is left to go
-	case payment.Status == db.ProcessPaymentPending && payment.CheckoutSessionID != "":
+	case payment.Status == db.ProcessPaymentPending:
 		if claimHolder, err = a.db.Organization(vp.OrgAddress); err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
-		if !a.releasePendingCheckout(w, payment) {
+		// a consumed top-up is in the wallet already; an open one must not stay payable
+		if !payment.Consumed && !a.releasePendingCheckout(w, payment) {
 			return
 		}
 		fallthrough
-	case payment.Status == db.ProcessPaymentPending || payment.Status == db.ProcessPaymentFailed:
-		// pending (released above, or never checked out) or failed: nothing was paid, so
-		// the payment state goes with the draft — conditionally, since the status may have
-		// moved on since it was read
+	case payment.Status == db.ProcessPaymentFailed:
+		// pending (released above) or failed: the process holds no money, so the payment state
+		// goes with the draft — conditionally, since the status may have moved on since it was read
 		dropped, err := a.db.DeleteProcessPayment(oid)
 		if err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -134,9 +134,7 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 			a.releaseDroppedCheckoutClaim(vp, claimHolder)
 		}
 	default:
-		// processing since the check above (a delayed payment method completing): money is
-		// in flight, and its record must not go with the draft
-		errors.ErrPaymentSessionConflict.Withf("the draft payment is %s; retry once it settles", payment.Status).Write(w)
+		errors.ErrPaymentSessionConflict.Withf("the draft payment is %s", payment.Status).Write(w)
 		return
 	}
 	if err := a.db.DeleteVotingProcess(oid); err != nil {

@@ -130,34 +130,6 @@ func (ms *MongoStorage) DeleteProcessPaymentCheckout(processID bson.ObjectID, se
 	return res.DeletedCount == 1, nil
 }
 
-// MarkProcessPaymentProcessing moves the pending payment holding sessionID to processing
-// (a delayed payment method).
-func (ms *MongoStorage) MarkProcessPaymentProcessing(processID bson.ObjectID, sessionID string) (bool, error) {
-	return ms.transitionProcessPayment(processID, sessionID, processPaymentTransition{
-		from: bson.A{ProcessPaymentPending},
-		set:  bson.M{"status": ProcessPaymentProcessing},
-	})
-}
-
-// MarkProcessPaymentPaid moves a pending or processing payment holding sessionID to paid. A
-// replay reports false, so callers can skip side effects. Empty charge fields are not written.
-func (ms *MongoStorage) MarkProcessPaymentPaid(
-	processID bson.ObjectID, sessionID string, charge ProcessCharge,
-) (bool, error) {
-	set := bson.M{"status": ProcessPaymentPaid, "paidAt": time.Now()}
-	if charge.PaymentIntentID != "" {
-		set["paymentIntentId"] = charge.PaymentIntentID
-	}
-	if charge.SubtotalCents > 0 && charge.TotalCents > 0 {
-		set["chargeSubtotalCents"] = charge.SubtotalCents
-		set["chargeTotalCents"] = charge.TotalCents
-	}
-	return ms.transitionProcessPayment(processID, sessionID, processPaymentTransition{
-		from: bson.A{ProcessPaymentPending, ProcessPaymentProcessing},
-		set:  set,
-	})
-}
-
 // RefundWithholding is what a delete's refund keeps back: the net cents of the add-ons another
 // process relies on, and which add-ons they are.
 type RefundWithholding struct {
@@ -267,15 +239,6 @@ func (ms *MongoStorage) MarkProcessPaymentRefundFailed(processID bson.ObjectID, 
 	return res.MatchedCount == 1, nil
 }
 
-// MarkProcessPaymentFailed moves a pending or processing payment holding sessionID to failed,
-// making the process payable again.
-func (ms *MongoStorage) MarkProcessPaymentFailed(processID bson.ObjectID, sessionID string) (bool, error) {
-	return ms.transitionProcessPayment(processID, sessionID, processPaymentTransition{
-		from: bson.A{ProcessPaymentPending, ProcessPaymentProcessing},
-		set:  bson.M{"status": ProcessPaymentFailed},
-	})
-}
-
 // SetProcessPaymentPaidByWallet upserts a wallet-paid payment over none, a consumed pending one,
 // a failed one, or a smaller paid one (census headroom). It never lowers an amount, never touches
 // a pending payment whose checkout is still open, nor one a delete is refunding, and reports true
@@ -337,9 +300,10 @@ func (ms *MongoStorage) SetProcessPaymentPaidByWallet(payment *ProcessPayment) (
 // growth past that price is refused with what it costs and bought through the same census
 // checkout. It is €0 for a process published free, and the price of its census at the time for
 // a process published before pay-per-process (grandfathered: what it already holds stays free).
-// A process that already has a payment keeps it, except a failed one: its checkout is over
-// (expired, cancelled or declined) and can no longer be paid, so it is replaced — leaving it would
-// give the published census no envelope at all. Reports whether it wrote.
+// A process that already has a payment keeps it, except a failed one (a reverted wallet payment)
+// or a consumed pending one (its top-up is already in the wallet): neither holds money for the
+// process, and leaving it would give the published census no envelope at all. Reports whether it
+// wrote.
 func (ms *MongoStorage) SetProcessPaymentEnvelope(
 	processID bson.ObjectID, orgAddress common.Address, amountCents pricing.Cents,
 ) (bool, error) {
@@ -351,7 +315,10 @@ func (ms *MongoStorage) SetProcessPaymentEnvelope(
 	defer cancel()
 	// with upsert, a payment the filter excludes collides on _id: that duplicate key is the refusal
 	res, err := ms.processPayments.ReplaceOne(ctx,
-		bson.M{"_id": processID, "status": ProcessPaymentFailed},
+		bson.M{"_id": processID, "$or": bson.A{
+			bson.M{"status": ProcessPaymentFailed},
+			bson.M{"status": ProcessPaymentPending, "consumed": true},
+		}},
 		&ProcessPayment{
 			ProcessID:   processID,
 			OrgAddress:  orgAddress,
@@ -416,64 +383,6 @@ func (ms *MongoStorage) transitionProcessPayment(
 	res, err := ms.processPayments.UpdateOne(ctx, filter, bson.M{"$set": t.set})
 	if err != nil {
 		return false, fmt.Errorf("failed to transition process payment: %w", err)
-	}
-	return res.MatchedCount == 1, nil
-}
-
-// processTopUpSessionsWindow bounds ProcessPayment.TopUpSessions the way
-// walletAppliedKeysWindow bounds a wallet's applied keys: an unbounded $push eventually
-// reaches the 16 MB document limit and a payment that can no longer be updated can never be
-// raised again. A process bought this many census top-ups is already far outside
-// self-service pricing, so the window is small.
-// ponytail: a fixed window — the amountCents compare-and-set is the real replay guard, this
-// list only stops a replay of the *same* session from the *same* base.
-const processTopUpSessionsWindow = 50
-
-// ProcessTopUp is one census top-up to apply to a paid process: the session that bought it
-// was priced as ToCents minus FromCents, the envelope it was opened against.
-type ProcessTopUp struct {
-	ProcessID       bson.ObjectID
-	FromCents       pricing.Cents
-	ToCents         pricing.Cents
-	SessionID       string
-	PaymentIntentID string
-}
-
-// RaiseProcessPaymentAmount raises a paid payment's envelope from t.FromCents to t.ToCents,
-// recording the checkout session that bought the increase and, when known, the payment intent
-// that paid for it, so deleting the draft can refund every charge and not only the first. A
-// compare-and-set on the base the session was priced from: once the envelope has moved (a
-// replay of this session, or another top-up applied first) nothing matches and it reports
-// false, so a session never raises from a base it did not pay the difference from. Reports
-// whether this call won the raise.
-func (ms *MongoStorage) RaiseProcessPaymentAmount(t ProcessTopUp) (bool, error) {
-	if t.ProcessID == bson.NilObjectID || t.SessionID == "" || t.FromCents < 0 || t.ToCents <= t.FromCents {
-		return false, ErrInvalidData
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-	filter := bson.M{
-		"_id":           t.ProcessID,
-		"status":        ProcessPaymentPaid,
-		"amountCents":   t.FromCents,
-		"topUpSessions": bson.M{"$ne": t.SessionID},
-		// a delete fixed its refund: a top-up landing now raises nothing and is refunded on arrival
-		"refundWithheldCents": bson.M{"$exists": false},
-	}
-	update := bson.M{
-		"$set": bson.M{"amountCents": t.ToCents, "updatedAt": time.Now()},
-		"$push": bson.M{"topUpSessions": bson.M{
-			"$each":  bson.A{t.SessionID},
-			"$slice": -processTopUpSessionsWindow,
-		}},
-	}
-	if t.PaymentIntentID != "" {
-		// never windowed: dropping an intent would leave money a delete cannot refund
-		update["$push"].(bson.M)["topUpIntents"] = t.PaymentIntentID
-	}
-	res, err := ms.processPayments.UpdateOne(ctx, filter, update)
-	if err != nil {
-		return false, fmt.Errorf("failed to raise process payment amount: %w", err)
 	}
 	return res.MatchedCount == 1, nil
 }

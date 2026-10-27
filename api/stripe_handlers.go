@@ -263,7 +263,8 @@ func (a *API) InitializeStripeService() error {
 	// wire the pay-per-process seam: the same service backs one-time checkout, and a
 	// verified process payment triggers publication server-side
 	a.paymentGW = service
-	service.OnProcessPaid = a.publishPaidProcess
+	service.OnProcessTopUp = a.applyProcessTopUp
+	service.OnProcessCheckoutDropped = a.dropProcessCheckout
 
 	log.Infof("Stripe service initialized successfully")
 	return nil
