@@ -4,135 +4,78 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/pricing"
 	"github.com/vocdoni/saas-backend/stripe"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.vocdoni.io/dvote/util"
 )
 
-// TestStripeRefundFailedWebhook covers the refund that does not stick: Stripe accepted it,
-// the draft was deleted on the strength of that, and the refund then failed. The process
-// cannot come back, so the only correct reaction is to stop the payment looking settled and
-// say loudly that a human must reconcile it.
-func TestStripeRefundFailedWebhook(t *testing.T) {
-	c := qt.New(t)
-	installStripeWebhookService(t)
-
-	// a card payment that a delete refunded as re_failed
-	refundedPayment := func(session string) bson.ObjectID {
-		processID := bson.NewObjectID()
-		stored, err := testDB.SetProcessPaymentPending(&db.ProcessPayment{
-			ProcessID:         processID,
-			OrgAddress:        common.HexToAddress("0x000000000000000000000000000000000000beef"),
-			CheckoutSessionID: session,
-			AmountCents:       1_500,
-			Currency:          "eur",
-		}, "")
-		c.Assert(err, qt.IsNil)
-		c.Assert(stored, qt.IsTrue)
-		won, err := testDB.MarkProcessPaymentPaid(processID, session, db.ProcessCharge{PaymentIntentID: "pi_" + session})
-		c.Assert(err, qt.IsNil)
-		c.Assert(won, qt.IsTrue)
-		refunded, err := testDB.MarkProcessPaymentRefunded(processID, "re_failed", 1_500)
-		c.Assert(err, qt.IsNil)
-		c.Assert(refunded, qt.IsTrue)
-		return processID
+// refundObject is the wire shape of a refund inside a webhook event.
+func refundObject(id, paymentIntentID, status string, amountCents pricing.Cents) map[string]any {
+	return map[string]any{
+		"id": id, "object": "refund", "amount": amountCents, "status": status, "payment_intent": paymentIntentID,
 	}
-	processID := refundedPayment("cs_refund_failed")
-
-	refundObject := func(status, rawProcessID string) map[string]any {
-		return map[string]any{
-			"id":       "re_failed",
-			"object":   "refund",
-			"amount":   1_500,
-			"status":   status,
-			"metadata": map[string]string{"voting_process_id": rawProcessID},
-		}
-	}
-
-	// a refund still on its way changes nothing
-	status := postSignedStripeEvent(t, testWebhookSecret, "evt_refund_pending",
-		"refund.updated", refundObject("pending", processID.Hex()))
-	c.Assert(status, qt.Equals, http.StatusOK)
-	payment, err := testDB.ProcessPayment(processID)
-	c.Assert(err, qt.IsNil)
-	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentRefunded)
-
-	// one that failed puts the payment back to paid, keeping the refund id to reconcile
-	status = postSignedStripeEvent(t, testWebhookSecret, "evt_refund_failed",
-		"refund.updated", refundObject("failed", processID.Hex()))
-	c.Assert(status, qt.Equals, http.StatusOK)
-	payment, err = testDB.ProcessPayment(processID)
-	c.Assert(err, qt.IsNil)
-	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPaid)
-	c.Assert(payment.RefundID, qt.Equals, "re_failed")
-
-	// the legacy charge.refund.updated is handled the same way, for an endpoint still subscribed to it
-	legacyID := refundedPayment("cs_refund_failed_legacy")
-	status = postSignedStripeEvent(t, testWebhookSecret, "evt_refund_failed_legacy",
-		"charge.refund.updated", refundObject("failed", legacyID.Hex()))
-	c.Assert(status, qt.Equals, http.StatusOK)
-	legacy, err := testDB.ProcessPayment(legacyID)
-	c.Assert(err, qt.IsNil)
-	c.Assert(legacy.Status, qt.Equals, db.ProcessPaymentPaid)
-
-	// a refund naming no process is permanently invalid: answered 200 so Stripe stops
-	status = postSignedStripeEvent(t, testWebhookSecret, "evt_refund_failed_bad",
-		"refund.updated", refundObject("failed", "not-an-object-id"))
-	c.Assert(status, qt.Equals, http.StatusOK)
-
-	// a refund of no process at all — a subscription's — is not ours and is ignored
-	foreign := refundObject("failed", "")
-	delete(foreign, "metadata")
-	status = postSignedStripeEvent(t, testWebhookSecret, "evt_refund_foreign", "refund.updated", foreign)
-	c.Assert(status, qt.Equals, http.StatusOK)
-	payment, err = testDB.ProcessPayment(processID)
-	c.Assert(err, qt.IsNil)
-	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPaid)
 }
 
-// TestStripeLateCensusTopUpRefunded: a census top-up paid after its draft was deleted and
-// refunded bought nothing, so the webhook refunds it on the spot — under the per-intent key
-// every refund of the process uses — instead of raising an envelope nobody can spend.
-func TestStripeLateCensusTopUpRefunded(t *testing.T) {
+// TestStripeRefundWebhookDebitsWallet: a refund of a top-up made by hand in the Stripe dashboard
+// is mirrored in the wallet: debited net of the top-up's own VAT, once per refund across replays
+// and its later updates, a partial refund and the rest each once, even below zero, and shown in
+// the history as a refund. Refunds that are not settled, or of payments that are not top-ups,
+// change nothing.
+func TestStripeRefundWebhookDebitsWallet(t *testing.T) {
 	c := qt.New(t)
 	installStripeWebhookService(t)
+	token := testCreateUser(t, "refundsync123456")
+	orgAddress := testCreateOrganization(t, token)
 
-	// Stripe's API, stubbed: the one call this path makes is the refund
-	refundBodies, refundKeys := stubStripeRefunds(t)
-
-	processID := bson.NewObjectID()
-	stored, err := testDB.SetProcessPaymentPending(&db.ProcessPayment{
-		ProcessID:         processID,
-		OrgAddress:        common.HexToAddress("0x000000000000000000000000000000000000beef"),
-		CheckoutSessionID: "cs_late_first",
-		AmountCents:       1_500,
-		Currency:          "eur",
-	}, "")
-	c.Assert(err, qt.IsNil)
-	c.Assert(stored, qt.IsTrue)
-	won, err := testDB.MarkProcessPaymentPaid(processID, "cs_late_first", db.ProcessCharge{PaymentIntentID: "pi_late_first"})
-	c.Assert(err, qt.IsNil)
-	c.Assert(won, qt.IsTrue)
-	refunded, err := testDB.MarkProcessPaymentRefunded(processID, "re_first", 1_500)
-	c.Assert(err, qt.IsNil)
-	c.Assert(refunded, qt.IsTrue)
-
-	session := checkoutSessionObject("cs_late_topup", "paid", 500, map[string]string{
-		stripe.MetadataKeyProcessID:             processID.Hex(),
-		stripe.MetadataKeyProcessTopUpFromCents: "1500",
-		stripe.MetadataKeyProcessTopUpCents:     "2000",
+	// a €100 top-up charged €121 with VAT, then €80 of it spent
+	intent := "pi_refund_" + util.RandomHex(6)
+	topUp := checkoutSessionObject("cs_refund_"+util.RandomHex(6), "paid", 10_000, map[string]string{
+		stripe.MetadataKeyWalletTopUpOrg: orgAddress.String(),
 	})
-	session["payment_intent"] = "pi_late_topup"
-	code := postSignedStripeEvent(t, testWebhookSecret, "evt_late_topup", "checkout.session.completed", session)
+	topUp["amount_total"] = 12_100
+	topUp["payment_intent"] = intent
+	code := postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8), "checkout.session.completed", topUp)
 	c.Assert(code, qt.Equals, http.StatusOK)
-	c.Assert(*refundBodies, qt.DeepEquals, []string{"pi_late_topup"})
-	c.Assert(*refundKeys, qt.DeepEquals, []string{"refund:" + processID.Hex() + ":pi_late_topup"})
+	c.Assert(testDB.DebitWalletForProcess(db.WalletDebit{
+		OrgAddress: orgAddress, ProcessID: bson.NewObjectID(), ProcessOrgAddress: orgAddress,
+		AmountCents: 8_000, PriceCents: 8_000,
+	}), qt.IsNil)
 
-	payment, err := testDB.ProcessPayment(processID)
+	post := func(eventID, eventType string, refund map[string]any) {
+		c.Assert(postSignedStripeEvent(t, testWebhookSecret, eventID, eventType, refund), qt.Equals, http.StatusOK)
+	}
+	// not settled yet, or never: nothing moves
+	post("evt_"+util.RandomHex(8), "refund.created", refundObject("re_partial", intent, "pending", 3_025))
+	post("evt_"+util.RandomHex(8), "refund.updated", refundObject("re_failed", intent, "failed", 3_025))
+	assertWallet(t, orgAddress, 2_000, db.WalletEntryRefund, 0)
+
+	// a partial refund of €30.25 gross is €25 net: debited once across the updated event and a
+	// fresh-id replay
+	partialEvent := "evt_" + util.RandomHex(8)
+	post(partialEvent, "refund.updated", refundObject("re_partial", intent, "succeeded", 3_025))
+	post(partialEvent, "refund.updated", refundObject("re_partial", intent, "succeeded", 3_025))
+	post("evt_"+util.RandomHex(8), "refund.created", refundObject("re_partial", intent, "succeeded", 3_025))
+	assertWallet(t, orgAddress, -500, db.WalletEntryRefund, 1)
+
+	// the rest (€90.75 gross, €75 net) lands in full, deeper below zero
+	post("evt_"+util.RandomHex(8), "refund.created", refundObject("re_rest", intent, "succeeded", 9_075))
+	post("evt_"+util.RandomHex(8), "refund.created", refundObject("re_rest", intent, "succeeded", 9_075))
+	assertWallet(t, orgAddress, -8_000, db.WalletEntryRefund, 2)
+	_, entries, err := testDB.WalletLedger(orgAddress, 1, 1)
 	c.Assert(err, qt.IsNil)
-	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentRefunded)
-	c.Assert(payment.AmountCents, qt.Equals, pricing.Cents(1_500))
+	c.Assert(entries[0].Kind, qt.Equals, db.WalletEntryRefund)
+	c.Assert(entries[0].AmountCents, qt.Equals, pricing.Cents(-7_500))
+
+	// a refund of a payment that never credited a wallet (a subscription invoice) is ignored
+	post("evt_"+util.RandomHex(8), "refund.created", refundObject("re_other", "pi_not_a_topup", "succeeded", 5_000))
+	assertWallet(t, orgAddress, -8_000, db.WalletEntryRefund, 2)
+
+	// in debt, the wallet pays nothing until a top-up covers it
+	err = testDB.DebitWalletForProcess(db.WalletDebit{
+		OrgAddress: orgAddress, ProcessID: bson.NewObjectID(), AmountCents: 1, PriceCents: 1,
+	})
+	c.Assert(err, qt.ErrorIs, db.ErrInsufficientWalletBalance)
 }

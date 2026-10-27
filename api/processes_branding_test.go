@@ -12,6 +12,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/pricing"
+	"github.com/vocdoni/saas-backend/stripe"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -64,9 +65,9 @@ func TestBrandingChargedOncePerOrganization(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(secondPayment.Branding, qt.IsFalse)
 
-	// a failed payment releases the claim once it is stale, so the second draft can carry
+	// a dropped checkout releases the claim once it is stale, so the second draft can carry
 	// branding again
-	released, err := testDB.MarkProcessPaymentFailed(oid, payment.CheckoutSessionID)
+	released, err := testDB.DeleteProcessPaymentCheckout(oid, payment.CheckoutSessionID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(released, qt.IsTrue)
 	price = requestAndParse[apicommon.ProcessPriceResponse](
@@ -111,9 +112,10 @@ func TestBrandingClaimReleasedWhenClaimantDropsIt(t *testing.T) {
 	stored, err := testDB.SetProcessPaymentPending(&db.ProcessPayment{
 		ProcessID:         claimantOID,
 		OrgAddress:        orgAddress,
+		Payer:             orgAddress,
 		CheckoutSessionID: "cs_without_branding",
-		QuoteHash:         "hash",
 		AmountCents:       plainCents,
+		TopUpCents:        plainCents,
 		Currency:          "eur",
 	}, checkout.SessionID)
 	c.Assert(err, qt.IsNil)
@@ -215,17 +217,14 @@ func TestCancelCheckoutExcludesConcurrentCheckout(t *testing.T) {
 	fake.expireFn = func(string) {
 		_, racingCode = testRequest(t, http.MethodPost, adminToken, checkoutReq, "processes", cancelled, "checkout")
 	}
-	status := requestAndParse[apicommon.ProcessPaymentStatusResponse](
-		t, http.MethodDelete, adminToken, nil, "processes", cancelled, "checkout")
+	requestAndAssertCode(http.StatusOK, t, http.MethodDelete, adminToken, nil, "processes", cancelled, "checkout")
 	c.Assert(racingCode, qt.Equals, http.StatusConflict)
-	c.Assert(status.Status, qt.Equals, db.ProcessPaymentFailed)
 
 	// the cancelled draft holds no live session, so the claim it released is free for the sibling
 	oid, err := bson.ObjectIDFromHex(cancelled)
 	c.Assert(err, qt.IsNil)
-	payment, err := testDB.ProcessPayment(oid)
-	c.Assert(err, qt.IsNil)
-	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentFailed)
+	_, err = testDB.ProcessPayment(oid)
+	c.Assert(err, qt.ErrorIs, db.ErrNotFound)
 	next := requestAndParse[apicommon.ProcessCheckoutResponse](
 		t, http.MethodPost, adminToken, checkoutReq, "processes", sibling, "checkout")
 	c.Assert(next.AmountCents, qt.Equals, withBrandingCents)
@@ -266,15 +265,14 @@ func TestBrandingClaimReleasedByAbandonedCheckout(t *testing.T) {
 	status := postSignedStripeEvent(t, testWebhookSecret, "evt_branding_expired",
 		"checkout.session.expired",
 		checkoutSessionObject(payment.CheckoutSessionID, "unpaid", withBrandingCents, map[string]string{
-			"voting_process_id": abandoned,
+			stripe.MetadataKeyWalletTopUpOrg: orgAddress.String(),
+			stripe.MetadataKeyProcessID:      abandoned,
 		}))
 	c.Assert(status, qt.Equals, http.StatusOK)
-	payment, err = testDB.ProcessPayment(abandonedOID)
-	c.Assert(err, qt.IsNil)
-	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentFailed)
+	_, err = testDB.ProcessPayment(abandonedOID)
+	c.Assert(err, qt.ErrorIs, db.ErrNotFound)
 
-	// with the claim released (and stale), the next draft can be charged for branding
-	staleBrandingClaims(t)
+	// the expiry released the claim at once: the next draft can be charged for branding
 	price = requestAndParse[apicommon.ProcessPriceResponse](
 		t, http.MethodGet, adminToken, nil, "processes", next, "price")
 	c.Assert(price.TotalCents, qt.Equals, withBrandingCents)
@@ -303,9 +301,11 @@ func TestPaidDraftBrandingFixedAtPayment(t *testing.T) {
 		c.Assert(checkout.AmountCents, qt.Equals, plainCents)
 		oid, err := bson.ObjectIDFromHex(pid)
 		c.Assert(err, qt.IsNil)
-		won, err := testDB.MarkProcessPaymentPaid(oid, checkout.SessionID, db.ProcessCharge{})
+		// the top-up lands: consumed, then the wallet pays
+		won, err := testDB.ConsumeProcessPaymentTopUp(oid, checkout.SessionID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(won, qt.IsTrue)
+		c.Assert(markProcessPaid(t, pid), qt.Equals, plainCents)
 		return oid
 	}
 
@@ -314,12 +314,12 @@ func TestPaidDraftBrandingFixedAtPayment(t *testing.T) {
 	requestAndAssertCode(http.StatusOK, t, http.MethodPost, token, checkoutReq, "processes", holder, "checkout")
 	payAsCheckedOut(late)
 
-	// the sibling's payment fails and its claim goes stale: branding is claimable again
+	// the sibling's checkout expires and its claim goes stale: branding is claimable again
 	holderOID, err := bson.ObjectIDFromHex(holder)
 	c.Assert(err, qt.IsNil)
 	holderPayment, err := testDB.ProcessPayment(holderOID)
 	c.Assert(err, qt.IsNil)
-	_, err = testDB.MarkProcessPaymentFailed(holderOID, holderPayment.CheckoutSessionID)
+	_, err = testDB.DeleteProcessPaymentCheckout(holderOID, holderPayment.CheckoutSessionID)
 	c.Assert(err, qt.IsNil)
 	staleBrandingClaims(t)
 

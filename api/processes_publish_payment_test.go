@@ -34,22 +34,28 @@ func pollProcessPublished(t *testing.T, token, pid string) {
 	}
 }
 
-// TestVotingProcessPublishPaymentGate: a priced process cannot publish unpaid (402 with
-// the quote in the payload, and the validation dry-run reports it), a paid one can still be
-// edited (that is how a draft stranded by publish preflight is repaired) but not deleted,
-// and publishes.
+// publishPaymentRefusal is the 402 (40178) a standard organization's publish gets when its wallet
+// falls short.
+type publishPaymentRefusal struct {
+	Code int                              `json:"code"`
+	Data apicommon.ProcessPaymentRequired `json:"data"`
+}
+
+// TestVotingProcessPublishPaymentGate: a priced process of a standard organization publishes from
+// the organization's own wallet. Short, publish answers 402 with the quote, the balance and the
+// shortfall (and the dry-run reports it); an open top-up checkout answers 409; covered, publish
+// debits the price once — a paid draft stays editable and republishing it is free.
 func TestVotingProcessPublishPaymentGate(t *testing.T) {
 	c := qt.New(t)
+	fake := installFakePaymentGW(t)
 	token := testCreateUser(t, "gatepassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(pricedProcessVoters)...)
-	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+	pid := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, newVotingProcessRequest(orgAddress, memberIDs(members)),
-		processesCreateEndpoint)
-	pid := created.ProcessID
-	oid, err := bson.ObjectIDFromHex(pid)
-	c.Assert(err, qt.IsNil)
+		processesCreateEndpoint).ProcessID
+	oid := objectID(c, pid)
 
 	// the dry-run lists the missing payment among the problems
 	validation := requestAndParse[apicommon.VotingProcessValidateResponse](
@@ -57,140 +63,47 @@ func TestVotingProcessPublishPaymentGate(t *testing.T) {
 	c.Assert(validation.Valid, qt.IsFalse)
 	c.Assert(strings.Join(validation.Errors, "; "), qt.Contains, "requires payment")
 
-	// publish is refused with 402 while unpaid
-	requestAndAssertError(errors.ErrPaymentRequired, t, http.MethodPost, token, nil,
-		"processes", pid, "publish")
+	// short: 402 with what is missing, and nothing debited
+	const balance = 300
+	fundWallet(t, orgAddress, balance)
+	refusal := requestAndParseWithAssertCode[publishPaymentRefusal](http.StatusPaymentRequired,
+		t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(refusal.Code, qt.Equals, errors.ErrPaymentRequired.Code)
+	c.Assert(refusal.Data.TotalCents, qt.Equals, pricedProcessCents)
+	c.Assert(refusal.Data.BalanceCents, qt.Equals, pricing.Cents(balance))
+	c.Assert(refusal.Data.ShortfallCents, qt.Equals, pricedProcessCents-balance)
 
-	// pay (as the webhook would: pending session marked paid)
-	stored, err := testDB.SetProcessPaymentPending(&db.ProcessPayment{
-		ProcessID:         oid,
-		OrgAddress:        orgAddress,
-		CheckoutSessionID: "cs_gate_test",
-		QuoteHash:         "hash_at_payment_time",
-		AmountCents:       pricedProcessCents,
-		Currency:          "eur",
-	}, "")
-	c.Assert(err, qt.IsNil)
-	c.Assert(stored, qt.IsTrue)
-
-	// a payment still clearing (delayed method) is in flight, not missing: publish answers the
-	// same 409 checkout does, rather than a 402 sending the customer back to pay
-	processing, err := testDB.MarkProcessPaymentProcessing(oid, "cs_gate_test")
-	c.Assert(err, qt.IsNil)
-	c.Assert(processing, qt.IsTrue)
+	// an open top-up checkout blocks a manual publish: paying it would publish a second time
+	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, token,
+		&apicommon.ProcessCheckoutRequest{ReturnURL: "https://x.example"}, "processes", pid, "checkout")
+	c.Assert(checkout.AmountCents, qt.Equals, pricedProcessCents-balance)
+	fundWallet(t, orgAddress, pricedProcessCents)
 	requestAndAssertError(errors.ErrPaymentSessionConflict, t, http.MethodPost, token, nil,
 		"processes", pid, "publish")
-	validation = requestAndParse[apicommon.VotingProcessValidateResponse](
-		t, http.MethodGet, token, nil, "processes", pid, "validation")
-	c.Assert(strings.Join(validation.Errors, "; "), qt.Contains, "processing")
+	requestAndAssertCode(http.StatusOK, t, http.MethodDelete, token, nil, "processes", pid, "checkout")
+	c.Assert(fake.expired, qt.DeepEquals, []string{checkout.SessionID})
 
-	won, err := testDB.MarkProcessPaymentPaid(oid, "cs_gate_test", db.ProcessCharge{})
-	c.Assert(err, qt.IsNil)
-	c.Assert(won, qt.IsTrue)
-
-	// a paid draft is still editable: the publish gate re-prices whatever the edit
-	// produced, so an edit can only repair the draft, never under-charge it
+	// a draft is still editable: the publish gate re-prices whatever the edit produced
 	update := newVotingProcessRequest(orgAddress, memberIDs(members))
 	requestAndAssertCode(http.StatusOK, t, http.MethodPut, token, update, "processes", pid)
 
-	// paid -> publishes end to end
+	// covered: publishes end to end, debiting the price once, recorded on the payment
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted)
 	pollProcessPublished(t, token, pid)
-}
-
-// TestPublishPaidProcessServerSide exercises the webhook fulfillment hook: once a
-// payment is verified, the process publishes as the user who requested the checkout,
-// with no client involvement.
-func TestPublishPaidProcessServerSide(t *testing.T) {
-	c := qt.New(t)
-	token := testCreateUser(t, "hookpassword1234")
-	me := requestAndParse[apicommon.UserInfo](t, http.MethodGet, token, nil, "users", "me")
-	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	members := postOrgMembers(t, token, orgAddress, newOrgMembers(pricedProcessVoters)...)
-	created := requestAndParse[apicommon.CreateVotingProcessResponse](
-		t, http.MethodPost, token, newVotingProcessRequest(orgAddress, memberIDs(members)),
-		processesCreateEndpoint)
-	oid, err := bson.ObjectIDFromHex(created.ProcessID)
+	wallet, err := testDB.Wallet(orgAddress)
 	c.Assert(err, qt.IsNil)
-
-	stored, err := testDB.SetProcessPaymentPending(&db.ProcessPayment{
-		ProcessID:         oid,
-		OrgAddress:        orgAddress,
-		CheckoutSessionID: "cs_hook_test",
-		QuoteHash:         "hash",
-		AmountCents:       pricedProcessCents,
-		Currency:          "eur",
-		RequestedBy:       me.Email,
-	}, "")
+	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(balance))
+	payment, err := testDB.ProcessPayment(oid)
 	c.Assert(err, qt.IsNil)
-	c.Assert(stored, qt.IsTrue)
-	won, err := testDB.MarkProcessPaymentPaid(oid, "cs_hook_test", db.ProcessCharge{})
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPaid)
+	c.Assert(payment.AmountCents, qt.Equals, pricedProcessCents)
+	c.Assert(payment.Payer, qt.Equals, orgAddress)
+	_, entries, err := testDB.WalletLedger(orgAddress, 1, 1)
 	c.Assert(err, qt.IsNil)
-	c.Assert(won, qt.IsTrue)
-
-	// the hook the stripe service fires after winning the paid CAS
-	c.Assert(testAPI.publishPaidProcess(oid), qt.IsNil)
-	pollProcessPublished(t, token, created.ProcessID)
-
-	// firing it again (a replayed fulfillment) is a no-op on a published process
-	c.Assert(testAPI.publishPaidProcess(oid), qt.IsNil)
-}
-
-// TestPublishPaidProcessRefusals: every refusal inside the fulfillment hook must leave
-// the process paid and unpublished — publishing later (manually, for free) is always
-// possible, and the user is never charged again.
-func TestPublishPaidProcessRefusals(t *testing.T) {
-	c := qt.New(t)
-	token := testCreateUser(t, "hookrefusals1234")
-	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-
-	payAndHook := func(pid, requestedBy, sessionID string) bson.ObjectID {
-		oid, err := bson.ObjectIDFromHex(pid)
-		c.Assert(err, qt.IsNil)
-		stored, err := testDB.SetProcessPaymentPending(&db.ProcessPayment{
-			ProcessID: oid, OrgAddress: orgAddress, CheckoutSessionID: sessionID,
-			QuoteHash: "hash", AmountCents: pricedProcessCents, Currency: "eur", RequestedBy: requestedBy,
-		}, "")
-		c.Assert(err, qt.IsNil)
-		c.Assert(stored, qt.IsTrue)
-		won, err := testDB.MarkProcessPaymentPaid(oid, sessionID, db.ProcessCharge{})
-		c.Assert(err, qt.IsNil)
-		c.Assert(won, qt.IsTrue)
-		c.Assert(testAPI.publishPaidProcess(oid), qt.IsNil)
-		return oid
-	}
-	assertPaidUnpublished := func(oid bson.ObjectID) {
-		payment, err := testDB.ProcessPayment(oid)
-		c.Assert(err, qt.IsNil)
-		c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPaid)
-		vp, err := testDB.VotingProcess(oid)
-		c.Assert(err, qt.IsNil)
-		c.Assert(vp.Published, qt.IsFalse)
-		c.Assert(vp.PublishInProgress(), qt.IsFalse) // no claim left behind
-	}
-
-	// the user who paid no longer exists: stays paid, publish manually later
-	ghostPid := newPricedVotingProcess(t, token, orgAddress)
-	assertPaidUnpublished(payAndHook(ghostPid, "ghost@nowhere.example", "cs_refusal_ghost"))
-
-	// the draft fails preflight at fulfillment time (a stray question corrupted the
-	// stored set after payment): stays paid, no claim, repairable + publishable later
-	me := requestAndParse[apicommon.UserInfo](t, http.MethodGet, token, nil, "users", "me")
-	strayPid := newPricedVotingProcess(t, token, orgAddress)
-	strayOid, err := bson.ObjectIDFromHex(strayPid)
-	c.Assert(err, qt.IsNil)
-	_, err = testDB.SetQuestion(&db.VotingProcessQuestion{
-		ProcessID: strayOid, OrgAddress: orgAddress, Order: 2,
-		Title:     db.MultiLangString{"default": "stray"},
-		Type:      db.VotingTypeSingleChoice,
-		TypeSetup: db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1},
-		Choices:   []db.Choice{{Title: db.MultiLangString{"default": "Yes"}, Value: 0}},
-	})
-	c.Assert(err, qt.IsNil)
-	assertPaidUnpublished(payAndHook(strayPid, me.Email, "cs_refusal_stray"))
+	c.Assert(entries[0].Kind, qt.Equals, db.WalletEntryPayment)
+	c.Assert(entries[0].AmountCents, qt.Equals, -pricedProcessCents)
+	c.Assert(entries[0].ProcessOrgAddress, qt.Equals, orgAddress)
 }
 
 // newIntegratorWithManagedOrg provisions an integrator organization on a plan that allows
@@ -336,30 +249,10 @@ func TestPublishPaidProcessRefusesGrownCensus(t *testing.T) {
 	orgAddress := testCreateProvisionedOrganization(t, token)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
-	oid, err := bson.ObjectIDFromHex(pid)
-	c.Assert(err, qt.IsNil)
+	oid := objectID(c, pid)
 	vp, err := testDB.VotingProcess(oid)
 	c.Assert(err, qt.IsNil)
-	me := requestAndParse[apicommon.UserInfo](t, http.MethodGet, token, nil, "users", "me")
-
-	// pay the draft at its real quote hash: a placeholder hash would exercise the
-	// mismatch path instead of the price-grew one
-	quote, input, err := testAPI.processQuote(vp)
-	c.Assert(err, qt.IsNil)
-	stored, err := testDB.SetProcessPaymentPending(&db.ProcessPayment{
-		ProcessID:         oid,
-		OrgAddress:        orgAddress,
-		CheckoutSessionID: "cs_grown_census",
-		QuoteHash:         pricing.QuoteHash(input, quote.TotalCents),
-		AmountCents:       quote.TotalCents,
-		Currency:          "eur",
-		RequestedBy:       me.Email,
-	}, "")
-	c.Assert(err, qt.IsNil)
-	c.Assert(stored, qt.IsTrue)
-	won, err := testDB.MarkProcessPaymentPaid(oid, "cs_grown_census", db.ProcessCharge{})
-	c.Assert(err, qt.IsNil)
-	c.Assert(won, qt.IsTrue)
+	paidCents := markProcessPaid(t, pid) // the wallet is empty again
 
 	// grow the census past what was paid; the org listing includes the 26 already in it
 	all := postOrgMembers(t, token, orgAddress, newOrgMembers(3 * pricedProcessVoters)[pricedProcessVoters:]...)
@@ -368,28 +261,29 @@ func TestPublishPaidProcessRefusesGrownCensus(t *testing.T) {
 	c.Assert(added, qt.Equals, 2*pricedProcessVoters)
 	price := requestAndParse[apicommon.ProcessPriceResponse](
 		t, http.MethodGet, token, nil, "processes", pid, "price")
-	c.Assert(price.TotalCents > quote.TotalCents, qt.IsTrue)
+	c.Assert(price.TotalCents > paidCents, qt.IsTrue)
 
-	// publication is refused with the new price rather than minting a 78-voter election
-	// for the 26-voter price
-	requestAndAssertError(errors.ErrPaymentRequired, t, http.MethodPost, token, nil,
-		"processes", pid, "publish")
+	// publication is refused with the difference rather than minting a 78-voter election for the
+	// 26-voter price
+	refusal := requestAndParseWithAssertCode[publishPaymentRefusal](http.StatusPaymentRequired,
+		t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(refusal.Data.ShortfallCents, qt.Equals, price.TotalCents-paidCents)
 	vp, err = testDB.VotingProcess(oid)
 	c.Assert(err, qt.IsNil)
 	c.Assert(vp.Published, qt.IsFalse)
 	c.Assert(vp.PublishInProgress(), qt.IsFalse) // no claim left behind
-
-	// the webhook fulfillment hook is the other entry point into publication, and Stripe
-	// retries an event for days — so it re-prices too, instead of publishing on the
-	// strength of the paid status alone
-	c.Assert(testAPI.publishPaidProcess(oid), qt.IsNil)
-	vp, err = testDB.VotingProcess(oid)
-	c.Assert(err, qt.IsNil)
-	c.Assert(vp.Published, qt.IsFalse)
-	c.Assert(vp.PublishInProgress(), qt.IsFalse)
 	payment, err := testDB.ProcessPayment(oid)
 	c.Assert(err, qt.IsNil)
-	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPaid) // still paid: publish it manually
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPaid)
+	c.Assert(payment.AmountCents, qt.Equals, paidCents)
+
+	// with the difference in the wallet the publish debits only that
+	fundWallet(t, orgAddress, price.TotalCents-paidCents)
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
+	wallet, err := testDB.Wallet(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(0))
 }
 
 // TestManagedWalletDebitRepricesGrownCensus: the wallet debit is priced at the moment of
@@ -417,13 +311,13 @@ func TestManagedWalletDebitRepricesGrownCensus(t *testing.T) {
 	}), qt.IsNil)
 
 	// the debit the publish path performs (26 voters, integrator email 2FA)
-	c.Assert(testAPI.debitManagedProcessWallet(vp, org), qt.IsNil)
+	c.Assert(testAPI.debitProcessWallet(vp, org), qt.IsNil)
 	wallet, err := testDB.Wallet(integratorAddr)
 	c.Assert(err, qt.IsNil)
 	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-integratorProcessCents))
 
 	// a retry of the unchanged draft charges nothing
-	c.Assert(testAPI.debitManagedProcessWallet(vp, org), qt.IsNil)
+	c.Assert(testAPI.debitProcessWallet(vp, org), qt.IsNil)
 	wallet, err = testDB.Wallet(integratorAddr)
 	c.Assert(err, qt.IsNil)
 	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000-integratorProcessCents))
@@ -438,7 +332,7 @@ func TestManagedWalletDebitRepricesGrownCensus(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(grown.TotalCents > integratorProcessCents, qt.IsTrue)
 
-	c.Assert(testAPI.debitManagedProcessWallet(vp, org), qt.IsNil)
+	c.Assert(testAPI.debitProcessWallet(vp, org), qt.IsNil)
 	wallet, err = testDB.Wallet(integratorAddr)
 	c.Assert(err, qt.IsNil)
 	c.Assert(wallet.BalanceCents, qt.Equals, 100_000-grown.TotalCents)
@@ -455,7 +349,7 @@ func TestManagedWalletDebitRepricesGrownCensus(t *testing.T) {
 	c.Assert(entries[1].AmountCents, qt.Equals, pricing.Cents(-integratorProcessCents))
 
 	// and a further attempt at the unchanged price adds nothing
-	c.Assert(testAPI.debitManagedProcessWallet(vp, org), qt.IsNil)
+	c.Assert(testAPI.debitProcessWallet(vp, org), qt.IsNil)
 	wallet, err = testDB.Wallet(integratorAddr)
 	c.Assert(err, qt.IsNil)
 	c.Assert(wallet.BalanceCents, qt.Equals, 100_000-grown.TotalCents)
@@ -483,13 +377,13 @@ func TestManagedWalletConcurrentChargesPayOnce(t *testing.T) {
 	c.Assert(testDB.CreditWallet(db.WalletCredit{
 		OrgAddress: integratorAddr, AmountCents: 100_000, IdempotencyKey: "cs_wallet_race_topup",
 	}), qt.IsNil)
-	c.Assert(testAPI.debitManagedProcessWallet(vp, org), qt.IsNil) // 26-voter integrator price paid
+	c.Assert(testAPI.debitProcessWallet(vp, org), qt.IsNil) // 26-voter integrator price paid
 
 	var wg sync.WaitGroup
 	errs := make(chan error, 10)
 	for i := range 10 {
 		wg.Go(func() {
-			_, err := testAPI.chargeManagedProcessWallet(managedProcessCharge{
+			_, err := testAPI.chargeProcessWallet(processCharge{
 				vp: vp, org: org, quote: pricing.Quote{TotalCents: pricing.Cents(2_000 + 100*i)},
 			})
 			errs <- err
@@ -510,50 +404,33 @@ func TestManagedWalletConcurrentChargesPayOnce(t *testing.T) {
 	c.Assert(payment.AmountCents, qt.Equals, pricing.Cents(2_900))
 }
 
-// TestManagedWalletChargeRefusesCardOwnedPayment: the wallet may not record over a card payment,
-// so charging it anyway would take the integrator's money with nothing to show for it — no
-// envelope to grow against and nothing a delete would refund. It is refused before the debit.
-func TestManagedWalletChargeRefusesCardOwnedPayment(t *testing.T) {
+// TestWalletChargeRefusesOpenCheckout: a draft whose top-up checkout is still open may still be
+// paid by the customer, so the wallet does not pay over it: refused before the debit.
+func TestWalletChargeRefusesOpenCheckout(t *testing.T) {
 	c := qt.New(t)
 	installFakePaymentGW(t)
-	token := testCreateUser(t, "walletcardowned1")
-	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_wallet_card_owned")
+	token := testCreateUser(t, "walletopencheck1")
+	orgAddress := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	pid := newPricedVotingProcess(t, token, orgAddress)
+	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, token,
+		&apicommon.ProcessCheckoutRequest{ReturnURL: "https://x.example"}, "processes", pid, "checkout")
+	fundWallet(t, orgAddress, 100_000)
+	vp, err := testDB.VotingProcess(objectID(c, pid))
+	c.Assert(err, qt.IsNil)
+	org, err := testDB.Organization(orgAddress)
+	c.Assert(err, qt.IsNil)
 
-	members := postOrgMembers(t, token, managedAddr, newOrgMembers(pricedProcessVoters)...)
-	created := requestAndParse[apicommon.CreateVotingProcessResponse](
-		t, http.MethodPost, token, newVotingProcessRequest(managedAddr, memberIDs(members)),
-		processesCreateEndpoint)
-	oid, err := bson.ObjectIDFromHex(created.ProcessID)
-	c.Assert(err, qt.IsNil)
-	vp, err := testDB.VotingProcess(oid)
-	c.Assert(err, qt.IsNil)
-	org, err := testDB.Organization(managedAddr)
-	c.Assert(err, qt.IsNil)
-	c.Assert(testDB.CreditWallet(db.WalletCredit{
-		OrgAddress: integratorAddr, AmountCents: 100_000, IdempotencyKey: "cs_wallet_card_owned_topup",
-	}), qt.IsNil)
-
-	// a card payment still clearing, from before the organization was managed
-	stored, err := testDB.SetProcessPaymentPending(&db.ProcessPayment{
-		ProcessID: oid, OrgAddress: managedAddr, CheckoutSessionID: "cs_card_owned",
-		AmountCents: pricedProcessCents, Currency: "eur",
-	}, "")
-	c.Assert(err, qt.IsNil)
-	c.Assert(stored, qt.IsTrue)
-	moved, err := testDB.MarkProcessPaymentProcessing(oid, "cs_card_owned")
-	c.Assert(err, qt.IsNil)
-	c.Assert(moved, qt.IsTrue)
-
-	_, err = testAPI.chargeManagedProcessWallet(managedProcessCharge{
+	_, err = testAPI.chargeProcessWallet(processCharge{
 		vp: vp, org: org, quote: pricing.Quote{TotalCents: pricedProcessCents},
 	})
 	c.Assert(errors.Is(err, errors.ErrPaymentSessionConflict), qt.IsTrue, qt.Commentf("got %v", err))
 
-	wallet, err := testDB.Wallet(integratorAddr)
+	wallet, err := testDB.Wallet(orgAddress)
 	c.Assert(err, qt.IsNil)
 	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(100_000))
-	payment, err := testDB.ProcessPayment(oid)
+	payment, err := testDB.ProcessPayment(objectID(c, pid))
 	c.Assert(err, qt.IsNil)
-	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentProcessing)
-	c.Assert(payment.CheckoutSessionID, qt.Equals, "cs_card_owned")
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPending)
+	c.Assert(payment.CheckoutSessionID, qt.Equals, checkout.SessionID)
 }

@@ -14,7 +14,6 @@ import (
 	"github.com/vocdoni/saas-backend/pricing"
 	"github.com/vocdoni/saas-backend/stripe"
 	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.vocdoni.io/dvote/util"
 )
 
 // TestWalletEndpoints: every non-managed organization has one wallet, read and topped up under
@@ -125,15 +124,4 @@ func TestWalletIntegratorHistoryAndKeys(t *testing.T) {
 	requestAndAssertCode(http.StatusForbidden, t, http.MethodPost, key,
 		&apicommon.WalletTopUpRequest{AmountCents: 10_000, ReturnURL: "https://x.example"},
 		"organizations", integratorAddr.String(), "wallet", "topup")
-}
-
-// fundWallet credits cents to a wallet, as a verified top-up would.
-func fundWallet(t *testing.T, wallet common.Address, cents pricing.Cents) {
-	t.Helper()
-	if cents <= 0 {
-		return
-	}
-	qt.Assert(t, testDB.CreditWallet(db.WalletCredit{
-		OrgAddress: wallet, AmountCents: cents, IdempotencyKey: "cs_fund_" + util.RandomHex(8),
-	}), qt.IsNil)
 }

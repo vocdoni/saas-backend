@@ -25,7 +25,6 @@ type fakePaymentGW struct {
 	sessions map[string]*stripe.PaymentSessionInfo
 	created  []*stripe.PaymentSessionParams
 	expired  []string
-	refunds  []fakeRefund
 	// expireErr, when set, makes ExpirePaymentSession fail (Stripe unreachable)
 	expireErr error
 	// createErr, when set, makes CreatePaymentSession fail (Stripe unreachable)
@@ -34,7 +33,6 @@ type fakePaymentGW struct {
 	expireFn func(sessionID string)
 	// createFn, when set, runs as a session is created: a request racing the checkout
 	createFn func()
-	refundFn func(processID bson.ObjectID, paymentIntentID string) (*stripe.RefundInfo, error)
 }
 
 func newFakePaymentGW() *fakePaymentGW {
@@ -200,26 +198,29 @@ func TestProcessCheckoutFlow(t *testing.T) {
 	orgAddress := testCreateOrganization(t, adminToken)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, adminToken, orgAddress)
-	oid, err := bson.ObjectIDFromHex(pid)
-	c.Assert(err, qt.IsNil)
-
 	checkoutReq := &apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}
 
-	// first checkout opens a session for the server-side price
+	// part of the price is already in the wallet: the checkout tops up only the shortfall
+	const balance = 500
+	fundWallet(t, orgAddress, balance)
 	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](
 		t, http.MethodPost, adminToken, checkoutReq, "processes", pid, "checkout")
 	c.Assert(checkout.SessionID, qt.Equals, "cs_test_1")
 	c.Assert(checkout.ClientSecret, qt.Equals, "cs_test_1_secret")
-	c.Assert(checkout.AmountCents, qt.Equals, pricedProcessCents)
+	c.Assert(checkout.AmountCents, qt.Equals, pricedProcessCents-balance)
 	c.Assert(fake.created, qt.HasLen, 1)
+	c.Assert(fake.created[0].Metadata[stripe.MetadataKeyWalletTopUpOrg], qt.Equals, orgAddress.String())
 	c.Assert(fake.created[0].Metadata[stripe.MetadataKeyProcessID], qt.Equals, pid)
-	var lineSum pricing.Cents
-	for _, item := range fake.created[0].LineItems {
-		lineSum += item.AmountCents
-	}
-	c.Assert(lineSum, qt.Equals, pricedProcessCents)
+	c.Assert(fake.created[0].LineItems, qt.HasLen, 1)
+	c.Assert(fake.created[0].LineItems[0].AmountCents, qt.Equals, pricedProcessCents-balance)
 
-	// the payment is stored pending and visible on the status endpoint
+	// the pending payment holds the price it was opened for and what the session charges
+	payment, err := testDB.ProcessPayment(objectID(c, pid))
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPending)
+	c.Assert(payment.AmountCents, qt.Equals, pricedProcessCents)
+	c.Assert(payment.TopUpCents, qt.Equals, pricedProcessCents-balance)
+	c.Assert(payment.Payer, qt.Equals, orgAddress)
 	status := requestAndParse[apicommon.ProcessPaymentStatusResponse](
 		t, http.MethodGet, adminToken, nil, "processes", pid, "checkout")
 	c.Assert(status.Status, qt.Equals, db.ProcessPaymentPending)
@@ -231,34 +232,32 @@ func TestProcessCheckoutFlow(t *testing.T) {
 	c.Assert(again.SessionID, qt.Equals, "cs_test_1")
 	c.Assert(fake.created, qt.HasLen, 1)
 
-	// editing the draft to a different price obsoletes the session: the next checkout
-	// expires it and opens a replacement
-	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2 * pricedProcessVoters)[pricedProcessVoters:]...)
-	update := newVotingProcessRequest(orgAddress, memberIDs(members))
+	// the balance moved: same price, other shortfall — the session is replaced
+	fundWallet(t, orgAddress, 100)
+	moved := requestAndParse[apicommon.ProcessCheckoutResponse](
+		t, http.MethodPost, adminToken, checkoutReq, "processes", pid, "checkout")
+	c.Assert(moved.SessionID, qt.Equals, "cs_test_2")
+	c.Assert(moved.AmountCents, qt.Equals, pricedProcessCents-balance-100)
+	c.Assert(fake.expired, qt.DeepEquals, []string{"cs_test_1"})
+
+	// editing the draft to a different price obsoletes the session just the same
+	update := newVotingProcessRequest(orgAddress, postNewOrgMembers(t, adminToken, orgAddress, pricedProcessVoters+2))
 	requestAndAssertCode(http.StatusOK, t, http.MethodPut, adminToken, update, "processes", pid)
 	replaced := requestAndParse[apicommon.ProcessCheckoutResponse](
 		t, http.MethodPost, adminToken, checkoutReq, "processes", pid, "checkout")
-	c.Assert(replaced.SessionID, qt.Equals, "cs_test_2")
-	c.Assert(fake.expired, qt.DeepEquals, []string{"cs_test_1"})
+	c.Assert(replaced.SessionID, qt.Equals, "cs_test_3")
+	c.Assert(fake.expired, qt.DeepEquals, []string{"cs_test_1", "cs_test_2"})
 
-	// once the payment is processing or paid, checkout refuses a second charge
-	won, err := testDB.MarkProcessPaymentProcessing(oid, "cs_test_2")
-	c.Assert(err, qt.IsNil)
-	c.Assert(won, qt.IsTrue)
-	requestAndAssertError(errors.ErrPaymentSessionConflict, t, http.MethodPost, adminToken, checkoutReq,
-		"processes", pid, "checkout")
-	won, err = testDB.MarkProcessPaymentPaid(oid, "cs_test_2", db.ProcessCharge{})
-	c.Assert(err, qt.IsNil)
-	c.Assert(won, qt.IsTrue)
-	requestAndAssertError(errors.ErrPaymentSessionConflict, t, http.MethodPost, adminToken, checkoutReq,
+	// once the wallet covers the price there is nothing to check out: publish directly
+	fundWallet(t, orgAddress, 100_000)
+	requestAndAssertError(errors.ErrMalformedBody, t, http.MethodPost, adminToken, checkoutReq,
 		"processes", pid, "checkout")
 }
 
-// TestDeleteDraftRefusesCompletedSession guards the money race: a pending payment whose
-// Stripe session the customer already completed (webhook not landed yet) must not be
-// deleted — that would capture the money and destroy the process. Delete refuses with a
-// conflict, exactly as the checkout path does.
-func TestDeleteDraftRefusesCompletedSession(t *testing.T) {
+// TestDeleteDraftWithCompletedTopUp: a pending payment whose top-up the customer already
+// completed (webhook not landed yet) no longer blocks the delete: the money lands in the wallet
+// whatever happens to the draft, and the session is not expired (it cannot be).
+func TestDeleteDraftWithCompletedTopUp(t *testing.T) {
 	c := qt.New(t)
 	fake := installFakePaymentGW(t)
 	adminToken := testCreateUser(t, "deleterace123456")
@@ -269,27 +268,11 @@ func TestDeleteDraftRefusesCompletedSession(t *testing.T) {
 	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](
 		t, http.MethodPost, adminToken, &apicommon.ProcessCheckoutRequest{ReturnURL: "https://x.example"},
 		"processes", pid, "checkout")
-
-	// the customer completed checkout; the webhook has not fulfilled yet (still pending)
 	fake.setSessionStatus(checkout.SessionID, stripe.SessionStatusComplete)
-	requestAndAssertError(errors.ErrPaymentSessionConflict, t, http.MethodDelete, adminToken, nil,
-		"processes", pid)
-
-	// the process and its payment are intact — nothing was destroyed
-	oid, err := bson.ObjectIDFromHex(pid)
-	c.Assert(err, qt.IsNil)
-	_, err = testDB.VotingProcess(oid)
-	c.Assert(err, qt.IsNil)
-	payment, err := testDB.ProcessPayment(oid)
-	c.Assert(err, qt.IsNil)
-	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPending)
-
-	// a still-open (abandoned) session, by contrast, does not block deletion
-	pid2 := newPricedVotingProcess(t, adminToken, orgAddress)
-	_ = requestAndParse[apicommon.ProcessCheckoutResponse](
-		t, http.MethodPost, adminToken, &apicommon.ProcessCheckoutRequest{ReturnURL: "https://x.example"},
-		"processes", pid2, "checkout")
-	requestAndAssertCode(http.StatusOK, t, http.MethodDelete, adminToken, nil, "processes", pid2)
+	requestAndAssertCode(http.StatusOK, t, http.MethodDelete, adminToken, nil, "processes", pid)
+	c.Assert(fake.expired, qt.HasLen, 0)
+	_, err := testDB.ProcessPayment(objectID(c, pid))
+	c.Assert(err, qt.ErrorIs, db.ErrNotFound)
 }
 
 // TestProcessCheckoutSessionStates covers the checkout reconciliation against
@@ -369,6 +352,14 @@ func TestProcessCheckoutRefusals(t *testing.T) {
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	checkoutReq := &apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}
 
+	// a managed organization has no wallet of its own: its integrator pays at publish
+	_, managedAddr := newIntegratorWithManagedOrg(t, adminToken, "prod_test_checkout_managed")
+	managedMembers := postOrgMembers(t, adminToken, managedAddr, newOrgMembers(pricedProcessVoters)...)
+	managed := requestAndParse[apicommon.CreateVotingProcessResponse](t, http.MethodPost, adminToken,
+		newVotingProcessRequest(managedAddr, memberIDs(managedMembers)), processesCreateEndpoint)
+	requestAndAssertError(errors.ErrManagedOrgHasNoWallet, t, http.MethodPost, adminToken, checkoutReq,
+		"processes", managed.ProcessID, "checkout")
+
 	// a free process (census within the free tier, no priced 2FA channel) has nothing
 	// to pay — note even a tiny census with 2FA is NOT free (2FA bills per voter)
 	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)
@@ -417,9 +408,10 @@ func TestDeleteDraftFailsClosedWhenSessionUnverifiable(t *testing.T) {
 	stored, err := testDB.SetProcessPaymentPending(&db.ProcessPayment{
 		ProcessID:         oid,
 		OrgAddress:        orgAddress,
+		Payer:             orgAddress,
 		CheckoutSessionID: "cs_unreachable",
-		QuoteHash:         "hash",
 		AmountCents:       1_515,
+		TopUpCents:        1_515,
 		Currency:          "eur",
 	}, "")
 	c.Assert(err, qt.IsNil)
@@ -439,10 +431,10 @@ func TestDeleteDraftFailsClosedWhenSessionUnverifiable(t *testing.T) {
 	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPending)
 }
 
-// TestFreePublishRefusedOverOpenCheckout: a draft that shrinks to free while its checkout is
-// open must not publish over it — the session would stay payable, and paying it would charge
-// for a free process. Publish refuses until the checkout is cancelled, and cancelling refuses
-// a session the customer already completed.
+// TestFreePublishRefusedOverOpenCheckout: a draft that shrinks to free while its top-up checkout
+// is open must not publish over it — the session would stay payable. Publish refuses until the
+// checkout is cancelled; cancelling expires an open session, drops the payment, and a repeat finds
+// nothing left to cancel.
 func TestFreePublishRefusedOverOpenCheckout(t *testing.T) {
 	c := qt.New(t)
 	fake := installFakePaymentGW(t)
@@ -468,19 +460,9 @@ func TestFreePublishRefusedOverOpenCheckout(t *testing.T) {
 		t, http.MethodGet, token, nil, "processes", pid, "validation")
 	c.Assert(strings.Join(validation.Errors, "; "), qt.Contains, "/checkout")
 
-	// a completed session is money in flight: not cancelled, nothing changes
-	fake.setSessionStatus(checkout.SessionID, stripe.SessionStatusComplete)
-	requestAndAssertError(errors.ErrPaymentSessionConflict, t, http.MethodDelete, token, nil,
-		"processes", pid, "checkout")
-	c.Assert(fake.expired, qt.HasLen, 0)
-	fake.setSessionStatus(checkout.SessionID, stripe.SessionStatusOpen)
-
-	// cancel expires the session and frees the draft; a repeat is a no-op
-	for range 2 {
-		cancelled := requestAndParse[apicommon.ProcessPaymentStatusResponse](
-			t, http.MethodDelete, token, nil, "processes", pid, "checkout")
-		c.Assert(cancelled.Status, qt.Equals, db.ProcessPaymentFailed)
-	}
+	// cancel expires the session and frees the draft; a repeat finds no payment
+	requestAndAssertCode(http.StatusOK, t, http.MethodDelete, token, nil, "processes", pid, "checkout")
+	requestAndAssertCode(http.StatusNotFound, t, http.MethodDelete, token, nil, "processes", pid, "checkout")
 	c.Assert(fake.expired, qt.DeepEquals, []string{checkout.SessionID})
 
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
@@ -494,56 +476,4 @@ func TestFreePublishRefusedOverOpenCheckout(t *testing.T) {
 	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPaid)
 	c.Assert(payment.AmountCents, qt.Equals, pricing.Cents(0))
 	c.Assert(payment.CheckoutSessionID, qt.Equals, "")
-}
-
-func TestOrganizationProcessPayments(t *testing.T) {
-	c := qt.New(t)
-	installFakePaymentGW(t)
-	token := testCreateUser(t, "paymentslist123")
-	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(pricedProcessVoters)...))
-	var pids []string
-	for range 2 {
-		pid := requestAndParse[apicommon.CreateVotingProcessResponse](
-			t, http.MethodPost, token, newVotingProcessRequest(orgAddress, ids), processesCreateEndpoint).ProcessID
-		requestAndAssertCode(http.StatusOK, t, http.MethodPost, token,
-			&apicommon.ProcessCheckoutRequest{ReturnURL: "https://x.example"}, "processes", pid, "checkout")
-		pids = append(pids, pid)
-	}
-	requestAndAssertCode(http.StatusOK, t, http.MethodDelete, token, nil, "processes", pids[0], "checkout")
-
-	list := func(query string) []apicommon.OrganizationProcessPayment {
-		return requestAndParse[apicommon.OrganizationProcessPaymentsResponse](
-			t, http.MethodGet, token, nil, "organizations", orgAddress.String(), "payments"+query).Payments
-	}
-	// by default only the payments still open: the cancelled checkout is failed
-	open := list("")
-	c.Assert(open, qt.HasLen, 1)
-	c.Assert(open[0].ProcessID, qt.Equals, pids[1])
-	c.Assert(open[0].Status, qt.Equals, db.ProcessPaymentPending)
-	c.Assert(open[0].AmountCents, qt.Equals, pricedProcessCents)
-	c.Assert(open[0].Title, qt.Not(qt.HasLen), 0)
-	c.Assert(open[0].Published, qt.IsFalse)
-
-	failed := list("?status=failed")
-	c.Assert(failed, qt.HasLen, 1)
-	c.Assert(failed[0].ProcessID, qt.Equals, pids[0])
-
-	// newest first unless asked otherwise
-	both := list("?status=pending,failed")
-	c.Assert(both, qt.HasLen, 2)
-	c.Assert(both[0].ProcessID, qt.Equals, pids[1])
-	both = list("?status=pending,failed&sortOrder=asc")
-	c.Assert(both, qt.HasLen, 2)
-	c.Assert(both[0].ProcessID, qt.Equals, pids[0])
-
-	requestAndAssertError(errors.ErrMalformedURLParam, t, http.MethodGet, token, nil,
-		"organizations", orgAddress.String(), "payments?status=bogus")
-	requestAndAssertError(errors.ErrMalformedURLParam, t, http.MethodGet, token, nil,
-		"organizations", orgAddress.String(), "payments?sortOrder=up")
-
-	strangerToken := testCreateUser(t, "paymentsstranger123")
-	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodGet, strangerToken, nil,
-		"organizations", orgAddress.String(), "payments")
 }

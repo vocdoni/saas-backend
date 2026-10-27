@@ -31,7 +31,7 @@ func newAddOnsVotingProcess(t *testing.T, token string, orgAddress common.Addres
 func TestStripeCheckoutWebhookStampsCustomURL(t *testing.T) {
 	c := qt.New(t)
 	installStripeWebhookService(t)
-	installFakePaymentGW(t)
+	fake := installFakePaymentGW(t)
 	token := testCreateUser(t, "customurlpaid123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
@@ -42,15 +42,11 @@ func TestStripeCheckoutWebhookStampsCustomURL(t *testing.T) {
 	reqA.AddOns = db.ProcessAddOns{CustomURL: true}
 	createdA := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, reqA, processesCreateEndpoint)
-	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](
-		t, http.MethodPost, token, &apicommon.ProcessCheckoutRequest{ReturnURL: "https://x.example"},
-		"processes", createdA.ProcessID, "checkout")
-	c.Assert(checkout.AmountCents, qt.Equals, pricing.CustomURLCents)
-	code := postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8), "checkout.session.completed",
-		checkoutSessionObject(checkout.SessionID, "paid", pricing.CustomURLCents, map[string]string{
-			stripe.MetadataKeyProcessID: createdA.ProcessID,
-		}))
+	_, paid := openProcessTopUp(t, fake, token, createdA.ProcessID)
+	c.Assert(paid["amount_subtotal"], qt.Equals, pricing.CustomURLCents)
+	code := postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8), "checkout.session.completed", paid)
 	c.Assert(code, qt.Equals, http.StatusOK)
+	pollProcessPublished(t, token, createdA.ProcessID)
 	org, err := testDB.Organization(orgAddress)
 	c.Assert(err, qt.IsNil)
 	c.Assert(org.CustomURLPaidAt.IsZero(), qt.IsFalse)
@@ -140,22 +136,10 @@ func TestDeletePaidDraftWithholdsEveryReliedOnAddOn(t *testing.T) {
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	paid := newAddOnsVotingProcess(t, token, orgAddress, db.ProcessAddOns{CustomURL: true, Branding: true})
-	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, token,
-		&apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}, "processes", paid, "checkout")
 	net := pricedProcessCents + pricing.BrandingCents + pricing.CustomURLCents
-	c.Assert(checkout.AmountCents, qt.Equals, net)
+	c.Assert(markProcessPaid(t, paid), qt.Equals, net) // stamps both add-ons
 	oid, err := bson.ObjectIDFromHex(paid)
 	c.Assert(err, qt.IsNil)
-	won, err := testDB.MarkProcessPaymentPaid(oid, checkout.SessionID, db.ProcessCharge{
-		PaymentIntentID: "pi_test_withhold_addons", SubtotalCents: net, TotalCents: net, // no VAT
-	})
-	c.Assert(err, qt.IsNil)
-	c.Assert(won, qt.IsTrue)
-	for _, addOn := range db.OrgAddOns {
-		stamped, err := testDB.SetOrganizationAddOnPaid(orgAddress, addOn, time.Now())
-		c.Assert(err, qt.IsNil)
-		c.Assert(stamped, qt.IsTrue)
-	}
 
 	// a sibling that paid without the custom URL because of the stamp, yet carries it
 	sibling, err := bson.ObjectIDFromHex(newAddOnsVotingProcess(t, token, orgAddress, db.ProcessAddOns{CustomURL: true}))
@@ -165,8 +149,10 @@ func TestDeletePaidDraftWithholdsEveryReliedOnAddOn(t *testing.T) {
 	c.Assert(recorded, qt.IsTrue)
 
 	requestAndAssertCode(http.StatusOK, t, http.MethodDelete, token, nil, "processes", paid)
-	c.Assert(fake.refunds, qt.HasLen, 1)
-	c.Assert(fake.refunds[0].amountCents, qt.Equals, net-pricing.CustomURLCents)
+	c.Assert(fake.created, qt.HasLen, 0)
+	wallet, err := testDB.Wallet(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.BalanceCents, qt.Equals, net-pricing.CustomURLCents) // credited back, less the URL
 	payment, err := testDB.ProcessPayment(oid)
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentRefunded)
@@ -175,51 +161,6 @@ func TestDeletePaidDraftWithholdsEveryReliedOnAddOn(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(org.CustomURLPaidAt.IsZero(), qt.IsFalse)
 	c.Assert(org.BrandingPaidAt.IsZero(), qt.IsTrue)
-}
-
-// TestDeleteRetryKeepsLegacyRefundPlan: a refund plan fixed before the custom URL was once per
-// organization stored only its withheld cents, and then branding was the only add-on it could
-// withhold. A retry of such a plan keeps withholding branding: the refund still leaves it out and
-// the organization keeps it, while the custom URL nobody withheld is released.
-func TestDeleteRetryKeepsLegacyRefundPlan(t *testing.T) {
-	c := qt.New(t)
-	fake := installFakePaymentGW(t)
-	token := testCreateUser(t, "legacyrefundplan")
-	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-
-	paid := newAddOnsVotingProcess(t, token, orgAddress, db.ProcessAddOns{CustomURL: true, Branding: true})
-	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, token,
-		&apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}, "processes", paid, "checkout")
-	net := pricedProcessCents + pricing.BrandingCents + pricing.CustomURLCents
-	c.Assert(checkout.AmountCents, qt.Equals, net)
-	oid, err := bson.ObjectIDFromHex(paid)
-	c.Assert(err, qt.IsNil)
-	won, err := testDB.MarkProcessPaymentPaid(oid, checkout.SessionID, db.ProcessCharge{
-		PaymentIntentID: "pi_test_legacy_plan", SubtotalCents: net, TotalCents: net, // no VAT
-	})
-	c.Assert(err, qt.IsNil)
-	c.Assert(won, qt.IsTrue)
-	for _, addOn := range db.OrgAddOns {
-		stamped, err := testDB.SetOrganizationAddOnPaid(orgAddress, addOn, time.Now())
-		c.Assert(err, qt.IsNil)
-		c.Assert(stamped, qt.IsTrue)
-	}
-	// what a failed first attempt under the old code left: withheld cents, no add-on list
-	planned, err := testDB.PlanProcessPaymentRefund(oid, net, db.RefundWithholding{Cents: pricing.BrandingCents})
-	c.Assert(err, qt.IsNil)
-	c.Assert(planned, qt.IsTrue)
-
-	requestAndAssertCode(http.StatusOK, t, http.MethodDelete, token, nil, "processes", paid)
-	c.Assert(fake.refunds, qt.HasLen, 1)
-	c.Assert(fake.refunds[0].amountCents, qt.Equals, net-pricing.BrandingCents)
-	payment, err := testDB.ProcessPayment(oid)
-	c.Assert(err, qt.IsNil)
-	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentRefunded)
-	org, err := testDB.Organization(orgAddress)
-	c.Assert(err, qt.IsNil)
-	c.Assert(org.BrandingPaidAt.IsZero(), qt.IsFalse)
-	c.Assert(org.CustomURLPaidAt.IsZero(), qt.IsTrue)
 }
 
 // TestQuoteOnlyRefusedOnEveryPaymentPath: above 50 000 voters a quote has no price and a zero
@@ -257,40 +198,39 @@ func TestQuoteOnlyRefusedOnEveryPaymentPath(t *testing.T) {
 	// the publish gate (the plan's own census cap answers first over HTTP on this branch)
 	draftVP, err := testDB.VotingProcess(draftOID(draft))
 	c.Assert(err, qt.IsNil)
-	_, err = testAPI.paymentDueForPublish(draftVP)
+	err = testAPI.paymentDueForPublish(draftVP)
 	c.Assert(err, qt.ErrorIs, errors.ErrQuoteRequired)
 	validation := requestAndParse[apicommon.VotingProcessValidateResponse](
 		t, http.MethodGet, token, nil, "processes", draft, "validation")
 	c.Assert(validation.Errors, qt.Contains, errors.ErrQuoteRequired.Error())
 
-	// a paid draft whose census then outgrew the self-service limit: fulfillment leaves it paid for
-	// a manual publish instead of failing the webhook forever, and growth checks refuse it. Paid
-	// through checkout, so the payment names the requesting user fulfillment publishes as.
+	// a draft topped up and paid whose census then outgrew the self-service limit: the top-up
+	// follow-up leaves the credit for a manual publish instead of failing the webhook forever, and
+	// growth checks refuse it. Paid through a top-up, so the payment names the requesting user.
 	paid := newPricedVotingProcess(t, token, orgAddress)
 	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, token,
 		&apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}, "processes", paid, "checkout")
-	paidCents := checkout.AmountCents
-	won, err := testDB.MarkProcessPaymentPaid(draftOID(paid), checkout.SessionID,
-		db.ProcessCharge{PaymentIntentID: "pi_test_quote_only"})
+	won, err := testDB.ConsumeProcessPaymentTopUp(draftOID(paid), checkout.SessionID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue)
+	paidCents := markProcessPaid(t, paid)
 	vp, census := resize(paid, 50_000)
 	c.Assert(testAPI.censusGrowthPaymentError(censusGrowth{vp: vp, census: census, by: 1}),
 		qt.ErrorIs, errors.ErrQuoteRequired)
 	c.Assert(testAPI.censusGrowthPaymentError(censusGrowth{vp: vp, census: census}),
 		qt.ErrorIs, errors.ErrPaymentRequired) // 50 000 still has a price, above what was paid
 	resize(paid, 50_001)
-	c.Assert(testAPI.publishPaidProcess(vp.ID), qt.IsNil)
+	c.Assert(testAPI.publishPaidProcess(stripe.ProcessTopUp{ProcessID: vp.ID, SessionID: checkout.SessionID}), qt.IsNil)
 	got, err := testDB.VotingProcess(vp.ID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(got.Published, qt.IsFalse)
-	c.Assert(got.Publishing.IsZero(), qt.IsTrue) // never reached startProcessPublish: the gate refused it
+	c.Assert(got.Publishing.IsZero(), qt.IsTrue) // never reached startProcessPublish: re-pricing refused it
 
 	// a managed organization's publish debit does not read the quote-only zero total as free
 	managedOrg := &db.Organization{Address: orgAddress, ManagedBy: common.Address{1}}
-	c.Assert(testAPI.debitManagedProcessWallet(vp, managedOrg), qt.ErrorIs, errors.ErrQuoteRequired)
+	c.Assert(testAPI.debitProcessWallet(vp, managedOrg), qt.ErrorIs, errors.ErrQuoteRequired)
 	// a wallet charge of a quote-only price is refused even when "already covered"
-	_, err = testAPI.chargeManagedProcessWallet(managedProcessCharge{
+	_, err = testAPI.chargeProcessWallet(processCharge{
 		vp: vp, org: managedOrg, quote: pricing.Quote{QuoteRequired: true},
 	})
 	c.Assert(err, qt.ErrorIs, errors.ErrQuoteRequired)

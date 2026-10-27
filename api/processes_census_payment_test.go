@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
@@ -11,13 +10,13 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
-	stripeapi "github.com/stripe/stripe-go/v87"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/pricing"
 	"github.com/vocdoni/saas-backend/stripe"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.vocdoni.io/dvote/util"
 )
 
 // Census sizes the growth tests walk through, sitting just above the free tier. Every voter above
@@ -38,17 +37,37 @@ func growthCents(t *testing.T, voters int) pricing.Cents {
 	return quote.TotalCents
 }
 
-// buyCardHeadroom raises a card-paid process's envelope from its paid price to the price of
-// growthTierEnd voters, as a paid census top-up does, and returns the new envelope.
-func buyCardHeadroom(t *testing.T, oid bson.ObjectID, paid pricing.Cents) pricing.Cents {
+// buyHeadroom raises a paid process's envelope from its paid price to the price of growthTierEnd
+// voters, paid from its organization's wallet as census/checkout does when the wallet covers it.
+func buyHeadroom(t *testing.T, oid bson.ObjectID, paid pricing.Cents) pricing.Cents {
 	t.Helper()
+	c := qt.New(t)
 	target := growthCents(t, growthTierEnd)
-	raised, err := testDB.RaiseProcessPaymentAmount(db.ProcessTopUp{
-		ProcessID: oid, FromCents: paid, ToCents: target, SessionID: "cs_headroom_" + oid.Hex(),
+	vp, err := testDB.VotingProcess(oid)
+	c.Assert(err, qt.IsNil)
+	org, err := testDB.Organization(vp.OrgAddress)
+	c.Assert(err, qt.IsNil)
+	payment, err := testDB.ProcessPayment(oid)
+	c.Assert(err, qt.IsNil)
+	fundWallet(t, walletPayer(org), target-paid)
+	debited, err := testAPI.chargeProcessWallet(processCharge{
+		vp: vp, org: org, quote: pricing.Quote{TotalCents: target},
+		branding: payment.Branding, customURL: payment.CustomURL,
 	})
-	qt.Assert(t, err, qt.IsNil)
-	qt.Assert(t, raised, qt.IsTrue)
+	c.Assert(err, qt.IsNil)
+	c.Assert(debited, qt.Equals, target-paid)
 	return target
+}
+
+// fundWallet credits cents to a wallet, as a verified top-up would.
+func fundWallet(t *testing.T, wallet common.Address, cents pricing.Cents) {
+	t.Helper()
+	if cents <= 0 {
+		return
+	}
+	qt.Assert(t, testDB.CreditWallet(db.WalletCredit{
+		OrgAddress: wallet, AmountCents: cents, IdempotencyKey: "cs_fund_" + util.RandomHex(8),
+	}), qt.IsNil)
 }
 
 // TestPublishedFreeProcessCensusGrowth: a process published free has no checkout to record
@@ -157,7 +176,7 @@ func TestPublishedCensusGrowthWithinPaidPrice(t *testing.T) {
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
 	// headroom bought up to growthTierEnd
-	paidCents := buyCardHeadroom(t, oid, growthCents(t, growthBaseVoters))
+	paidCents := buyHeadroom(t, oid, growthCents(t, growthBaseVoters))
 	grownCents := growthCents(t, growthTotalVoters)
 
 	// 7 more voters fit what was paid: allowed, and they land in the census (202: the
@@ -180,7 +199,8 @@ func TestPublishedCensusGrowthWithinPaidPrice(t *testing.T) {
 	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
 	c.Assert(got.Census.Size, qt.Equals, int64(growthTierEnd))
 
-	// buying the headroom opens a session for the difference only, not the new total
+	// the wallet is empty: buying the headroom opens a top-up for the difference only, not the
+	// new total
 	fake := installFakePaymentGW(t)
 	installStripeWebhookService(t)
 	headroom := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, token,
@@ -192,8 +212,10 @@ func TestPublishedCensusGrowthWithinPaidPrice(t *testing.T) {
 	requestAndAssertError(errors.ErrPaymentRequired, t, http.MethodPut, token,
 		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[growthTierEnd:]}, "processes", pid, "census")
 
-	// the webhook raises the paid envelope from the base to the target the session carries
+	// the webhook credits the wallet, then debits the envelope from the base up to the target
+	// the session carries
 	topUpMeta := fake.created[len(fake.created)-1].Metadata
+	c.Assert(topUpMeta[stripe.MetadataKeyWalletTopUpOrg], qt.Equals, orgAddress.String())
 	c.Assert(topUpMeta[stripe.MetadataKeyProcessTopUpFromCents], qt.Equals, strconv.FormatInt(int64(paidCents), 10))
 	c.Assert(topUpMeta[stripe.MetadataKeyProcessTopUpCents], qt.Equals, strconv.FormatInt(int64(grownCents), 10))
 	code := postSignedStripeEvent(t, testWebhookSecret, "evt_headroom_1", "checkout.session.completed",
@@ -217,8 +239,10 @@ func TestPublishedCensusGrowthWithinPaidPrice(t *testing.T) {
 	payment, err = testDB.ProcessPayment(oid)
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.AmountCents, qt.Equals, grownCents)
-	// the up-front headroom, then this session once
-	c.Assert(payment.TopUpSessions, qt.DeepEquals, []string{"cs_headroom_" + oid.Hex(), headroom.SessionID})
+	// credited once, debited once: the wallet is back where it was
+	wallet, err := testDB.Wallet(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(0))
 
 	// nothing is left to buy at that size
 	requestAndAssertError(errors.ErrMalformedBody, t, http.MethodPost, token,
@@ -288,7 +312,7 @@ func TestCensusGrowthIgnoresUnknownMembers(t *testing.T) {
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
 	// headroom bought up to growthTierEnd: the edge of the paid price, which one more voter crosses
-	buyCardHeadroom(t, objectID(c, pid), growthCents(t, growthBaseVoters))
+	buyHeadroom(t, objectID(c, pid), growthCents(t, growthBaseVoters))
 
 	typo := bson.NewObjectID().Hex()
 	withTypo := append(ids[growthBaseVoters:growthTierEnd:growthTierEnd], typo)
@@ -299,31 +323,22 @@ func TestCensusGrowthIgnoresUnknownMembers(t *testing.T) {
 	c.Assert(strings.Join(added.Errors, "; "), qt.Contains, typo)
 }
 
-// markProcessPaid records a completed checkout for the process at its current quote, the state
-// the webhook leaves a paid process in, and returns the amount paid.
+// markProcessPaid pays a priced draft from its payer's wallet, as the publish debit would but
+// without publishing: the wallet is funded with the price first. It returns the price.
 func markProcessPaid(t *testing.T, pid string) pricing.Cents {
 	t.Helper()
 	c := qt.New(t)
-	oid, err := bson.ObjectIDFromHex(pid)
+	vp, err := testDB.VotingProcess(objectID(c, pid))
 	c.Assert(err, qt.IsNil)
-	vp, err := testDB.VotingProcess(oid)
+	org, err := testDB.Organization(vp.OrgAddress)
 	c.Assert(err, qt.IsNil)
 	quote, input, err := testAPI.processQuote(vp)
 	c.Assert(err, qt.IsNil)
-	session := "cs_paid_" + pid
-	stored, err := testDB.SetProcessPaymentPending(&db.ProcessPayment{
-		ProcessID:         oid,
-		OrgAddress:        vp.OrgAddress,
-		CheckoutSessionID: session,
-		QuoteHash:         pricing.QuoteHash(input, quote.TotalCents),
-		AmountCents:       quote.TotalCents,
-		Currency:          "eur",
-	}, "")
+	fundWallet(t, walletPayer(org), quote.TotalCents)
+	_, err = testAPI.chargeProcessWallet(processCharge{
+		vp: vp, org: org, quote: quote, branding: input.Branding, customURL: input.CustomURL,
+	})
 	c.Assert(err, qt.IsNil)
-	c.Assert(stored, qt.IsTrue)
-	won, err := testDB.MarkProcessPaymentPaid(oid, session, db.ProcessCharge{})
-	c.Assert(err, qt.IsNil)
-	c.Assert(won, qt.IsTrue)
 	return quote.TotalCents
 }
 
@@ -422,85 +437,6 @@ func TestMemberbaseGrowthBeyondPaidPrice(t *testing.T) {
 	putOrgMember(t, token, orgAddress, newOrgMembers(1)[0]) // the 42nd voter, past the price paid
 }
 
-// TestOverlappingCensusTopUpsRefundTheStaleOne: two census top-ups opened against the same
-// paid amount each charge the difference from it. Once the first is paid the envelope has
-// moved, so the second, priced from a base that no longer holds, would overcharge if applied:
-// it raises nothing and is refunded in full.
-func TestOverlappingCensusTopUpsRefundTheStaleOne(t *testing.T) {
-	c := qt.New(t)
-	installStripeWebhookService(t)
-	refundIntents, _ := stubStripeRefunds(t)
-
-	processID := bson.NewObjectID()
-	stored, err := testDB.SetProcessPaymentPending(&db.ProcessPayment{
-		ProcessID:         processID,
-		OrgAddress:        common.HexToAddress("0x000000000000000000000000000000000000beef"),
-		CheckoutSessionID: "cs_overlap_first",
-		AmountCents:       1_500,
-		Currency:          "eur",
-	}, "")
-	c.Assert(err, qt.IsNil)
-	c.Assert(stored, qt.IsTrue)
-	won, err := testDB.MarkProcessPaymentPaid(processID, "cs_overlap_first",
-		db.ProcessCharge{PaymentIntentID: "pi_overlap_first"})
-	c.Assert(err, qt.IsNil)
-	c.Assert(won, qt.IsTrue)
-
-	topUp := func(sessionID string, amount pricing.Cents, target string) map[string]any {
-		session := checkoutSessionObject(sessionID, "paid", amount, map[string]string{
-			stripe.MetadataKeyProcessID:             processID.Hex(),
-			stripe.MetadataKeyProcessTopUpFromCents: "1500",
-			stripe.MetadataKeyProcessTopUpCents:     target,
-		})
-		session["payment_intent"] = "pi_" + sessionID
-		return session
-	}
-	// both opened at 1500: one charging 500 up to 2000, the other 1000 up to 2500
-	code := postSignedStripeEvent(t, testWebhookSecret, "evt_overlap_small", "checkout.session.completed",
-		topUp("cs_overlap_small", 500, "2000"))
-	c.Assert(code, qt.Equals, http.StatusOK)
-	code = postSignedStripeEvent(t, testWebhookSecret, "evt_overlap_large", "checkout.session.completed",
-		topUp("cs_overlap_large", 1_000, "2500"))
-	c.Assert(code, qt.Equals, http.StatusOK)
-
-	payment, err := testDB.ProcessPayment(processID)
-	c.Assert(err, qt.IsNil)
-	c.Assert(payment.AmountCents, qt.Equals, pricing.Cents(2_000))
-	c.Assert(payment.TopUpIntents, qt.DeepEquals, []string{"pi_cs_overlap_small"})
-	c.Assert(*refundIntents, qt.DeepEquals, []string{"pi_cs_overlap_large"})
-
-	// a replay of the applied one is still a no-op, not a refund
-	code = postSignedStripeEvent(t, testWebhookSecret, "evt_overlap_small_replay", "checkout.session.completed",
-		topUp("cs_overlap_small", 500, "2000"))
-	c.Assert(code, qt.Equals, http.StatusOK)
-	c.Assert(*refundIntents, qt.HasLen, 1)
-}
-
-// stubStripeRefunds points the Stripe client at a stub that accepts every refund, recording
-// the payment intent and idempotency key of each.
-func stubStripeRefunds(t *testing.T) (intents, keys *[]string) {
-	intents, keys = &[]string{}, &[]string{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/refunds" || r.ParseForm() != nil {
-			t.Errorf("unexpected stripe call %s", r.URL.Path)
-		}
-		if r.Method == http.MethodGet {
-			// the lookup for a refund already issued: there is none
-			_, _ = w.Write([]byte(`{"object":"list","data":[],"has_more":false,"url":"/v1/refunds"}`))
-			return
-		}
-		*intents = append(*intents, r.PostForm.Get("payment_intent"))
-		*keys = append(*keys, r.Header.Get("Idempotency-Key"))
-		_, _ = w.Write([]byte(`{"id":"re_stub","object":"refund","status":"succeeded"}`))
-	}))
-	t.Cleanup(srv.Close)
-	previous := stripeapi.GetBackend(stripeapi.APIBackend)
-	stripeapi.SetBackend(stripeapi.APIBackend,
-		stripeapi.GetBackendWithConfig(stripeapi.APIBackend, &stripeapi.BackendConfig{URL: stripeapi.String(srv.URL)}))
-	t.Cleanup(func() { stripeapi.SetBackend(stripeapi.APIBackend, previous) })
-	return intents, keys
-}
-
 // TestGrandfatheredProcessCensusGrowth: a process published before pay-per-process has no
 // payment at all. Its first growth check grandfathers it at the price of the census it holds —
 // that much stays free — and growth past it is refused like any paid process's.
@@ -549,7 +485,7 @@ func TestGrandfatheredProcessCensusGrowth(t *testing.T) {
 	c.Assert(payment.AmountCents, qt.Equals, growthCents(t, growthBaseVoters))
 
 	// headroom bought up to growthTierEnd: 27 → 34 voters then fits the envelope
-	paidCents := buyCardHeadroom(t, oid, payment.AmountCents)
+	paidCents := buyHeadroom(t, oid, payment.AmountCents)
 	requestAndAssertCode(http.StatusOK, t, http.MethodPut, token,
 		&apicommon.UpdateOrganizationMemberGroupsRequest{AddMembers: ids[growthBaseVoters:growthTierEnd]},
 		"organizations", orgAddress.String(), "groups", group.ID)
@@ -664,9 +600,9 @@ func TestManagedCensusGrowthChargesIntegratorWallet(t *testing.T) {
 	c.Assert(wallet.BalanceCents, qt.Equals, 100_000-grownCents)
 }
 
-// TestCensusCheckoutChargesTheMinimum: a card headroom purchase worth less than the minimum
-// charge (one voter in the first band, €0.66) bills the minimum, since Stripe cannot charge
-// less, while the paid envelope is still raised to the target price only.
+// TestCensusCheckoutChargesTheMinimum: a headroom purchase whose shortfall is below the minimum
+// charge (one voter in the first band, €0.66, on an empty wallet) tops up the minimum; the
+// envelope is raised to the target price only and the rest stays in the wallet.
 func TestCensusCheckoutChargesTheMinimum(t *testing.T) {
 	c := qt.New(t)
 	fake := installFakePaymentGW(t)
@@ -695,6 +631,54 @@ func TestCensusCheckoutChargesTheMinimum(t *testing.T) {
 	payment, err := testDB.ProcessPayment(oid)
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.AmountCents, qt.Equals, targetCents)
+	wallet, err := testDB.Wallet(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.BalanceCents, qt.Equals, pricing.MinimumChargeCents-66)
+}
+
+// TestOverlappingHeadroomTopUpsKeepTheStaleCredit: two headroom top-ups opened against the same
+// envelope each priced the difference from it. Once the first is applied the envelope has moved,
+// so the second debits nothing: its credit stays in the wallet, and a replay of the first changes
+// nothing either.
+func TestOverlappingHeadroomTopUpsKeepTheStaleCredit(t *testing.T) {
+	c := qt.New(t)
+	installStripeWebhookService(t)
+	token := testCreateUser(t, "overlaptopups123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	pid := newPricedVotingProcess(t, token, orgAddress)
+	paidCents := markProcessPaid(t, pid)
+
+	topUp := func(sessionID string, amount, target pricing.Cents) map[string]any {
+		return checkoutSessionObject(sessionID, "paid", amount, map[string]string{
+			stripe.MetadataKeyWalletTopUpOrg:        orgAddress.String(),
+			stripe.MetadataKeyProcessID:             pid,
+			stripe.MetadataKeyProcessTopUpFromCents: strconv.FormatInt(int64(paidCents), 10),
+			stripe.MetadataKeyProcessTopUpCents:     strconv.FormatInt(int64(target), 10),
+		})
+	}
+	// both opened at paidCents: one charging 500 up to +500, the other 1000 up to +1000
+	code := postSignedStripeEvent(t, testWebhookSecret, "evt_overlap_small", "checkout.session.completed",
+		topUp("cs_overlap_small_"+pid, 500, paidCents+500))
+	c.Assert(code, qt.Equals, http.StatusOK)
+	code = postSignedStripeEvent(t, testWebhookSecret, "evt_overlap_large", "checkout.session.completed",
+		topUp("cs_overlap_large_"+pid, 1_000, paidCents+1_000))
+	c.Assert(code, qt.Equals, http.StatusOK)
+
+	payment, err := testDB.ProcessPayment(objectID(c, pid))
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.AmountCents, qt.Equals, paidCents+500)
+	wallet, err := testDB.Wallet(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(1_000))
+
+	// a replay of the applied one credits and debits nothing
+	code = postSignedStripeEvent(t, testWebhookSecret, "evt_overlap_small_replay", "checkout.session.completed",
+		topUp("cs_overlap_small_"+pid, 500, paidCents+500))
+	c.Assert(code, qt.Equals, http.StatusOK)
+	wallet, err = testDB.Wallet(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(1_000))
 }
 
 // TestCensusCheckoutRefusesQuoteOnlySize: above 50 000 voters the quote has no price, so the
