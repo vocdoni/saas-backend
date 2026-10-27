@@ -274,9 +274,7 @@ func walletMayRecord(payment *db.ProcessPayment) bool {
 // or reverted — stops it. So a Stripe retry never debits a draft whose payment was given back.
 func (a *API) applyProcessTopUp(t stripe.ProcessTopUp) error {
 	if t.HeadroomCents > 0 {
-		log.Infow("census headroom top-up credited, kept in the wallet",
-			"processId", t.ProcessID.Hex(), "sessionId", t.SessionID)
-		return nil
+		return a.applyHeadroomTopUp(t)
 	}
 	payment, err := a.db.ProcessPayment(t.ProcessID)
 	if errors.Is(err, db.ErrNotFound) {
@@ -305,6 +303,47 @@ func (a *API) applyProcessTopUp(t stripe.ProcessTopUp) error {
 		}
 	}
 	return a.publishPaidProcess(t)
+}
+
+// applyHeadroomTopUp debits census headroom a credited top-up paid for: the wallet pays the
+// process's envelope up to t.HeadroomCents, only while the process still paid t.FromCents — the
+// base the checkout was priced from. A replay finds the envelope raised and debits nothing; any
+// refusal leaves the credit in the wallet, where POST /processes/{processId}/census/checkout
+// spends it.
+func (a *API) applyHeadroomTopUp(t stripe.ProcessTopUp) error {
+	vp, err := a.db.VotingProcess(t.ProcessID)
+	if errors.Is(err, db.ErrNotFound) {
+		log.Infow("headroom top-up credited for a deleted process, kept in the wallet", "processId", t.ProcessID.Hex())
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to get process: %w", err)
+	}
+	org, err := a.db.Organization(vp.OrgAddress)
+	if err != nil {
+		return fmt.Errorf("failed to get organization: %w", err)
+	}
+	payment, err := a.db.ProcessPayment(t.ProcessID)
+	if err != nil {
+		return fmt.Errorf("failed to get process payment: %w", err)
+	}
+	from := t.FromCents
+	debited, err := a.chargeProcessWallet(processCharge{
+		vp: vp, org: org, quote: pricing.Quote{TotalCents: t.HeadroomCents},
+		branding: payment.Branding, customURL: payment.CustomURL, fromCents: &from,
+	})
+	var refusal errors.Error
+	if errors.As(err, &refusal) {
+		log.Infow("headroom top-up not applied, kept in the wallet", "processId", t.ProcessID.Hex(),
+			"sessionId", t.SessionID, "reason", err.Error())
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	log.Infow("census headroom paid from a top-up", "processId", t.ProcessID.Hex(), "sessionId", t.SessionID,
+		"targetCents", t.HeadroomCents, "debitedCents", debited)
+	return nil
 }
 
 // dropProcessCheckout is the webhook's handling of a top-up checkout that expired or whose

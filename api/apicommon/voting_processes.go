@@ -203,8 +203,9 @@ type ProcessCheckoutRequest struct {
 	Locale    string `json:"locale,omitempty"`
 }
 
-// ProcessCheckoutResponse carries the embedded checkout credentials for the process
-// purchase. AmountCents is the net total the session was created for.
+// ProcessCheckoutResponse carries the embedded checkout credentials of a wallet top-up.
+// AmountCents is the net amount the session charges (or, for census headroom paid from the
+// wallet with no checkout, what was debited).
 type ProcessCheckoutResponse struct {
 	ClientSecret string        `json:"clientSecret"`
 	SessionID    string        `json:"sessionId"`
@@ -214,9 +215,9 @@ type ProcessCheckoutResponse struct {
 
 // ProcessCensusGrowthQuote is the 402 payload of a census that would grow a published
 // process past the price it was paid for: the projected quote at the requested size, what is
-// already covered, and the difference the organization has to buy. Raise the envelope with
-// POST /processes/{processId}/census/checkout (by card, or from the integrator wallet for a
-// managed organization), then retry the request that was refused.
+// already covered, the difference the organization has to buy, and how much of it the payer's
+// wallet lacks. Raise the envelope with POST /processes/{processId}/census/checkout, then retry
+// the request that was refused.
 type ProcessCensusGrowthQuote struct {
 	// ProcessID is the process whose envelope is exceeded. A memberbase change can reach the
 	// census of several processes, so it names the one to buy headroom for.
@@ -229,6 +230,9 @@ type ProcessCensusGrowthQuote struct {
 	// CensusSize is the projected size the quote was computed for.
 	CensusSize int64  `json:"censusSize"`
 	Currency   string `json:"currency"`
+	// BalanceCents is the payer's wallet balance, ShortfallCents what DueCents exceeds it by.
+	BalanceCents   pricing.Cents `json:"balanceCents"`
+	ShortfallCents pricing.Cents `json:"shortfallCents"`
 }
 
 // ProcessPaymentRequired is the 402 (40178) payload of a publish the organization's wallet does
@@ -240,8 +244,9 @@ type ProcessPaymentRequired struct {
 	ShortfallCents pricing.Cents `json:"shortfallCents"`
 }
 
-// ProcessCensusCheckoutRequest buys census headroom for a paid process: a one-time checkout
-// for the difference between what the process paid and what CensusSize would cost.
+// ProcessCensusCheckoutRequest buys census headroom for a paid process: the difference between
+// what the process paid and what CensusSize would cost, debited from the payer's wallet (topped
+// up through a checkout first when it falls short).
 type ProcessCensusCheckoutRequest struct {
 	// CensusSize is the census size to buy room for; it must exceed what is already paid.
 	CensusSize int64 `json:"censusSize"`

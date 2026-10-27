@@ -1083,6 +1083,10 @@ definitions:
     type: object
   apicommon.ProcessCensusGrowthQuote:
     properties:
+      balanceCents:
+        description: BalanceCents is the payer's wallet balance, ShortfallCents what
+          DueCents exceeds it by.
+        type: integer
       censusSize:
         description: CensusSize is the projected size the quote was computed for.
         type: integer
@@ -1103,6 +1107,8 @@ definitions:
           ProcessID is the process whose envelope is exceeded. A memberbase change can reach the
           census of several processes, so it names the one to buy headroom for.
         type: string
+      shortfallCents:
+        type: integer
       totalCents:
         type: integer
     type: object
@@ -5477,19 +5483,18 @@ paths:
       consumes:
       - application/json
       description: |-
-        Opens a one-time Stripe checkout for the difference between what the process
-        already paid and what its census would cost at censusSize, so a census that
-        outgrew its price can be grown (or a paid draft republished) instead of being
-        stuck behind a 402. Add-ons are priced exactly as the original payment priced
-        them, so a once-per-organization add-on (branding, custom URL) is never charged twice. The paid amount is raised
-        when the payment is verified by webhook — never before, so the census stays
-        refused until the money lands. A managed organization pays from its integrator
-        wallet instead: the difference is debited synchronously and the response carries
-        no checkout session, so the census can grow immediately. A card difference below
-        the €1 minimum charge is billed as €1 (amountCents); the paid amount is still
-        raised to the target price only. 400 when the process has
-        no completed payment, or when the target does not cost more than was already
-        paid. Requires Admin role.
+        Debits the payer's wallet for the difference between what the process already paid
+        and what its census would cost at censusSize, so a census that outgrew its price can
+        be grown (or a paid draft republished) instead of being stuck behind a 402. Add-ons are
+        priced exactly as the original payment priced them, so a once-per-organization add-on
+        (branding, custom URL) is never charged twice. When the wallet covers it the paid
+        amount is raised at once and the response carries no checkout session (amountCents is
+        what was debited). When it does not: a managed organization gets 402 (40175); any other
+        gets a wallet top-up checkout for the shortfall (at least €1), and the headroom is
+        debited once that payment is verified by webhook — never before, so the census stays
+        refused until then; if the process changed meanwhile the credit stays in the wallet.
+        400 when the process has no completed payment, or when the target does not cost more
+        than was already paid. Requires Admin role.
       parameters:
       - description: Process ID
         in: path
@@ -5522,12 +5527,15 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "403":
-          description: API key used to buy an unmanaged organization's headroom by
-            card
+          description: API key used to open a top-up checkout
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Payment changed or is being refunded
           schema:
             $ref: '#/definitions/errors.Error'
         "422":
