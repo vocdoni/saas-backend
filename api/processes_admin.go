@@ -23,14 +23,14 @@ import (
 //	@Description	published process has on-chain elections and cannot be deleted. Requires
 //	@Description	Manager/Admin role of the organization that owns the process.
 //	@Description
-//	@Description	A paid draft is refunded before it is deleted, the way it was paid: a card payment
-//	@Description	is refunded (VAT included) and a managed organization's payment is credited back to
-//	@Description	its integrator wallet. The payment record is kept as the audit trail, and the
+//	@Description	A paid draft is credited back to the wallet that paid it before it is deleted (the
+//	@Description	organization's own, or its integrator's for a managed organization); nothing is ever
+//	@Description	refunded to a card. The payment record is kept as the audit trail, and the
 //	@Description	once-per-organization add-ons it paid (branding, custom URL) are released so the
 //	@Description	organization's next process can buy them — except one another process relies on,
-//	@Description	which is withheld from the refund and stays the organization's. A draft
-//	@Description	whose payment is still processing, or whose checkout was just completed, is refused:
-//	@Description	retry once it settles.
+//	@Description	which is withheld from the credit and stays the organization's. An open top-up
+//	@Description	checkout of the draft is expired first; one already completed still credits the
+//	@Description	wallet when its webhook arrives.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
@@ -40,8 +40,8 @@ import (
 //	@Success		200			{string}	string			"OK"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		404			{object}	errors.Error	"Process not found"
-//	@Failure		409			{object}	errors.Error	"Process already published, or its payment is in flight"
-//	@Failure		500			{object}	errors.Error	"Internal server error, or the payment could not be refunded"
+//	@Failure		409			{object}	errors.Error	"Process already published, or its payment changed while deleting it"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId} [delete]
 func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)

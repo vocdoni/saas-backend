@@ -4927,14 +4927,14 @@ paths:
         published process has on-chain elections and cannot be deleted. Requires
         Manager/Admin role of the organization that owns the process.
 
-        A paid draft is refunded before it is deleted, the way it was paid: a card payment
-        is refunded (VAT included) and a managed organization's payment is credited back to
-        its integrator wallet. The payment record is kept as the audit trail, and the
+        A paid draft is credited back to the wallet that paid it before it is deleted (the
+        organization's own, or its integrator's for a managed organization); nothing is ever
+        refunded to a card. The payment record is kept as the audit trail, and the
         once-per-organization add-ons it paid (branding, custom URL) are released so the
         organization's next process can buy them — except one another process relies on,
-        which is withheld from the refund and stays the organization's. A draft
-        whose payment is still processing, or whose checkout was just completed, is refused:
-        retry once it settles.
+        which is withheld from the credit and stays the organization's. An open top-up
+        checkout of the draft is expired first; one already completed still credits the
+        wallet when its webhook arrives.
 
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
@@ -4959,11 +4959,12 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Process already published, or its payment is in flight
+          description: Process already published, or its payment changed while deleting
+            it
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
-          description: Internal server error, or the payment could not be refunded
+          description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
       security:

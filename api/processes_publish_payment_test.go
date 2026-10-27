@@ -158,8 +158,8 @@ func TestManagedProcessWalletPublish(t *testing.T) {
 		processesCreateEndpoint)
 	pid := created.ProcessID
 
-	// managed orgs never see checkout — the wallet pays at publish time
-	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, token,
+	// managed orgs have no wallet of their own and never see checkout — the integrator's pays at publish
+	requestAndAssertError(errors.ErrManagedOrgHasNoWallet, t, http.MethodPost, token,
 		&apicommon.ProcessCheckoutRequest{ReturnURL: "https://x.example"}, "processes", pid, "checkout")
 
 	// empty wallet: publish refused with 402 and the required amount; the publish claim
