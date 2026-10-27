@@ -11,6 +11,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/vochain/state"
@@ -242,17 +243,23 @@ const (
 // against the node; the typical single-nullifier request never notices it.
 var verifyLookupSem = make(chan struct{}, 32)
 
-// lookupVoteOnChain is the production handlers.VoteOnChainLookup: one node read of the vote
-// with this nullifier, holding a verifyLookupSem slot, or ctx.Err() if the caller gives up
-// waiting for one.
-func (a *API) lookupVoteOnChain(ctx context.Context, nullifier []byte) (bool, error) {
+// chainVote reads the vote with this nullifier from the node, holding a verifyLookupSem slot for
+// the read: account.ErrVoteNotFound when the chain has none, ctx.Err() if the caller gives up
+// waiting for a slot. Every vote lookup of a request handler goes through it, so the slot policy
+// lives in one place.
+func (a *API) chainVote(ctx context.Context, nullifier []byte) (*api.Vote, error) {
 	select {
 	case verifyLookupSem <- struct{}{}:
 		defer func() { <-verifyLookupSem }()
 	case <-ctx.Done():
-		return false, ctx.Err()
+		return nil, ctx.Err()
 	}
-	_, err := a.account.VoteByNullifier(nullifier)
+	return a.account.VoteByNullifier(nullifier)
+}
+
+// lookupVoteOnChain is the production handlers.VoteOnChainLookup (see chainVote).
+func (a *API) lookupVoteOnChain(ctx context.Context, nullifier []byte) (bool, error) {
+	_, err := a.chainVote(ctx, nullifier)
 	if stderrors.Is(err, account.ErrVoteNotFound) {
 		return false, nil
 	}
@@ -329,15 +336,7 @@ func (a *API) verifyVotesHandler(w http.ResponseWriter, r *http.Request) {
 	parallelForEach(len(distinct), func(d int) {
 		i := distinct[d]
 		votes[i].Nullifier = req.Nullifiers[i]
-		// wait for a cross-request lookup slot, unless nobody is left to read the answer.
-		select {
-		case verifyLookupSem <- struct{}{}:
-			defer func() { <-verifyLookupSem }()
-		case <-r.Context().Done():
-			errs[d] = r.Context().Err()
-			return
-		}
-		vote, err := a.account.VoteByNullifier(req.Nullifiers[i])
+		vote, err := a.chainVote(r.Context(), req.Nullifiers[i])
 		if stderrors.Is(err, account.ErrVoteNotFound) {
 			return
 		}
@@ -465,15 +464,16 @@ func voteNullifier(signedTx *models.SignedTx, vote *models.VoteEnvelope, pid int
 // the vote nullifier as assigned on chain.
 func (a *API) submitRelayVote(vote *parsedVote) func() (*db.JobResult, error) {
 	return func() (*db.JobResult, error) {
-		voteID, relayedBefore, err := a.account.SubmitVote(context.Background(), vote.payload, vote.nullifier)
+		relay, err := a.account.SubmitVote(context.Background(), vote.payload, vote.nullifier)
 		if err != nil {
 			return nil, err
 		}
 		// meter the relayed vote for billing/quota; best-effort, never fail the relay on a
-		// counter error. The quota itself is enforced at election publish, not here. A vote
-		// this relay did not land itself (a re-relay of an envelope already on chain or in the
-		// mempool) is not metered again.
-		if !relayedBefore {
+		// counter error. The quota itself is enforced at election publish, not here. A vote is
+		// metered once per voter and election: only when this relay landed it and the chain shows
+		// it as the nullifier's first vote, so neither an overwrite nor a re-relay of a vote
+		// already cast (its bytes are public on chain) is metered again.
+		if relay.FirstVote {
 			if err := a.db.IncrementOrganizationSentVotesCounter(vote.org); err != nil {
 				log.Errorw(err, "failed to increment org sent votes counter")
 			}
@@ -481,7 +481,7 @@ func (a *API) submitRelayVote(vote *parsedVote) func() (*db.JobResult, error) {
 		return &db.JobResult{
 			ProcessID: vote.processID,
 			Nullifier: vote.nullifier,
-			VoteID:    internal.HexBytes(voteID),
+			VoteID:    internal.HexBytes(relay.VoteID),
 		}, nil
 	}
 }
