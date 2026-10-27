@@ -18,7 +18,7 @@ on:
 jobs:
   resolve:
     name: Resolve refs
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
     # Runs for a dispatch, a pull_request, or a `/integration` comment on a pull
     # request. An unrelated comment is skipped here, which skips the test job too.
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/integration'))
@@ -151,7 +151,7 @@ jobs:
     # For a pull_request the job runs only when a sticky vocdoni-node ref is set:
     # the regular Main workflow already tests every PR against the go.mod version.
     if: ${{ !cancelled() && needs.resolve.result == 'success' && needs.resolve.outputs.reset != 'true' && (github.event_name != 'pull_request' || needs.resolve.outputs.vocdoni_node_ref != '') }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
     timeout-minutes: 45
     # Every comment and dispatch run gets its own group, so a pinned run is never
     # cancelled by a push or another comment. Queue order between groups is not
@@ -183,7 +183,7 @@ jobs:
           go-version-file: go.mod
           # No module cache on comment runs: they would save PR code's cache into the default
           # branch's scope. Hygiene only; the write-access gate in resolve is the defence.
-          cache: ${{ github.event_name != 'issue_comment' }}
+          cache: ${{ runner.environment == 'github-hosted' && github.event_name != 'issue_comment' }}
 
       - name: Pin vocdoni-node
         id: pins
@@ -271,7 +271,7 @@ jobs:
     # Replies to an authorized /integration comment (an unparsed one gets "rejected"; others are
     # ignored) and to every push run whose tests passed or failed. A cancelled run was superseded.
     if: ${{ always() && ((github.event_name == 'issue_comment' && needs.resolve.outputs.authorized == 'true') || (github.event_name == 'pull_request' && (needs.test.result == 'success' || needs.test.result == 'failure'))) }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
     permissions:
       contents: read # the checkout below
       pull-requests: write
