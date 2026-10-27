@@ -222,9 +222,8 @@ func TestProcessPaymentPendingPinsReplacedSession(t *testing.T) {
 	c.Assert(payment.CheckoutSessionID, qt.Equals, "cs_c")
 }
 
-// TestProcessPaymentRefund covers the money-back transitions: only a paid payment refunds,
-// the refund is recorded on the row that survives its deleted process, and a refund Stripe
-// later fails puts the payment back to paid so nothing looks settled that is not.
+// TestProcessPaymentRefund: only a paid payment is marked credited back, once, and the row
+// survives its deleted process.
 func TestProcessPaymentRefund(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
@@ -234,8 +233,8 @@ func TestProcessPaymentRefund(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
 
-	// nothing to refund until the money actually arrived
-	ok, err = testDB.MarkProcessPaymentRefunded(processID, "re_1", 29_000)
+	// nothing to give back until the wallet paid
+	ok, err = testDB.MarkProcessPaymentRefunded(processID, 29_000)
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsFalse)
 
@@ -246,42 +245,28 @@ func TestProcessPaymentRefund(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
 
-	// paid -> refunded, recording what the money went back as
-	ok, err = testDB.MarkProcessPaymentRefunded(processID, "re_1", 29_000)
+	// an envelope that moved is not recorded as fully refunded
+	ok, err = testDB.MarkProcessPaymentRefunded(processID, 20_000)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+	ok, err = testDB.MarkProcessPaymentRefunded(processID, 29_000)
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
 	payment, err := testDB.ProcessPayment(processID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.Status, qt.Equals, ProcessPaymentRefunded)
-	c.Assert(payment.RefundID, qt.Equals, "re_1")
 
-	// a delete retried after the refund landed must not refund twice
-	ok, err = testDB.MarkProcessPaymentRefunded(processID, "re_2", 29_000)
+	// a delete retried after the credit landed does not mark it twice, nor can the wallet pay again
+	ok, err = testDB.MarkProcessPaymentRefunded(processID, 29_000)
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsFalse)
-
-	// a refund that failed at Stripe is not a refund: back to paid, refund id kept as the
-	// trace of what to reconcile by hand
-	ok, err = testDB.MarkProcessPaymentRefundFailed(processID, "re_1")
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsTrue)
-	payment, err = testDB.ProcessPayment(processID)
-	c.Assert(err, qt.IsNil)
-	c.Assert(payment.Status, qt.Equals, ProcessPaymentPaid)
-	c.Assert(payment.RefundID, qt.Equals, "re_1")
-
-	// a replay of that event, and one naming a refund this payment never had, change nothing
-	ok, err = testDB.MarkProcessPaymentRefundFailed(processID, "re_1")
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsFalse)
-	ok, err = testDB.MarkProcessPaymentRefundFailed(processID, "re_other")
+	ok, err = testDB.SetProcessPaymentPaidByWallet(walletPayment(processID, 29_000))
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsFalse)
 }
 
 // TestProcessPaymentRefundPlan: a delete fixes its refund once, against the envelope it read,
-// and the payment is locked from then on — neither a card top-up nor a wallet top-up can raise
-// what that refund returns.
+// and the payment is locked from then on — census headroom cannot raise what that refund returns.
 func TestProcessPaymentRefundPlan(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
@@ -316,18 +301,6 @@ func TestProcessPaymentRefundPlan(t *testing.T) {
 	payment, err = testDB.ProcessPayment(processID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.AmountCents, qt.Equals, pricing.Cents(29_000))
-
-	// a plan whose refund was refused for good is dropped, but only the plan the caller fixed
-	ok, err = testDB.DropProcessPaymentRefundPlan(processID, 29_000, 0)
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsFalse)
-	ok, err = testDB.DropProcessPaymentRefundPlan(processID, 29_000, 14_900)
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsTrue)
-	payment, err = testDB.ProcessPayment(processID)
-	c.Assert(err, qt.IsNil)
-	c.Assert(payment.RefundWithheldCents, qt.IsNil)
-	c.Assert(payment.RefundWithheldAddOns, qt.IsNil)
 }
 
 // TestOrganizationBrandingReliedOnPendingSibling: a branded draft whose checkout is open counts as

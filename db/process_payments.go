@@ -165,76 +165,25 @@ func (ms *MongoStorage) PlanProcessPaymentRefund(
 	return res.MatchedCount == 1, nil
 }
 
-// DropProcessPaymentRefundPlan undoes PlanProcessPaymentRefund for a refund that never happened
-// and never will (Stripe refused it for good), so the draft is not stranded behind a plan no
-// retry can carry out. A compare-and-set on the plan the caller fixed: it reports false when the
-// payment moved since, and then leaves it alone.
-func (ms *MongoStorage) DropProcessPaymentRefundPlan(
-	processID bson.ObjectID, amountCents, withheldCents pricing.Cents,
-) (bool, error) {
+// MarkProcessPaymentRefunded records that a paid payment's money was credited back. Only a paid
+// payment transitions, so a retry of a delete that already credited reports false; the credit
+// itself is keyed "refund:<process>", so it cannot land twice either. The document is kept after
+// the draft is deleted: it is the only trace that money moved in and back out.
+//
+// amountCents is the envelope the caller credited back. A refund plan (PlanProcessPaymentRefund)
+// already keeps it from growing, so the compare-and-set is only a guard: a payment that moved
+// anyway reports false rather than being recorded as fully refunded.
+func (ms *MongoStorage) MarkProcessPaymentRefunded(processID bson.ObjectID, amountCents pricing.Cents) (bool, error) {
 	if processID == bson.NilObjectID {
 		return false, ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	res, err := ms.processPayments.UpdateOne(ctx,
-		bson.M{
-			"_id": processID, "status": ProcessPaymentPaid, "amountCents": amountCents,
-			"refundWithheldCents": withheldCents,
-		},
-		bson.M{
-			"$unset": bson.M{"refundWithheldCents": "", "refundWithheldAddOns": ""},
-			"$set":   bson.M{"updatedAt": time.Now()},
-		})
-	if err != nil {
-		return false, fmt.Errorf("failed to drop process payment refund plan: %w", err)
-	}
-	return res.MatchedCount == 1, nil
-}
-
-// MarkProcessPaymentRefunded records that a paid payment's money was returned. Only a paid
-// payment transitions, so a retry of a delete that already refunded reports false instead of
-// refunding twice — the caller issues the refund under an idempotency key and this CAS is
-// what keeps the record honest about it. The document is kept after the draft is deleted: it
-// is the only trace that money moved in and back out.
-//
-// amountCents is the envelope the caller refunded. A refund plan (PlanProcessPaymentRefund)
-// already keeps it from growing, so the compare-and-set is only a guard: a payment that moved
-// anyway reports false rather than being recorded as fully refunded.
-func (ms *MongoStorage) MarkProcessPaymentRefunded(
-	processID bson.ObjectID, refundID string, amountCents pricing.Cents,
-) (bool, error) {
-	if processID == bson.NilObjectID || refundID == "" {
-		return false, ErrInvalidData
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-	res, err := ms.processPayments.UpdateOne(ctx,
 		bson.M{"_id": processID, "status": ProcessPaymentPaid, "amountCents": amountCents},
-		bson.M{"$set": bson.M{
-			"status": ProcessPaymentRefunded, "refundId": refundID, "updatedAt": time.Now(),
-		}})
+		bson.M{"$set": bson.M{"status": ProcessPaymentRefunded, "updatedAt": time.Now()}})
 	if err != nil {
 		return false, fmt.Errorf("failed to mark process payment refunded: %w", err)
-	}
-	return res.MatchedCount == 1, nil
-}
-
-// MarkProcessPaymentRefundFailed puts a payment Stripe could not actually refund back to
-// paid, keeping refundId so the failed attempt stays visible. The draft is already deleted at
-// this point, so this is a manual-reconciliation signal, not a state anything recovers from
-// on its own — callers log it at error level.
-func (ms *MongoStorage) MarkProcessPaymentRefundFailed(processID bson.ObjectID, refundID string) (bool, error) {
-	if processID == bson.NilObjectID || refundID == "" {
-		return false, ErrInvalidData
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-	res, err := ms.processPayments.UpdateOne(ctx,
-		bson.M{"_id": processID, "status": ProcessPaymentRefunded, "refundId": refundID},
-		bson.M{"$set": bson.M{"status": ProcessPaymentPaid, "updatedAt": time.Now()}})
-	if err != nil {
-		return false, fmt.Errorf("failed to revert failed process payment refund: %w", err)
 	}
 	return res.MatchedCount == 1, nil
 }
