@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"mime"
 	"mime/multipart"
@@ -106,7 +107,18 @@ func (se *Email) SendNotification(ctx context.Context, notification *notificatio
 	if err != nil {
 		return fmt.Errorf("could not compose email body: %v", err)
 	}
-	return se.sendMail(ctx, notification.ToAddress, body)
+	return classifySendError(se.sendMail(ctx, notification.ToAddress, body))
+}
+
+// classifySendError marks an SMTP 5xx reply (unknown mailbox, rejected message...)
+// as permanent, since retrying the same message cannot succeed. 4xx deferrals and
+// network errors are returned unchanged.
+func classifySendError(err error) error {
+	var protoErr *textproto.Error
+	if errors.As(err, &protoErr) && protoErr.Code >= 500 && protoErr.Code < 600 {
+		return &notifications.PermanentError{Err: err}
+	}
+	return err
 }
 
 // sendMail delivers msg to the recipient like smtp.SendMail does (STARTTLS when offered, then

@@ -2,13 +2,38 @@ package smtp
 
 import (
 	"bytes"
+	"fmt"
 	"mime"
 	"net/mail"
+	"net/textproto"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/notifications"
 )
+
+func TestClassifySendError(t *testing.T) {
+	c := qt.New(t)
+
+	// 5xx replies are permanent, bare or wrapped
+	c.Assert(notifications.IsPermanentSendError(classifySendError(&textproto.Error{Code: 550, Msg: "no such user"})),
+		qt.IsTrue)
+	c.Assert(notifications.IsPermanentSendError(classifySendError(
+		fmt.Errorf("could not send the message: %w", &textproto.Error{Code: 550, Msg: "no such user"}))), qt.IsTrue)
+	c.Assert(notifications.IsPermanentSendError(classifySendError(&textproto.Error{Code: 500})), qt.IsTrue)
+	c.Assert(notifications.IsPermanentSendError(classifySendError(&textproto.Error{Code: 599})), qt.IsTrue)
+
+	// 4xx deferrals and codes outside 5xx stay transient
+	c.Assert(notifications.IsPermanentSendError(classifySendError(&textproto.Error{Code: 451, Msg: "try later"})),
+		qt.IsFalse)
+	c.Assert(notifications.IsPermanentSendError(classifySendError(&textproto.Error{Code: 499})), qt.IsFalse)
+	c.Assert(notifications.IsPermanentSendError(classifySendError(&textproto.Error{Code: 600})), qt.IsFalse)
+
+	// nil and non-SMTP errors are returned unchanged
+	c.Assert(classifySendError(nil), qt.IsNil)
+	netErr := fmt.Errorf("dial tcp: connection refused")
+	c.Assert(classifySendError(netErr), qt.Equals, netErr)
+}
 
 func TestComposeBodySubjectCannotInjectHeaders(t *testing.T) {
 	c := qt.New(t)

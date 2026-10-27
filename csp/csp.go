@@ -111,6 +111,28 @@ type CSP struct {
 	notifySync               bool
 }
 
+// countSentNotification bumps the organization's sent counters for a challenge
+// the queue reports. Only delivered challenges count: the counters gate
+// publishing, so given-up ones (expired, permanently failed, no service
+// configured) must not use up the quota.
+func countSentNotification(storage *db.MongoStorage, ch *notifications.NotificationChallenge) {
+	if !ch.Success {
+		return
+	}
+	switch ch.Type {
+	case notifications.EmailChallenge:
+		if err := storage.IncrementOrganizationSentEmailsCounter(ch.OrgAddress); err != nil {
+			log.Errorf("failed to increment org %s email counter: %v", ch.OrgAddress, err)
+		}
+	case notifications.SMSChallenge:
+		if err := storage.IncrementOrganizationSentSMSCounter(ch.OrgAddress); err != nil {
+			log.Errorf("failed to increment org %s sms counter: %v", ch.OrgAddress, err)
+		}
+	default:
+		log.Warnf("can't count notification of unknown type %s", ch.Type)
+	}
+}
+
 // New method creates a new CSP service. It requires a CSPConfig struct with
 // the configuration for the service. It returns the CSP service or an error
 // if the storage fails to initialize. It initializes the storage with the
@@ -141,18 +163,7 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 					"type", ch.Type,
 					"userID", ch.UserID,
 					"anchorID", ch.AnchorID)
-				switch ch.Type {
-				case notifications.EmailChallenge:
-					if err := config.DB.IncrementOrganizationSentEmailsCounter(ch.OrgAddress); err != nil {
-						log.Errorf("failed to increment org %s email counter: %v", ch.OrgAddress, err)
-					}
-				case notifications.SMSChallenge:
-					if err := config.DB.IncrementOrganizationSentSMSCounter(ch.OrgAddress); err != nil {
-						log.Errorf("failed to increment org %s sms counter: %v", ch.OrgAddress, err)
-					}
-				default:
-					log.Warnf("can't count notification of unknown type %s", ch.Type)
-				}
+				countSentNotification(config.DB, ch)
 			}
 		}
 	}()
