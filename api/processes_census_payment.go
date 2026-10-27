@@ -284,7 +284,7 @@ func (a *API) createProcessCensusCheckoutHandler(w http.ResponseWriter, r *http.
 	// an upper bound — this charges for headroom that was actually asked for.
 	if p.org.ManagedBy != (common.Address{}) {
 		// what was actually debited: a concurrent purchase may have covered part or all of it
-		debited, err := a.chargeManagedProcessWallet(managedProcessCharge{
+		debited, err := a.chargeProcessWallet(processCharge{
 			vp: vp, org: p.org, quote: quote, branding: p.payment.Branding, customURL: p.payment.CustomURL,
 		})
 		if err != nil {

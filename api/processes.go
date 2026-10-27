@@ -761,14 +761,10 @@ func (a *API) validateVotingProcessHandler(w http.ResponseWriter, r *http.Reques
 	// the dry-run reports every problem the same way: a mismatched question set is just one more
 	// entry in errors, so the mismatch flag publish acts on is irrelevant here.
 	problems, _ := a.publishPreflightProblems(publishTarget{vp: vp, questions: questions, census: census, user: user})
-	// an unpaid price is one more reason a publish would be refused; a quote error is
-	// not reported here (a broken census already surfaces above)
+	// a wallet that does not cover the price is one more reason a publish would be refused; a
+	// quote error is not reported here (a broken census already surfaces above)
 	if !vp.Published {
-		due, err := a.paymentDueForPublish(vp)
-		if err == nil && due != nil {
-			problems = append(problems,
-				fmt.Sprintf("publication requires payment of %d eur cents", due.TotalCents))
-		} else if errors.Is(err, errors.ErrPaymentSessionConflict) || errors.Is(err, errors.ErrQuoteRequired) {
+		if err := a.paymentDueForPublish(vp); refusedForUser(err) {
 			problems = append(problems, err.Error())
 		}
 	}

@@ -276,17 +276,20 @@ func (ms *MongoStorage) MarkProcessPaymentFailed(processID bson.ObjectID, sessio
 	})
 }
 
-// SetProcessPaymentPaidByWallet upserts a wallet-paid payment. It never touches a card-owned
-// payment, may raise a wallet payment's amount but never lower it, and reports true for an
-// already-paid retry. Callers pass the existing CreatedAt and PaidAt to keep them.
+// SetProcessPaymentPaidByWallet upserts a wallet-paid payment over none, a consumed pending one,
+// a failed one, or a smaller paid one (census headroom). It never lowers an amount, never touches
+// a pending payment whose checkout is still open, nor one a delete is refunding, and reports true
+// for an already-paid retry. Callers pass the existing CreatedAt, PaidAt and CheckoutSessionID to
+// keep them.
 func (ms *MongoStorage) SetProcessPaymentPaidByWallet(payment *ProcessPayment) (bool, error) {
-	if payment == nil || payment.ProcessID == bson.NilObjectID ||
+	if payment == nil || payment.ProcessID == bson.NilObjectID || (payment.Payer.Cmp(common.Address{}) == 0) ||
 		(payment.OrgAddress.Cmp(common.Address{}) == 0) || payment.AmountCents <= 0 {
 		return false, ErrInvalidData
 	}
 	now := time.Now()
 	payment.Status = ProcessPaymentPaid
-	payment.CheckoutSessionID = ""
+	payment.Consumed = false
+	payment.TopUpCents = 0
 	if payment.PaidAt.IsZero() {
 		payment.PaidAt = now
 	}
@@ -300,13 +303,12 @@ func (ms *MongoStorage) SetProcessPaymentPaidByWallet(payment *ProcessPayment) (
 	filter := bson.M{
 		"_id": payment.ProcessID,
 		"$or": bson.A{
-			bson.M{"status": bson.M{"$in": bson.A{ProcessPaymentPending, ProcessPaymentFailed}}},
-			// a top-up of this wallet payment: only upwards, never a card-owned one
+			bson.M{"status": ProcessPaymentPending, "consumed": true},
+			bson.M{"status": ProcessPaymentFailed},
+			// census headroom: only upwards
 			bson.M{
-				"status": ProcessPaymentPaid,
-				// absent or empty
-				"checkoutSessionId": bson.M{"$in": bson.A{"", nil}},
-				"amountCents":       bson.M{"$lt": payment.AmountCents},
+				"status":      ProcessPaymentPaid,
+				"amountCents": bson.M{"$lt": payment.AmountCents},
 				// a delete fixed its refund: the envelope it returns cannot grow under it
 				"refundWithheldCents": bson.M{"$exists": false},
 			},
@@ -319,11 +321,11 @@ func (ms *MongoStorage) SetProcessPaymentPaidByWallet(payment *ProcessPayment) (
 			if gerr != nil {
 				return false, fmt.Errorf("failed to resolve conflicting process payment: %w", gerr)
 			}
-			// only a wallet payment covering this amount is a retry that already paid; a card
-			// payment, or a smaller one, would read as recorded to a caller that just debited,
-			// and a planned payment is being refunded, so it is not paid for this caller either
-			return existing.Status == ProcessPaymentPaid && existing.CheckoutSessionID == "" &&
-				existing.AmountCents >= payment.AmountCents && existing.RefundWithheldCents == nil, nil
+			// only a paid payment covering this amount is a retry that already paid; an open
+			// checkout, or a smaller payment, would read as recorded to a caller that just
+			// debited, and a planned payment is being refunded, so it is not paid for it either
+			return existing.Status == ProcessPaymentPaid && existing.AmountCents >= payment.AmountCents &&
+				existing.RefundWithheldCents == nil, nil
 		}
 		return false, fmt.Errorf("failed to set process payment paid by wallet: %w", err)
 	}

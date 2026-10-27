@@ -13,12 +13,97 @@ func newPendingPayment(processID bson.ObjectID, sessionID string) *ProcessPaymen
 	return &ProcessPayment{
 		ProcessID:         processID,
 		OrgAddress:        testOrgAddress,
+		Payer:             testOrgAddress,
 		CheckoutSessionID: sessionID,
 		QuoteHash:         "hash-" + sessionID,
 		AmountCents:       29_000,
+		TopUpCents:        29_000,
 		Currency:          "eur",
 		RequestedBy:       testUserEmail,
 	}
+}
+
+// walletPayment is a paid-from-the-wallet record of amountCents for processID.
+func walletPayment(processID bson.ObjectID, amountCents pricing.Cents) *ProcessPayment {
+	return &ProcessPayment{
+		ProcessID: processID, OrgAddress: testOrgAddress, Payer: testOrgAddress,
+		AmountCents: amountCents, Currency: "eur",
+	}
+}
+
+// TestProcessPaymentTopUpCheckout walks a top-up checkout opened for a process: only its own
+// session consumes it, once; an open one is never overwritten by a wallet payment, a consumed one
+// is; and an expiry drops only the session it names.
+func TestProcessPaymentTopUpCheckout(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	processID := bson.NewObjectID()
+	_, err := testDB.ProcessPayment(processID)
+	c.Assert(err, qt.ErrorIs, ErrNotFound)
+	ok, err := testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_1"), "")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+
+	// an open checkout is not the wallet's to pay over: the customer may still pay it
+	ok, err = testDB.SetProcessPaymentPaidByWallet(walletPayment(processID, 29_000))
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+
+	// a stale session neither consumes nor drops it
+	ok, err = testDB.ConsumeProcessPaymentTopUp(processID, "cs_other")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+	ok, err = testDB.DeleteProcessPaymentCheckout(processID, "cs_other")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+
+	// its own session consumes it exactly once
+	ok, err = testDB.ConsumeProcessPaymentTopUp(processID, "cs_1")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	ok, err = testDB.ConsumeProcessPaymentTopUp(processID, "cs_1")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+	payment, err := testDB.ProcessPayment(processID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, ProcessPaymentPending)
+	c.Assert(payment.Consumed, qt.IsTrue)
+
+	// consumed: the wallet pays over it, keeping the session that funded it
+	paid := walletPayment(processID, 29_000)
+	paid.CheckoutSessionID = "cs_1"
+	ok, err = testDB.SetProcessPaymentPaidByWallet(paid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	payment, err = testDB.ProcessPayment(processID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, ProcessPaymentPaid)
+	c.Assert(payment.CheckoutSessionID, qt.Equals, "cs_1")
+	c.Assert(payment.Consumed, qt.IsFalse)
+	c.Assert(payment.Payer, qt.Equals, testOrgAddress)
+
+	// paid: a replayed session consumes nothing, an expiry drops nothing, no checkout replaces it
+	ok, err = testDB.ConsumeProcessPaymentTopUp(processID, "cs_1")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+	ok, err = testDB.DeleteProcessPaymentCheckout(processID, "cs_1")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_2"), "cs_1")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+
+	// an expired checkout goes, and only the one named
+	expiredID := bson.NewObjectID()
+	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(expiredID, "cs_3"), "")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	ok, err = testDB.DeleteProcessPaymentCheckout(expiredID, "cs_3")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	_, err = testDB.ProcessPayment(expiredID)
+	c.Assert(err, qt.ErrorIs, ErrNotFound)
 }
 
 // TestProcessPaymentTransitions walks the payment state machine and asserts every illegal
@@ -127,34 +212,31 @@ func TestProcessPaymentPaidByWallet(t *testing.T) {
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
 	processID := bson.NewObjectID()
-	payment := &ProcessPayment{
-		ProcessID:   processID,
-		OrgAddress:  testOrgAddress,
-		AmountCents: 14_200,
-		Currency:    "eur",
-	}
+	payment := walletPayment(processID, 14_200)
 
-	// the integrator publish path needs no prior pending state
+	// a payment records the wallet it debited
+	noPayer := *payment
+	noPayer.Payer = common.Address{}
+	_, err := testDB.SetProcessPaymentPaidByWallet(&noPayer)
+	c.Assert(err, qt.ErrorIs, ErrInvalidData)
+
+	// the publish path needs no prior pending state
 	ok, err := testDB.SetProcessPaymentPaidByWallet(payment)
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
 	stored, err := testDB.ProcessPayment(processID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(stored.Status, qt.Equals, ProcessPaymentPaid)
-	c.Assert(stored.CheckoutSessionID, qt.Equals, "")
 
 	// a publish retry that already paid reports success, not conflict
-	ok, err = testDB.SetProcessPaymentPaidByWallet(payment)
+	ok, err = testDB.SetProcessPaymentPaidByWallet(walletPayment(processID, 14_200))
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
 
-	// a retry after the census grew tops the record up to the new price, keeping the
-	// original CreatedAt so the record's history survives
-	toppedUp := *payment
-	toppedUp.AmountCents = 20_000
-	toppedUp.CreatedAt = stored.CreatedAt
-	toppedUp.PaidAt = stored.PaidAt
-	ok, err = testDB.SetProcessPaymentPaidByWallet(&toppedUp)
+	// census headroom raises it, keeping the original CreatedAt and PaidAt
+	raisedPayment := walletPayment(processID, 20_000)
+	raisedPayment.CreatedAt, raisedPayment.PaidAt = stored.CreatedAt, stored.PaidAt
+	ok, err = testDB.SetProcessPaymentPaidByWallet(raisedPayment)
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
 	raised, err := testDB.ProcessPayment(processID)
@@ -164,28 +246,12 @@ func TestProcessPaymentPaidByWallet(t *testing.T) {
 	c.Assert(raised.PaidAt.Equal(stored.PaidAt), qt.IsTrue)
 
 	// but never down: a stale retry priced lower leaves the record alone
-	lowered := toppedUp
-	lowered.AmountCents = 14_200
-	ok, err = testDB.SetProcessPaymentPaidByWallet(&lowered)
+	ok, err = testDB.SetProcessPaymentPaidByWallet(walletPayment(processID, 14_200))
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue) // already paid, so the caller is not in conflict
 	raised, err = testDB.ProcessPayment(processID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(raised.AmountCents, qt.Equals, pricing.Cents(20_000))
-
-	// a card-paid payment is not a wallet retry: a caller that debited must not read it as recorded
-	cardID := bson.NewObjectID()
-	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(cardID, "cs_card"), "")
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsTrue)
-	ok, err = testDB.MarkProcessPaymentPaid(cardID, "cs_card", ProcessCharge{})
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsTrue)
-	byWallet := *payment
-	byWallet.ProcessID = cardID
-	ok, err = testDB.SetProcessPaymentPaidByWallet(&byWallet)
-	c.Assert(err, qt.IsNil)
-	c.Assert(ok, qt.IsFalse)
 
 	// deleting the draft never removes a paid payment's record
 	deleted, err := testDB.DeleteProcessPayment(processID)
@@ -293,9 +359,7 @@ func TestProcessPaymentRefundPlan(t *testing.T) {
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
 	processID := bson.NewObjectID()
-	ok, err := testDB.SetProcessPaymentPaidByWallet(&ProcessPayment{
-		ProcessID: processID, OrgAddress: testOrgAddress, AmountCents: 29_000, Currency: "eur",
-	})
+	ok, err := testDB.SetProcessPaymentPaidByWallet(walletPayment(processID, 29_000))
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
 
@@ -323,9 +387,7 @@ func TestProcessPaymentRefundPlan(t *testing.T) {
 	})
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsFalse)
-	ok, err = testDB.SetProcessPaymentPaidByWallet(&ProcessPayment{
-		ProcessID: processID, OrgAddress: testOrgAddress, AmountCents: 40_000, Currency: "eur",
-	})
+	ok, err = testDB.SetProcessPaymentPaidByWallet(walletPayment(processID, 40_000))
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsFalse)
 	payment, err = testDB.ProcessPayment(processID)

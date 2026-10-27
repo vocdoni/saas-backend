@@ -231,6 +231,15 @@ type ProcessCensusGrowthQuote struct {
 	Currency   string `json:"currency"`
 }
 
+// ProcessPaymentRequired is the 402 (40178) payload of a publish the organization's wallet does
+// not cover: the quote, the balance, and the shortfall POST /processes/{processId}/checkout tops
+// up (charged at least the minimum).
+type ProcessPaymentRequired struct {
+	pricing.Quote
+	BalanceCents   pricing.Cents `json:"balanceCents"`
+	ShortfallCents pricing.Cents `json:"shortfallCents"`
+}
+
 // ProcessCensusCheckoutRequest buys census headroom for a paid process: a one-time checkout
 // for the difference between what the process paid and what CensusSize would cost.
 type ProcessCensusCheckoutRequest struct {
