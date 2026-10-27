@@ -521,6 +521,26 @@ func (ms *MongoStorage) MarkCSPProcessVotedOnChain(userID, processID internal.He
 	return nil
 }
 
+// MarkCSPProcessVotedOnChainByAddress caches that the vote cast by address on processID is on
+// chain, on the CSP process row that consumed that address: the relay knows the voter's address
+// and the election, not the member. No row matches a blind-census vote (its row holds no address),
+// which is not an error. The lookup is served by the cspTokensStatus processid+consumedaddress
+// index (migration 32).
+func (ms *MongoStorage) MarkCSPProcessVotedOnChainByAddress(processID, address internal.HexBytes) error {
+	if len(processID) == 0 || len(address) == 0 {
+		return ErrBadInputs
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	if _, err := ms.cspTokensStatus.UpdateOne(ctx,
+		bson.M{"processid": processID, "consumedaddress": address},
+		bson.M{"$set": bson.M{"votedonchain": true}},
+	); err != nil {
+		return fmt.Errorf("failed to mark CSP process voted on chain by address: %w", err)
+	}
+	return nil
+}
+
 // DeleteCSPAuthByAnchor removes every CSP authentication token tied to the given bundle.
 // It is a best-effort cleanup used when tearing down an organization (the bundle's
 // processes share a common census/auth flow). Returns the number of deleted tokens.

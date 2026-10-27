@@ -310,3 +310,35 @@ func TestMarkCSPProcessVotedOnChain(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(other.VotedOnChain, qt.IsFalse)
 }
+
+// TestMarkCSPProcessVotedOnChainByAddress pins the relay-side cache write: it finds the row by the
+// election and the address the CSP consumed, and touches nothing else.
+func TestMarkCSPProcessVotedOnChainByAddress(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	fixture := setupCheckBundleFixture(t)
+	aliceID := internal.HexBytesFromString(fixture.alice.ID.Hex())
+	p1 := internal.HexBytes{0xAA, 0xBB, 0xCC, 0xDD}
+	p2 := internal.HexBytes{0xDE, 0xAD, 0xBE, 0xEF}
+	seedUsedCSPProcess(t, fixture.alice.ID.Hex(), fixture.bundleID, p1)
+	seedUsedCSPProcess(t, fixture.alice.ID.Hex(), fixture.bundleID, p2)
+	address := internal.HexBytes{0x11, 0x22, 0x33} // the one seedUsedCSPProcess consumes
+
+	c.Assert(testDB.MarkCSPProcessVotedOnChainByAddress(nil, address), qt.ErrorIs, ErrBadInputs)
+	c.Assert(testDB.MarkCSPProcessVotedOnChainByAddress(p1, nil), qt.ErrorIs, ErrBadInputs)
+	// another address (or a blind-census vote, whose row has none) matches no row: not an error
+	c.Assert(testDB.MarkCSPProcessVotedOnChainByAddress(p1, internal.HexBytes{0x99}), qt.IsNil)
+	row, err := testDB.CSPProcessByUserAndProcess(aliceID, p1)
+	c.Assert(err, qt.IsNil)
+	c.Assert(row.VotedOnChain, qt.IsFalse)
+
+	c.Assert(testDB.MarkCSPProcessVotedOnChainByAddress(p1, address), qt.IsNil)
+	row, err = testDB.CSPProcessByUserAndProcess(aliceID, p1)
+	c.Assert(err, qt.IsNil)
+	c.Assert(row.VotedOnChain, qt.IsTrue)
+	// only the row of that election
+	other, err := testDB.CSPProcessByUserAndProcess(aliceID, p2)
+	c.Assert(err, qt.IsNil)
+	c.Assert(other.VotedOnChain, qt.IsFalse)
+}

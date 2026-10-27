@@ -374,6 +374,9 @@ type parsedVote struct {
 	processID internal.HexBytes
 	org       common.Address
 	nullifier internal.HexBytes
+	// voter is the address that signed the envelope, when it could be recovered (not for an
+	// anonymous vote, which carries its own nullifier)
+	voter internal.HexBytes
 }
 
 // parseRelayVote runs the synchronous checks of a vote relay: the payload must decode to
@@ -426,37 +429,40 @@ func (a *API) parseRelayVote(payload internal.HexBytes) (*parsedVote, *errors.Er
 		return nil, errors.Ptr(errors.ErrGenericInternalServerError.WithErr(err))
 	}
 
+	nullifier, voter := voteNullifier(signedTx, vote, pid, a.account.ChainID())
 	return &parsedVote{
 		payload:   payload,
 		processID: pid,
 		org:       orgAddress,
-		nullifier: voteNullifier(signedTx, vote, pid, a.account.ChainID()),
+		nullifier: nullifier,
+		voter:     voter,
 	}, nil
 }
 
 // voteNullifier works out the nullifier of an envelope without submitting it, so a vote
-// can be identified while its job is still pending and after it failed. An anonymous vote
-// carries its own; otherwise it is hash(voter address + process id), the same value the
-// chain returns as the voteID once it accepts the vote. Best effort: an envelope we
-// cannot recover a signer from yields no nullifier and is relayed anyway — the chain, not
-// this backend, decides whether a signature is valid.
+// can be identified while its job is still pending and after it failed, along with the voter
+// address it derives from. An anonymous vote carries its own nullifier (and no address);
+// otherwise it is hash(voter address + process id), the same value the chain returns as the
+// voteID once it accepts the vote. Best effort: an envelope we cannot recover a signer from
+// yields neither and is relayed anyway — the chain, not this backend, decides whether a
+// signature is valid.
 func voteNullifier(signedTx *models.SignedTx, vote *models.VoteEnvelope, pid internal.HexBytes,
 	chainID string,
-) internal.HexBytes {
+) (nullifier, voter internal.HexBytes) {
 	if len(vote.Nullifier) > 0 {
-		return internal.HexBytes(vote.Nullifier)
+		return internal.HexBytes(vote.Nullifier), nil
 	}
 	msg, _, err := ethereum.BuildVocdoniTransaction(signedTx.Tx, chainID)
 	if err != nil {
 		log.Debugw("could not build vote tx message to derive its nullifier", "error", err)
-		return nil
+		return nil, nil
 	}
 	addr, err := ethereum.AddrFromSignature(msg, signedTx.Signature)
 	if err != nil {
 		log.Debugw("could not recover the voter address to derive its nullifier", "error", err)
-		return nil
+		return nil, nil
 	}
-	return internal.HexBytes(state.GenerateNullifier(addr, pid))
+	return internal.HexBytes(state.GenerateNullifier(addr, pid)), internal.HexBytes(addr.Bytes())
 }
 
 // submitRelayVote builds the worker closure that relays one envelope: submit (retrying
@@ -476,6 +482,14 @@ func (a *API) submitRelayVote(vote *parsedVote) func() (*db.JobResult, error) {
 		if relay.FirstVote {
 			if err := a.db.IncrementOrganizationSentVotesCounter(vote.org); err != nil {
 				log.Errorw(err, "failed to increment org sent votes counter")
+			}
+		}
+		// the vote is on chain: cache it on the voter's CSP row, so /check and the participants
+		// list need no node read for it. Best-effort, as a miss only costs that read; a blind
+		// census row carries no address and matches nothing.
+		if len(vote.voter) > 0 {
+			if err := a.db.MarkCSPProcessVotedOnChainByAddress(vote.processID, vote.voter); err != nil {
+				log.Warnw("could not cache relayed vote on chain", "processId", vote.processID.String(), "error", err)
 			}
 		}
 		return &db.JobResult{
