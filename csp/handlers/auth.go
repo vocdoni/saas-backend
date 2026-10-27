@@ -108,8 +108,10 @@ type voterPhone struct {
 // parseVoterPhone normalizes and hashes a submitted phone number, returning nil for an empty one.
 // The hash is deliberately expensive (Argon2), so step 0 computes it once, before the participant
 // lookup, and reuses it for the contact check: hashing it only for a found participant would make
-// a found participant measurably slower to answer than an unknown one.
-func parseVoterPhone(phone string, org *db.Organization) (*voterPhone, error) {
+// a found participant measurably slower to answer than an unknown one. It runs in the service-wide
+// argon2 slots for ctx, the voter's request, and gives up with internal.ErrHashingBusy when none
+// frees up in time (see phoneParseFailed).
+func parseVoterPhone(ctx context.Context, phone string, org *db.Organization) (*voterPhone, error) {
 	if phone == "" {
 		return nil, nil
 	}
@@ -117,11 +119,20 @@ func parseVoterPhone(phone string, org *db.Organization) (*voterPhone, error) {
 	if err != nil {
 		return nil, err
 	}
-	hashed, err := db.NewHashedPhone(normalized, org)
+	hashed, err := db.NewHashedPhoneContext(ctx, normalized, org)
 	if err != nil {
 		return nil, err
 	}
 	return &voterPhone{normalized: normalized, hashed: hashed}, nil
+}
+
+// phoneParseFailed is the answer to a parseVoterPhone error: ErrServerBusy, a 503 to retry later,
+// when no argon2 slot freed up in time; otherwise the phone itself is invalid.
+func phoneParseFailed(err error) errors.Error {
+	if errors.Is(err, internal.ErrHashingBusy) {
+		return errors.ErrServerBusy.WithErr(err)
+	}
+	return errors.ErrInvalidData.WithErr(err)
 }
 
 // handlePhoneContact verifies the phone and returns the appropriate contact method.
@@ -297,8 +308,9 @@ func (c *CSPHandlers) authFirstStep(
 	var phone *voterPhone
 	var hashedPhone db.HashedPhone
 	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone) {
-		if phone, err = parseVoterPhone(req.Phone, org); err != nil {
-			return nil, errors.ErrInvalidData.WithErr(err)
+		// hashed before the failed-attempt budget is claimed, so a busy answer spends none of it
+		if phone, err = parseVoterPhone(r.Context(), req.Phone, org); err != nil {
+			return nil, phoneParseFailed(err)
 		}
 		if phone != nil {
 			hashedPhone = phone.hashed

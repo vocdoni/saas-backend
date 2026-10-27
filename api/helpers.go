@@ -351,9 +351,15 @@ func parseLimit(s string) (int64, error) {
 func hashPassword(w http.ResponseWriter, r *http.Request, password string) (string, bool) {
 	hash, err := internal.HexHashPasswordContext(r.Context(), passwordSalt, password)
 	if err != nil {
-		w.Header().Set("Retry-After", strconv.Itoa(int(internal.HashSlotWait.Seconds())))
-		errors.ErrServerBusy.WithErr(err).Write(w)
+		writeHashingBusy(w, err)
 		return "", false
 	}
 	return hash, true
+}
+
+// writeHashingBusy writes the 503 for a request whose argon2 hash found no free slot in time
+// (internal.ErrHashingBusy), telling the client when to retry.
+func writeHashingBusy(w http.ResponseWriter, err error) {
+	w.Header().Set("Retry-After", strconv.Itoa(int(internal.HashSlotWait.Seconds())))
+	errors.ErrServerBusy.WithErr(err).Write(w)
 }

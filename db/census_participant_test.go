@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -663,7 +664,7 @@ func TestCensusParticipant(t *testing.T) {
 		}
 
 		{
-			_, _, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, update0, "test_salt")
+			_, _, err := testDB.UpsertOrgMemberAndCensusParticipants(context.Background(), testOrg, update0, "test_salt")
 			c.Assert(err, qt.ErrorMatches, ".*update would create duplicates.*",
 				qt.Commentf("trying to UpdateOrgMember(%+v) should create a conflict with %+v", update0, members[1]))
 
@@ -678,7 +679,7 @@ func TestCensusParticipant(t *testing.T) {
 		oldHashedPhone := member1.Phone
 		{
 			update1 := &OrgMemberUpdate{ID: member1.ID, Phone: new("+34698123321")}
-			_, created, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, update1, "test_salt")
+			_, created, err := testDB.UpsertOrgMemberAndCensusParticipants(context.Background(), testOrg, update1, "test_salt")
 			c.Assert(err, qt.IsNil)
 			c.Assert(created, qt.IsFalse)
 
@@ -691,7 +692,7 @@ func TestCensusParticipant(t *testing.T) {
 		// since duplicates in memberbase are allowed, and a new member is not part of any census
 		{
 			update0.ID = bson.NilObjectID
-			newMemberID, created, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, update0, "test_salt")
+			newMemberID, created, err := testDB.UpsertOrgMemberAndCensusParticipants(context.Background(), testOrg, update0, "test_salt")
 			c.Assert(err, qt.IsNil)
 			c.Assert(created, qt.IsTrue)
 			member, err := testDB.OrgMember(testOrgAddress, newMemberID.Hex())
@@ -702,7 +703,7 @@ func TestCensusParticipant(t *testing.T) {
 		// Passing an arbitrary (new) memberID should also work OK and create a new member
 		{
 			update0.ID = bson.NewObjectID()
-			newMemberID, created, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, update0, "test_salt")
+			newMemberID, created, err := testDB.UpsertOrgMemberAndCensusParticipants(context.Background(), testOrg, update0, "test_salt")
 			c.Assert(err, qt.IsNil)
 			c.Assert(created, qt.IsTrue)
 			member, err := testDB.OrgMember(testOrgAddress, newMemberID.Hex())

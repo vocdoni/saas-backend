@@ -3804,7 +3804,10 @@ paths:
         Add multiple members to an organization. Requires Manager/Admin role and is subject to the
         plan's member quota. With `async=true` the import runs in the background and the response
         carries a `jobId` to poll via GET /jobs/{jobId}; otherwise it
-        completes synchronously. An empty members list is a no-op that returns added=0.
+        completes synchronously. A synchronous import whose members carry more than 150 phones and
+        passwords in total (each one is an expensive hash) runs as if `async=true` had been sent: the
+        response carries a `jobId` instead of the added count, so a client must check for one. An
+        empty members list is a no-op that returns added=0.
 
         Also callable with a scoped API key (scope: `members:write`).
       parameters:
@@ -3892,6 +3895,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy hashing, retry after Retry-After (50302)
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -4981,7 +4988,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "503":
-          description: Password-hashing capacity exhausted, retry later (50302)
+          description: Password- or phone-hashing capacity exhausted, retry later
+            (50302)
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Authenticate a voter for a voting process
@@ -5032,6 +5040,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Phone-hashing capacity exhausted, retry later (50302)
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Resend a voting process auth challenge

@@ -4,6 +4,7 @@ package db
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -919,16 +920,35 @@ type HashedPhone []byte
 // NewHashedPhone creates a HashedPhone from a phone and organization.
 // If phone is the empty string, returns an empty Phone and no error.
 func NewHashedPhone(phone string, organization *Organization) (HashedPhone, error) {
+	return hashPhoneWith(phone, organization, func(org common.Address, normalized string) ([]byte, error) {
+		return internal.HashOrgData(org, normalized), nil
+	})
+}
+
+// NewHashedPhoneContext is NewHashedPhone for a request handler: the hash gives up with
+// internal.ErrHashingBusy when no hashing slot frees up in time (see internal.HashOrgDataContext).
+func NewHashedPhoneContext(ctx context.Context, phone string, organization *Organization) (HashedPhone, error) {
+	return hashPhoneWith(phone, organization, func(org common.Address, normalized string) ([]byte, error) {
+		return internal.HashOrgDataContext(ctx, org, normalized)
+	})
+}
+
+// hashPhoneWith normalizes phone for the organization's country and hashes it with hash.
+func hashPhoneWith(phone string, organization *Organization,
+	hash func(org common.Address, normalized string) ([]byte, error),
+) (HashedPhone, error) {
 	if phone == "" {
 		return HashedPhone{}, nil
 	}
-
-	// Normalize and hash in one operation
 	normalized, err := internal.SanitizeAndVerifyPhoneNumber(phone, organization.Country)
 	if err != nil {
 		return nil, err
 	}
-	return HashedPhone(internal.HashOrgData(organization.Address, normalized)), nil
+	hashed, err := hash(organization.Address, normalized)
+	if err != nil {
+		return nil, err
+	}
+	return HashedPhone(hashed), nil
 }
 
 // Matches checks if a HashedPhone matches another phone

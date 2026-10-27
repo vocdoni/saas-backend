@@ -115,7 +115,7 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 //	@Failure		401			{object}	errors.Error	"Invalid authentication data, cooldown not reached, or invalid challenge"
 //	@Failure		404			{object}	errors.Error	"Process, census, or organization not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
-//	@Failure		503			{object}	errors.Error	"Password-hashing capacity exhausted, retry later (50302)"
+//	@Failure		503			{object}	errors.Error	"Password- or phone-hashing capacity exhausted, retry later (50302)"
 //	@Router			/processes/{processId}/auth/{step} [post]
 func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request) {
 	oid, anchor, ok := parseProcessID(w, r)
@@ -157,6 +157,7 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 //	@Failure		401			{object}	errors.Error	"Invalid/expired token, token not belonging to the process, or contact mismatch"
 //	@Failure		404			{object}	errors.Error	"Census or organization not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		503			{object}	errors.Error	"Phone-hashing capacity exhausted, retry later (50302)"
 //	@Router			/processes/{processId}/auth/resend [post]
 func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Request) {
 	oid, anchor, ok := parseProcessID(w, r)
@@ -201,8 +202,9 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 	lang := apicommon.NotificationLang(r.Context(), org)
 	var phone *voterPhone
 	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone) {
-		if phone, err = parseVoterPhone(req.Phone, org); err != nil {
-			errors.ErrInvalidData.WithErr(err).Write(w)
+		// parsed before a resend is claimed, so a busy answer spends none of the token's resends
+		if phone, err = parseVoterPhone(r.Context(), req.Phone, org); err != nil {
+			phoneParseFailed(err).Write(w)
 			return
 		}
 	}

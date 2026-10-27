@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
 	"testing"
@@ -967,4 +968,53 @@ func TestAddOrganizationMembersAsyncInsertFailure(t *testing.T) {
 	c.Assert(job.Result.Total, qt.Equals, 2)
 	c.Assert(job.Errors, qt.HasLen, 1)
 	c.Assert(job.Errors[0], qt.Matches, "lines 1-2: .*duplicate key.*")
+}
+
+// TestAddMembersLargeSyncImportRunsAsJob pins that a synchronous import needing more than
+// maxSyncMemberHashes argon2 hashes (phones and passwords) runs as a job, like async=true, while one
+// at the limit still completes in the request.
+func TestAddMembersLargeSyncImportRunsAsJob(t *testing.T) {
+	c := qt.New(t)
+	adminToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+
+	membersWithPasswords := func(prefix string, n int) []apicommon.OrgMember {
+		members := make([]apicommon.OrgMember, n)
+		for i := range members {
+			members[i] = apicommon.OrgMember{
+				MemberNumber: fmt.Sprintf("%s-%d", prefix, i),
+				Password:     testMemberPassword(fmt.Sprintf("%s-%d", prefix, i)),
+			}
+		}
+		return members
+	}
+
+	// at the limit: answered in the request
+	inRequest := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, adminToken,
+		&apicommon.AddMembersRequest{Members: membersWithPasswords("at", maxSyncMemberHashes)},
+		organizationMembersURL(orgAddress.String()))
+	c.Assert(inRequest.JobID, qt.HasLen, 0)
+	c.Assert(inRequest.Added, qt.Equals, uint32(maxSyncMemberHashes))
+
+	// one hash over: a job, though async was not asked for
+	over := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, adminToken,
+		&apicommon.AddMembersRequest{Members: membersWithPasswords("over", maxSyncMemberHashes+1)},
+		organizationMembersURL(orgAddress.String()))
+	c.Assert(over.JobID, qt.HasLen, 16)
+	var jobID internal.HexBytes
+	jobID.SetBytes(over.JobID)
+	job := pollOrgJob(t, adminToken, orgAddress.String(), jobID.String())
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted)
+	c.Assert(job.Result.Added, qt.Equals, maxSyncMemberHashes+1)
+}
+
+func TestMemberHashCount(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(memberHashCount([]apicommon.OrgMember{
+		{},
+		{Phone: "+34612345601"},
+		{Password: "x"},
+		{Phone: "+34612345602", Password: "y"},
+	}), qt.Equals, 4)
 }

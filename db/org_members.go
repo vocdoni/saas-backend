@@ -36,7 +36,10 @@ func (ms *MongoStorage) SetOrgMember(salt string, orgMember *OrgMember) (string,
 		return "", fmt.Errorf("organization not found: %w", err)
 	}
 
-	member, errs := prepareOrgMember(org, orgMember, salt, time.Now())
+	member, errs, err := prepareOrgMember(org, orgMember, salt, time.Now(), backgroundHasher)
+	if err != nil {
+		return "", err
+	}
 	if len(errs) != 0 {
 		return "", fmt.Errorf("%w: %s", ErrInvalidData, strings.Join(errorsAsStrings(errs), ", "))
 	}
@@ -210,6 +213,39 @@ func HashMemberPassword(salt string, memberID bson.ObjectID, clientHash string) 
 	return internal.HashPassword(salt+memberID.Hex(), clientHash)
 }
 
+// memberHasher computes the argon2 hashes a member write stores: its phone and its password. Bulk
+// writes use backgroundHasher, which never fails and holds at most one shared hashing slot for all
+// of them; a write a request handler waits on uses requestHasher, which gives up with
+// internal.ErrHashingBusy instead of waiting behind running imports.
+type memberHasher struct {
+	phone    func(phone string, org *Organization) (HashedPhone, error)
+	password func(salt string, memberID bson.ObjectID, clientHash string) ([]byte, error)
+}
+
+// backgroundHasher is the memberHasher of bulk member writes (imports, census population).
+var backgroundHasher = memberHasher{
+	phone: func(phone string, org *Organization) (HashedPhone, error) {
+		return hashPhoneWith(phone, org, func(addr common.Address, normalized string) ([]byte, error) {
+			return internal.HashOrgDataBackground(addr, normalized), nil
+		})
+	},
+	password: func(salt string, memberID bson.ObjectID, clientHash string) ([]byte, error) {
+		return internal.HashPasswordBackground(salt+memberID.Hex(), clientHash), nil
+	},
+}
+
+// requestHasher is the memberHasher of a member write a request handler waits on.
+func requestHasher(ctx context.Context) memberHasher {
+	return memberHasher{
+		phone: func(phone string, org *Organization) (HashedPhone, error) {
+			return NewHashedPhoneContext(ctx, phone, org)
+		},
+		password: func(salt string, memberID bson.ObjectID, clientHash string) ([]byte, error) {
+			return HashMemberPasswordContext(ctx, salt, memberID, clientHash)
+		},
+	}
+}
+
 // HashMemberPasswordContext is HashMemberPassword for a request handler: the hash runs in the
 // service-wide argon2 slots, and it gives up with internal.ErrHashingBusy when none frees up within
 // internal.HashSlotWait or ctx ends first (see internal.HashPasswordContext).
@@ -222,10 +258,14 @@ func HashMemberPasswordContext(ctx context.Context, salt string, memberID bson.O
 //   - Setting the organization address
 //   - Setting the creation timestamp
 //   - Validating what Normalized only canonicalized (email, birthdate)
-//   - Hashing sensitive data (email, phone, password)
+//   - Hashing sensitive data (email, phone, password) with hasher
 //   - Not including original sensitive data
-func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime time.Time) (
-	*OrgMember, []error,
+//
+// The []error are the member's validation errors, which leave the offending field empty. The error
+// is a hash that could not be computed (only a requestHasher's internal.ErrHashingBusy): then the
+// member must not be stored at all.
+func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime time.Time, hasher memberHasher) (
+	*OrgMember, []error, error,
 ) {
 	// Normalize every field that can feed the login hash, so what is stored is
 	// byte-identical to what the CSP recomputes from a login request. Whitespace
@@ -255,11 +295,14 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 
 	// Hash phone if present
 	if member.PlaintextPhone != "" {
-		phone, err := NewHashedPhone(member.PlaintextPhone, org)
-		if err != nil {
+		phone, err := hasher.phone(member.PlaintextPhone, org)
+		switch {
+		case errors.Is(err, internal.ErrHashingBusy):
+			return nil, nil, err
+		case err != nil:
 			// the error already identifies the offending phone number
 			errs = append(errs, err)
-		} else {
+		default:
 			member.Phone = phone
 		}
 		member.PlaintextPhone = ""
@@ -267,7 +310,11 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 
 	// Hash password if present, with the member ID assigned above as part of its salt
 	if member.Password != "" {
-		member.HashedPass = HashMemberPassword(salt, member.ID, member.Password)
+		hashed, err := hasher.password(salt, member.ID, member.Password)
+		if err != nil {
+			return nil, nil, err
+		}
+		member.HashedPass = hashed
 		member.Password = ""
 	}
 
@@ -281,7 +328,7 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 			member.ParsedBirthDate = time.Time{}
 		}
 	}
-	return &member, errs
+	return &member, errs, nil
 }
 
 // createOrgMemberBulkOperations creates a batch of members using bulk write operations,
@@ -301,7 +348,8 @@ func (ms *MongoStorage) createOrgMemberBulkOperations(
 
 	for i, m := range members {
 		// Prepare the member
-		member, validationErrors := prepareOrgMember(org, m, salt, currentTime)
+		// a backgroundHasher never fails, so only validation errors can come back
+		member, validationErrors, _ := prepareOrgMember(org, m, salt, currentTime, backgroundHasher)
 		for _, err := range validationErrors {
 			errs = append(errs, fmt.Errorf("line %d: %w", firstLine+i, err))
 		}
@@ -458,8 +506,11 @@ func (ms *MongoStorage) AddBulkOrgMembers(org *Organization, members []*OrgMembe
 // participate in. The update is applied over the stored member under the keys lock and the result
 // is written whole, so every census hash is computed from the member as it is actually stored.
 // The returned bool reports whether the member was created rather than updated, so callers can
-// propagate a brand new member to the censuses of the organization's auto group.
-func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, update *OrgMemberUpdate, salt string,
+// propagate a brand new member to the censuses of the organization's auto group. The member's phone
+// and password are hashed for reqCtx, the waiting request (see requestHasher): when no hashing slot
+// frees up in time it returns internal.ErrHashingBusy and writes nothing.
+func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(reqCtx context.Context, org *Organization,
+	update *OrgMemberUpdate, salt string,
 ) (bson.ObjectID, bool, error) {
 	if org.Address.Cmp(common.Address{}) == 0 {
 		return bson.NilObjectID, false, ErrInvalidData
@@ -487,7 +538,10 @@ func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, 
 	}
 
 	now := time.Now()
-	preparedMember, validationErrors := prepareOrgMember(org, update.applyTo(stored), salt, now)
+	preparedMember, validationErrors, err := prepareOrgMember(org, update.applyTo(stored), salt, now, requestHasher(reqCtx))
+	if err != nil {
+		return bson.NilObjectID, false, err
+	}
 	if len(validationErrors) > 0 {
 		return bson.NilObjectID, false, fmt.Errorf("%w: %s", ErrInvalidData,
 			strings.Join(errorsAsStrings(validationErrors), ", "))

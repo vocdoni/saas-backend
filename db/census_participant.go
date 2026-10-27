@@ -272,7 +272,8 @@ func createCensusParticipantBulkOperations(
 
 	for _, m := range orgMembers {
 		// Prepare the member
-		orgMember, _ := prepareOrgMember(org, m, salt, currentTime)
+		// a backgroundHasher never fails, so only validation errors can come back
+		orgMember, _, _ := prepareOrgMember(org, m, salt, currentTime, backgroundHasher)
 		// TODO: handle prepareOrgMember []error, pass them back to client
 
 		// Create member filter and update document

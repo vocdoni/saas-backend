@@ -57,6 +57,14 @@ func TestValidateVoterAddress(t *testing.T) {
 	c.Assert(validateVoterAddress(internal.HexBytes(make([]byte, common.AddressLength+1))), qt.Not(qt.IsNil))
 }
 
+// TestPhoneParseFailed pins the answers to a phone that could not be parsed: a hash that found no
+// free argon2 slot is a 503 to retry, anything else an invalid phone.
+func TestPhoneParseFailed(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(phoneParseFailed(internal.ErrHashingBusy), qt.ErrorIs, errors.ErrServerBusy)
+	c.Assert(phoneParseFailed(fmt.Errorf("not a phone number")), qt.ErrorIs, errors.ErrInvalidData)
+}
+
 func TestHandlePhoneContact(t *testing.T) {
 	c := qt.New(t)
 
@@ -65,7 +73,7 @@ func TestHandlePhoneContact(t *testing.T) {
 		hashedPhone, err := db.NewHashedPhone(phone, org)
 		c.Assert(err, qt.IsNil)
 
-		submitted, err := parseVoterPhone(phone, org)
+		submitted, err := parseVoterPhone(context.Background(), phone, org)
 		c.Assert(err, qt.IsNil)
 		normalized, challengeType, err := handlePhoneContact(submitted, hashedPhone)
 		c.Assert(err, qt.IsNil)
@@ -73,7 +81,7 @@ func TestHandlePhoneContact(t *testing.T) {
 		c.Assert(challengeType, qt.Equals, notifications.SMSChallenge)
 
 		// another number, or none at all, fails with the same error as an unknown participant
-		other, err := parseVoterPhone("+34699999999", org)
+		other, err := parseVoterPhone(context.Background(), "+34699999999", org)
 		c.Assert(err, qt.IsNil)
 		_, _, err = handlePhoneContact(other, hashedPhone)
 		c.Assert(err, qt.ErrorIs, errors.ErrCSPAuthFailed)
