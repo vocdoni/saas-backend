@@ -510,15 +510,7 @@ func (ms *MongoStorage) MarkCSPProcessVotedOnChain(userID, processID internal.He
 	if userID == nil || processID == nil {
 		return ErrBadInputs
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-	if _, err := ms.cspTokensStatus.UpdateOne(ctx,
-		bson.M{"_id": cspAuthTokenStatusID(userID, processID)},
-		bson.M{"$set": bson.M{"votedonchain": true}},
-	); err != nil {
-		return fmt.Errorf("failed to mark CSP process voted on chain: %w", err)
-	}
-	return nil
+	return ms.markVotedOnChain(bson.M{"_id": cspAuthTokenStatusID(userID, processID)})
 }
 
 // MarkCSPProcessVotedOnChainByAddress caches that the vote cast by address on processID is on
@@ -530,13 +522,16 @@ func (ms *MongoStorage) MarkCSPProcessVotedOnChainByAddress(processID, address i
 	if len(processID) == 0 || len(address) == 0 {
 		return ErrBadInputs
 	}
+	return ms.markVotedOnChain(bson.M{"processid": processID, "consumedaddress": address})
+}
+
+// markVotedOnChain sets the votedonchain cache on the CSP process row filter matches. A filter that
+// matches no row has nothing to cache on, which is not an error.
+func (ms *MongoStorage) markVotedOnChain(filter bson.M) error {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	if _, err := ms.cspTokensStatus.UpdateOne(ctx,
-		bson.M{"processid": processID, "consumedaddress": address},
-		bson.M{"$set": bson.M{"votedonchain": true}},
-	); err != nil {
-		return fmt.Errorf("failed to mark CSP process voted on chain by address: %w", err)
+	if _, err := ms.cspTokensStatus.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"votedonchain": true}}); err != nil {
+		return fmt.Errorf("failed to mark CSP process voted on chain: %w", err)
 	}
 	return nil
 }

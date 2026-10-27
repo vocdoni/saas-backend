@@ -221,14 +221,15 @@ func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	statuses, err := a.resolveVoteStatuses(r.Context(), rows)
+	// the caller gave up waiting: nobody is left to read an answer, and its cancelled lookups are
+	// no node failure to log
+	if r.Context().Err() != nil {
+		return
+	}
 	if err != nil {
 		// a lookup failed: the affected questions are reported with hasVotedUnknown rather than
 		// failing the whole list, whose other data comes from the database
 		log.Warnw("vote status lookup failed", "processId", oid.Hex(), "error", err)
-	}
-	// the caller gave up waiting: nobody is left to read an answer
-	if r.Context().Err() != nil {
-		return
 	}
 	for _, p := range participants {
 		m, exists := membersByID[p.ParticipantID]
