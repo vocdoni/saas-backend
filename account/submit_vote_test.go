@@ -47,6 +47,11 @@ type fakeVoteNode struct {
 	minedOnPoll int
 	nullifier   string
 	voteOnChain bool
+	// otherBallot makes the vote on chain another tx than the relayed one; overwrites is its
+	// overwrite count; lookupFails answers every vote lookup with a 500.
+	otherBallot bool
+	overwrites  uint32
+	lookupFails bool
 
 	sendCount, pollCount, lookupCount int
 }
@@ -69,12 +74,22 @@ func (f *fakeVoteNode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(&api.TransactionReference{Height: 7})
 	case r.URL.Path == "/votes/"+f.nullifier:
 		f.lookupCount++
+		if f.lookupFails {
+			http.Error(w, "indexer unavailable", http.StatusInternalServerError)
+			return
+		}
 		if !f.voteOnChain {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
+		txHash, _ := hex.DecodeString(f.txHash)
+		if f.otherBallot {
+			other := sha256.Sum256([]byte("another-ballot"))
+			txHash = other[:]
+		}
+		overwrites := f.overwrites
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(&api.Vote{BlockHeight: 7})
+		_ = json.NewEncoder(w).Encode(&api.Vote{BlockHeight: 7, TxHash: txHash, OverwriteCount: &overwrites})
 	case r.URL.Path == "/chain/info" && f.serveInfo:
 		f.height++
 		w.Header().Set("Content-Type", "application/json")
@@ -108,6 +123,7 @@ func newFakeVoteNode(c *qt.C, node *fakeVoteNode) *Account {
 	c.Patch(&voteRetryCap, 40*time.Millisecond)
 	c.Patch(&voteRetryBudget, 2*time.Second)
 	c.Patch(&voteMinedTimeout, 200*time.Millisecond)
+	c.Patch(&voteIndexWait, 10*time.Millisecond)
 
 	// the trailing slash matters: see TestVoteByNullifier
 	client, err := apiclient.New(srv.URL + "/")
@@ -118,22 +134,49 @@ func newFakeVoteNode(c *qt.C, node *fakeVoteNode) *Account {
 	return &Account{client: client}
 }
 
-// AC1: a transport error, a 502 and a 504 are retried, and the send that succeeds is mined.
+// AC1: a transport error, a 502 and a 504 are retried, and the send that succeeds is mined and
+// metered as the nullifier's first vote.
 func TestSubmitVoteRetriesTransientErrors(t *testing.T) {
 	c := qt.New(t)
 	node := &fakeVoteNode{
 		sends:       []sendAnswer{answerTransport, answerStatus(502, ""), answerStatus(504, ""), answerOK},
 		minedOnPoll: 1,
+		voteOnChain: true,
 	}
 	a := newFakeVoteNode(c, node)
 
-	voteID, relayedBefore, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)
+	relay, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)
 	c.Assert(err, qt.IsNil)
-	c.Assert(relayedBefore, qt.IsFalse)
-	c.Assert(string(voteID), qt.Equals, "vote-id-from-node")
+	c.Assert(relay.FirstVote, qt.IsTrue)
+	c.Assert(string(relay.VoteID), qt.Equals, "vote-id-from-node")
 	sends, _, lookups := node.counts()
 	c.Assert(sends, qt.Equals, 4)
-	c.Assert(lookups, qt.Equals, 0)
+	c.Assert(lookups, qt.Equals, 1, qt.Commentf("the mined vote is read back to meter it"))
+}
+
+// An overwrite this call landed is a cast vote, but not a first one: it is not metered again.
+func TestSubmitVoteOverwriteNotFirst(t *testing.T) {
+	c := qt.New(t)
+	node := &fakeVoteNode{sends: []sendAnswer{answerOK}, minedOnPoll: 1, voteOnChain: true, overwrites: 1}
+	a := newFakeVoteNode(c, node)
+
+	relay, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)
+	c.Assert(err, qt.IsNil)
+	c.Assert(relay.FirstVote, qt.IsFalse)
+}
+
+// A mined tx is a cast vote even when the indexer cannot serve it yet: the job succeeds, and the
+// vote is not metered rather than metered on a guess.
+func TestSubmitVoteMinedButNotIndexed(t *testing.T) {
+	c := qt.New(t)
+	node := &fakeVoteNode{sends: []sendAnswer{answerOK}, minedOnPoll: 1, lookupFails: true}
+	a := newFakeVoteNode(c, node)
+
+	relay, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)
+	c.Assert(err, qt.IsNil)
+	c.Assert(relay.FirstVote, qt.IsFalse)
+	_, _, lookups := node.counts()
+	c.Assert(lookups, qt.Equals, voteIndexAttempts)
 }
 
 // AC2: a definitive error is not retried, and the failure is returned after one nullifier lookup.
@@ -142,7 +185,7 @@ func TestSubmitVoteDefinitiveErrorNotRetried(t *testing.T) {
 	node := &fakeVoteNode{sends: []sendAnswer{answerStatus(500, "vochain SendTx failed: invalid signature")}}
 	a := newFakeVoteNode(c, node)
 
-	_, _, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)
+	_, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)
 	c.Assert(err, qt.ErrorMatches, `(?s)could not submit vote tx: API error: 500 .*invalid signature.*`)
 	sends, polls, lookups := node.counts()
 	c.Assert(sends, qt.Equals, 1)
@@ -150,18 +193,17 @@ func TestSubmitVoteDefinitiveErrorNotRetried(t *testing.T) {
 	c.Assert(lookups, qt.Equals, 1)
 }
 
-// AC3: whatever made the send fail, a vote found on chain by its nullifier is a success. It is
-// reported as relayed before unless a send of this call was accepted (then the vote is ours,
-// only its mined wait timed out).
+// AC3: whatever made the send fail, the same tx found on chain by its nullifier is a success. It
+// is metered only when a send of this call is known to have been accepted.
 func TestSubmitVoteFoundByNullifier(t *testing.T) {
 	for _, tc := range []struct {
-		name          string
-		sends         []sendAnswer
-		relayedBefore bool
+		name      string
+		sends     []sendAnswer
+		firstVote bool
 	}{
-		{"definitive error", []sendAnswer{answerStatus(500, "overwrite count reached")}, true},
-		{"retry budget exhausted", []sendAnswer{answerStatus(502, "")}, true},
-		{"mined wait timed out", []sendAnswer{answerOK}, false},
+		{"definitive error", []sendAnswer{answerStatus(500, "vote already exists")}, false},
+		{"retry budget exhausted", []sendAnswer{answerStatus(502, "")}, false},
+		{"mined wait timed out", []sendAnswer{answerOK}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := qt.New(t)
@@ -169,37 +211,53 @@ func TestSubmitVoteFoundByNullifier(t *testing.T) {
 			a := newFakeVoteNode(c, node)
 			c.Patch(&voteRetryBudget, 100*time.Millisecond)
 
-			voteID, relayedBefore, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)
+			relay, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)
 			c.Assert(err, qt.IsNil)
-			c.Assert(relayedBefore, qt.Equals, tc.relayedBefore)
-			c.Assert(voteID, qt.DeepEquals, testVoteNullifier)
+			c.Assert(relay.FirstVote, qt.Equals, tc.firstVote)
+			c.Assert(relay.VoteID, qt.DeepEquals, testVoteNullifier)
 			_, _, lookups := node.counts()
 			c.Assert(lookups, qt.Equals, 1)
 		})
 	}
 }
 
+// A rejected ballot whose nullifier holds another vote (an earlier one, with this one refused as
+// an overwrite) is a failure: the job must not report a ballot the chain did not take.
+func TestSubmitVoteAnotherBallotOnChain(t *testing.T) {
+	c := qt.New(t)
+	node := &fakeVoteNode{
+		sends:       []sendAnswer{answerStatus(500, "vochain SendTx failed: overwrite count reached")},
+		voteOnChain: true,
+		otherBallot: true,
+	}
+	a := newFakeVoteNode(c, node)
+
+	_, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)
+	c.Assert(err, qt.ErrorMatches, `(?s)could not submit vote tx: .*overwrite count reached.*another vote under its nullifier.*`)
+}
+
 // "already exists in cache" on the very first send: someone relayed these bytes before this call.
-// The vote is waited for and confirmed, but not claimed (no double metering of a re-relay).
+// The vote is waited for and confirmed, but not metered (that relay landed it).
 func TestSubmitVoteInCacheOnFirstSend(t *testing.T) {
 	c := qt.New(t)
 	node := &fakeVoteNode{
 		sends:       []sendAnswer{answerStatus(500, "vochain SendTx failed: tx already exists in cache")},
 		minedOnPoll: 1,
+		voteOnChain: true,
 	}
 	a := newFakeVoteNode(c, node)
 
-	voteID, relayedBefore, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)
+	relay, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)
 	c.Assert(err, qt.IsNil)
-	c.Assert(relayedBefore, qt.IsTrue)
-	c.Assert(voteID, qt.DeepEquals, testVoteNullifier)
+	c.Assert(relay.FirstVote, qt.IsFalse)
+	c.Assert(relay.VoteID, qt.DeepEquals, testVoteNullifier)
 	sends, _, lookups := node.counts()
 	c.Assert(sends, qt.Equals, 1)
 	c.Assert(lookups, qt.Equals, 0)
 }
 
 // AC3b: a lost answer followed by "already exists in cache" means the first send was accepted:
-// SubmitVote waits for the locally computed tx hash, and sends nothing more.
+// SubmitVote waits for the locally computed tx hash, sends nothing more, and meters the vote.
 func TestSubmitVoteInCacheIsAccepted(t *testing.T) {
 	c := qt.New(t)
 	node := &fakeVoteNode{
@@ -209,19 +267,20 @@ func TestSubmitVoteInCacheIsAccepted(t *testing.T) {
 			answerOK, // must never be reached
 		},
 		minedOnPoll: 2,
+		voteOnChain: true,
 	}
 	a := newFakeVoteNode(c, node)
 	// the second poll comes one apiclient.PollInterval (5s) after the first
 	c.Patch(&voteMinedTimeout, 10*time.Second)
 
-	voteID, relayedBefore, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)
+	relay, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)
 	c.Assert(err, qt.IsNil)
-	c.Assert(relayedBefore, qt.IsFalse)
-	c.Assert(voteID, qt.DeepEquals, testVoteNullifier)
+	c.Assert(relay.FirstVote, qt.IsTrue)
+	c.Assert(relay.VoteID, qt.DeepEquals, testVoteNullifier)
 	sends, polls, lookups := node.counts()
 	c.Assert(sends, qt.Equals, 2)
 	c.Assert(polls, qt.Equals, 2)
-	c.Assert(lookups, qt.Equals, 0)
+	c.Assert(lookups, qt.Equals, 1)
 }
 
 // AC3c: a 503 has already been retried by dvote's client (apiclient.DefaultRetries sends, one
@@ -231,7 +290,7 @@ func TestSubmitVoteServiceUnavailableNotRetried(t *testing.T) {
 	node := &fakeVoteNode{sends: []sendAnswer{answerStatus(503, "mempool is full")}}
 	a := newFakeVoteNode(c, node)
 
-	_, _, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)
+	_, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)
 	c.Assert(err, qt.ErrorMatches, `could not submit vote tx: .*read on closed response body`)
 	sends, polls, lookups := node.counts()
 	c.Assert(sends, qt.Equals, apiclient.DefaultRetries)
@@ -247,13 +306,30 @@ func TestSubmitVoteBudgetExhausted(t *testing.T) {
 	a := newFakeVoteNode(c, node)
 	c.Patch(&voteRetryBudget, 150*time.Millisecond)
 
-	_, relayedBefore, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)
+	_, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)
 	c.Assert(err, qt.ErrorMatches, `(?s)could not submit vote tx: Post ".*/chain/transactions": .*EOF.*`)
-	c.Assert(relayedBefore, qt.IsFalse)
 	sends, polls, lookups := node.counts()
 	c.Assert(sends > 1, qt.IsTrue, qt.Commentf("sends: %d", sends))
 	c.Assert(polls > 0, qt.IsTrue, qt.Commentf("the ambiguous send must be waited for by hash"))
 	c.Assert(lookups, qt.Equals, 1)
+}
+
+// A connection that cannot even be opened is retried like any transport error, but proves the tx
+// never reached the node, so it is not waited for by hash; any other transport error may have.
+func TestSendNeverLeft(t *testing.T) {
+	c := qt.New(t)
+	srv := httptest.NewServer(http.NotFoundHandler())
+	closedURL := srv.URL
+	srv.Close()
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, closedURL, strings.NewReader("{}"))
+	c.Assert(err, qt.IsNil)
+	_, err = http.DefaultClient.Do(req)
+	c.Assert(err, qt.IsNotNil)
+	c.Assert(sendNeverLeft(err), qt.IsTrue, qt.Commentf("error: %v", err))
+	c.Assert(transientSendErr(err), qt.IsTrue)
+
+	c.Assert(sendNeverLeft(fmt.Errorf(`Post "http://node/chain/transactions": EOF`)), qt.IsFalse)
+	c.Assert(sendNeverLeft(fmt.Errorf("API error: 502 ()")), qt.IsFalse)
 }
 
 // sendTxStatus parses the status out of dvote's error string, and only out of it.
