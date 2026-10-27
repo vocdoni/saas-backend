@@ -1088,6 +1088,8 @@ definitions:
         type: boolean
       hasVoted:
         type: boolean
+      hasVotedUnknown:
+        type: boolean
       questionId:
         type: string
       upstreamId:
@@ -5341,7 +5343,8 @@ paths:
         matched member's per-question vote status: hasSigned when the CSP signed the member's
         ballot (the vote may not be on chain), hasVoted only when the vote is on chain. In an
         anonymous (blind) census hasVoted is always false and hasSigned is the only signal. When
-        the chain cannot be asked about a signed question the call fails with 500. For `phone`
+        the chain cannot be asked about a signed question, that question is reported with
+        hasVotedUnknown=true (and hasVoted=false) instead of failing the whole list. For `phone`
         pass the plaintext number; it is hashed server-side. Requires Manager/Admin of the
         owning organization.
 
@@ -5382,7 +5385,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
-          description: Internal server error or blockchain request failed
+          description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
         "503":
