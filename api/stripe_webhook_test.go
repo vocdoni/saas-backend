@@ -361,35 +361,43 @@ func TestStripeWebhook(t *testing.T) {
 			s := mockStripeInvoicePayment(orgAddress, date)
 			s.EffectiveAt = 0
 			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeInvoicePaymentSucceeded, s))
-			c.Assert(err, qt.ErrorMatches, ".* invoice missing effective date")
+			c.Assert(err, qt.ErrorMatches, ".*invoice .* missing effective date: permanently invalid webhook event")
+		}
+
+		{
+			// not a subscription invoice: ignored, not retried
+			s := mockStripeInvoicePayment(orgAddress, date)
+			s.Parent.SubscriptionDetails = nil
+			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeInvoicePaymentSucceeded, s))
+			c.Assert(err, qt.IsNil)
 		}
 
 		{
 			s := mockStripeInvoicePayment(orgAddress, date)
-			s.Parent.SubscriptionDetails = nil
+			s.Parent = nil
 			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeInvoicePaymentSucceeded, s))
-			c.Assert(err, qt.ErrorMatches, ".* invoice missing subscription details")
+			c.Assert(err, qt.IsNil)
 		}
 
 		{
 			s := mockStripeInvoicePayment(orgAddress, date)
 			s.Parent.SubscriptionDetails.Metadata["address"] = ""
 			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeInvoicePaymentSucceeded, s))
-			c.Assert(err, qt.ErrorMatches, ".* invoice missing address metadata")
+			c.Assert(err, qt.ErrorMatches, ".*invoice .* missing address metadata: permanently invalid webhook event")
 		}
 
 		{
 			s := mockStripeInvoicePayment(orgAddress, date)
 			s.Parent.SubscriptionDetails.Metadata["address"] = "0x00dead"
 			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeInvoicePaymentSucceeded, s))
-			c.Assert(err, qt.ErrorMatches, "organization .* not found for payment .*")
+			c.Assert(err, qt.ErrorMatches, "organization .* not found for payment .*: permanently invalid webhook event")
 		}
 
 		{
 			s := mockStripeInvoicePayment(orgAddress, date)
 			s.Status = stripeapi.InvoiceStatusOpen
 			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeInvoicePaymentSucceeded, s))
-			c.Assert(err, qt.ErrorMatches, ".*invoice is not paid")
+			c.Assert(err, qt.ErrorMatches, ".*invoice .* is not paid: permanently invalid webhook event")
 		}
 	})
 

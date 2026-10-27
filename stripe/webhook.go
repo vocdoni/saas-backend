@@ -251,6 +251,9 @@ func (s *Service) handleInvoicePayment(event *stripeapi.Event) error {
 	if err != nil {
 		return fmt.Errorf("failed to parse invoice from event: %w", err)
 	}
+	if invoiceInfo == nil {
+		return nil
+	}
 
 	// Use per-organization locking
 	unlock := s.lockManager.LockOrganization(invoiceInfo.OrgAddress)
@@ -259,8 +262,8 @@ func (s *Service) handleInvoicePayment(event *stripeapi.Event) error {
 	// Update last payment date
 	err = s.db.SetOrganizationLastPaymentDate(invoiceInfo.OrgAddress, invoiceInfo.PaymentTime)
 	if errors.Is(err, db.ErrNotFound) {
-		return fmt.Errorf("organization %s not found for payment %s: %w",
-			invoiceInfo.OrgAddress, invoiceInfo.ID, err)
+		return fmt.Errorf("organization %s not found for payment %s: %w: %w",
+			invoiceInfo.OrgAddress, invoiceInfo.ID, err, errPermanentEvent)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to update payment date for organization %s: %w",
@@ -302,10 +305,11 @@ func (s *Service) handleProductUpsert(event *stripeapi.Event) error {
 	// Webhook event payloads don't expand default_price, but isDefaultPlan reads
 	// product.DefaultPrice.Metadata. Re-fetch the product with default_price expanded
 	// (as the full sync does) so a product.updated event can't clear the Default flag.
-	product, err = s.client.GetProduct(product.ID)
+	expanded, err := s.client.GetProduct(product.ID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch product %s with expanded default price: %w", product.ID, err)
 	}
+	product = expanded
 
 	prices, err := s.client.GetProductPrices(product.ID)
 	if err != nil {
@@ -406,27 +410,29 @@ func newSubscriptionInfo(subscription *stripeapi.Subscription) (*SubscriptionInf
 	return subscriptionInfo, nil
 }
 
-// parseInvoiceFromEvent extracts invoice information from a webhook event
+// parseInvoiceFromEvent extracts invoice information from a webhook event, or nil for an invoice
+// that is not a subscription's (e.g. the receipt of a one-time payment).
 func parseInvoiceFromEvent(event *stripeapi.Event) (*InvoiceInfo, error) {
 	var invoice stripeapi.Invoice
 	if err := json.Unmarshal(event.Data.Raw, &invoice); err != nil {
-		return nil, fmt.Errorf("failed to parse invoice from event: %v", err)
+		return nil, fmt.Errorf("failed to parse invoice from event: %v: %w", err, errPermanentEvent)
+	}
+
+	// not a subscription invoice: nothing to record
+	if invoice.Parent == nil || invoice.Parent.SubscriptionDetails == nil {
+		return nil, nil
 	}
 
 	if invoice.EffectiveAt == 0 {
-		return nil, fmt.Errorf("invoice missing effective date")
-	}
-
-	if invoice.Parent.SubscriptionDetails == nil {
-		return nil, fmt.Errorf("invoice missing subscription details")
+		return nil, fmt.Errorf("invoice %s missing effective date: %w", invoice.ID, errPermanentEvent)
 	}
 	orgAddress := common.HexToAddress(invoice.Parent.SubscriptionDetails.Metadata["address"])
 	if orgAddress.Cmp(common.Address{}) == 0 {
-		return nil, fmt.Errorf("invoice missing address metadata")
+		return nil, fmt.Errorf("invoice %s missing address metadata: %w", invoice.ID, errPermanentEvent)
 	}
 
 	if invoice.Status != stripeapi.InvoiceStatusPaid {
-		return nil, fmt.Errorf("invoice is not paid")
+		return nil, fmt.Errorf("invoice %s is not paid: %w", invoice.ID, errPermanentEvent)
 	}
 
 	return &InvoiceInfo{
