@@ -79,7 +79,7 @@ func testNotification() *Notification {
 func TestIsPermanentSendError(t *testing.T) {
 	c := qt.New(t)
 
-	perm := &textproto.Error{Code: 550, Msg: "no such user"}
+	perm := &PermanentError{Err: &textproto.Error{Code: 550, Msg: "no such user"}}
 	transientProto := &textproto.Error{Code: 451, Msg: "try later"}
 	netErr := fmt.Errorf("dial tcp: connection refused")
 
@@ -89,11 +89,8 @@ func TestIsPermanentSendError(t *testing.T) {
 	c.Assert(IsPermanentSendError(netErr), qt.IsFalse)
 	// wrapped permanent stays permanent
 	c.Assert(IsPermanentSendError(fmt.Errorf("provider: %w", perm)), qt.IsTrue)
-	// 5xx boundary
-	c.Assert(IsPermanentSendError(&textproto.Error{Code: 500}), qt.IsTrue)
-	c.Assert(IsPermanentSendError(&textproto.Error{Code: 599}), qt.IsTrue)
-	c.Assert(IsPermanentSendError(&textproto.Error{Code: 499}), qt.IsFalse)
-	c.Assert(IsPermanentSendError(&textproto.Error{Code: 600}), qt.IsFalse)
+	// bare SMTP 5xx replies are only permanent once a provider wraps them
+	c.Assert(IsPermanentSendError(&textproto.Error{Code: 550}), qt.IsFalse)
 
 	// failover-style joined errors: permanent only when every branch is permanent
 	c.Assert(IsPermanentSendError(errors.Join(
@@ -253,7 +250,7 @@ func TestQueuePermanentFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	svc := &configurableSvc{sendErr: &textproto.Error{Code: 550, Msg: "no such user"}}
+	svc := &configurableSvc{sendErr: &PermanentError{Err: &textproto.Error{Code: 550, Msg: "no such user"}}}
 	q := NewQueue(ctx, QueueConfig{Workers: 1, MailService: svc})
 	q.Start()
 
@@ -326,7 +323,7 @@ func TestQueuePushWait(t *testing.T) {
 		Workers:     1,
 		MailService: &configurableSvc{},
 		// a permanent error makes the failing item give up immediately
-		SMSService: &configurableSvc{sendErr: &textproto.Error{Code: 550, Msg: "mailbox unavailable"}},
+		SMSService: &configurableSvc{sendErr: &PermanentError{Err: &textproto.Error{Code: 550, Msg: "mailbox unavailable"}}},
 	})
 	q.Start()
 

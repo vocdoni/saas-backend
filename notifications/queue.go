@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/textproto"
 	"time"
 
 	"github.com/enriquebris/goconcurrentqueue"
@@ -353,15 +352,8 @@ func (e *PermanentError) Error() string { return e.Err.Error() }
 // Unwrap returns the provider error.
 func (e *PermanentError) Unwrap() error { return e.Err }
 
-// IsPermanentSendError reports whether a send error is permanent (retrying
-// will never succeed). Permanent errors are SMTP 5xx replies and errors wrapped
-// in a PermanentError. Everything else (network timeouts, transient deferrals,
-// context cancellations) is treated as transient and will be retried up to the
-// queue's MaxRetries/TTL bounds.
-//
-// When delivery goes through a failover service the result is an errors.Join of
-// every provider's error. Such a joined error is only permanent if all branches
-// are permanent.
+// IsPermanentSendError reports whether a send error is wrapped in a PermanentError.
+// A failover service's joined error is only permanent if every branch is.
 func IsPermanentSendError(err error) bool {
 	if err == nil {
 		return false
@@ -379,12 +371,5 @@ func IsPermanentSendError(err error) bool {
 		return true
 	}
 	var permErr *PermanentError
-	if errors.As(err, &permErr) {
-		return true
-	}
-	var protoErr *textproto.Error
-	if errors.As(err, &protoErr) {
-		return protoErr.Code >= 500 && protoErr.Code < 600
-	}
-	return false
+	return errors.As(err, &permErr)
 }
