@@ -111,34 +111,9 @@ func (c *CSP) NewBlindRequest(token, processID, weight internal.HexBytes) (r, pi
 // together with the pinned weight it salted with, so the handler can report the weight actually
 // signed (its documented contract) rather than the live member weight.
 func (c *CSP) BlindSign(token, processID, blindedMsg internal.HexBytes) (signature, pinnedWeight internal.HexBytes, err error) {
-	authTokenData, err := c.Storage.CSPAuth(token)
+	claimed, err := c.claimBlindNonce(token, processID, blindedMsg)
 	if err != nil {
-		if errors.Is(err, db.ErrTokenNotFound) {
-			return nil, nil, ErrInvalidAuthToken
-		}
-		return nil, nil, errors.Join(ErrSign, err)
-	}
-	if !authTokenData.Verified {
-		return nil, nil, ErrAuthTokenNotVerified
-	}
-	// validate the blinded message against BlindSign's preconditions before claiming the nonce, so
-	// an invalid input never consumes the one-time nonce (which would strand the voter or, worse,
-	// force a same-nonce retry). N is the secp256k1 group order shared by go-blindsecp256k1.
-	m := new(big.Int).SetBytes(blindedMsg)
-	if m.Sign() == 0 || m.Cmp(ethcrypto.S256().Params().N) >= 0 || len(m.Bytes()) != blindScalarBytes {
-		return nil, nil, ErrInvalidBlindedMessage
-	}
-	// atomically claim the nonce: the returned document carries the k, R and weight to sign with.
-	claimed, err := c.Storage.ClaimCSPProcessBlind(authTokenData.UserID, processID, token)
-	if err != nil {
-		switch {
-		case errors.Is(err, db.ErrBlindNonceNotFound):
-			return nil, nil, ErrBlindRequestNotFound
-		case errors.Is(err, db.ErrProcessAlreadyConsumed):
-			return nil, nil, ErrProcessAlreadyConsumed
-		default:
-			return nil, nil, errors.Join(ErrSign, err)
-		}
+		return nil, nil, err
 	}
 	salt, err := saltedkey.V2Salt(processID, claimed.BlindWeight)
 	if err != nil {
@@ -147,12 +122,48 @@ func (c *CSP) BlindSign(token, processID, blindedMsg internal.HexBytes) (signatu
 	secretK := new(big.Int).SetBytes(claimed.BlindSecret)
 	sig, err := c.Signer.SignBlind(salt, blindedMsg, secretK)
 	if err != nil {
-		// unreachable given the pre-validation above; the nonce is already claimed (spent) so this
-		// is a hard failure, not a retry — log loudly rather than silently strand the slot.
+		// unreachable given the pre-validation in claimBlindNonce; the nonce is already claimed
+		// (spent) so this is a hard failure, not a retry — log loudly rather than silently
+		// strand the slot.
 		log.Errorw(errors.Join(ErrSign, err), "blind signature failed after claiming the nonce")
 		return nil, nil, errors.Join(ErrSign, err)
 	}
 	return sig, claimed.BlindWeight, nil
+}
+
+// claimBlindNonce runs the part of round 2 shared by every blind scheme. It checks the auth token,
+// validates the blinded message against BlindSign's preconditions — 0 < m' < N and exactly 32
+// bytes — before touching any state, so a malformed message never consumes the one-time nonce,
+// and then atomically claims the nonce armed in round 1. The returned document carries the nonce
+// k and the pinned weight to sign with.
+func (c *CSP) claimBlindNonce(token, processID, blindedMsg internal.HexBytes) (*db.CSPProcess, error) {
+	authTokenData, err := c.Storage.CSPAuth(token)
+	if err != nil {
+		if errors.Is(err, db.ErrTokenNotFound) {
+			return nil, ErrInvalidAuthToken
+		}
+		return nil, errors.Join(ErrSign, err)
+	}
+	if !authTokenData.Verified {
+		return nil, ErrAuthTokenNotVerified
+	}
+	// N is the secp256k1 group order shared by go-blindsecp256k1.
+	m := new(big.Int).SetBytes(blindedMsg)
+	if m.Sign() == 0 || m.Cmp(ethcrypto.S256().Params().N) >= 0 || len(m.Bytes()) != blindScalarBytes {
+		return nil, ErrInvalidBlindedMessage
+	}
+	claimed, err := c.Storage.ClaimCSPProcessBlind(authTokenData.UserID, processID, token)
+	if err != nil {
+		switch {
+		case errors.Is(err, db.ErrBlindNonceNotFound):
+			return nil, ErrBlindRequestNotFound
+		case errors.Is(err, db.ErrProcessAlreadyConsumed):
+			return nil, ErrProcessAlreadyConsumed
+		default:
+			return nil, errors.Join(ErrSign, err)
+		}
+	}
+	return claimed, nil
 }
 
 // prepareSaltedKeySigner method prepares the data for the Ethereum signer.

@@ -8,6 +8,7 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/csp/signers/electionkey"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/proto/build/go/models"
@@ -63,7 +64,7 @@ func TestProcessesEncryptionKeys(t *testing.T) {
 			EntityId:      orgAddress.Bytes(),
 			Duration:      120,
 			Status:        models.ProcessStatus_READY,
-			CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA,
+			CensusOrigin:  electionkey.OriginECDSA,
 			CensusRoot:    cspPubKey,
 			MaxCensusSize: 10,
 			EnvelopeType:  &models.EnvelopeType{EncryptedVotes: true},

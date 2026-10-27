@@ -6,13 +6,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/csp/signers/electionkey"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/api"
@@ -73,14 +76,16 @@ func BuildElectionMetadata(params *db.ElectionParams) ([]byte, error) {
 type NewProcessParams struct {
 	OrgAddress common.Address // organization (entity) that owns the election
 	Params     *db.ElectionParams
-	CensusRoot []byte // census root: the CSP ECDSA public key, or its blind public key when Anonymous
+	// CensusRoot is the census root of the election: the public key its CSP proofs are checked
+	// against.
+	CensusRoot []byte
 	CensusURI  string // census endpoint (SaaS CSP base URL)
-	// Anonymous selects blind CSP: the election is published with census origin OFF_CHAIN_CA_V2
-	// (the CSP blind-signs ballots so it cannot link a signature to the voter). CensusRoot must then
-	// be the CSP blind public key. This is unrelated to EnvelopeType.Anonymous (the zk-SNARK flag),
-	// which stays false — the Vochain routes both CA origins to the CSP verifier regardless of it.
-	Anonymous   bool
-	MetadataURL string // public https URL of the stored ElectionMetadata JSON
+	// CensusOrigin is the CSP census origin of the election: OFF_CHAIN_CA_V3_ECDSA or
+	// OFF_CHAIN_CA_V3_BLIND (electionkey.OriginECDSA, electionkey.OriginBlind) with a
+	// per-election key as CensusRoot, or one of the legacy OFF_CHAIN_CA and OFF_CHAIN_CA_V2. It is
+	// unrelated to EnvelopeType.Anonymous (the zk-SNARK flag).
+	CensusOrigin models.CensusOrigin
+	MetadataURL  string // public https URL of the stored ElectionMetadata JSON
 	// Nonce, when set, is used as the tx account nonce instead of reading the current
 	// on-chain nonce. Batch publishing sets explicit consecutive nonces so N txs can be
 	// signed and submitted together; single publishes leave it nil to read the nonce.
@@ -177,6 +182,28 @@ func electionStartDuration(startDate, endDate time.Time) (startTime, duration ui
 	return 0, uint32(d.Seconds()), nil
 }
 
+// isCSPCensusOrigin reports whether origin is a census origin whose proofs a CSP signs.
+func isCSPCensusOrigin(origin models.CensusOrigin) bool {
+	switch origin {
+	case models.CensusOrigin_OFF_CHAIN_CA, models.CensusOrigin_OFF_CHAIN_CA_V2,
+		electionkey.OriginECDSA, electionkey.OriginBlind:
+		return true
+	default:
+		return false
+	}
+}
+
+// EnvelopeType returns the on-chain envelope type of an election built from ep.
+func EnvelopeType(ep *db.ElectionParams) *models.EnvelopeType {
+	return &models.EnvelopeType{
+		Serial:         false,
+		Anonymous:      ep.ElectionType.Anonymous,
+		EncryptedVotes: ep.ElectionType.SecretUntilTheEnd,
+		UniqueValues:   ep.VoteType.UniqueChoices,
+		CostFromWeight: ep.VoteType.CostFromWeight,
+	}
+}
+
 // BuildNewProcessTx constructs an unsigned Tx_NewProcess from high-level election
 // params. It reads the organization account's current on-chain nonce, maps
 // ElectionParams into the on-chain models.Process using a CSP census, and always
@@ -207,12 +234,8 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 		return nil, err
 	}
 
-	// blind CSP publishes under the V2 origin (weight-binding salt); the plain ECDSA CSP stays on
-	// the legacy origin. Both are verified on-chain by the CSP verifier; the flag never touches
-	// EnvelopeType.Anonymous.
-	censusOrigin := models.CensusOrigin_OFF_CHAIN_CA
-	if p.Anonymous {
-		censusOrigin = models.CensusOrigin_OFF_CHAIN_CA_V2
+	if !isCSPCensusOrigin(p.CensusOrigin) {
+		return nil, fmt.Errorf("census origin %d is not a CSP census origin", p.CensusOrigin)
 	}
 
 	metadataURL := p.MetadataURL
@@ -221,17 +244,11 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 		Status:        initialStatus,
 		StartTime:     startTime,
 		Duration:      duration,
-		CensusOrigin:  censusOrigin,
+		CensusOrigin:  p.CensusOrigin,
 		CensusRoot:    p.CensusRoot,
 		MaxCensusSize: ep.MaxCensusSize,
 		Metadata:      &metadataURL,
-		EnvelopeType: &models.EnvelopeType{
-			Serial:         false,
-			Anonymous:      ep.ElectionType.Anonymous,
-			EncryptedVotes: ep.ElectionType.SecretUntilTheEnd,
-			UniqueValues:   ep.VoteType.UniqueChoices,
-			CostFromWeight: ep.VoteType.CostFromWeight,
-		},
+		EnvelopeType:  EnvelopeType(ep),
 		VoteOptions: &models.ProcessVoteOptions{
 			MaxCount:          ep.VoteType.MaxCount,
 			MaxValue:          ep.VoteType.MaxValue,
@@ -348,8 +365,8 @@ func (a *Account) Election(processID []byte) (*api.Election, error) {
 // via the vote package: the votes-list page carries the memo but not the package, so for each
 // memo-carrying vote we fetch the single vote (which the node decrypts at RESULTS) and keep the
 // memo only if selectsOpen reports its decoded values selected the open choice (the predicate
-// owns the ballot layout — see OpenChoiceMatcher). The node's votes-list endpoint returns an
-// empty page past the last one, which terminates the loop.
+// owns the ballot layout — see OpenChoiceMatcher). The loop stops at the page the node reports
+// as the last one.
 //
 // ponytail: pages the whole election and does one extra GET per memo-carrying vote (N+1); fine for the
 // manager-only memo resolution folded into the results reads. Add saas-side pagination / a bounded
@@ -357,18 +374,9 @@ func (a *Account) Election(processID []byte) (*api.Election, error) {
 func (a *Account) ElectionMemos(electionID []byte, selectsOpen func(votes []int) bool) ([]string, error) {
 	var memos []string
 	for page := 0; ; page++ {
-		resp, code, err := a.client.Request(http.MethodGet, nil,
-			"elections", internal.HexBytes(electionID).String(), "votes", "page", strconv.Itoa(page))
+		list, err := a.electionVotesPage(electionID, page)
 		if err != nil {
-			return nil, fmt.Errorf("could not fetch votes of election %x: %w", electionID, err)
-		}
-		if code != http.StatusOK {
-			return nil, fmt.Errorf("could not fetch votes of election %x: unexpected status %d (%s)",
-				electionID, code, resp)
-		}
-		var list api.VotesList
-		if err := json.Unmarshal(resp, &list); err != nil {
-			return nil, fmt.Errorf("could not decode votes of election %x: %w", electionID, err)
+			return nil, err
 		}
 		if len(list.Votes) == 0 {
 			return memos, nil
@@ -390,7 +398,48 @@ func (a *Account) ElectionMemos(electionID []byte, selectsOpen func(votes []int)
 				memos = append(memos, string(v.Memo))
 			}
 		}
+		if list.Pagination == nil || list.Pagination.NextPage == nil {
+			return memos, nil
+		}
 	}
+}
+
+// electionVotesPage fetches one page of the votes of an election, from GET
+// /votes?electionId={electionId}&page={page}.
+func (a *Account) electionVotesPage(electionID []byte, page int) (*api.VotesList, error) {
+	u, err := url.Parse(a.endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("could not parse vochain endpoint: %w", err)
+	}
+	u = u.JoinPath("votes")
+	u.RawQuery = url.Values{
+		"electionId": {internal.HexBytes(electionID).String()},
+		"page":       {strconv.Itoa(page)},
+	}.Encode()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("could not build votes request of election %x: %w", electionID, err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("could not fetch votes of election %x: %w", electionID, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("could not read votes of election %x: %w", electionID, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("could not fetch votes of election %x: unexpected status %d (%s)",
+			electionID, resp.StatusCode, body)
+	}
+	var list api.VotesList
+	if err := json.Unmarshal(body, &list); err != nil {
+		return nil, fmt.Errorf("could not decode votes of election %x: %w", electionID, err)
+	}
+	return &list, nil
 }
 
 // voteSelectedValues fetches a single vote by its id and returns the choice values it selected

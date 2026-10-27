@@ -2290,6 +2290,12 @@ definitions:
         example: deadbeef
         format: hex
         type: string
+      proofType:
+        description: |-
+          ProofType is the ProofCA.Type name of the proof to build with Signature (ECDSA or
+          ECDSA_PIDSALTED). Set with Signature.
+        example: ECDSA
+        type: string
       signature:
         example: deadbeef
         format: hex
@@ -2476,6 +2482,12 @@ definitions:
         type: string
       error:
         type: string
+      proofType:
+        description: |-
+          ProofType is the ProofCA.Type name of the proof to build with Signature: ECDSA,
+          ECDSA_PIDSALTED, ECDSA_BLIND or ECDSA_BLIND_PIDSALTED. Set with Signature.
+        example: ECDSA_BLIND
+        type: string
       signature:
         example: deadbeef
         format: hex
@@ -2486,6 +2498,18 @@ definitions:
         type: string
       weight:
         example: 2a
+        format: hex
+        type: string
+      weightCertificate:
+        example: deadbeef
+        format: hex
+        type: string
+      weightKey:
+        description: |-
+          WeightKey and WeightCertificate are set on a blind signature of an OFF_CHAIN_CA_V3_BLIND
+          election: the compressed public key that blind-signed the ballot, and the 65-byte certificate
+          of that key for this election and weight. The client puts both in ProofCA.weightCertificate.
+        example: 02a1b2
         format: hex
         type: string
     type: object

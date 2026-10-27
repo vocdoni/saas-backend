@@ -12,11 +12,13 @@ import (
 	blind "github.com/vocdoni/go-blindsecp256k1"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp/handlers"
+	"github.com/vocdoni/saas-backend/csp/signers/electionkey"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/types"
 	"go.vocdoni.io/proto/build/go/models"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -30,12 +32,36 @@ func requestBlindPoint(t *testing.T, pid string, tok, election internal.HexBytes
 	return point.Points[0]
 }
 
-// testBlindSignBallot drives the two-round blind CSP flow for one election and returns the on-chain
-// ProofCA the voter casts. It retries the ~1/256 case where the client's blinded message is not a
+// setWeightCertificate sets ProofCA.weightCertificate (field 4, a CAWeightCertificate with weightKey
+// = 1 and signature = 2). The protobuf release this module pins predates the field, so it is
+// encoded by hand as an unknown field, which the protobuf runtime marshals as is.
+func setWeightCertificate(p *models.ProofCA, weightKey, signature []byte) {
+	var cert []byte
+	cert = protowire.AppendTag(cert, 1, protowire.BytesType)
+	cert = protowire.AppendBytes(cert, weightKey)
+	cert = protowire.AppendTag(cert, 2, protowire.BytesType)
+	cert = protowire.AppendBytes(cert, signature)
+	var field []byte
+	field = protowire.AppendTag(field, 4, protowire.BytesType)
+	field = protowire.AppendBytes(field, cert)
+	p.ProtoReflect().SetUnknown(field)
+}
+
+// testBlindSignBallot drives the two-round blind CSP flow for one OFF_CHAIN_CA_V3_BLIND election and
+// returns the on-chain proof the voter casts.
+func testBlindSignBallot(t *testing.T, pid string, tok, election, voterAddr internal.HexBytes) *models.Proof {
+	t.Helper()
+	return testBlindSignProof(t, pid, tok, election, voterAddr, models.ProofCA_ECDSA_BLIND)
+}
+
+// testBlindSignProof drives the two-round blind CSP flow for one election, asserts the CSP names
+// wantType as the proof type (with a weight certificate exactly when it is ECDSA_BLIND), and returns
+// the on-chain proof the voter casts. It retries the ~1/256 case where the client's blinded message is not a
 // valid blind-signature input (the CSP returns invalid_blinded_message without consuming the nonce,
 // and blind-point is idempotent, so the same R is reused). The voter blinds hash(CAbundle) exactly
 // as the Vochain verifier re-derives it (blind.Verify over HashRaw(marshal(bundle))).
-func testBlindSignBallot(t *testing.T, pid string, tok, election, voterAddr internal.HexBytes) *models.Proof {
+func testBlindSignProof(t *testing.T, pid string, tok, election, voterAddr internal.HexBytes, wantType models.ProofCA_Type,
+) *models.Proof {
 	t.Helper()
 	c := qt.New(t)
 	for range 40 {
@@ -66,22 +92,33 @@ func testBlindSignBallot(t *testing.T, pid string, tok, election, voterAddr inte
 			continue // re-blind against the same (idempotent) R
 		}
 		c.Assert(res.Code, qt.Equals, "", qt.Commentf("blind-sign error: %s", res.Error))
+		c.Assert(res.ProofType, qt.Equals, wantType.String())
 		signature, err := blind.Unblind(new(big.Int).SetBytes(res.Signature), userSecretData)
 		c.Assert(err, qt.IsNil)
-		return &models.Proof{Payload: &models.Proof_Ca{Ca: &models.ProofCA{
-			Type:      models.ProofCA_ECDSA_BLIND_PIDSALTED,
+		proofCA := &models.ProofCA{
+			Type:      wantType,
 			Signature: signature.BytesUncompressed(),
 			Bundle:    bundle,
-		}}}
+		}
+		if wantType == models.ProofCA_ECDSA_BLIND {
+			c.Assert(res.WeightKey, qt.HasLen, 33)
+			c.Assert(res.WeightCertificate, qt.HasLen, 65)
+			setWeightCertificate(proofCA, res.WeightKey, res.WeightCertificate)
+		} else {
+			c.Assert(res.WeightKey, qt.HasLen, 0)
+			c.Assert(res.WeightCertificate, qt.HasLen, 0)
+		}
+		return &models.Proof{Payload: &models.Proof_Ca{Ca: proofCA}}
 	}
 	c.Fatalf("blind sign did not produce a valid signature within the retry budget")
 	return nil
 }
 
-// TestProcessBlindCSP exercises the blind (anonymous, OFF_CHAIN_CA_V2) CSP flow end to end: an
-// anonymous process publishes with the V2 origin, the plain ECDSA sign endpoints are rejected, a
-// voter completes the two-round blind protocol and casts an unlinkable vote on chain, the election
-// is single-use, and sign-info omits the address/nullifier the CSP never learns.
+// TestProcessBlindCSP exercises the blind (anonymous, OFF_CHAIN_CA_V3_BLIND) CSP flow end to end:
+// an anonymous process publishes with the per-election blind origin, the plain ECDSA sign
+// endpoints are rejected, a voter completes the two-round blind protocol and casts an unlinkable
+// vote on chain, the election is single-use, sign-info omits the address/nullifier the CSP never
+// learns, and a blind vote with its weight certificate relayed through POST /vote is counted.
 func TestProcessBlindCSP(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
@@ -119,13 +156,16 @@ func TestProcessBlindCSP(t *testing.T) {
 		"processes", pid, "questions", qid)
 	c.Assert(pubQ.Census.Anonymous, qt.IsTrue)
 
-	// the election is published under the V2 census origin
+	// the election is published under the per-election blind census origin, with the question's
+	// election blind key as census root
 	vc := testNewVocdoniClient(t)
 	onchain, err := vc.Election(types.HexBytes(election))
 	c.Assert(err, qt.IsNil)
 	c.Assert(onchain.Census, qt.Not(qt.IsNil))
-	c.Assert(onchain.Census.CensusOrigin, qt.Equals,
-		models.CensusOrigin_name[int32(models.CensusOrigin_OFF_CHAIN_CA_V2)])
+	c.Assert(onchain.Census.CensusOrigin, qt.Equals, electionkey.OriginBlindName)
+	_, wantRoot, err := testCSP.ElectionCensus(got.Questions[0].ID, true)
+	c.Assert(err, qt.IsNil)
+	c.Assert([]byte(onchain.Census.CensusRoot), qt.DeepEquals, []byte(wantRoot))
 
 	tok := authProcessCSP(t, pid, &handlers.AuthRequest{
 		Name: voterMember.Name, Surname: voterMember.Surname, Email: voterMember.Email,
@@ -180,6 +220,22 @@ func TestProcessBlindCSP(t *testing.T) {
 	c.Assert(signInfo.Consumed, qt.HasLen, 1)
 	c.Assert(signInfo.Consumed[0].Address, qt.HasLen, 0)
 	c.Assert(signInfo.Consumed[0].Nullifier, qt.HasLen, 0)
+
+	// a second voter (weight 1) relays a "No" through POST /vote: the relay forwards the voter's
+	// signed bytes, so the weight certificate, unknown to the protobuf release this module pins,
+	// reaches the chain intact and the vote is counted.
+	relayMember := members[0]
+	relayTok := authProcessCSP(t, pid, &handlers.AuthRequest{
+		Name: relayMember.Name, Surname: relayMember.Surname, Email: relayMember.Email,
+	})
+	relayVoter := ethereum.SignKeys{}
+	c.Assert(relayVoter.Generate(), qt.IsNil)
+	relayProof := testBlindSignBallot(t, pid, relayTok, election, relayVoter.Address().Bytes())
+	c.Assert(relayProof.GetCa().ProtoReflect().GetUnknown(), qt.Not(qt.HasLen), 0)
+	relayNullifier := testRelayVoteRequest(t, &relayVoter, election, relayProof, []byte(`{"votes":[1]}`), nil)
+	c.Assert(relayNullifier, qt.Not(qt.HasLen), 0)
+	relayed := pollBlindResults(t, pid, [][]string{{"2", "1"}})
+	c.Assert(relayed.VoteCount, qt.Equals, uint64(2))
 }
 
 // TestProcessBlindCSPWeightPin is the regression test for the round-1 weight pin: it arms a blind

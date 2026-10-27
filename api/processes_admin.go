@@ -764,6 +764,23 @@ func (a *API) enqueueSetProcessCensus(orgAddress common.Address, targets []censu
 	return jobID, nil
 }
 
+// questionCensusRoot returns the census root of a published question's election: its own root
+// when it uses a per-election CSP key, otherwise the CSP root public key the legacy origins publish
+// (the blind one for an anonymous census).
+func (a *API) questionCensusRoot(q *db.VotingProcessQuestion, census *db.Census) ([]byte, error) {
+	if len(q.CensusRoot) > 0 {
+		return q.CensusRoot, nil
+	}
+	root, err := a.csp.PubKey()
+	if census.Anonymous {
+		root, err = a.csp.BlindPubKey()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("could not get the CSP public key: %w", err)
+	}
+	return root, nil
+}
+
 // setProcessCensusSizes submits one SET_PROCESS_CENSUS tx per target, skipping the elections that
 // already have the room: a resize that waited for the organization lock may have been overtaken by
 // a larger one, and the chain refuses a shrink.
@@ -773,9 +790,12 @@ func (a *API) setProcessCensusSizes(orgSigner *ethereum.SignKeys, targets []cens
 		if current, err := a.electionMaxCensusSize(&t.question); err == nil && t.size <= current {
 			continue
 		}
+		root, err := a.questionCensusRoot(&t.question, t.census)
+		if err != nil {
+			return nil, err
+		}
 		tx, err := a.account.BuildSetProcessCensusTx(
-			orgSigner.Address(), t.question.UpstreamID,
-			t.census.Published.Root, t.census.Published.URI, t.size,
+			orgSigner.Address(), t.question.UpstreamID, root, t.census.Published.URI, t.size,
 		)
 		if err != nil {
 			return nil, err

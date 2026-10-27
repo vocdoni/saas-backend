@@ -4,11 +4,14 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"math/big"
 	"sync"
 	"time"
 
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
+	blind "github.com/vocdoni/go-blindsecp256k1"
 	"github.com/vocdoni/saas-backend/csp/notifications"
+	"github.com/vocdoni/saas-backend/csp/signers/electionkey"
 	"github.com/vocdoni/saas-backend/csp/signers/saltedkey"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
@@ -98,7 +101,10 @@ type Config struct {
 // notification queue and the per-user notification cooldown time.
 type CSP struct {
 	PasswordSalt string
-	Signer       *saltedkey.SaltedKey
+	// Signer signs questions published on the legacy CSP origins, with keys salted from the root
+	// key. Questions on the per-election origins are signed with electionKeys instead.
+	Signer       SaltedSigner
+	electionKeys *electionkey.Root
 	Storage      *db.MongoStorage
 	signerLock   sync.Map
 	notifyQueue  *notifications.Queue
@@ -121,6 +127,10 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 	s, err := saltedkey.NewSaltedKey(config.RootKey.String())
 	if err != nil {
 		return nil, err
+	}
+	electionKeys, err := electionkey.NewRoot(config.RootKey)
+	if err != nil {
+		return nil, fmt.Errorf("invalid CSP root key: %w", err)
 	}
 	queue := notifications.NewQueue(ctx, notifications.QueueConfig{
 		TTL:                config.NotificationQueueTTL,
@@ -176,6 +186,7 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 	return &CSP{
 		Storage:                  config.DB,
 		Signer:                   s,
+		electionKeys:             electionKeys,
 		notifyQueue:              queue,
 		ctx:                      ctx,
 		notificationCoolDownTime: notificationCoolDownTime,
@@ -184,6 +195,16 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 		maxHourlyAuthFailures:    maxHourlyAuthFailures,
 		notifySync:               config.SyncDelivery,
 	}, nil
+}
+
+// SaltedSigner signs with keys salted from the CSP root key: the signing schemes of the legacy
+// OFF_CHAIN_CA (ECDSA, process id salt) and OFF_CHAIN_CA_V2 (blind, process id and weight salt)
+// census origins. saltedkey.SaltedKey implements it.
+type SaltedSigner interface {
+	SignECDSA(salt [saltedkey.SaltSize]byte, msg []byte) ([]byte, error)
+	SignBlind(salt [saltedkey.SaltSize]byte, msgBlinded []byte, secretK *big.Int) ([]byte, error)
+	ECDSAPubKey() (*ecdsa.PublicKey, error)
+	BlindPubKey() *blind.PublicKey
 }
 
 // pushChallenge enqueues a notification challenge. In synchronous-delivery mode

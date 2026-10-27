@@ -71,4 +71,8 @@ var (
 	// blind-signature input (zero, not below the curve order, or not 32 bytes). It is a client
 	// input error checked before the nonce is claimed, so the round-1 nonce stays armed for a retry.
 	ErrInvalidBlindedMessage = fmt.Errorf("invalid blinded message")
+	// ErrInvalidWeight is returned by round 1 of an OFF_CHAIN_CA_V3_BLIND election when the weight
+	// cannot be certified (zero, or wider than 32 bytes). No nonce is armed for it, so round 2 never
+	// claims a nonce it cannot sign.
+	ErrInvalidWeight = fmt.Errorf("invalid weight for a per-election blind signature")
 )

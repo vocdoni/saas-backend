@@ -173,13 +173,13 @@ func TestRelayVote(t *testing.T) {
 	proof := f.proofFor(t, processID)
 
 	// relay the vote and assert the chain counted it
-	votesBefore, err := f.client.ElectionVoteCount(processID.Bytes())
+	votesBefore, err := electionVoteCount(f.client, processID)
 	c.Assert(err, qt.IsNil)
 
 	nullifier := testRelayVoteRequest(t, f.voter, processID, proof, []byte("[\"1\"]"), nil)
 	c.Assert(nullifier, qt.Not(qt.HasLen), 0)
 
-	votesAfter, err := f.client.ElectionVoteCount(processID.Bytes())
+	votesAfter, err := electionVoteCount(f.client, processID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(votesAfter, qt.Equals, votesBefore+1, qt.Commentf("expected 1 more vote, got %d", votesAfter))
 
@@ -237,10 +237,10 @@ func TestRelayVotesBatch(t *testing.T) {
 	f := setupRelayVoting(t, questions)
 
 	req := &apicommon.RelayVotesRequest{Votes: make([]apicommon.RelayVoteRequest, questions)}
-	votesBefore := make([]uint32, questions)
+	votesBefore := make([]uint64, questions)
 	for i, processID := range f.processIDs {
 		var err error
-		votesBefore[i], err = f.client.ElectionVoteCount(processID.Bytes())
+		votesBefore[i], err = electionVoteCount(f.client, processID)
 		c.Assert(err, qt.IsNil)
 		proof := f.proofFor(t, processID)
 		req.Votes[i] = apicommon.RelayVoteRequest{
@@ -278,7 +278,7 @@ func TestRelayVotesBatch(t *testing.T) {
 
 	// every question got its vote, and every relayed envelope was metered
 	for i, processID := range f.processIDs {
-		votesAfter, err := f.client.ElectionVoteCount(processID.Bytes())
+		votesAfter, err := electionVoteCount(f.client, processID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(votesAfter, qt.Equals, votesBefore[i]+1, qt.Commentf("process %d was not voted", i))
 	}

@@ -361,17 +361,10 @@ func (a *API) startProcessPublish(ctx context.Context, t publishTarget) (string,
 	if err != nil {
 		return "", errors.ErrGenericInternalServerError.Withf("could not restore organization signer: %v", err)
 	}
-	// root = CSP public key; the on-chain census authorization is delegated to the CSP for every
-	// question. A blind (anonymous) census publishes the CSP blind public key instead, so the
-	// Vochain verifies each ballot's blind ECDSA proof against it under census origin OFF_CHAIN_CA_V2.
-	cspPubKey, err := a.csp.PubKey()
-	if census.Anonymous {
-		cspPubKey, err = a.csp.BlindPubKey()
-	}
-	if err != nil {
-		return "", errors.ErrGenericInternalServerError.Withf("could not get csp public key: %v", err)
-	}
-	census.Published = db.PublishedCensus{Root: cspPubKey, URI: a.serverURL, CreatedAt: time.Now()}
+	// the on-chain census authorization is delegated to the CSP for every question. Each question's
+	// election has its own census root, a per-election CSP key (see assignCensus), so the census
+	// records only where the CSP is served and leaves Root empty.
+	census.Published = db.PublishedCensus{URI: a.serverURL, CreatedAt: time.Now()}
 	if _, err := a.db.SetCensus(census); err != nil {
 		return "", fmt.Errorf("failed to publish census: %w", err)
 	}
@@ -400,7 +393,7 @@ func (a *API) startProcessPublish(ctx context.Context, t publishTarget) (string,
 	reserved := managedReserved
 	worker := &publishWorker{
 		a: a, vp: vp, questions: questions, census: census, org: org, user: user,
-		orgSigner: orgSigner, cspPubKey: cspPubKey, integratorAddr: integratorAddr,
+		orgSigner: orgSigner, integratorAddr: integratorAddr,
 		reserved: reserved, nonTestSized: nonTestSized, owner: owner,
 		minedUnpersisted: make(map[bson.ObjectID]internal.HexBytes),
 	}
@@ -430,7 +423,6 @@ type publishWorker struct {
 	org            *db.Organization
 	user           *db.User
 	orgSigner      *ethereum.SignKeys
-	cspPubKey      []byte
 	integratorAddr common.Address
 	reserved       bool
 	nonTestSized   bool
@@ -443,6 +435,13 @@ type publishWorker struct {
 	// (the election already exists — resubmitting would mint a duplicate); only the DB write is
 	// retried, until it succeeds or the attempt is abandoned.
 	minedUnpersisted map[bson.ObjectID]internal.HexBytes
+	// knownElectionIndex is the organization's election index that the elections this worker saw
+	// mine account for. A higher on-chain index means an election mined unseen (a lost batch
+	// response, or a tx that mined after its confirmation timed out); adoptOrphanElections finds it
+	// before anything is submitted again.
+	knownElectionIndex uint32
+	// electionIndexRead is set once knownElectionIndex holds the index read at the start of run.
+	electionIndexRead bool
 }
 
 // renewClaim refreshes the publish claim every PublishStaleAfter/3 until stop is closed, so a
@@ -497,7 +496,10 @@ func (pw *publishWorker) persistPublished(q *db.VotingProcessQuestion, upstreamI
 		if err = pw.a.db.MarkVotingProcessMined(pw.vp.ID); err != nil {
 			continue
 		}
-		if err = pw.a.db.SetQuestionPublished(q.ID, upstreamID, q.MetadataURL, initialStatus); err == nil {
+		if err = pw.a.db.SetQuestionPublished(db.QuestionPublishedParams{
+			ID: q.ID, UpstreamID: upstreamID, MetadataURL: q.MetadataURL, Status: initialStatus,
+			CensusOrigin: q.CensusOrigin, CensusRoot: q.CensusRoot,
+		}); err == nil {
 			q.UpstreamID = upstreamID
 			delete(pw.minedUnpersisted, q.ID)
 			return true
@@ -549,6 +551,7 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 		return nil, err
 	}
 	confirmed := false
+	orphanRounds := 0
 	for round := 0; round < maxPublishRounds && !confirmed; round++ {
 		// a worker that no longer owns the publish claim must stop before submitting anything:
 		// someone else has taken the process over, and both submitting would mint duplicate
@@ -560,25 +563,41 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 			}
 			return nil, fmt.Errorf("publish claim lost to another publish, stopping")
 		}
+		if !pw.electionIndexRead {
+			if err := pw.initElectionIndex(); err != nil {
+				pw.abandon()
+				return nil, err
+			}
+		}
 		// first retry any chain-confirmed election whose DB write is still pending: it must
 		// never be resubmitted, only re-persisted.
 		pw.flushMinedUnpersisted()
-		pending := make([]*db.VotingProcessQuestion, 0, len(pw.questions))
-		for i := range pw.questions {
-			q := &pw.questions[i]
-			if _, mined := pw.minedUnpersisted[q.ID]; mined {
-				continue // already on chain, only the DB write is pending
-			}
-			if len(q.UpstreamID) == 0 {
-				pending = append(pending, q)
-			}
-		}
+		pending := pw.pendingQuestions()
 		if len(pending) == 0 {
 			// everything is on chain; confirmed only once every row is persisted too
 			confirmed = pw.flushMinedUnpersisted()
-			if confirmed {
-				break
+			continue
+		}
+		// attribute any election that mined unseen; until the organization's elections are accounted
+		// for, building could mint a second election for a question that already has one.
+		if attributed, err := pw.adoptOrphanElections(); err != nil || !attributed {
+			orphanRounds++
+			if orphanRounds < maxOrphanRounds {
+				log.Warnw("organization elections not attributed yet, not submitting this round",
+					"processId", pw.vp.ID.Hex(), "error", err)
+				time.Sleep(orphanElectionWait)
+				continue
 			}
+			// the unattributed elections match no pending question root, so they cannot be
+			// duplicates of ours (per-question roots are unique); proceed. Even if one were a
+			// not-yet-served duplicate, a duplicate is harmless for authorization (each signature
+			// binds its processId) — see the spec's partial-publish failure mode.
+			log.Warnw("proceeding with unattributed organization elections",
+				"processId", pw.vp.ID.Hex(), "error", err)
+		}
+		pending = pw.pendingQuestions() // adoption may have recorded some
+		if len(pending) == 0 {
+			confirmed = pw.flushMinedUnpersisted()
 			continue
 		}
 		startNonce, err := a.account.AccountNonce(pw.vp.OrgAddress)
@@ -680,6 +699,12 @@ func (pw *publishWorker) confirmClaim() (bool, error) {
 // and reserves its own slot.
 func (pw *publishWorker) abandon() {
 	a := pw.a
+	// an election that mined unseen must be recorded before the questions are reset, or a later
+	// publish would create a second one for its question.
+	if attributed, err := pw.adoptOrphanElections(); err != nil || !attributed {
+		log.Errorw(fmt.Errorf("unattributed organization elections at abandon: %v", err),
+			fmt.Sprintf("process %s may have on-chain elections it does not record", pw.vp.ID.Hex()))
+	}
 	// last chance to persist elections that mined but whose DB write kept failing: losing the
 	// pair here means a later resume cannot know the election exists and will mint a new one.
 	if !pw.flushMinedUnpersisted() {
@@ -747,12 +772,16 @@ func (pw *publishWorker) buildBatch(
 		}
 		q.MetadataURL = a.objectStorage.LocalURL(objectName)
 		nonce := startNonce + uint32(i)
+		origin, err := pw.assignCensus(q)
+		if err != nil {
+			return nil, false, err
+		}
 		tx, err := a.account.BuildNewProcessTx(&account.NewProcessParams{
 			OrgAddress:    pw.vp.OrgAddress,
 			Params:        ep,
-			CensusRoot:    pw.cspPubKey,
+			CensusRoot:    q.CensusRoot,
 			CensusURI:     a.serverURL,
-			Anonymous:     pw.census.Anonymous,
+			CensusOrigin:  origin,
 			MetadataURL:   q.MetadataURL,
 			Nonce:         &nonce,
 			InitialStatus: initialStatus,
@@ -808,6 +837,7 @@ func (pw *publishWorker) confirmBatch(pending []*db.VotingProcessQuestion, resul
 			allConfirmed = false
 			continue
 		}
+		pw.knownElectionIndex++
 		// the election is confirmed on chain: record it in memory first (minedUnpersisted),
 		// then persist. If the DB write keeps failing the question is NOT retried as a new
 		// submission — the next rounds only retry the write — or every DB hiccup after a

@@ -854,7 +854,16 @@ type VotingProcessQuestion struct {
 	UpstreamID        internal.HexBytes `json:"upstreamId,omitempty" bson:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	MetadataURL       string            `json:"-" bson:"metadataURL,omitempty"`
 	Status            string            `json:"status,omitempty" bson:"status,omitempty"`
-	SyncedAt          time.Time         `json:"-" bson:"syncedAt,omitempty"`
+	// CensusOrigin is the census origin name of this question's election when it uses a
+	// per-election CSP key (OFF_CHAIN_CA_V3_ECDSA or OFF_CHAIN_CA_V3_BLIND); the CSP picks the
+	// signing scheme from it. Empty for a question published on a legacy CSP origin, which is
+	// signed with the salted root key.
+	CensusOrigin string `json:"-" bson:"censusOrigin,omitempty"`
+	// CensusRoot is the census root of this question's election when CensusOrigin is set: the
+	// compressed public key of its per-election CSP key. Empty for a legacy question, whose root
+	// is the census's Published.Root.
+	CensusRoot internal.HexBytes `json:"-" bson:"censusRoot,omitempty"`
+	SyncedAt   time.Time         `json:"-" bson:"syncedAt,omitempty"`
 	// EndedAt is the actual on-chain moment this question's election stopped accepting votes,
 	// set only when the vote was ended early (before its scheduled end, i.e. ManuallyEnded on
 	// the chain). Absent while the vote is open or when it ran to its scheduled end. Recorded by

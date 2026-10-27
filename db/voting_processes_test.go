@@ -52,7 +52,9 @@ func TestVotingProcessCRUD(t *testing.T) {
 
 	// publish one question, reverse lookup, then reset
 	upstream := internal.HexBytes("election-1")
-	c.Assert(testDB.SetQuestionPublished(q1ID, upstream, "url", QuestionStatusReady), qt.IsNil)
+	c.Assert(testDB.SetQuestionPublished(QuestionPublishedParams{
+		ID: q1ID, UpstreamID: upstream, MetadataURL: "url", Status: QuestionStatusReady,
+	}), qt.IsNil)
 	byUp, err := testDB.QuestionByUpstreamID(upstream)
 	c.Assert(err, qt.IsNil)
 	c.Assert(byUp.ID, qt.Equals, q1ID)
@@ -411,7 +413,9 @@ func TestServedUpstreamIDs(t *testing.T) {
 	_, err = testDB.SetQuestion(&VotingProcessQuestion{ProcessID: id, OrgAddress: org, Order: 1, Type: VotingTypeSingleChoice})
 	c.Assert(err, qt.IsNil)
 	served := internal.HexBytes("served-election")
-	c.Assert(testDB.SetQuestionPublished(qID, served, "url", QuestionStatusReady), qt.IsNil)
+	c.Assert(testDB.SetQuestionPublished(QuestionPublishedParams{
+		ID: qID, UpstreamID: served, MetadataURL: "url", Status: QuestionStatusReady,
+	}), qt.IsNil)
 
 	got, err := testDB.ServedUpstreamIDs([]internal.HexBytes{served, internal.HexBytes("orphan-election")})
 	c.Assert(err, qt.IsNil)
@@ -420,6 +424,48 @@ func TestServedUpstreamIDs(t *testing.T) {
 	got, err = testDB.ServedUpstreamIDs(nil)
 	c.Assert(err, qt.IsNil)
 	c.Assert(got, qt.HasLen, 0)
+}
+
+// TestSetQuestionPublishedCensusOrigin checks that a question published on a per-election census
+// origin stores the origin and root, a legacy one stores neither, and an origin without a root (or
+// the reverse) is refused.
+func TestSetQuestionPublishedCensusOrigin(t *testing.T) {
+	c := qt.New(t)
+	org := common.Address{0x13}
+	setupVotingProcessOrg(c, org)
+	id, err := testDB.SetVotingProcess(&VotingProcess{OrgAddress: org})
+	c.Assert(err, qt.IsNil)
+	v3ID, err := testDB.SetQuestion(&VotingProcessQuestion{ProcessID: id, OrgAddress: org, Type: VotingTypeSingleChoice})
+	c.Assert(err, qt.IsNil)
+	legacyID, err := testDB.SetQuestion(&VotingProcessQuestion{
+		ProcessID: id, OrgAddress: org, Order: 1, Type: VotingTypeSingleChoice,
+	})
+	c.Assert(err, qt.IsNil)
+	root := internal.HexBytes{0x02, 0x01, 0x02, 0x03}
+
+	c.Assert(testDB.SetQuestionPublished(QuestionPublishedParams{
+		ID: v3ID, UpstreamID: internal.HexBytes("v3-election"), MetadataURL: "url", Status: QuestionStatusReady,
+		CensusOrigin: "OFF_CHAIN_CA_V3_ECDSA", CensusRoot: root,
+	}), qt.IsNil)
+	got, err := testDB.Question(v3ID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.CensusOrigin, qt.Equals, "OFF_CHAIN_CA_V3_ECDSA")
+	c.Assert(got.CensusRoot, qt.DeepEquals, root)
+
+	c.Assert(testDB.SetQuestionPublished(QuestionPublishedParams{
+		ID: legacyID, UpstreamID: internal.HexBytes("legacy-election"), MetadataURL: "url", Status: QuestionStatusReady,
+	}), qt.IsNil)
+	got, err = testDB.Question(legacyID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.CensusOrigin, qt.Equals, "")
+	c.Assert(got.CensusRoot, qt.HasLen, 0)
+
+	c.Assert(testDB.SetQuestionPublished(QuestionPublishedParams{
+		ID: legacyID, UpstreamID: internal.HexBytes("legacy-election"), CensusOrigin: "OFF_CHAIN_CA_V3_ECDSA",
+	}), qt.ErrorIs, ErrInvalidData)
+	c.Assert(testDB.SetQuestionPublished(QuestionPublishedParams{
+		ID: legacyID, UpstreamID: internal.HexBytes("legacy-election"), CensusRoot: root,
+	}), qt.ErrorIs, ErrInvalidData)
 }
 
 // TestClaimVotingProcessPublishOwnerAndRevision pins the two guards added to the publish claim:

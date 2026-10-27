@@ -11,7 +11,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp"
-	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
@@ -262,7 +261,7 @@ func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrMalformedBody.Withf("process uses a blind (anonymous) census; use the blind-point/blind-sign endpoints").Write(w)
 		return
 	}
-	upstreamID, sErr := c.authorizeQuestion(sc, req.ProcessID)
+	election, sErr := c.authorizeQuestion(sc, req.ProcessID)
 	if sErr != nil {
 		sErr.Write(w)
 		return
@@ -271,7 +270,9 @@ func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	c.signAndRespond(w, req.AuthToken, *address, upstreamID, sc.weight)
+	c.signAndRespond(w, &csp.BallotRequest{
+		Token: req.AuthToken, Address: *address, Weight: sc.weight, Election: election,
+	})
 }
 
 // signContext is the part of a ballot signing request that is resolved once per call, from
@@ -353,16 +354,16 @@ func (c *CSPHandlers) resolveSignContext(
 // instead (authorizeLoadedQuestion) to avoid one query per ballot.
 func (c *CSPHandlers) authorizeQuestion(
 	sc *signContext, electionID internal.HexBytes,
-) (internal.HexBytes, *errors.Error) {
+) (csp.Election, *errors.Error) {
 	// an empty id cannot name an election, and db.QuestionByUpstreamID reports it as
 	// ErrInvalidData, which the branch below would surface to the client as a 500. The message is
 	// field-neutral because the single-sign endpoint sends this same id as "electionId".
 	if len(electionID) == 0 {
-		return nil, errors.Ptr(errors.ErrMalformedBody.With("missing election id"))
+		return csp.Election{}, errors.Ptr(errors.ErrMalformedBody.With("missing election id"))
 	}
 	question, err := c.mainDB.QuestionByUpstreamID(electionID)
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
-		return nil, errors.Ptr(errors.ErrGenericInternalServerError.WithErr(err))
+		return csp.Election{}, errors.Ptr(errors.ErrGenericInternalServerError.WithErr(err))
 	}
 	if err != nil {
 		question = nil // not found: authorizeLoadedQuestion folds it into the same 401
@@ -374,19 +375,20 @@ func (c *CSPHandlers) authorizeQuestion(
 // resolved to nothing): it must belong to this process, currently accept a signature, and the
 // member must be in its eligibility subset. Not-found and wrong-process collapse into the same
 // 401 on purpose — a caller learns nothing about elections outside the process it is signing for.
+// It returns the question's election: its on-chain id and the census origin that picks the signer.
 func authorizeLoadedQuestion(
 	sc *signContext, question *db.VotingProcessQuestion,
-) (internal.HexBytes, *errors.Error) {
+) (csp.Election, *errors.Error) {
 	if question == nil || question.ProcessID != sc.process.ID {
-		return nil, errors.Ptr(errors.ErrUnauthorized.Withf("election not found in process"))
+		return csp.Election{}, errors.Ptr(errors.ErrUnauthorized.Withf("election not found in process"))
 	}
 	if sErr := unvotableElection(sc.process, question); sErr != nil {
-		return nil, sErr
+		return csp.Election{}, sErr
 	}
 	if !memberEligibleForQuestion(question, sc.memberID) {
-		return nil, errors.Ptr(errors.ErrUnauthorized.Withf("member not eligible for this question"))
+		return csp.Election{}, errors.Ptr(errors.ErrUnauthorized.Withf("member not eligible for this question"))
 	}
-	return question.UpstreamID, nil
+	return csp.ElectionOf(question), nil
 }
 
 // maxSignBatchBodyBytes bounds a POST /processes/{processId}/sign-batch body. One ballot is an
@@ -397,10 +399,10 @@ func authorizeLoadedQuestion(
 const maxSignBatchBodyBytes = db.MaxQuestionsPerProcess*512 + 4*internal.KiB
 
 // authorizedBallot is one item of a sign batch that survived the authorization pass: the
-// question's on-chain election id, resolved from the request, and the voter address.
+// question's election, resolved from the request, and the voter address.
 type authorizedBallot struct {
-	upstreamID internal.HexBytes
-	address    internal.HexBytes
+	election csp.Election
+	address  internal.HexBytes
 }
 
 // ProcessSignBatchHandler godoc
@@ -507,7 +509,7 @@ func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Req
 			errors.ErrMalformedBody.With("missing election id").Withf("at index %d", i).Write(w)
 			return
 		}
-		upstreamID, sErr := authorizeLoadedQuestion(sc, byUpstream[string(item.UpstreamID)])
+		election, sErr := authorizeLoadedQuestion(sc, byUpstream[string(item.UpstreamID)])
 		if sErr != nil {
 			sErr.Withf("at index %d", i).Write(w)
 			return
@@ -516,7 +518,7 @@ func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Req
 			sErr.Withf("at index %d", i).Write(w)
 			return
 		}
-		ballots[i] = authorizedBallot{upstreamID: upstreamID, address: item.Address}
+		ballots[i] = authorizedBallot{election: election, address: item.Address}
 	}
 
 	// ponytail: signed sequentially. db.ConsumeCSPProcess takes the storage write lock, so a
@@ -525,37 +527,37 @@ func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Req
 	resp := &SignBatchResponse{Signatures: make([]SignBatchResult, len(ballots))}
 	for i, b := range ballots {
 		res := &resp.Signatures[i]
-		res.UpstreamID = b.upstreamID
-		signature, err := c.csp.Sign(req.AuthToken, b.address, b.upstreamID, sc.weight,
-			signers.SignerTypeECDSASalted)
+		res.UpstreamID = b.election.ID
+		signed, err := c.csp.SignBallot(&csp.BallotRequest{
+			Token: req.AuthToken, Address: b.address, Weight: sc.weight, Election: b.election,
+		})
 		if err != nil {
 			// usually per-ballot: this election's signing slot is spent, or a concurrent
 			// request holds its lock. Map it to a stable code + sanitized message for the
 			// response; the raw error stays in the log.
 			res.Code, res.Error = signOutcome(err)
-			logSignFailure(oid, sc.memberID, b.upstreamID, err)
+			logSignFailure(oid, sc.memberID, b.election.ID, err)
 			// an invalid token dooms every remaining ballot too (the token was valid when
 			// resolveSignContext ran, so it was deleted or unverified mid-batch): stamp the
 			// rest with the same outcome instead of issuing one doomed Sign each.
 			if res.Code == signCodeAuthInvalid {
 				for j := i + 1; j < len(ballots); j++ {
-					resp.Signatures[j].UpstreamID = ballots[j].upstreamID
+					resp.Signatures[j].UpstreamID = ballots[j].election.ID
 					resp.Signatures[j].Code, resp.Signatures[j].Error = res.Code, res.Error
 				}
 				break
 			}
 			continue
 		}
-		res.Signature = signature
-		res.Weight = sc.weight
+		res.setSignature(signed)
 	}
 	apicommon.HTTPWriteJSON(w, resp)
 }
 
-// blindBallotAuth is one item of a blind batch that survived the authorization pass: the
-// question's on-chain election id, plus (round 2 only) the blinded message to sign for it.
+// blindBallotAuth is one item of a blind round-2 batch that survived the authorization pass: the
+// question's election and the blinded message to sign for it.
 type blindBallotAuth struct {
-	upstreamID     internal.HexBytes
+	election       csp.Election
 	blindedMessage internal.HexBytes
 }
 
@@ -618,7 +620,7 @@ func (c *CSPHandlers) ProcessBlindPointHandler(w http.ResponseWriter, r *http.Re
 	}
 	// authorize the whole batch before issuing any point, mirroring sign-batch: an ineligible or
 	// out-of-process election fails the request rather than issuing a partial set.
-	upstreamIDs := make([]internal.HexBytes, len(req.Elections))
+	elections := make([]csp.Election, len(req.Elections))
 	seen := make(map[string]int, len(req.Elections))
 	for i, electionID := range req.Elections {
 		if first, dup := seen[string(electionID)]; dup {
@@ -630,25 +632,25 @@ func (c *CSPHandlers) ProcessBlindPointHandler(w http.ResponseWriter, r *http.Re
 			errors.ErrMalformedBody.With("missing election id").Withf("at index %d", i).Write(w)
 			return
 		}
-		upstreamID, sErr := authorizeLoadedQuestion(sc, byUpstream[string(electionID)])
+		election, sErr := authorizeLoadedQuestion(sc, byUpstream[string(electionID)])
 		if sErr != nil {
 			sErr.Withf("at index %d", i).Write(w)
 			return
 		}
-		upstreamIDs[i] = upstreamID
+		elections[i] = election
 	}
 
-	resp := &BlindPointResponse{Points: make([]BlindPointResult, len(upstreamIDs))}
-	for i, upstreamID := range upstreamIDs {
+	resp := &BlindPointResponse{Points: make([]BlindPointResult, len(elections))}
+	for i, election := range elections {
 		res := &resp.Points[i]
-		res.UpstreamID = upstreamID
-		tokenR, pinnedWeight, err := c.csp.NewBlindRequest(req.AuthToken, upstreamID, sc.weight)
+		res.UpstreamID = election.ID
+		tokenR, pinnedWeight, err := c.csp.NewBlindBallotRequest(req.AuthToken, election, sc.weight)
 		if err != nil {
 			res.Code, res.Error = signOutcome(err)
-			logSignFailure(oid, sc.memberID, upstreamID, err)
+			logSignFailure(oid, sc.memberID, election.ID, err)
 			if res.Code == signCodeAuthInvalid {
-				for j := i + 1; j < len(upstreamIDs); j++ {
-					resp.Points[j].UpstreamID = upstreamIDs[j]
+				for j := i + 1; j < len(elections); j++ {
+					resp.Points[j].UpstreamID = elections[j].ID
 					resp.Points[j].Code, resp.Points[j].Error = res.Code, res.Error
 				}
 				break
@@ -732,7 +734,7 @@ func (c *CSPHandlers) ProcessBlindSignHandler(w http.ResponseWriter, r *http.Req
 			errors.ErrMalformedBody.With("missing election id").Withf("at index %d", i).Write(w)
 			return
 		}
-		upstreamID, sErr := authorizeLoadedQuestion(sc, byUpstream[string(item.UpstreamID)])
+		election, sErr := authorizeLoadedQuestion(sc, byUpstream[string(item.UpstreamID)])
 		if sErr != nil {
 			sErr.Withf("at index %d", i).Write(w)
 			return
@@ -741,32 +743,40 @@ func (c *CSPHandlers) ProcessBlindSignHandler(w http.ResponseWriter, r *http.Req
 			errors.ErrMalformedBody.With("missing blinded message").Withf("at index %d", i).Write(w)
 			return
 		}
-		ballots[i] = blindBallotAuth{upstreamID: upstreamID, blindedMessage: item.BlindedMessage}
+		ballots[i] = blindBallotAuth{election: election, blindedMessage: item.BlindedMessage}
 	}
 
 	resp := &BlindSignResponse{Signatures: make([]SignBatchResult, len(ballots))}
 	for i, b := range ballots {
 		res := &resp.Signatures[i]
-		res.UpstreamID = b.upstreamID
-		signature, pinnedWeight, err := c.csp.BlindSign(req.AuthToken, b.upstreamID, b.blindedMessage)
+		res.UpstreamID = b.election.ID
+		signed, err := c.csp.BlindSignBallot(req.AuthToken, b.election, b.blindedMessage)
 		if err != nil {
 			res.Code, res.Error = signOutcome(err)
-			logSignFailure(oid, sc.memberID, b.upstreamID, err)
+			logSignFailure(oid, sc.memberID, b.election.ID, err)
 			if res.Code == signCodeAuthInvalid {
 				for j := i + 1; j < len(ballots); j++ {
-					resp.Signatures[j].UpstreamID = ballots[j].upstreamID
+					resp.Signatures[j].UpstreamID = ballots[j].election.ID
 					resp.Signatures[j].Code, resp.Signatures[j].Error = res.Code, res.Error
 				}
 				break
 			}
 			continue
 		}
-		res.Signature = signature
-		// report the weight actually signed (the pinned round-1 weight), matching SignBatchResult's
-		// contract — not the live sc.weight, which may have drifted since round 1.
-		res.Weight = pinnedWeight
+		// the weight reported is the one actually signed (the pinned round-1 weight), matching
+		// SignBatchResult's contract — not the live sc.weight, which may have drifted since round 1.
+		res.setSignature(signed)
 	}
 	apicommon.HTTPWriteJSON(w, resp)
+}
+
+// setSignature fills the success fields of r from a CSP ballot signature.
+func (r *SignBatchResult) setSignature(s *csp.BallotSignature) {
+	r.Signature = s.Signature
+	r.Weight = s.Weight
+	r.ProofType = s.ProofType
+	r.WeightKey = s.WeightKey
+	r.WeightCertificate = s.WeightCertificate
 }
 
 // questionsByUpstream loads a process's questions indexed by their on-chain election id, writing

@@ -29,8 +29,26 @@ jobs:
 
   test:
     runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
+    env:
+      # The integration tests build voconed from the private vochain-sequencer (test/sequencer),
+      # fetched over ssh with a read-only deploy key. Scoped to the job, nothing global on the runner.
+      GOPRIVATE: github.com/vocdoni/vochain-sequencer
+      GIT_CONFIG_COUNT: 1
+      GIT_CONFIG_KEY_0: url.git@github.com:vocdoni/vochain-sequencer.insteadOf
+      GIT_CONFIG_VALUE_0: https://github.com/vocdoni/vochain-sequencer
+      GIT_SSH_COMMAND: >-
+        ssh -i "$RUNNER_TEMP/vochain-sequencer-key" -o IdentitiesOnly=yes
+        -o UserKnownHostsFile="$RUNNER_TEMP/github-known-hosts" -o StrictHostKeyChecking=yes
     steps:
       - uses: actions/checkout@v7
+      - name: Install vochain-sequencer deploy key
+        env:
+          DEPLOY_KEY: ${{ secrets.VOCHAIN_SEQUENCER_DEPLOY_KEY }}
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/vochain-sequencer-key"
+          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/vochain-sequencer-key"
+          echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
+            > "$RUNNER_TEMP/github-known-hosts"
       - uses: actions/setup-go@v7
         with:
           go-version-file: 'go.mod'
@@ -51,6 +69,10 @@ jobs:
         if: github.ref == 'refs/heads/stage' ||  startsWith(github.ref, 'refs/heads/release')
         run: go test -vet=off -failfast -timeout=30m -race ./...
                 -cover -coverpkg=./... -covermode=atomic -coverprofile=gocoverage.txt
+
+      - name: Remove vochain-sequencer deploy key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/vochain-sequencer-key"
 
       - name: Store code coverage artifact
         # fixed name: pushes to main become the baseline PRs are compared against

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/csp/signers/electionkey"
 	"github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/proto/build/go/models"
 )
@@ -76,6 +77,7 @@ func TestBuildNewProcessTxInitialStatus(t *testing.T) {
 			Params:        ep,
 			CensusRoot:    []byte{0x01},
 			CensusURI:     "https://example.invalid",
+			CensusOrigin:  electionkey.OriginECDSA,
 			MetadataURL:   "https://example.invalid/meta.json",
 			Nonce:         &nonce,
 			InitialStatus: status,
@@ -134,6 +136,38 @@ func TestBuildNewProcessTxInitialStatus(t *testing.T) {
 				qt.Commentf("status=%s", bad))
 		}
 	})
+}
+
+// TestBuildNewProcessTxCensusOrigin checks that the census origin is published as given for every
+// CSP origin, and that any other origin, including the unset zero value, is refused.
+func TestBuildNewProcessTxCensusOrigin(t *testing.T) {
+	c := qt.New(t)
+	a := &Account{} // client is not touched when Nonce is set
+	params := func(origin models.CensusOrigin) *NewProcessParams {
+		nonce := uint32(0)
+		return &NewProcessParams{
+			Params:       &db.ElectionParams{EndDate: time.Now().Add(time.Hour), MaxCensusSize: 10},
+			CensusRoot:   []byte{0x02},
+			CensusURI:    "https://example.invalid",
+			CensusOrigin: origin,
+			Nonce:        &nonce,
+		}
+	}
+	for _, origin := range []models.CensusOrigin{
+		electionkey.OriginECDSA,
+		electionkey.OriginBlind,
+		models.CensusOrigin_OFF_CHAIN_CA,
+		models.CensusOrigin_OFF_CHAIN_CA_V2,
+	} {
+		tx, err := a.BuildNewProcessTx(params(origin))
+		c.Assert(err, qt.IsNil, qt.Commentf("origin=%d", origin))
+		c.Assert(tx.GetNewProcess().GetProcess().GetCensusOrigin(), qt.Equals, origin)
+		c.Assert(tx.GetNewProcess().GetProcess().GetCensusRoot(), qt.DeepEquals, []byte{0x02})
+	}
+	for _, origin := range []models.CensusOrigin{0, models.CensusOrigin_OFF_CHAIN_TREE} {
+		_, err := a.BuildNewProcessTx(params(origin))
+		c.Assert(err, qt.ErrorMatches, `census origin \d+ is not a CSP census origin`)
+	}
 }
 
 // TestParseInitialStatus covers the wire-string → on-chain enum parser used at the HTTP

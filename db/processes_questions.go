@@ -216,18 +216,38 @@ func (ms *MongoStorage) ServedUpstreamIDs(upstreamIDs []internal.HexBytes) (map[
 	return served, nil
 }
 
+// QuestionPublishedParams is the on-chain outcome of publishing one question.
+type QuestionPublishedParams struct {
+	ID          bson.ObjectID
+	UpstreamID  internal.HexBytes
+	MetadataURL string
+	Status      string
+	// CensusOrigin is the census origin name the election was created with when it uses a
+	// per-election CSP key (OFF_CHAIN_CA_V3_ECDSA or OFF_CHAIN_CA_V3_BLIND), and CensusRoot its
+	// census root. Both are empty for an election on a legacy CSP origin, and set together
+	// otherwise.
+	CensusOrigin string
+	CensusRoot   internal.HexBytes
+}
+
 // SetQuestionPublished records the on-chain outcome of a single question in one targeted
-// update, leaving sibling questions untouched.
-func (ms *MongoStorage) SetQuestionPublished(
-	id bson.ObjectID, upstreamID internal.HexBytes, metadataURL, status string,
-) error {
-	if id == bson.NilObjectID || len(upstreamID) == 0 {
+// update, leaving sibling questions untouched. The census origin and root are written only
+// when set, so a legacy question keeps an empty origin and is signed with the legacy scheme.
+func (ms *MongoStorage) SetQuestionPublished(p QuestionPublishedParams) error {
+	if p.ID == bson.NilObjectID || len(p.UpstreamID) == 0 {
+		return ErrInvalidData
+	}
+	if (p.CensusOrigin == "") != (len(p.CensusRoot) == 0) {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	update := bson.M{"$set": bson.M{"upstreamId": upstreamID, "metadataURL": metadataURL, "status": status}} //nolint:goconst
-	res, err := ms.processesQuestions.UpdateOne(ctx, bson.M{"_id": id}, update)
+	set := bson.M{"upstreamId": p.UpstreamID, "metadataURL": p.MetadataURL, "status": p.Status} //nolint:goconst
+	if p.CensusOrigin != "" {
+		set["censusOrigin"] = p.CensusOrigin
+		set["censusRoot"] = p.CensusRoot
+	}
+	res, err := ms.processesQuestions.UpdateOne(ctx, bson.M{"_id": p.ID}, bson.M{"$set": set})
 	if err != nil {
 		return fmt.Errorf("failed to set question published: %w", err)
 	}
