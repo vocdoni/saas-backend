@@ -51,7 +51,7 @@ func (ms *MongoStorage) walletKeyApplied(orgAddress common.Address, idempotencyK
 	}
 }
 
-// Wallet returns an organization's prepaid wallet, empty if it was never topped up.
+// Wallet returns a payer's prepaid wallet, empty if it was never credited.
 func (ms *MongoStorage) Wallet(orgAddress common.Address) (*Wallet, error) {
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return nil, ErrInvalidData
@@ -70,71 +70,113 @@ func (ms *MongoStorage) Wallet(orgAddress common.Address) (*Wallet, error) {
 	return wallet, nil
 }
 
-// WalletCredit is a top-up (Kind defaults to WalletEntryTopUp, key: session id) or a refund
-// (WalletEntryRefund with ProcessID, key: "refund:<process id hex>").
+// WalletCredit adds money to a wallet: a top-up (Kind WalletEntryTopUp, the default; key: the checkout
+// session id, with the payment intent and the VAT-included amount a refund needs) or a
+// credit-back (WalletEntryCreditBack with the process, key: "refund:<process id hex>" for a
+// deleted draft).
 type WalletCredit struct {
-	OrgAddress     common.Address
-	AmountCents    pricing.Cents
-	IdempotencyKey string
-	Kind           string
-	ProcessID      bson.ObjectID
+	OrgAddress        common.Address
+	AmountCents       pricing.Cents
+	IdempotencyKey    string
+	Kind              string
+	ProcessID         bson.ObjectID
+	ProcessOrgAddress common.Address
+	PaymentIntentID   string
+	GrossCents        pricing.Cents
 }
 
-// CreditWallet adds a credit, creating the wallet on first use. An already applied key is a
-// successful no-op.
+// CreditWallet adds a credit (Kind defaults to WalletEntryTopUp), creating the wallet on first
+// use. An already applied key is a successful no-op.
 func (ms *MongoStorage) CreditWallet(c WalletCredit) error {
-	orgAddress, amountCents, idempotencyKey := c.OrgAddress, c.AmountCents, c.IdempotencyKey
-	if (orgAddress.Cmp(common.Address{}) == 0) || amountCents <= 0 || idempotencyKey == "" {
-		return ErrInvalidData
-	}
 	kind := c.Kind
 	if kind == "" {
 		kind = WalletEntryTopUp
+	}
+	if c.AmountCents <= 0 || (kind != WalletEntryTopUp && kind != WalletEntryCreditBack) {
+		return ErrInvalidData
+	}
+	return ms.applyWalletEntry(&WalletLedgerEntry{
+		OrgAddress:        c.OrgAddress,
+		AmountCents:       c.AmountCents,
+		Kind:              kind,
+		IdempotencyKey:    c.IdempotencyKey,
+		ProcessID:         c.ProcessID,
+		ProcessOrgAddress: c.ProcessOrgAddress,
+		PaymentIntentID:   c.PaymentIntentID,
+		GrossCents:        c.GrossCents,
+	})
+}
+
+// WalletRefund is a Stripe refund of a top-up, debited from the wallet the top-up credited.
+type WalletRefund struct {
+	OrgAddress  common.Address
+	AmountCents pricing.Cents // net of VAT, positive
+	RefundID    string        // the Stripe refund id
+}
+
+// DebitWalletForRefund takes a refunded top-up back out of the wallet, in full even below zero:
+// the money already left through Stripe, so this only records it. A negative balance refuses
+// every DebitWalletForProcess until a top-up covers it. Keyed "striperefund:<refund id>", so a
+// replay or a later update of the same refund debits nothing.
+func (ms *MongoStorage) DebitWalletForRefund(r WalletRefund) error {
+	if r.AmountCents <= 0 || r.RefundID == "" {
+		return ErrInvalidData
+	}
+	return ms.applyWalletEntry(&WalletLedgerEntry{
+		OrgAddress:     r.OrgAddress,
+		AmountCents:    -r.AmountCents,
+		Kind:           WalletEntryRefund,
+		IdempotencyKey: "striperefund:" + r.RefundID,
+	})
+}
+
+// applyWalletEntry applies entry.AmountCents (signed) to the wallet with no balance check,
+// creating the wallet on first use, then appends the entry. An already applied key is a no-op.
+func (ms *MongoStorage) applyWalletEntry(entry *WalletLedgerEntry) error {
+	orgAddress, idempotencyKey := entry.OrgAddress, entry.IdempotencyKey
+	if (orgAddress.Cmp(common.Address{}) == 0) || entry.AmountCents == 0 || idempotencyKey == "" {
+		return ErrInvalidData
 	}
 	applied, err := ms.walletKeyApplied(orgAddress, idempotencyKey)
 	if err != nil {
 		return err
 	}
 	if applied {
-		return nil // already credited, by an attempt whose key may have left the window
+		return nil // already applied, by an attempt whose key may have left the window
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	filter := bson.M{"_id": orgAddress, "appliedKeys": bson.M{"$ne": idempotencyKey}}
 	update := bson.M{
-		"$inc":  bson.M{"balanceCents": amountCents},
+		"$inc":  bson.M{"balanceCents": entry.AmountCents},
 		"$push": appliedKeysPush(idempotencyKey),
 		"$set":  bson.M{"updatedAt": time.Now()},
 	}
 	_, err = ms.wallets.UpdateOne(ctx, filter, update, options.UpdateOne().SetUpsert(true))
 	if mongo.IsDuplicateKeyError(err) {
-		// the wallet exists: either the key was applied already, or a concurrent first credit
+		// the wallet exists: either the key was applied already, or a concurrent first write
 		// created it. Retrying without upsert applies only in the second case.
 		_, err = ms.wallets.UpdateOne(ctx, filter, update)
 	}
 	if err != nil {
-		return fmt.Errorf("failed to credit wallet: %w", err)
+		return fmt.Errorf("failed to update wallet: %w", err)
 	}
 	// always write the audit row, so a crash before it heals on retry (unique index dedups)
-	return ms.appendWalletLedger(&WalletLedgerEntry{
-		OrgAddress:     orgAddress,
-		AmountCents:    amountCents,
-		Kind:           kind,
-		IdempotencyKey: idempotencyKey,
-		ProcessID:      c.ProcessID,
-	})
+	return ms.appendWalletLedger(entry)
 }
 
 // WalletDebit takes AmountCents now towards a process price of PriceCents; (process, price)
-// is the idempotency key, so a retry at the same price charges nothing.
+// is the idempotency key, so a retry at the same price charges nothing. ProcessOrgAddress is
+// the organization owning the process, recorded on the ledger.
 type WalletDebit struct {
-	OrgAddress  common.Address
-	ProcessID   bson.ObjectID
-	AmountCents pricing.Cents
-	PriceCents  pricing.Cents
+	OrgAddress        common.Address
+	ProcessID         bson.ObjectID
+	ProcessOrgAddress common.Address
+	AmountCents       pricing.Cents
+	PriceCents        pricing.Cents
 }
 
-// DebitWalletForProcess debits the integrator wallet at most once per (process, price), or
+// DebitWalletForProcess debits the payer's wallet at most once per (process, price), or
 // returns ErrInsufficientWalletBalance without touching it.
 func (ms *MongoStorage) DebitWalletForProcess(d WalletDebit) error {
 	if (d.OrgAddress.Cmp(common.Address{}) == 0) || d.AmountCents <= 0 ||
@@ -178,12 +220,33 @@ func (ms *MongoStorage) DebitWalletForProcess(d WalletDebit) error {
 		// already debited by an earlier attempt: the retry keeps the debit
 	}
 	return ms.appendWalletLedger(&WalletLedgerEntry{
-		OrgAddress:     orgAddress,
-		AmountCents:    -amountCents,
-		Kind:           WalletEntryDebit,
-		IdempotencyKey: idempotencyKey,
-		ProcessID:      d.ProcessID,
+		OrgAddress:        orgAddress,
+		AmountCents:       -amountCents,
+		Kind:              WalletEntryPayment,
+		IdempotencyKey:    idempotencyKey,
+		ProcessID:         d.ProcessID,
+		ProcessOrgAddress: d.ProcessOrgAddress,
 	})
+}
+
+// WalletTopUpByPaymentIntent returns the top-up ledger entry a Stripe payment intent paid for,
+// or ErrNotFound when no wallet top-up was credited from it.
+func (ms *MongoStorage) WalletTopUpByPaymentIntent(paymentIntentID string) (*WalletLedgerEntry, error) {
+	if paymentIntentID == "" {
+		return nil, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	entry := &WalletLedgerEntry{}
+	err := ms.walletLedger.FindOne(ctx,
+		bson.M{"paymentIntentId": paymentIntentID, "kind": WalletEntryTopUp}).Decode(entry)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to find wallet top-up: %w", err)
+	}
+	return entry, nil
 }
 
 // WalletLedger returns a page of an organization's wallet ledger, newest first.

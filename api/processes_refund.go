@@ -255,7 +255,7 @@ func (a *API) returnProcessPayment(
 			OrgAddress:     plan.integrator,
 			AmountCents:    amount,
 			IdempotencyKey: idempotencyKey,
-			Kind:           db.WalletEntryRefund,
+			Kind:           db.WalletEntryCreditBack,
 			ProcessID:      vp.ID,
 		}); err != nil {
 			return "", fmt.Errorf("failed to credit the refund to the wallet: %w", err)

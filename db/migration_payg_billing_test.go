@@ -10,14 +10,14 @@ import (
 )
 
 // TestMigrationPaygBilling: the billing collections and indexes exist (notably the unique
-// walletLedger idempotencyKey), and Up is idempotent.
+// walletLedger idempotencyKey and its paymentIntentId lookup), and Up is idempotent.
 func TestMigrationPaygBilling(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	mig := migrationByVersion(c, 24)
+	mig := migrationByVersion(c, 26)
 	database := testDB.DBClient.Database(testDB.database)
 
 	// already applied by RunMigrationsUp at startup; a re-run must be a no-op
@@ -41,6 +41,15 @@ func TestMigrationPaygBilling(t *testing.T) {
 	entry["_id"] = bson.NewObjectID()
 	_, err = ledger.InsertOne(ctx, entry)
 	c.Assert(err, qt.Not(qt.IsNil))
+
+	// a Stripe refund finds the top-up it returns by payment intent
+	indexes, err := ledger.Indexes().ListSpecifications(ctx)
+	c.Assert(err, qt.IsNil)
+	var byIntent bool
+	for _, index := range indexes {
+		byIntent = byIntent || index.KeysDocument.Lookup("paymentIntentId").Type != 0
+	}
+	c.Assert(byIntent, qt.IsTrue)
 
 	// down is a documented no-op for data-bearing collections
 	c.Assert(mig.Down(ctx, database), qt.IsNil)

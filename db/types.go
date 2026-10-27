@@ -888,13 +888,22 @@ type ProcessPayment struct {
 	ProcessID  bson.ObjectID        `json:"-" bson:"_id"`
 	OrgAddress common.Address       `json:"-" bson:"orgAddress"`
 	Status     ProcessPaymentStatus `json:"status" bson:"status"`
+	// Payer is the wallet debited (the organization, or its integrator when managed). Every
+	// credit-back goes to it, never to a payer re-resolved from the organization.
+	Payer common.Address `json:"-" bson:"payer,omitempty"`
 	// CheckoutSessionID is the Stripe checkout session; empty when wallet-paid.
 	CheckoutSessionID string `json:"-" bson:"checkoutSessionId,omitempty"`
+	// Consumed marks a pending payment whose top-up the webhook credited: the session is spent,
+	// and the publish it was opened for pays from the wallet like any other.
+	Consumed bool `json:"-" bson:"consumed,omitempty"`
 	// QuoteHash is pricing.QuoteHash of what the session was opened for.
 	QuoteHash string `json:"-" bson:"quoteHash,omitempty"`
 	// AmountCents is the net total in EUR cents, VAT excluded.
 	AmountCents pricing.Cents `json:"amountCents" bson:"amountCents"`
-	Currency    string        `json:"currency" bson:"currency"`
+	// TopUpCents is what the pending top-up checkout charges (the shortfall, at least the
+	// minimum charge).
+	TopUpCents pricing.Cents `json:"-" bson:"topUpCents,omitempty"`
+	Currency   string        `json:"currency" bson:"currency"`
 	// PaymentIntentID is what a card refund is issued against; empty when wallet-paid.
 	PaymentIntentID string `json:"-" bson:"paymentIntentId,omitempty"`
 	// ChargeSubtotalCents and ChargeTotalCents are the first card charge before and after VAT;
@@ -939,9 +948,9 @@ func (p *ProcessPayment) Charged(addOn OrgAddOn) bool {
 	}
 }
 
-// Wallet is an integrator's prepaid EUR balance. AppliedKeys is a bounded window of recent
-// idempotency keys (session id for a top-up, "<process>:<price>" for a debit) that makes each
-// write atomic; walletLedger is the permanent record.
+// Wallet is a payer's prepaid EUR balance (1 credit = 1 euro, VAT excluded). AppliedKeys is a
+// bounded window of recent idempotency keys that makes each write atomic; walletLedger is the
+// permanent record. BalanceCents is negative only after a Stripe refund of a top-up already spent.
 type Wallet struct {
 	OrgAddress   common.Address `json:"orgAddress" bson:"_id"`
 	BalanceCents pricing.Cents  `json:"balanceCents" bson:"balanceCents"`
@@ -951,22 +960,33 @@ type Wallet struct {
 
 // Wallet ledger entry kinds.
 const (
+	// WalletEntryTopUp is a credit bought through a Stripe checkout (key: session id).
 	WalletEntryTopUp = "topup"
-	WalletEntryDebit = "debit"
-	// WalletEntryRefund is money returned for a deleted process, kept apart from top-ups.
+	// WalletEntryPayment is a debit for a process: its publish or census headroom.
+	WalletEntryPayment = "payment"
+	// WalletEntryCreditBack returns a payment to the wallet: a deleted paid draft, a failed publish.
+	WalletEntryCreditBack = "creditBack"
+	// WalletEntryRefund is a Stripe refund of a top-up, made by hand in the dashboard.
 	WalletEntryRefund = "refund"
 )
 
-// WalletLedgerEntry is one append-only wallet balance change (negative for debits).
-// IdempotencyKey is unique, so a replay is not recorded twice.
+// WalletLedgerEntry is one append-only wallet balance change, signed as applied (negative for
+// payments and refunds). IdempotencyKey is unique, so a replay is not recorded twice.
 type WalletLedgerEntry struct {
-	ID             bson.ObjectID  `json:"id" bson:"_id"`
-	OrgAddress     common.Address `json:"orgAddress" bson:"orgAddress"`
-	AmountCents    pricing.Cents  `json:"amountCents" bson:"amountCents"`
-	Kind           string         `json:"kind" bson:"kind"`
-	IdempotencyKey string         `json:"-" bson:"idempotencyKey"`
-	ProcessID      bson.ObjectID  `json:"processId,omitempty" bson:"processId,omitempty"`
-	CreatedAt      time.Time      `json:"createdAt" bson:"createdAt"`
+	ID          bson.ObjectID  `json:"id" bson:"_id"`
+	OrgAddress  common.Address `json:"orgAddress" bson:"orgAddress"`
+	AmountCents pricing.Cents  `json:"amountCents" bson:"amountCents"`
+	Kind        string         `json:"kind" bson:"kind"`
+	// IdempotencyKey is unique, so a replay is not recorded twice.
+	IdempotencyKey string        `json:"-" bson:"idempotencyKey"`
+	ProcessID      bson.ObjectID `json:"processId,omitzero" bson:"processId,omitempty"`
+	// ProcessOrgAddress is the organization owning ProcessID: a managed one for an integrator.
+	ProcessOrgAddress common.Address `json:"processOrgAddress,omitzero" bson:"processOrgAddress,omitempty"`
+	// PaymentIntentID is the Stripe payment intent of a top-up, which a refund names.
+	PaymentIntentID string `json:"-" bson:"paymentIntentId,omitempty"`
+	// GrossCents is what a top-up charged VAT included, to take a refund's VAT back out.
+	GrossCents pricing.Cents `json:"-" bson:"grossCents,omitempty"`
+	CreatedAt  time.Time     `json:"createdAt" bson:"createdAt"`
 }
 
 // VotingProcessQuestion is one question of a VotingProcess. Each question maps to

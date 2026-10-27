@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -96,6 +97,37 @@ func (ms *MongoStorage) SetProcessPaymentPending(payment *ProcessPayment, replac
 		return false, fmt.Errorf("failed to set process payment pending: %w", err)
 	}
 	return res.MatchedCount == 1 || res.UpsertedCount == 1, nil
+}
+
+// ConsumeProcessPaymentTopUp marks the pending payment holding sessionID consumed: its top-up
+// was credited, so the session is spent and the publish it was opened for pays from the wallet.
+// A compare-and-set on the session: it reports false when the payment no longer waits on it
+// (consumed already, cancelled, replaced, paid or refunded), and the caller then does nothing
+// more for that session.
+func (ms *MongoStorage) ConsumeProcessPaymentTopUp(processID bson.ObjectID, sessionID string) (bool, error) {
+	return ms.transitionProcessPayment(processID, sessionID, processPaymentTransition{
+		from:  bson.A{ProcessPaymentPending},
+		extra: bson.M{"consumed": bson.M{"$ne": true}},
+		set:   bson.M{"consumed": true},
+	})
+}
+
+// DeleteProcessPaymentCheckout drops the pending payment holding sessionID: its checkout expired,
+// failed, or was cancelled. A compare-and-set on the session, so a newer checkout of the same
+// draft is left alone; reports whether it deleted.
+func (ms *MongoStorage) DeleteProcessPaymentCheckout(processID bson.ObjectID, sessionID string) (bool, error) {
+	if processID == bson.NilObjectID || sessionID == "" {
+		return false, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.processPayments.DeleteOne(ctx, bson.M{
+		"_id": processID, "status": ProcessPaymentPending, "checkoutSessionId": sessionID,
+	})
+	if err != nil {
+		return false, fmt.Errorf("failed to delete process payment checkout: %w", err)
+	}
+	return res.DeletedCount == 1, nil
 }
 
 // MarkProcessPaymentProcessing moves the pending payment holding sessionID to processing
@@ -358,8 +390,9 @@ func (ms *MongoStorage) DeleteProcessPayment(processID bson.ObjectID) (bool, err
 // processPaymentTransition is one step of the payment state machine: the statuses a payment
 // may move from, and the fields it gets on the way.
 type processPaymentTransition struct {
-	from bson.A
-	set  bson.M
+	from  bson.A
+	extra bson.M // more conditions on the payment, or nil
+	set   bson.M
 }
 
 // transitionProcessPayment applies one CAS transition and reports whether this call won it.
@@ -376,6 +409,7 @@ func (ms *MongoStorage) transitionProcessPayment(
 		"checkoutSessionId": sessionID,
 		"status":            bson.M{"$in": t.from},
 	}
+	maps.Copy(filter, t.extra)
 	t.set["updatedAt"] = time.Now()
 	res, err := ms.processPayments.UpdateOne(ctx, filter, bson.M{"$set": t.set})
 	if err != nil {

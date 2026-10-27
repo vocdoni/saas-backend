@@ -102,10 +102,10 @@ func TestWalletCreditAndDebit(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(total, qt.Equals, int64(3))
 	c.Assert(entries, qt.HasLen, 3)
-	c.Assert(entries[0].Kind, qt.Equals, WalletEntryDebit)
+	c.Assert(entries[0].Kind, qt.Equals, WalletEntryPayment)
 	c.Assert(entries[0].AmountCents, qt.Equals, pricing.Cents(-1_000))
 	c.Assert(entries[0].ProcessID, qt.Equals, processID)
-	c.Assert(entries[1].Kind, qt.Equals, WalletEntryDebit)
+	c.Assert(entries[1].Kind, qt.Equals, WalletEntryPayment)
 	c.Assert(entries[1].AmountCents, qt.Equals, pricing.Cents(-4_000))
 	c.Assert(entries[1].ProcessID, qt.Equals, processID)
 	c.Assert(entries[2].Kind, qt.Equals, WalletEntryTopUp)
@@ -267,4 +267,69 @@ func TestWalletAppliedKeysBounded(t *testing.T) {
 	total, _, err := testDB.WalletLedger(testOrgAddress, 1, 10)
 	c.Assert(err, qt.IsNil)
 	c.Assert(total, qt.Equals, int64(3)) // two top-ups + one debit
+}
+
+// TestWalletRefundDebit: a Stripe refund of a top-up is debited in full even below zero, once per
+// refund id across replays, and a negative balance refuses every process debit until a top-up
+// covers it.
+func TestWalletRefundDebit(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	c.Assert(testDB.CreditWallet(WalletCredit{
+		OrgAddress: testOrgAddress, AmountCents: 10_000, IdempotencyKey: "cs_refunded",
+		PaymentIntentID: "pi_refunded", GrossCents: 12_100,
+	}), qt.IsNil)
+	topUp, err := testDB.WalletTopUpByPaymentIntent("pi_refunded")
+	c.Assert(err, qt.IsNil)
+	c.Assert(topUp.OrgAddress, qt.Equals, testOrgAddress)
+	c.Assert(topUp.AmountCents, qt.Equals, pricing.Cents(10_000))
+	c.Assert(topUp.GrossCents, qt.Equals, pricing.Cents(12_100))
+	_, err = testDB.WalletTopUpByPaymentIntent("pi_unknown")
+	c.Assert(err, qt.ErrorIs, ErrNotFound)
+
+	// most of it is spent on a process
+	processID, processOrg := bson.NewObjectID(), common.Address{0x42}
+	c.Assert(testDB.DebitWalletForProcess(WalletDebit{
+		OrgAddress: testOrgAddress, ProcessID: processID, ProcessOrgAddress: processOrg,
+		AmountCents: 8_000, PriceCents: 8_000,
+	}), qt.IsNil)
+
+	// a partial refund, then the rest: each debited once, the second below zero
+	refund := func(id string, cents pricing.Cents) error {
+		return testDB.DebitWalletForRefund(WalletRefund{OrgAddress: testOrgAddress, AmountCents: cents, RefundID: id})
+	}
+	c.Assert(refund("re_partial", 1_500), qt.IsNil)
+	c.Assert(refund("re_partial", 1_500), qt.IsNil) // replay
+	c.Assert(refund("re_rest", 8_500), qt.IsNil)
+	c.Assert(refund("re_rest", 8_500), qt.IsNil) // replay
+	wallet, err := testDB.Wallet(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(-8_000))
+
+	// in debt: no process debit goes through, however small
+	err = debitProcess(testOrgAddress, 100, bson.NewObjectID())
+	c.Assert(err, qt.ErrorIs, ErrInsufficientWalletBalance)
+	// the next top-up pays the debt first
+	c.Assert(topUpTestWallet(9_000, "cs_after_refund"), qt.IsNil)
+	c.Assert(debitProcess(testOrgAddress, 1_000, bson.NewObjectID()), qt.IsNil)
+	err = debitProcess(testOrgAddress, 1, bson.NewObjectID())
+	c.Assert(err, qt.ErrorIs, ErrInsufficientWalletBalance)
+
+	// the history shows each kind, signed as applied, with the process's organization
+	_, entries, err := testDB.WalletLedger(testOrgAddress, 1, 10)
+	c.Assert(err, qt.IsNil)
+	kinds := map[string]pricing.Cents{}
+	for _, e := range entries {
+		kinds[e.Kind] += e.AmountCents
+		if e.ProcessID == processID {
+			c.Assert(e.ProcessOrgAddress, qt.Equals, processOrg)
+		}
+	}
+	c.Assert(kinds, qt.DeepEquals, map[string]pricing.Cents{
+		WalletEntryTopUp: 19_000, WalletEntryPayment: -9_000, WalletEntryRefund: -10_000,
+	})
+
+	c.Assert(refund("", 100), qt.ErrorIs, ErrInvalidData)
+	c.Assert(refund("re_zero", 0), qt.ErrorIs, ErrInvalidData)
 }

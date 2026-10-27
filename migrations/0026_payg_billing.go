@@ -14,8 +14,9 @@ func init() {
 	AddMigration(26, "payg_billing", upPaygBilling, downPaygBilling)
 }
 
-// upPaygBilling creates processPayments (keyed by process id), wallets (keyed by org) and
-// walletLedger, whose unique idempotencyKey index stops a replay being recorded twice.
+// upPaygBilling creates processPayments (keyed by process id), wallets (keyed by payer) and
+// walletLedger, whose unique idempotencyKey index stops a replay being recorded twice and whose
+// paymentIntentId index finds the top-up a Stripe refund returns.
 func upPaygBilling(ctx context.Context, database *mongo.Database) error {
 	for _, name := range []string{"processPayments", "wallets", "walletLedger"} {
 		if err := database.CreateCollection(ctx, name); err != nil {
@@ -32,6 +33,8 @@ func upPaygBilling(ctx context.Context, database *mongo.Database) error {
 			Options: options.Index().SetUnique(true),
 		},
 		{Keys: bson.D{{Key: "orgAddress", Value: 1}, {Key: "createdAt", Value: -1}}},
+		// a Stripe refund names the payment intent of the top-up it returns
+		{Keys: bson.D{{Key: "paymentIntentId", Value: 1}}, Options: options.Index().SetSparse(true)},
 	}
 	if _, err := database.Collection("walletLedger").Indexes().CreateMany(ctx, ledgerIndexes); err != nil {
 		return fmt.Errorf("failed to create indexes on walletLedger: %w", err)
