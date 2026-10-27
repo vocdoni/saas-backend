@@ -198,3 +198,47 @@ func TestSetQuestionEndedAt(t *testing.T) {
 	c.Assert(testDB.SetQuestionEndedAt(upstream, time.Time{}), qt.Not(qt.IsNil))
 	c.Assert(testDB.SetQuestionEndedAt(internal.HexBytes{}, t1), qt.Not(qt.IsNil))
 }
+
+// TestSetQuestionBallotCounts verifies that SetQuestionBallotCounts is first-write-wins: the first
+// counts are persisted and read back, and a second write with different counts is a no-op.
+func TestSetQuestionBallotCounts(t *testing.T) {
+	c := qt.New(t)
+	org := common.Address{0x99, 0xbc}
+	setupVotingProcessOrg(c, org)
+
+	pid, err := testDB.SetVotingProcess(&VotingProcess{OrgAddress: org, Title: MultiLangString{"default": "P counts"}})
+	c.Assert(err, qt.IsNil)
+	upstream := internal.HexBytes("ballotCounts-election-1")
+	qID, err := testDB.SetQuestion(&VotingProcessQuestion{
+		ProcessID:  pid,
+		OrgAddress: org,
+		Title:      MultiLangString{"default": "Q"},
+		UpstreamID: upstream,
+		Status:     QuestionStatusResults,
+	})
+	c.Assert(err, qt.IsNil)
+
+	got, err := testDB.Question(qID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.BallotCounts, qt.IsNil)
+
+	first := &BallotCounts{
+		BlankVoteCount: 1, BlankVoteWeight: "3", InvalidVoteCount: 0, InvalidVoteWeight: "0",
+		OptionVoteCounts: []uint64{2, 0}, OptionVoteWeights: []string{"5", "0"},
+	}
+	c.Assert(testDB.SetQuestionBallotCounts(upstream, first), qt.IsNil)
+	got, err = testDB.QuestionByUpstreamID(upstream)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.BallotCounts, qt.DeepEquals, first)
+
+	// a second write is a no-op: first value wins
+	second := &BallotCounts{BlankVoteCount: 9, BlankVoteWeight: "9", InvalidVoteWeight: "0"}
+	c.Assert(testDB.SetQuestionBallotCounts(upstream, second), qt.IsNil)
+	got, err = testDB.Question(qID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.BallotCounts, qt.DeepEquals, first)
+
+	// nil counts and an empty upstreamID are rejected
+	c.Assert(testDB.SetQuestionBallotCounts(upstream, nil), qt.ErrorIs, ErrInvalidData)
+	c.Assert(testDB.SetQuestionBallotCounts(internal.HexBytes{}, first), qt.ErrorIs, ErrInvalidData)
+}

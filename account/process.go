@@ -357,23 +357,14 @@ func (a *Account) Election(processID []byte) (*api.Election, error) {
 func (a *Account) ElectionMemos(electionID []byte, selectsOpen func(votes []int) bool) ([]string, error) {
 	var memos []string
 	for page := 0; ; page++ {
-		resp, code, err := a.client.Request(http.MethodGet, nil,
-			"elections", internal.HexBytes(electionID).String(), "votes", "page", strconv.Itoa(page))
+		rows, err := a.electionVotesPage(electionID, page)
 		if err != nil {
-			return nil, fmt.Errorf("could not fetch votes of election %x: %w", electionID, err)
+			return nil, err
 		}
-		if code != http.StatusOK {
-			return nil, fmt.Errorf("could not fetch votes of election %x: unexpected status %d (%s)",
-				electionID, code, resp)
-		}
-		var list api.VotesList
-		if err := json.Unmarshal(resp, &list); err != nil {
-			return nil, fmt.Errorf("could not decode votes of election %x: %w", electionID, err)
-		}
-		if len(list.Votes) == 0 {
+		if len(rows) == 0 {
 			return memos, nil
 		}
-		for _, v := range list.Votes {
+		for _, v := range rows {
 			if len(v.Memo) == 0 {
 				continue
 			}
@@ -393,24 +384,40 @@ func (a *Account) ElectionMemos(electionID []byte, selectsOpen func(votes []int)
 	}
 }
 
+// electionVotesPage returns one page of the votes list of the on-chain election with the given id. The
+// rows carry the vote id (nullifier) and memo but neither the package nor the weight; the node answers
+// an empty page past the last one.
+func (a *Account) electionVotesPage(electionID []byte, page int) ([]*api.Vote, error) {
+	resp, code, err := a.client.Request(http.MethodGet, nil,
+		"elections", internal.HexBytes(electionID).String(), "votes", "page", strconv.Itoa(page))
+	if err != nil {
+		return nil, fmt.Errorf("could not fetch votes of election %x: %w", electionID, err)
+	}
+	if code != http.StatusOK {
+		return nil, fmt.Errorf("could not fetch votes of election %x: unexpected status %d (%s)",
+			electionID, code, resp)
+	}
+	var list api.VotesList
+	if err := json.Unmarshal(resp, &list); err != nil {
+		return nil, fmt.Errorf("could not decode votes of election %x: %w", electionID, err)
+	}
+	return list.Votes, nil
+}
+
 // voteSelectedValues fetches a single vote by its id and returns the choice values it selected
 // (VotePackage.Votes). The node decrypts the package for encrypted elections once keys are revealed
-// (RESULTS); if the package is still opaque/absent it returns no values, so the caller drops the memo.
+// (RESULTS); if the package is still opaque/absent/unreadable it returns no values, so the caller drops
+// the memo.
 func (a *Account) voteSelectedValues(voteID internal.HexBytes) ([]int, error) {
 	vote, err := a.VoteByNullifier(voteID)
 	if err != nil {
 		return nil, err
 	}
-	if len(vote.VotePackage) == 0 {
-		return nil, nil
+	votes, ok := decodeVotePackage(vote)
+	if !ok {
+		return nil, nil // an unreadable package selects nothing: the memo is dropped
 	}
-	var pkg struct {
-		Votes []int `json:"votes"`
-	}
-	if err := json.Unmarshal(vote.VotePackage, &pkg); err != nil {
-		return nil, nil // opaque/encrypted package: no selectable values, memo is dropped
-	}
-	return pkg.Votes, nil
+	return votes, nil
 }
 
 // ErrVoteNotFound is returned by VoteByNullifier when the chain has no vote with the

@@ -22,6 +22,7 @@ import (
 // Account handles the account operations that include signing transactions, creating faucet packages, etc.
 type Account struct {
 	client *apiclient.HTTPclient
+	votes  *voteReader
 	signer *ethereum.SignKeys
 
 	PubKey            internal.HexBytes `swaggertype:"string" format:"hex" example:"deadbeef"`
@@ -36,6 +37,10 @@ func New(privateKey string, apiEndpoint string) (*Account, error) {
 	apiClient, err := apiclient.New(apiEndpoint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create API client: %w", err)
+	}
+	votes, err := newVoteReader(apiEndpoint)
+	if err != nil {
+		return nil, err
 	}
 	if err := apiClient.SetAccount(privateKey); err != nil {
 		return nil, fmt.Errorf("failed to set account: %w", err)
@@ -71,6 +76,7 @@ func New(privateKey string, apiEndpoint string) (*Account, error) {
 	}
 	return &Account{
 		client:            apiClient,
+		votes:             votes,
 		signer:            &signer,
 		PubKey:            internal.HexBytes(signer.PublicKey()),
 		TxCosts:           txCosts,

@@ -270,6 +270,8 @@ func main() {
 		Account:        acc,
 		Interval:       viper.GetDuration("statusSyncInterval"),
 		ConfirmTimeout: viper.GetDuration("statusSyncConfirmTimeout"),
+		// once a question's election is final, derive and persist its ballot counts in the background
+		ResultsProcessors: []statussync.ResultsProcessor{statussync.NewBallotCountsProcessor(acc)},
 	})
 	apiConf.StatusSyncer = syncer
 	syncer.Start()

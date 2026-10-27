@@ -139,6 +139,9 @@ type StatusEnqueuer interface {
 	// EnqueueReconcile does one background chain read and converges the stored status to it; known
 	// is the status just served, used to guard the write against a concurrent change.
 	EnqueueReconcile(upstreamID internal.HexBytes, known string)
+	// EnqueueResults runs the results processors (e.g. ballot counts) in the background for a
+	// question whose election reports final results.
+	EnqueueResults(upstreamID internal.HexBytes)
 }
 
 // API type represents the API HTTP server with JWT authentication capabilities.
@@ -196,6 +199,14 @@ func (a *API) enqueueConfirm(upstreamID internal.HexBytes, expected string) {
 func (a *API) enqueueReconcile(upstreamID internal.HexBytes, known string) {
 	if a.statusSyncer != nil {
 		a.statusSyncer.EnqueueReconcile(upstreamID, known)
+	}
+}
+
+// enqueueResults asks the syncer to run the results processors for a final question in the
+// background; a no-op when the syncer is disabled.
+func (a *API) enqueueResults(upstreamID internal.HexBytes) {
+	if a.statusSyncer != nil {
+		a.statusSyncer.EnqueueResults(upstreamID)
 	}
 }
 

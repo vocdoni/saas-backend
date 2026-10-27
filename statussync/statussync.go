@@ -30,13 +30,16 @@ const (
 	defaultWorkers = 8
 )
 
-// Config wires the syncer's dependencies and tuning. Zero Interval/ConfirmTimeout/Workers default.
+// Config wires the syncer's dependencies and tuning. Zero Interval/ConfirmTimeout/Workers/ResultsWorkers
+// default. With no ResultsProcessors the results queue is disabled and EnqueueResults is a no-op.
 type Config struct {
-	DB             *db.MongoStorage
-	Account        *account.Account
-	Interval       time.Duration
-	ConfirmTimeout time.Duration
-	Workers        int
+	DB                *db.MongoStorage
+	Account           *account.Account
+	Interval          time.Duration
+	ConfirmTimeout    time.Duration
+	Workers           int
+	ResultsProcessors []ResultsProcessor
+	ResultsWorkers    int
 }
 
 // task is one queued reconciliation, keyed (for dedup) by its on-chain election id.
@@ -68,6 +71,8 @@ type Syncer struct {
 	mu      sync.Mutex
 	pending map[string]*task
 	wake    chan struct{}
+
+	results *resultsQueue
 }
 
 // New builds a Syncer bound to ctx (cancelling ctx stops it). Zero tuning fields use the defaults.
@@ -88,7 +93,7 @@ func New(ctx context.Context, c *Config) *Syncer {
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
-	return &Syncer{
+	s := &Syncer{
 		db:          c.DB,
 		account:     c.Account,
 		interval:    interval,
@@ -98,14 +103,20 @@ func New(ctx context.Context, c *Config) *Syncer {
 		pending:     make(map[string]*task),
 		wake:        make(chan struct{}, 1),
 	}
+	s.results = newResultsQueue(c)
+	return s
 }
 
 // Start launches the processing loop and returns immediately. The loop wakes on each enqueue and at
 // least every interval to service confirm retries. ctx cancellation stops it.
 func (s *Syncer) Start() {
 	log.Infow("starting question status syncer",
-		"interval", s.interval.String(), "maxAttempts", s.maxAttempts, "workers", s.workers)
+		"interval", s.interval.String(), "maxAttempts", s.maxAttempts, "workers", s.workers,
+		"resultsProcessors", len(s.results.processors), "resultsWorkers", s.results.workers)
 	go s.loop()
+	if len(s.results.processors) > 0 {
+		go s.resultsLoop()
+	}
 }
 
 func (s *Syncer) loop() {
@@ -167,10 +178,14 @@ func (s *Syncer) add(t *task) {
 	}
 }
 
-// ProcessPending processes every pending task once, ignoring nextAt scheduling, and returns how
-// many it handled. Exported as a deterministic test hook; production uses the interval loop.
+// ProcessPending processes every pending status task once, ignoring nextAt scheduling, and returns how
+// many it handled. It then drains the results queue once, synchronously, ignoring nextAt (see
+// drainResults); results tasks are not part of the returned count. Exported as a deterministic test
+// hook; production uses the loops started by Start.
 func (s *Syncer) ProcessPending() int {
-	return s.processDue(true)
+	n := s.processDue(true)
+	s.drainResults()
+	return n
 }
 
 // processDue removes and processes tasks that are due (or all, when force), through a bounded worker
@@ -223,6 +238,7 @@ func (s *Syncer) process(t *task) {
 			log.Warnw("status sync: reconcile write failed", "upstreamId", hexID, "error", err.Error())
 		}
 		s.maybeRecordEndedAt(t.upstreamID, hexID, election)
+		s.followResults(t.upstreamID, election)
 		return
 	}
 
@@ -232,10 +248,15 @@ func (s *Syncer) process(t *task) {
 			log.Warnw("status sync: confirm stamp failed", "upstreamId", hexID, "error", err.Error())
 		}
 		s.maybeRecordEndedAt(t.upstreamID, hexID, election)
+		s.followResults(t.upstreamID, election)
 		return
 	}
 	// not confirmed yet: keep polling without touching the optimistic stored value.
 	if t.attempts > 1 {
+		// this confirm polls again, so it is itself the follow-up of a not-yet-final ENDED election
+		if election.FinalResults {
+			s.EnqueueResults(t.upstreamID)
+		}
 		t.attempts--
 		t.nextAt = time.Now().Add(s.interval)
 		s.add(t)
@@ -246,6 +267,7 @@ func (s *Syncer) process(t *task) {
 		log.Warnw("status sync: give-up reconcile failed", "upstreamId", hexID, "error", err.Error())
 	}
 	s.maybeRecordEndedAt(t.upstreamID, hexID, election)
+	s.followResults(t.upstreamID, election)
 }
 
 // maybeRecordEndedAt persists the actual on-chain end time for a manually ended question's
