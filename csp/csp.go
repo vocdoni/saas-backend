@@ -17,9 +17,8 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-// MaxChallengeAttempts is the maximum number of failed challenge-code
-// verification attempts allowed for a single authentication token before it is
-// rejected.
+// MaxChallengeAttempts is the maximum number of challenge-code verification
+// attempts allowed for a single authentication token before it is rejected.
 const MaxChallengeAttempts = 5
 
 // MaxChallengeResends is the number of times the challenge of a single authentication token can

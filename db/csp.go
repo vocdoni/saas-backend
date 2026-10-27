@@ -140,7 +140,7 @@ func (ms *MongoStorage) VerifyCSPAuth(token internal.HexBytes) error {
 	return nil
 }
 
-// IncrementCSPAuthAttempts atomically records a failed verification attempt for
+// IncrementCSPAuthAttempts atomically records a verification attempt for
 // the given token, but only while the stored attempt count is still below
 // maxAttempts. It returns recorded=true when the attempt was counted, and
 // recorded=false when the cap had already been reached (no increment performed)

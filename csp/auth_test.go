@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"regexp"
+	"sync"
 	"testing"
 	"time"
 
@@ -261,6 +262,99 @@ func TestVerifyAuthToken(t *testing.T) {
 		// even the valid code is now rejected because attempts are exhausted
 		err = csp.VerifyAuthToken(testToken, validCode)
 		c.Assert(err, qt.ErrorIs, ErrTooManyAttempts)
+	})
+}
+
+func TestVerifyAuthTokenConcurrentAttempts(t *testing.T) {
+	c := qt.New(t)
+
+	testDB, err := db.New(testMongoURI, test.RandomDatabaseName())
+	c.Assert(err, qt.IsNil)
+
+	ctx := context.Background()
+	csp, err := New(ctx, &Config{
+		DB:                       testDB,
+		MailService:              testMailService,
+		SMSService:               testSMSService,
+		NotificationCoolDownTime: time.Second * 5,
+		NotificationTTL:          time.Second * 5,
+		RootKey:                  *testRootKey,
+	})
+	c.Assert(err, qt.IsNil)
+
+	// concurrentVerify runs one VerifyAuthToken per solution in parallel and returns their errors
+	concurrentVerify := func(solutions []string) []error {
+		errs := make([]error, len(solutions))
+		var wg sync.WaitGroup
+		for i, solution := range solutions {
+			wg.Go(func() {
+				errs[i] = csp.VerifyAuthToken(testToken, solution)
+			})
+		}
+		wg.Wait()
+		return errs
+	}
+	// filterErr returns the results equal to target; the sentinels are returned unwrapped
+	filterErr := func(errs []error, target error) []error {
+		var matched []error
+		for _, err := range errs {
+			if err == target {
+				matched = append(matched, err)
+			}
+		}
+		return matched
+	}
+
+	c.Run("parallel wrong guesses are capped", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		secret := gotp.RandomSecret(16)
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testAnchorID, secret), qt.IsNil)
+		validCode := gotp.NewDefaultHOTP(secret).At(0)
+		wrongCode := "000000"
+		if wrongCode == validCode {
+			wrongCode = "000001"
+		}
+		// far more parallel guesses than the cap: exactly MaxChallengeAttempts may be evaluated
+		solutions := make([]string, 4*MaxChallengeAttempts)
+		for i := range solutions {
+			solutions[i] = wrongCode
+		}
+		errs := concurrentVerify(solutions)
+		c.Assert(filterErr(errs, ErrChallengeCodeFailure), qt.HasLen, MaxChallengeAttempts)
+		c.Assert(filterErr(errs, ErrTooManyAttempts), qt.HasLen, len(solutions)-MaxChallengeAttempts)
+		// the cap is reached, so even the valid code is refused
+		c.Assert(csp.VerifyAuthToken(testToken, validCode), qt.ErrorIs, ErrTooManyAttempts)
+	})
+
+	c.Run("parallel guesses including the valid code are capped", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		secret := gotp.RandomSecret(16)
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testAnchorID, secret), qt.IsNil)
+		validCode := gotp.NewDefaultHOTP(secret).At(0)
+		solutions := make([]string, 4*MaxChallengeAttempts)
+		for i := range solutions {
+			solutions[i] = "000000"
+		}
+		if validCode == "000000" {
+			solutions[0] = "000001"
+		}
+		solutions[len(solutions)-1] = validCode
+		errs := concurrentVerify(solutions)
+		// a request that reads the token after the valid code verified sees an empty secret and gets
+		// ErrTokenExpired without claiming, so only the evaluated codes (failed or valid) are bounded
+		evaluated := append(filterErr(errs, ErrChallengeCodeFailure), filterErr(errs, nil)...)
+		c.Assert(len(evaluated) <= MaxChallengeAttempts, qt.IsTrue)
+	})
+
+	c.Run("valid code on the last allowed attempt succeeds", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		secret := gotp.RandomSecret(16)
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testAnchorID, secret), qt.IsNil)
+		validCode := gotp.NewDefaultHOTP(secret).At(0)
+		for range MaxChallengeAttempts - 1 {
+			c.Assert(csp.VerifyAuthToken(testToken, "invalid"), qt.ErrorIs, ErrChallengeCodeFailure)
+		}
+		c.Assert(csp.VerifyAuthToken(testToken, validCode), qt.IsNil)
 	})
 }
 
