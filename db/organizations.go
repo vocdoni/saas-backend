@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -338,6 +339,44 @@ func (ms *MongoStorage) SetOrganizationLastPaymentDate(address common.Address, d
 	return ms.updateOrganizationFields(address, bson.M{"subscription.lastPaymentDate": date})
 }
 
+// UpdateOrganizationProfile $sets only the profile fields that are not zero on the existing
+// organization with profile's address. Unlike SetOrganization it never upserts, and it leaves
+// every other field (counters, subscription, limits, memberships...) alone, so a write based on
+// an earlier read cannot undo changes made since. Returns ErrNotFound if there is no organization
+// with that address.
+func (ms *MongoStorage) UpdateOrganizationProfile(profile *Organization) error {
+	fields := bson.M{}
+	if profile.Website != "" {
+		fields["website"] = profile.Website
+	}
+	if profile.Size != "" {
+		fields["size"] = profile.Size
+	}
+	if profile.Color != "" {
+		fields["color"] = profile.Color
+	}
+	if profile.Subdomain != "" {
+		fields["subdomain"] = profile.Subdomain
+	}
+	if profile.Country != "" {
+		fields["country"] = profile.Country
+	}
+	if profile.Timezone != "" {
+		fields["timezone"] = profile.Timezone
+	}
+	if profile.DefaultLang != "" {
+		fields["defaultLang"] = profile.DefaultLang
+	}
+	if profile.Meta != nil {
+		fields["meta"] = profile.Meta
+	}
+	// nothing to write, the organization is left as it is
+	if len(fields) == 0 {
+		return nil
+	}
+	return ms.updateOrganizationFields(profile.Address, fields)
+}
+
 // updateOrganizationFields $sets the given fields of an existing organization, returning
 // ErrNotFound if there is no organization with that address.
 func (ms *MongoStorage) updateOrganizationFields(address common.Address, fields bson.M) error {
@@ -373,6 +412,36 @@ func (ms *MongoStorage) AddOrganizationMeta(address common.Address, meta map[str
 	return nil
 }
 
+// ReplaceOrganizationMetaKeeping replaces the 'meta' object of an organization with meta, except for
+// the keepKeys: those keep their stored values, read by the update itself so a concurrent write to
+// them is not lost.
+func (ms *MongoStorage) ReplaceOrganizationMetaKeeping(address common.Address, meta map[string]any, keepKeys []string) error {
+	replaced := bson.M{}
+	for k, v := range meta {
+		if !slices.Contains(keepKeys, k) {
+			replaced[k] = v
+		}
+	}
+	keep := bson.M{}
+	for _, k := range keepKeys {
+		keep[k] = "$meta." + k
+	}
+	// a stored field that is missing is left out of the keep object, so it stays missing; $literal
+	// stops user values starting with "$" from being read as field paths
+	merged := bson.M{"$mergeObjects": bson.A{bson.M{"$literal": replaced}, keep}}
+	pipeline := bson.A{bson.M{"$set": bson.M{"meta": merged}}}
+
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	if _, err := ms.organizations.UpdateOne(ctx, bson.M{"_id": address}, pipeline); err != nil {
+		return fmt.Errorf("failed to replace meta: %w", err)
+	}
+	return nil
+}
+
 // UpdateOrganizationMeta updates individual keys in the 'meta' subdocument
 // Has only one layer o depth, if a second layer document is provided, for example meta.doc = [a,b,c] it will
 // all the docment will be updated
@@ -395,6 +464,9 @@ func (ms *MongoStorage) UpdateOrganizationMeta(address common.Address, metaUpdat
 
 	result, err := ms.organizations.UpdateOne(ctx, filter, update)
 	if err != nil {
+		if isMetaPathError(err) {
+			return fmt.Errorf("%w: %w", ErrInvalidMetaPath, err)
+		}
 		return fmt.Errorf("failed to update eta: %w", err)
 	}
 
@@ -403,6 +475,14 @@ func (ms *MongoStorage) UpdateOrganizationMeta(address common.Address, metaUpdat
 	}
 
 	return nil
+}
+
+// isMetaPathError reports whether MongoDB rejected a meta update path: PathNotViable (28) when a
+// sub-key is written into a value that is not an object, ConflictingUpdateOperators (40) when two
+// paths overlap.
+func isMetaPathError(err error) bool {
+	var srvErr mongo.ServerError
+	return errors.As(err, &srvErr) && (srvErr.HasErrorCode(28) || srvErr.HasErrorCode(40))
 }
 
 // DeleteOrganizationMetaKeys deletes specific keys from the 'meta' object of a given Organization
@@ -426,6 +506,9 @@ func (ms *MongoStorage) DeleteOrganizationMetaKeys(address common.Address, keysT
 
 	result, err := ms.organizations.UpdateOne(ctx, filter, update)
 	if err != nil {
+		if isMetaPathError(err) {
+			return fmt.Errorf("%w: %w", ErrInvalidMetaPath, err)
+		}
 		return fmt.Errorf("failed to unset meta fields: %w", err)
 	}
 

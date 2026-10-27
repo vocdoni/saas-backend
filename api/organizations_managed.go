@@ -132,6 +132,14 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 	if !validateDefaultLang(w, req.DefaultLang) {
 		return
 	}
+	if err := apicommon.ValidateMetaKeys(req.Meta); err != nil {
+		errors.ErrInvalidUserData.WithErr(err).Write(w)
+		return
+	}
+	if err := apicommon.ValidateMetaShorthands(req.Name, req.Logo, req.Description); err != nil {
+		errors.ErrInvalidUserData.WithErr(err).Write(w)
+		return
+	}
 	creatorEmail := user.Email
 	if req.OwnerEmail != "" {
 		// validate the owner exists up front, before provisioning an on-chain account, so a
