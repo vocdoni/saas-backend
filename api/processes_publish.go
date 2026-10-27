@@ -19,9 +19,9 @@ import (
 	"go.vocdoni.io/proto/build/go/models"
 )
 
-// maxPublishRounds bounds how many times the publish worker re-batches the not-yet-confirmed
-// questions before giving up and abandoning the attempt (questions are then regenerated from
-// scratch on the next publish).
+// maxPublishRounds bounds how many times one publish attempt re-batches the not-yet-confirmed
+// questions. Running out is a transient failure: the attempt is retried (publishRetryAttempts),
+// keeping the questions already mined.
 const maxPublishRounds = 3
 
 // publishRetryAttempts bounds how many times the service retries a publish that failed for a
