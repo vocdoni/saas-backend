@@ -414,7 +414,8 @@ func (c *CSP) VerifyAuthToken(token internal.HexBytes, solution string) error {
 		log.Warnw("too many challenge attempts",
 			"userID", authTokenData.UserID,
 			"anchorID", authTokenData.AnchorID,
-			"token", token)
+			"token", token,
+			"attempts", MaxChallengeAttempts) // the conditional increment never exceeds the cap
 		return ErrTooManyAttempts
 	}
 	if !c.verifySolution(authTokenData.Secret, solution) {
