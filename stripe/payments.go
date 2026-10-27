@@ -23,19 +23,18 @@ import (
 
 // Session metadata keys that route webhook fulfillment.
 const (
-	// MetadataKeyProcessID marks a session as the purchase of one voting process.
-	MetadataKeyProcessID = "voting_process_id"
-	// MetadataKeyWalletTopUpOrg marks a session as a wallet top-up for an integrator
-	// organization (value: the org address).
+	// MetadataKeyWalletTopUpOrg marks a session as a wallet top-up (value: the wallet's
+	// organization address). Every payment session carries it, and it routes the webhook.
 	MetadataKeyWalletTopUpOrg = "wallet_topup_org"
-	// MetadataKeyProcessTopUpCents marks a session as census headroom bought for an
-	// already-paid process, carrying the *target* amount its payment must be raised to (not
-	// the difference charged), so a replay is idempotent.
+	// MetadataKeyProcessID marks a top-up as opened for one voting process: once credited, the
+	// wallet pays that process's publish (or census headroom) right away.
+	MetadataKeyProcessID = "voting_process_id"
+	// MetadataKeyProcessTopUpCents marks a process top-up as census headroom, carrying the
+	// *target* envelope the process must be raised to (not the difference charged).
 	MetadataKeyProcessTopUpCents = "process_topup_cents"
-	// MetadataKeyProcessTopUpFromCents carries the amount a census top-up was priced from. The
-	// top-up applies only while the payment is still at it: of two top-ups opened against the
-	// same amount the first paid wins, and the other, which charged a difference from a base
-	// that no longer holds, is refunded in full.
+	// MetadataKeyProcessTopUpFromCents carries the envelope the headroom was priced from: it is
+	// applied only while the process still paid exactly that, so a stale session never buys
+	// headroom from a base it did not price.
 	MetadataKeyProcessTopUpFromCents = "process_topup_from_cents"
 	// MetadataKeyRequestedBy carries the email of the user who started the checkout.
 	MetadataKeyRequestedBy = "requested_by"
@@ -129,7 +128,9 @@ func buildPaymentSessionParams(params *PaymentSessionParams) *stripeapi.Checkout
 		// session-level metadata: a payment session has no SubscriptionData, and the
 		// webhook needs the routing identity back from the session itself
 		Metadata: params.Metadata,
-		Locale:   new(stripeLocale(params.Locale)),
+		// and on the payment intent, which is what a refund made in the dashboard names
+		PaymentIntentData: &stripeapi.CheckoutSessionPaymentIntentDataParams{Metadata: params.Metadata},
+		Locale:            new(stripeLocale(params.Locale)),
 	}
 	if params.ReturnURL != "" {
 		checkoutParams.ReturnURL = new(params.ReturnURL + "/{CHECKOUT_SESSION_ID}")

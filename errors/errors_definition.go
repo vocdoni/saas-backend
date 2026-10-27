@@ -111,11 +111,15 @@ var (
 	// ErrMaxWritersReached: the organization already has as many admins and managers (pending
 	// invitations included) as it may hold.
 	ErrMaxWritersReached = Error{Code: 40179, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("max admin and manager users reached")}
-	// ErrPaymentRequired carries the current quote in data so the client can start checkout.
+	// ErrPaymentRequired: the organization's wallet does not cover the price; data carries the
+	// quote, balanceCents and shortfallCents, which POST /processes/{processId}/checkout tops up.
 	ErrPaymentRequired = Error{Code: 40178, HTTPstatus: http.StatusPaymentRequired, Err: fmt.Errorf("process publication requires payment")}
-	// ErrInsufficientWalletBalance: the integrator wallet cannot cover the debit; data carries
-	// requiredCents and availableCents when the balance could be read.
+	// ErrInsufficientWalletBalance: the integrator wallet cannot cover a managed organization's
+	// debit; data carries requiredCents and availableCents when the balance could be read.
 	ErrInsufficientWalletBalance = Error{Code: 40175, HTTPstatus: http.StatusPaymentRequired, Err: fmt.Errorf("insufficient integrator wallet balance")}
+	// ErrManagedOrgHasNoWallet: a managed organization's processes are paid from its integrator's
+	// wallet; it has none of its own and cannot top one up.
+	ErrManagedOrgHasNoWallet = Error{Code: 40181, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("managed organizations have no wallet; their integrator pays")}
 	// ErrQuoteRequired: the census is above the self-service limit; a custom quote is the only path.
 	ErrQuoteRequired = Error{Code: 40176, HTTPstatus: http.StatusUnprocessableEntity, Err: fmt.Errorf("census size requires a custom quote, self-service checkout is unavailable")}
 	// ErrPaymentSessionConflict: the process's payment is in a state the request cannot act on

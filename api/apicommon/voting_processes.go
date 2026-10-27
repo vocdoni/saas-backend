@@ -241,16 +241,16 @@ type ProcessCensusCheckoutRequest struct {
 	Locale    string `json:"locale,omitempty"`
 }
 
-// WalletResponse is an integrator's prepaid wallet: EUR balance plus its paged ledger,
+// WalletResponse is an organization's prepaid wallet: EUR balance plus its paged history,
 // newest first.
 type WalletResponse struct {
 	BalanceCents pricing.Cents          `json:"balanceCents"`
 	Currency     string                 `json:"currency"`
-	Ledger       []db.WalletLedgerEntry `json:"ledger"`
+	History      []db.WalletLedgerEntry `json:"history"`
 	Pagination   *Pagination            `json:"pagination"`
 }
 
-// WalletTopUpRequest starts a one-time checkout that credits the integrator wallet once
+// WalletTopUpRequest starts a one-time checkout that credits the organization's wallet once
 // the payment is webhook-verified. AmountCents is EUR cents, VAT excluded.
 type WalletTopUpRequest struct {
 	AmountCents pricing.Cents `json:"amountCents"`

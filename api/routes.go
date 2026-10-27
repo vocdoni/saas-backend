@@ -161,11 +161,11 @@ const (
 	// GET routes to compute a price from formula inputs (public calculator)
 	pricingEndpoint = "/pricing"
 
-	// GET the caller's integrator wallet (balance + ledger, path-less)
-	walletEndpoint = "/wallet"
+	// GET an organization's wallet (balance + history); not for managed organizations
+	walletEndpoint = "/organizations/{orgAddress}/wallet"
 
-	// POST starts a one-time checkout that tops up the integrator wallet
-	walletTopUpEndpoint = "/wallet/topup"
+	// POST starts a one-time checkout that tops up an organization's wallet
+	walletTopUpEndpoint = "/organizations/{orgAddress}/wallet/topup"
 
 	// GET lists the organization's process payments, filtered by status
 	organizationPaymentsEndpoint = "/organizations/{orgAddress}/payments"

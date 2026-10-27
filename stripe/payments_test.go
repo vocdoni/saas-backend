@@ -9,7 +9,8 @@ import (
 
 // TestBuildPaymentSessionParams pins the wire shape of a one-time checkout session: mode
 // payment, embedded UI, tax exclusive EUR price_data, invoice creation, and the routing
-// metadata on the session itself (a payment session has no SubscriptionData).
+// metadata on the session itself (a payment session has no SubscriptionData) and on its payment
+// intent, which a refund made in the dashboard names.
 func TestBuildPaymentSessionParams(t *testing.T) {
 	c := qt.New(t)
 
@@ -19,8 +20,9 @@ func TestBuildPaymentSessionParams(t *testing.T) {
 			{Description: "email 2FA", AmountCents: 600},
 		},
 		Metadata: map[string]string{
-			MetadataKeyProcessID:   "656e6f7567682062797465732100",
-			MetadataKeyRequestedBy: "admin@example.com",
+			MetadataKeyWalletTopUpOrg: "0x000000000000000000000000000000000000bEEF",
+			MetadataKeyProcessID:      "656e6f7567682062797465732100",
+			MetadataKeyRequestedBy:    "admin@example.com",
 		},
 		ReturnURL: "https://app.example.com/payment",
 		Locale:    "ca", // unsupported by Stripe, must fall back to es like the subscription flow
@@ -36,6 +38,8 @@ func TestBuildPaymentSessionParams(t *testing.T) {
 	c.Assert(*params.ReturnURL, qt.Equals, "https://app.example.com/payment/{CHECKOUT_SESSION_ID}")
 	c.Assert(params.SubscriptionData, qt.IsNil)
 	c.Assert(params.Metadata[MetadataKeyProcessID], qt.Equals, "656e6f7567682062797465732100")
+	c.Assert(params.PaymentIntentData.Metadata[MetadataKeyWalletTopUpOrg], qt.Equals,
+		"0x000000000000000000000000000000000000bEEF")
 
 	c.Assert(params.LineItems, qt.HasLen, 2)
 	for i, want := range []struct {

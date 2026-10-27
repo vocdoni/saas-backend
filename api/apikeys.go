@@ -49,8 +49,9 @@ func IsValidAPIKeyScope(s string) bool {
 // tickets, checkout, etc.) JWT-only. The patterns must match the constants used at registration
 // so they equal chi's RoutePattern().
 var apiKeyAllowlist = map[string]string{
-	// integrator (path-less; the integrator org is resolved from the key). The wallet
-	// top-up stays JWT-only like the rest of checkout.
+	// integrator (path-less; the integrator org is resolved from the key). The wallet is read
+	// only on the key's own organization (walletOrganization); its top-up stays JWT-only like the
+	// rest of checkout.
 	"GET " + integratorEndpoint:             ScopeQuotaRead,
 	"GET " + walletEndpoint:                 ScopeQuotaRead,
 	"GET " + managedOrganizationsEndpoint:   ScopeManagedRead,
@@ -87,7 +88,8 @@ var apiKeyAllowlist = map[string]string{
 	"PUT " + processesQuestionCensusEndpoint:  ScopeVotingWrite,
 	// the only checkout route a key may call: a managed organization's census headroom is
 	// debited from the integrator wallet, and the integrator drives census growth with its key.
-	// The handler refuses keys on its card branch; the per-organization role check still gates it.
+	// The handler refuses keys on the top-up checkout branch; the per-organization role check
+	// still gates it.
 	"POST " + processesCensusCheckoutEndpoint: ScopeVotingWrite,
 }
 

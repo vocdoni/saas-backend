@@ -396,17 +396,19 @@ func TestStripeCheckoutWebhookWalletTopUp(t *testing.T) {
 	code := postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8),
 		"checkout.session.completed", topUpObject)
 	c.Assert(code, qt.Equals, http.StatusOK)
-	wallet := requestAndParse[apicommon.WalletResponse](t, http.MethodGet, token, nil, "wallet")
+	wallet := requestAndParse[apicommon.WalletResponse](t, http.MethodGet, token, nil,
+		"organizations", integratorAddr.String(), "wallet")
 	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(50_000))
 
 	// a fresh-id replay (second replica) cannot double-credit; the ledger has one row
 	code = postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8),
 		"checkout.session.completed", topUpObject)
 	c.Assert(code, qt.Equals, http.StatusOK)
-	wallet = requestAndParse[apicommon.WalletResponse](t, http.MethodGet, token, nil, "wallet")
+	wallet = requestAndParse[apicommon.WalletResponse](t, http.MethodGet, token, nil,
+		"organizations", integratorAddr.String(), "wallet")
 	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(50_000))
-	c.Assert(wallet.Ledger, qt.HasLen, 1)
-	c.Assert(wallet.Ledger[0].AmountCents, qt.Equals, pricing.Cents(50_000))
+	c.Assert(wallet.History, qt.HasLen, 1)
+	c.Assert(wallet.History[0].AmountCents, qt.Equals, pricing.Cents(50_000))
 }
 
 // TestStripeCheckoutWebhookReplayPublishesStrandedProcess: fulfillment is two steps —
@@ -512,9 +514,10 @@ func TestStripeCheckoutWebhookPermanentlyInvalidEvents(t *testing.T) {
 			stripe.MetadataKeyWalletTopUpOrg: "not-an-address",
 		}))
 	c.Assert(code, qt.Equals, http.StatusOK)
-	wallet := requestAndParse[apicommon.WalletResponse](t, http.MethodGet, token, nil, "wallet")
+	wallet := requestAndParse[apicommon.WalletResponse](t, http.MethodGet, token, nil,
+		"organizations", integratorAddr.String(), "wallet")
 	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(0))
-	c.Assert(wallet.Ledger, qt.HasLen, 0)
+	c.Assert(wallet.History, qt.HasLen, 0)
 
 	// a process payment whose process id is not an ObjectID, on both the completed and
 	// the async-failed event: no process to reconcile it against, ever

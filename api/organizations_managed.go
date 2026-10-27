@@ -252,7 +252,8 @@ func (a *API) managedOrganizationsHandler(w http.ResponseWriter, r *http.Request
 //	@Description	session — no address in the URL) is enabled as an integrator, along with the usage summed
 //	@Description	across its managed organizations. The caller must be an admin or manager of the
 //	@Description	organization. An integrator has no limits: its spending is bounded by its wallet
-//	@Description	balance (GET /wallet). When the organization is not an integrator, `enabled` is false.
+//	@Description	balance (GET /organizations/{orgAddress}/wallet). When the organization is not an integrator,
+//	@Description	`enabled` is false.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `quota:read`).
 //	@Tags			integrator
