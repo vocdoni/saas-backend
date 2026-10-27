@@ -117,6 +117,9 @@ jobs:
       actions: read # download coverage artifacts (current PR run + main baseline)
       pull-requests: write # post the coverage report as a PR comment
     steps:
+      # A self-hosted workspace keeps an earlier job's credential-less checkout,
+      # which the action's changed-files step would fail to fetch from.
+      - uses: actions/checkout@v7
       # The action installs its binary with `sudo mv` into /usr/bin, which the
       # self-hosted runner refuses; DRY_RUN leaves it in .github/outputs instead.
       - name: Put the go-coverage-report download dir on PATH
