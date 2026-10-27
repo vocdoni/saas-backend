@@ -5372,6 +5372,10 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy hashing the phone, retry after Retry-After (50302)
+          schema:
+            $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
       summary: List voted participants of a voting process
