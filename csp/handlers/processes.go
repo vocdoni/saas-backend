@@ -66,6 +66,17 @@ func memberEligibleForQuestion(q *db.VotingProcessQuestion, memberID string) boo
 // it has to err toward letting a real voter through.
 const startGrace = time.Minute
 
+// endGrace keeps signing open a little past the stored EndDate. The chain closes later than it:
+// an immediate-start election's duration is computed when its tx is built, so it ends EndDate plus
+// the time that tx took to be mined. A signature issued in that window can still be cast, and one
+// issued after the chain closed is only wasted: it carries no right the chain would honour.
+const endGrace = time.Minute
+
+// processEnded reports whether the process is past its end (plus endGrace), when it has one.
+func processEnded(vp *db.VotingProcess) bool {
+	return !vp.EndDate.IsZero() && !time.Now().Before(vp.EndDate.Add(endGrace))
+}
+
 // unvotableElection returns the 401 to write when the question's election does not currently
 // accept a signature, or nil when it does.
 //
@@ -80,8 +91,7 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 	if !vp.StartDate.IsZero() && time.Now().Add(startGrace).Before(vp.StartDate) {
 		return errors.Ptr(errors.ErrUnauthorized.Withf("process has not started yet"))
 	}
-	// no grace at the end: a signature issued after it could only ever be refused by the chain
-	if !vp.EndDate.IsZero() && !time.Now().Before(vp.EndDate) {
+	if processEnded(vp) {
 		return errors.Ptr(errors.ErrUnauthorized.Withf("process has ended"))
 	}
 	return nil
@@ -1014,8 +1024,9 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 			QuestionID: q.ID.Hex(),
 			UpstreamID: q.UpstreamID,
 			// a voter can only vote a question if they are a participant of the process
-			// census AND fall within the question's eligibility subset
-			CanVote: resp.BelongsToProcess && memberEligibleForQuestion(q, memberID),
+			// census AND fall within the question's eligibility subset, and not once the process
+			// has ended (the CSP no longer signs then)
+			CanVote: resp.BelongsToProcess && memberEligibleForQuestion(q, memberID) && !processEnded(vp),
 		}
 		if len(q.UpstreamID) == 0 {
 			continue // question not yet on chain
@@ -1034,6 +1045,7 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 	// one goroutine per signed question (at most db.MaxQuestionsPerProcess); only uncached,
 	// non-blind rows reach the chain, and the lookup bounds node reads across requests. Each
 	// goroutine writes only its own index.
+	resolver := VoteStatusResolver{Store: c.mainDB, Lookup: c.voteOnChain}
 	errs := make([]error, len(rows))
 	var wg sync.WaitGroup
 	for i, row := range rows {
@@ -1041,14 +1053,20 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 			continue
 		}
 		wg.Go(func() {
-			resp.Questions[i].HasSigned, resp.Questions[i].HasVoted, errs[i] = ResolveVoteStatus(
-				r.Context(), c.mainDB, c.voteOnChain, row)
+			var st VoteStatus
+			st, errs[i] = resolver.Resolve(r.Context(), row)
+			resp.Questions[i].HasSigned, resp.Questions[i].HasVoted = st.Signed, st.Voted
 		})
 	}
 	wg.Wait()
 	// a vote the chain could not be asked about is not a hasVoted=false (same policy as
-	// POST /votes/verify); the raw node error goes to the log, not to the voter.
+	// POST /votes/verify): a voter told "not voted" by mistake would vote again. The raw node
+	// error goes to the log, not to the voter.
 	if err := stderrors.Join(errs...); err != nil {
+		// the voter gave up waiting: nobody is left to read an answer, and it is no node failure
+		if r.Context().Err() != nil {
+			return
+		}
 		log.Warnw("vote status lookup failed", "processId", oid.Hex(), "error", err)
 		errors.ErrVochainRequestFailed.Write(w)
 		return

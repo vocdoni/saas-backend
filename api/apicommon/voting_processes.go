@@ -220,12 +220,14 @@ type VotingProcessValidateResponse struct {
 // ProcessParticipantQuestionVote is one question's vote status for a matched participant.
 // HasSigned is true once the CSP signed the member's ballot for the question (the vote may not
 // be on chain); HasVoted is true only when the vote is on chain, and is always false in an
-// anonymous (blind) census.
+// anonymous (blind) census. HasVotedUnknown is set when the chain could not be asked about this
+// member's vote: HasVoted is then false without meaning "not voted".
 type ProcessParticipantQuestionVote struct {
-	QuestionID string            `json:"questionId"`
-	UpstreamID internal.HexBytes `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
-	HasSigned  bool              `json:"hasSigned"`
-	HasVoted   bool              `json:"hasVoted"`
+	QuestionID      string            `json:"questionId"`
+	UpstreamID      internal.HexBytes `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	HasSigned       bool              `json:"hasSigned"`
+	HasVoted        bool              `json:"hasVoted"`
+	HasVotedUnknown bool              `json:"hasVotedUnknown,omitempty"`
 }
 
 // ProcessParticipantEntry is a matched org member that is also a participant of the process

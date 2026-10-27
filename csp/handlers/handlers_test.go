@@ -110,7 +110,10 @@ func TestUnvotableElectionEndDate(t *testing.T) {
 	c.Assert(unvotableElection(&db.VotingProcess{}, q), qt.Equals, (*errors.Error)(nil))
 	c.Assert(unvotableElection(&db.VotingProcess{EndDate: time.Now().Add(time.Hour)}, q),
 		qt.Equals, (*errors.Error)(nil))
-	ended := unvotableElection(&db.VotingProcess{EndDate: time.Now().Add(-time.Second)}, q)
+	// within endGrace of the stored end the chain may still be open: signing goes on
+	c.Assert(unvotableElection(&db.VotingProcess{EndDate: time.Now().Add(-time.Second)}, q),
+		qt.Equals, (*errors.Error)(nil))
+	ended := unvotableElection(&db.VotingProcess{EndDate: time.Now().Add(-endGrace - time.Second)}, q)
 	c.Assert(ended, qt.Not(qt.Equals), (*errors.Error)(nil))
 	c.Assert(ended.Error(), qt.Contains, "process has ended")
 }

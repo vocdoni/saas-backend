@@ -235,10 +235,18 @@ func TestProcessCSP(t *testing.T) {
 	// signed but not relayed: the CSP signature is not a vote
 	assertParticipant(true, false)
 
-	// AC5b: a signed row the chain cannot be asked about fails the call, never reads as not voted
+	// AC5b: a signed row the chain cannot be asked about is reported as unknown, never as not
+	// voted, while the rest of the list still renders
 	failVoteLookup(signInfo.Consumed[0].Nullifier)
-	requestAndAssertError(errors.ErrVochainRequestFailed, t, http.MethodGet, token, nil,
+	pc := requestAndParse[apicommon.ProcessParticipantsResponse](t, http.MethodGet, token, nil,
 		"processes", pid, participantsPath)
+	c.Assert(pc.Participants, qt.HasLen, 1)
+	for _, qv := range pc.Participants[0].Questions {
+		open := bytes.Equal(qv.UpstreamID, openElection)
+		c.Assert(qv.HasSigned, qt.Equals, open)
+		c.Assert(qv.HasVoted, qt.IsFalse)
+		c.Assert(qv.HasVotedUnknown, qt.Equals, open)
+	}
 	unfailVoteLookup(signInfo.Consumed[0].Nullifier)
 
 	// once the vote is mined, hasVoted flips to true (and stays, now from the cached flag)
@@ -467,7 +475,7 @@ func TestProcessCSPSignRefusedAfterEnd(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	vp, err := testDB.VotingProcess(oid)
 	c.Assert(err, qt.IsNil)
-	vp.EndDate = time.Now().Add(-time.Second)
+	vp.EndDate = time.Now().Add(-2 * time.Minute) // past the CSP's end grace
 	_, err = testDB.SetVotingProcess(vp)
 	c.Assert(err, qt.IsNil)
 
