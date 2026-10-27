@@ -347,6 +347,53 @@ func sessionProcessTopUp(session *stripeapi.CheckoutSession) (*ProcessTopUp, err
 	return topUp, nil
 }
 
+// handleRefund mirrors in the wallet a refund made by hand in the Stripe dashboard (the service
+// never refunds): on refund.created and refund.updated, a succeeded refund of a payment intent
+// that credited a wallet top-up is debited from that wallet, net of VAT at the top-up's own
+// ratio (rounded down), in full even below zero. Keyed by the refund id, so replays, and the
+// updated event of a refund already counted when created, debit nothing. A refund of anything
+// else — a subscription invoice, a payment intent with no top-up — is ignored.
+func (s *Service) handleRefund(event *stripeapi.Event) error {
+	var refund stripeapi.Refund
+	if err := json.Unmarshal(event.Data.Raw, &refund); err != nil {
+		return fmt.Errorf("failed to parse refund from event %s: %w", event.ID, err)
+	}
+	if refund.Status != stripeapi.RefundStatusSucceeded || refund.Amount <= 0 {
+		return nil // pending, failed or canceled: no money left
+	}
+	if refund.PaymentIntent == nil || refund.PaymentIntent.ID == "" {
+		log.Infow("ignoring refund without a payment intent", "refundId", refund.ID)
+		return nil
+	}
+	topUp, err := s.db.WalletTopUpByPaymentIntent(refund.PaymentIntent.ID)
+	if errors.Is(err, db.ErrNotFound) {
+		// not a wallet top-up. ponytail: also a top-up refunded before its completed event was
+		// credited, which a human in the dashboard cannot realistically do; read the payment
+		// intent's wallet_topup_org metadata from Stripe if it ever happens.
+		log.Infow("ignoring refund of a payment that is not a credited wallet top-up",
+			"refundId", refund.ID, "paymentIntentId", refund.PaymentIntent.ID)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to find the top-up of refund %s: %w", refund.ID, err)
+	}
+	netCents := pricing.Cents(refund.Amount)
+	if topUp.GrossCents > 0 {
+		netCents = pricing.Cents(refund.Amount) * topUp.AmountCents / topUp.GrossCents
+	}
+	if netCents <= 0 {
+		return nil
+	}
+	if err := s.db.DebitWalletForRefund(db.WalletRefund{
+		OrgAddress: topUp.OrgAddress, AmountCents: netCents, RefundID: refund.ID,
+	}); err != nil {
+		return fmt.Errorf("failed to debit refund %s: %w", refund.ID, err)
+	}
+	log.Warnw("wallet top-up refunded in stripe, debited from the wallet", "orgAddress", topUp.OrgAddress.String(),
+		"refundId", refund.ID, "refundedCents", refund.Amount, "debitedCents", netCents)
+	return nil
+}
+
 // parseCheckoutSessionFromEvent extracts the checkout session object from a webhook event.
 func parseCheckoutSessionFromEvent(event *stripeapi.Event) (*stripeapi.CheckoutSession, error) {
 	var session stripeapi.CheckoutSession
