@@ -265,7 +265,8 @@ explicitly out of scope — handle those separately if the erasure request cover
 
 **What it does.** `--setIntegrator` flags an organization as an integrator: it can create
 managed organizations and pay for their processes from its prepaid wallet, with no limit other
-than the wallet balance.
+than the wallet balance. Standard organizations pay for their own processes from their own
+wallet the same way; a managed organization has none, its integrator's pays.
 
 **How to run.**
 

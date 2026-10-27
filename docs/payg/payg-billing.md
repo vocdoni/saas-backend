@@ -1,18 +1,21 @@
 # Pay-per-process billing
 
 How the SaaS backend charges for voting processes: each process is priced individually
-from its eligible voters and selected add-ons, paid through a one-time Stripe Checkout
-session (or an integrator's prepaid wallet), and **publication is the fulfillment of a
-verified payment**. Drafts are free; small processes without add-ons are free; a browser redirect is
-never proof of payment.
+from its eligible voters and selected add-ons and **paid from a prepaid credit wallet**
+(1 credit = €1, VAT excluded, stored as cents). Every organization that is not managed has one
+wallet, a standard organization and an integrator alike; a managed organization's processes are
+paid from its integrator's. Stripe does one thing: top a wallet up. Publishing and buying census
+headroom only ever debit a wallet, money given back is credited to the wallet it came from, and
+a refund made by hand in the Stripe dashboard is mirrored in the wallet. Drafts are free; small
+processes without add-ons are free; a browser redirect is never proof of payment.
 
 Spec: [VocdoniApp new pricing model](https://hackmd.io/@vocdoni/vocdoni-app-new-pricing-model-feature).
 Code map: `pricing/` (the formula), `db/process_payments.go` + `db/wallets.go` (state),
-`stripe/payments.go` (checkout + webhook fulfillment), `api/processes_price.go`,
-`api/processes_checkout.go` + `api/wallet.go` (endpoints), `api/processes_publish.go` +
-`api/processes_publish_payment.go` (the gate), `api/processes_census_payment.go` +
-`stripe/topups.go` (census headroom), `api/processes_refund.go` + `stripe/refunds.go`
-(money back).
+`stripe/payments.go` (top-up sessions, the checkout webhook, refund sync), `api/wallet.go`
+(wallet endpoints, every top-up session), `api/processes_price.go`, `api/processes_checkout.go`
+(the shortfall checkout), `api/processes_publish.go` + `api/processes_publish_payment.go` (the
+gate, the debit, the webhook follow-up), `api/processes_census_payment.go` (census headroom),
+`api/processes_refund.go` (credit back on delete).
 
 ## Pricing
 
@@ -49,10 +52,11 @@ add-on's claim, as described in
 
 **Minimum charge.** A priced total strictly between €0 and €1 is raised to €1
 (`pricing.MinimumChargeCents`) by an extra `minimumCharge` line, so the lines still sum to the
-total; it applies to card and wallet payers alike (Stripe cannot charge a card less than
-€0.50). A total of €0 stays free. A card census-headroom checkout follows the same rule: it
-charges `max(dueCents, €1)` while the envelope is raised to the target price only
-([Buying census headroom](#buying-census-headroom)).
+total; it applies to every payer. A total of €0 stays free. €1 is also the smallest top-up
+(Stripe cannot charge a card less than €0.50): a free-form top-up is €1 to €100 000, and a
+top-up opened for a shortfall charges `max(shortfall, €1)`, the rest staying in the wallet
+([Topping up for a process](#topping-up-for-a-process),
+[Buying census headroom](#buying-census-headroom)).
 
 Worked examples (pinned in `pricing/pricing_test.go` and `api/pricing_test.go`): 25 voters →
 free; 26 → €17.16; 40 → €26.40; 600 → €262; 1 200 → €383; 3 000 → €608; 10 000 → €1 358;
@@ -70,133 +74,186 @@ should suggest a custom quote) and still carries a price that can be paid. Above
 process is **quote-only**: the quote has no price at all — `lines: []`, `totalCents: 0`,
 `quoteRequired: true`, add-ons not priced either — and a zero total there is never "free".
 Every payment path refuses it with **422** (40176) before it could read the zero as free or
-as already covered: the publish gate (card and managed organizations alike, so the
-`validation` dry-run lists it too), process checkout, census-headroom checkout (card and
-wallet), the managed wallet debit and wallet charge, and the census growth guard. A paid
-process whose census crossed 50 000 after payment is left paid by webhook fulfillment (the
-webhook answers 200, not a retry loop) for sales to publish manually.
+as already covered: the publish gate (so the `validation` dry-run lists it too), the wallet
+debit, the process top-up checkout, census-headroom checkout, and the census growth guard. A
+draft whose census crossed 50 000 after its top-up was credited is not published by the webhook
+(it answers 200, not a retry loop): the credit stays in the wallet for sales to settle.
 
-`pricing.QuoteHash` fingerprints the priced inputs + total. It is stored with the
-payment and is how an open checkout session is detected as **obsolete** after a draft
-edit changes the price.
+## Wallets
+
+A wallet is keyed by its **payer**: the organization itself, or `org.ManagedBy` for a managed
+organization, whose processes its integrator pays. It is created on its first credit.
+
+- `GET /organizations/{orgAddress}/wallet` (Admin or Manager; also a `quota:read` API key **of
+  that same organization**) returns `{balanceCents, currency, history[], pagination}`. A key acts
+  as the user who created it, who may administer other organizations too, so the handler pins
+  it to `key.OrgAddress` (403 `ErrAPIKeyNotAllowed` otherwise).
+- `POST /organizations/{orgAddress}/wallet/topup {amountCents, returnURL, locale}` (Admin, JWT
+  only) opens a `mode: payment` checkout for €1–€100 000 net; Stripe Tax adds VAT on top. The
+  balance moves only when the verified webhook credits it.
+- A managed organization has no wallet: both routes answer **403** (40181,
+  `ErrManagedOrgHasNoWallet`). The path-less `/wallet` routes and
+  `GET /organizations/{orgAddress}/payments` are gone; the wallet history replaces the latter.
+
+`history` is the `walletLedger`, newest first, with `amountCents` signed as applied:
+
+| Kind | Sign | What |
+|---|---|---|
+| `topup` | + | a verified Stripe top-up, net of VAT (key: the session id) |
+| `payment` | − | a process publish or census headroom (`processId`, and `processOrgAddress`: the managed organization that spent it) |
+| `creditBack` | + | a payment returned to the wallet: a paid draft deleted (`refund:<process id>`) |
+| `refund` | − | a top-up refunded by hand in the Stripe dashboard (`striperefund:<refund id>`) |
+
+The ledger is the append-only audit trail; the wallet document is authoritative for the
+balance. Every write is one conditional update that carries its idempotency condition
+(`appliedKeys $ne <key>`) and, for a debit, the balance condition (`balanceCents $gte`) in the
+same filter (all but a Stripe refund's debit, see below): no double spend across replicas, no transactions. `appliedKeys` is bounded to the
+5 000 most recent keys (`walletAppliedKeysWindow`); an operation older than that is caught by the
+ledger's unique index on `idempotencyKey`. Charges to one wallet are also serialized by an
+in-memory lock (single API instance).
+
+The balance is negative only after a Stripe refund of credit already spent
+([Stripe refunds of top-ups](#stripe-refunds-of-top-ups)): every debit is then refused until a
+top-up covers the debt, and a shortfall (due − balance) already counts it.
 
 ## Payment state
 
 Payment state lives in its own `processPayments` collection keyed by the process id —
 deliberately **not** embedded in `votingProcesses`, whose write paths replace whole
-documents and must never be able to wipe a live session id or a paid state.
+documents. Every payment is a wallet debit; the card only ever fills a wallet.
 
 ```
- (none) ──checkout──► pending ──delayed method──► processing
-   │                    │  ▲                          │
-   │ free (net €0)      │  └── new session ── failed ◄─┴── payment failed
-   │                    │                        ▲
-   ▼                    │                        └── session expired
- publish            webhook paid ──► paid ──── draft deleted ───► refunded
-                                       ▲                            │
-                         wallet debit ─┘        refund failed at Stripe
-                                       └────────────────────────────┘
+ (none) ──POST /checkout──► pending ──webhook credits the top-up──► pending (consumed)
+   │                          │                                         │
+   │   expired / async failed │                                         │ publish debits
+   │   / cancelled: row goes ◄┘                                         ▼
+   ├──────────── publish debits the wallet (no checkout) ──────────► paid ──draft deleted──► refunded
+   │                                                                     ▲   (credit back)
+   └── free (net €0): publish records a €0 paid envelope ────────────────┘
 ```
 
-- `pending`: a checkout session is open. Draft edits are allowed; the session is expired
-  and replaced at the next checkout if the price changed. A session Stripe expires on its
-  own (`checkout.session.expired`) moves the payment to `failed`, which matters for the
-  once-per-organization add-ons: an abandoned checkout must not hold the organization's claims
-  forever.
-- `processing`: checkout completed with a delayed payment method (e.g. SEPA debit) and
-  the outcome is unknown. No new charge may start; the draft is locked.
-- `failed`: the payment failed; the process is payable again with a fresh session.
-- `paid`: verified by webhook or debited from a wallet. Publication retries never
-  re-charge, and every publish path re-prices against `amountCents`. The draft stays
-  **editable** (an edit can only repair a draft that failed publish preflight — the gate
-  re-prices it, so it cannot under-charge), its census may grow while the projected price
-  fits inside what was paid, and the envelope itself can be raised
-  ([Buying census headroom](#buying-census-headroom)).
-- `refunded`: the draft was deleted and its refund was issued ([Deleting a paid
-  draft](#deleting-a-paid-draft)). Kept as the audit trail: the process it names no longer
-  exists, so nothing can be paid for again. Normally final, but not guaranteed: Stripe can
-  report a refund as failed up to ~30 days later. The payment then returns to `paid` (the
-  money is held again) and the event is logged at error level for manual reconciliation;
-  Stripe does not retry a failed refund, so it has to be returned another way.
+- `pending`: a wallet top-up checkout is open for the process (`checkoutSessionId`,
+  `amountCents` = the price it was opened for, `topUpCents` = what it charges, `requestedBy`).
+  The row holds the once-per-organization add-on claims across the checkout. `consumed` is set
+  when the webhook credits that top-up: the session is spent and the money is in the wallet, so
+  a consumed row no longer blocks a manual publish, and is replaced by a new checkout, the wallet
+  payment or the €0 envelope, or dropped on cancel/delete without any Stripe call.
+- `paid`: debited from the payer's wallet (`payer`). `amountCents` is the envelope; it keeps the
+  `checkoutSessionId` of the top-up that funded it, if any. Publishing again is free, and every
+  publish path re-prices against `amountCents`. The draft stays **editable** (an edit can only
+  repair a draft that failed publish preflight — the debit re-prices it, so it cannot
+  under-charge), its census may grow while the projected price fits inside what was paid, and
+  the envelope can be raised ([Buying census headroom](#buying-census-headroom)).
+- `refunded`: the draft was deleted and its payment credited back to `payer`
+  ([Deleting a paid draft](#deleting-a-paid-draft)). Terminal; kept as the audit trail.
+- `failed`: reserved for a wallet payment that a failed publish reverts; nothing in this flow
+  writes it.
 
 Every transition is a single conditional Mongo write whose **filter is the state
-machine** (`db/process_payments.go`), in the style of `ClaimVotingProcessForPublish`:
-matching the filter is winning the transition, `MatchedCount` reports it, and a
-duplicate webhook resolves to a lost CAS instead of a second side effect.
+machine** (`db/process_payments.go`): matching the filter is winning the transition,
+`MatchedCount` reports it, and the top-up's session id is part of the filter of every
+transition the webhook makes, so a stale or replayed session loses its compare-and-set instead
+of acting twice.
 
-## Checkout flow (standard organizations)
+## Publication gate and the debit
 
-0. `GET /pricing?voters=…&emailTwoFA=…` — the public calculator over the same formula
-   (no auth, no draft needed; for the pricing page). Branding and the custom URL are charged as requested
-   and credits are not applied — it has no organization context.
-1. `GET /processes/{id}/price` — the server-side quote for a draft (line breakdown,
-   flags, current payment status). The price shown to the user before payment is always
-   a server calculation, never client-side math.
-2. `POST /processes/{id}/checkout` (Admin, JWT-only) — reconciles before charging:
-   - `processing`/`paid` → 409 (40177), never a second charge;
-   - open session with a matching quote hash → **reused** (same client secret);
-   - open session with a stale hash → **expired first**, then replaced — an expiry
-     failure refuses the checkout rather than risking two payable sessions;
-   - otherwise a new `mode: payment` session with server-calculated `price_data`
-     (`tax_behavior: exclusive`), `invoice_creation` enabled, and the process id +
-     requesting user in **session metadata**.
-3. The app confirms with the embedded Payment Element; Stripe computes VAT.
-4. The webhook fulfills (below). `GET /processes/{id}/checkout` is for polling only.
-5. `GET /organizations/{address}/payments` (Admin or Manager) lists the organization's
-   payments as stored, `?status=` a comma list (default `pending,processing`: the checkouts
-   still open), newest first unless `sortOrder=asc`. It is how drafts held by an open
-   checkout are found; `DELETE /processes/{id}/checkout` cancels one.
+0. `GET /pricing?voters=…&emailTwoFA=…` — the public calculator over the same formula (no auth,
+   no draft; for the pricing page). Branding and the custom URL are charged as requested — it
+   has no organization context.
+1. `GET /processes/{id}/price` — the server-side quote for a draft (line breakdown, flags,
+   current payment status). The price shown before payment is always a server calculation.
+2. `POST /processes/{id}/publish` runs the gate (`paymentDueForPublish`), which only reads:
+   quote-only → **422** (40176); a `pending` row whose top-up is still open → **409** (40177): pay
+   it, or cancel it with `DELETE /processes/{id}/checkout`, then publish; otherwise
+   `due = total − paid`, and when the payer's balance does not cover it → **402**. A standard
+   organization gets 40178 with `{lines, totalCents, …, balanceCents, shortfallCents}` (the
+   quote, flattened, plus what the wallet lacks); a managed one gets 40175 with
+   `{requiredCents, availableCents}` of its integrator's wallet. The `GET .../validation`
+   dry-run lists the same refusals.
+3. **The debit** happens in exactly one place: inside `startProcessPublish`, after the publish
+   claim, so two concurrent publishes cannot both debit and a delete cannot credit back between
+   the debit and the publish. It claims the once-per-organization add-ons, re-prices, and debits
+   `total − paid` from the payer's wallet under the payer's wallet lock, keyed
+   `<process id>:<price>`: a retry at the same price debits nothing, a retry of a draft that grew
+   debits only the difference. The balance can move between gate and debit; the debit's own
+   refusal (402, claims released) is the authoritative answer. The paid record (`payer`, the
+   new envelope) is written right after the debit and is not optional: a payment the wallet may
+   not write over — an open checkout, a planned refund — is refused (409) before any money moves,
+   and a record write that still fails is a 500 a retry heals without charging again. Anything
+   failing after that — a full tx queue (503) included — leaves a paid draft: publishing again is
+   free and deleting it credits the wallet back.
 
-Free processes (net €0) skip all of this and publish directly.
+Free processes (net €0) publish directly and record a €0 `paid` envelope.
 
-## Publication gate
+## Topping up for a process
 
-`POST /processes/{id}/publish` refuses a priced unpaid process with **402** (40178,
-quote in the error data); the `GET .../validation` dry-run lists the missing payment
-too. A `processing` payment is already paid and still clearing, so publish answers the same
-**409** (40177) checkout does rather than sending the customer back to pay; the webhook
-publishes it once it settles. Once paid, publish re-enters the normal pipeline (preflight → atomic claim →
-signer → async job). Publishing after paid is free forever — a failed publication
-retries without touching the payment.
+`POST /processes/{id}/checkout {returnURL, locale}` (Admin, JWT only) is how a standard
+organization pays a draft its wallet does not cover. It quotes the draft, claims the add-ons,
+and opens a wallet top-up for the **shortfall** (`total − balance`, at least €1) carrying
+`wallet_topup_org` and `voting_process_id` metadata; it stores the `pending` row.
 
-Webhook-triggered publication: every paid fulfillment — Stripe's replays included, not
-only the one that wins the paid CAS — fires `stripe.Service.OnProcessPaid` →
-`api.publishPaidProcess`, which re-prices, re-runs preflight and publishes **acting as the
-user who requested the checkout** (persisted on the payment). If that user is gone, preflight
-fails, the draft is now priced above its payment or its payment refuses publication, the
-process stays paid, the webhook answers 200, and any admin publishes manually later, free.
-A failure that can clear on its own — a full tx queue, another publish holding the claim, a
-read error — answers **500** instead, so Stripe redelivers the event and the replay publishes.
-So payment completes even if the buyer closes the browser.
+- 400 when the process is free or the wallet already covers it (publish directly); 403 (40181)
+  for a managed organization; 422 above 50 000 voters; 409 (40177) when the draft is already
+  paid (a paid draft whose census outgrew its price buys the difference with
+  `POST /processes/{id}/census/checkout`) or its last checkout completed and is being credited.
+- An open session is **reused** while both the price it was opened for and what it charges
+  still equal the current total and shortfall; otherwise it is **expired first**, then replaced —
+  an expiry failure refuses the checkout rather than leave two payable sessions.
+- `GET /processes/{id}/checkout` reports the row with the live session state, for polling only.
+- `DELETE /processes/{id}/checkout` cancels a pending row: an open session is expired (a
+  completed one is left: its money lands in the wallet anyway), the row goes and its add-on
+  claims are released. 200 `"OK"`; a repeat is 404 (no payment); 409 for a paid or refunded one.
+- `checkout.session.expired` / `async_payment_failed` drop the row holding that session and
+  release its claims; a newer checkout of the same draft, and a row whose top-up was already
+  credited (consumed), are left alone.
 
-## Webhook fulfillment and idempotency
+When the top-up is paid the webhook credits the wallet and then follows up
+(`applyProcessTopUp`): it acts only on the row of **this** session, consumes it (a
+compare-and-set on the session id) and publishes as the requesting user
+(`publishPaidProcess`, which re-prices, re-runs preflight and calls `startProcessPublish`: the
+debit is the one inside it). A row already consumed (a crash between credit and publish) is
+published by the redelivery; a row paid by this session publishes again for free. It publishes
+only at the price the checkout was opened for or less: a draft whose price rose since is never
+debited more than the customer agreed to. The credit **always stays in the wallet**; nothing is
+ever refunded to the card.
 
-`stripe/webhook.go` handles `checkout.session.completed` and
-`checkout.session.async_payment_succeeded` (fulfill only when the session's
-`payment_status` is `"paid"`; a completed-but-unpaid session only advances to
-`processing`), `checkout.session.async_payment_failed` and `checkout.session.expired`
-(→ `failed`), and `refund.updated` (a refund that will never pay out; its legacy form
-`charge.refund.updated`, which Stripe emits only for some payment methods, is accepted too). Sessions from
-the legacy subscription flow carry none of our metadata keys and are ignored.
+| Webhook outcome | Answer |
+|---|---|
+| credited and published (or already published) | 200 |
+| no row, another session's row, refunded, price rose, wallet short, draft changed, deleted or failing preflight, requesting user gone | 200 — the credit stays for a manual publish |
+| a read error, another publish holding the claim, a full tx queue | 500 — Stripe redelivers, the credit is not repeated (session key) |
 
-There is **no durable event store**. Idempotency is property of every side effect:
+## Webhook handling and idempotency
+
+`stripe/webhook.go` routes the one-time payment events:
+
+- `checkout.session.completed` / `checkout.session.async_payment_succeeded`: dispatched on
+  `wallet_topup_org` **first** — every payment session carries it; a session without it is a
+  subscription checkout, owned by the subscription webhooks. A session whose `payment_status`
+  is not `paid` (a delayed method still clearing) credits nothing yet. The net paid amount
+  (subtotal − discount, VAT excluded) is credited under the session id, with the payment intent
+  and the VAT-included total a later refund needs; only then is `voting_process_id` (and the
+  headroom metadata) parsed, so metadata that names no process still keeps the credit.
+- `checkout.session.async_payment_failed` / `checkout.session.expired`: nothing was credited;
+  a top-up opened for a process drops its pending row.
+- `refund.created` / `refund.updated`: [Stripe refunds of top-ups](#stripe-refunds-of-top-ups).
+  The webhook endpoint must be subscribed to them.
+
+There is **no durable event store**. Idempotency is a property of every side effect:
 
 | Side effect | Guard |
 |---|---|
-| mark process paid | payment CAS (status + session id in the filter) |
-| enqueue publication | fired only by the CAS winner |
-| wallet credit / debit | `appliedKeys $ne` in the same atomic wallet update |
+| wallet credit, debit, credit-back, refund debit | `appliedKeys $ne` in the same atomic wallet update |
 | ledger audit row | unique index on the operation's idempotency key |
+| consume a pending row | compare-and-set on status, session id and `consumed` |
+| publish | the publish claim; publishing a published process is a no-op |
 
-A replayed event (Stripe retry, restart, second replica) loses every guard and is a
-no-op. Money arriving for a session the process no longer references is logged as an
-error for manual reconciliation — never silently dropped.
+A replayed event (Stripe retry, restart, second replica) loses every guard and is a no-op. An
+event that can never become valid — an organization that is not an address, a process id that
+is not an ObjectID — is answered **200** and dropped (`errPermanentEvent`): retrying it for
+three days would only bury the events that can still succeed.
 
-An event that can never become valid — metadata naming no process, an id that is not an
-ObjectID — is answered **200** and dropped (`errPermanentEvent`): retrying it for three days
-would only bury the events that can still succeed.
-
-## Integrator wallet (managed organizations)
+## Integrators (managed organizations)
 
 An integrator is an organization flagged `integrator` (`cmd/cli --setIntegrator`, or opted in at
 creation). It manages any number of organizations and has no quota of its own: the only limit on
@@ -207,38 +264,15 @@ The migration that introduced the flag also flagged organizations on an active n
 integrator plan. Subscribing to an integrator plan in Stripe no longer grants integrator status:
 an operator runs `cmd/cli --setIntegrator`, or the organization is created with `integrator: true`.
 
-Integrators publish on behalf of managed organizations, so the payer is not present at
-publish time. Each integrator holds a prepaid **EUR balance** (money, not resource
-units — unit pools would clash with the non-linear base price):
-
-- **Top-up**: `POST /wallet/topup` (JWT, Admin of the integrator org) opens the same
-  one-time checkout flow; the balance is credited only by the verified webhook, keyed by
-  the session id. `GET /wallet` (also `quota:read` API key) reads balance + ledger.
-- **Debit at publish**: a managed org's process skips the 402 gate; inside the publish
-  pipeline (after the claim, so concurrent publishes cannot both debit) the wallet is
-  debited by one conditional update carrying both the balance condition
-  (`balanceCents $gte`) and the idempotency condition (`appliedKeys $ne <processId:price>`)
-  in a single filter — the no-double-spend guarantee across replicas, with no transactions.
-  Insufficient balance → 402 (40175, required + available cents), claim released,
-  retryable. The key carries the price, so a retry at the **same** price is a no-op while a
-  retry of a draft that grew debits only the difference and raises the payment to match.
-  The paid record is written right after the debit and is not optional: a draft whose record
-  belongs to a card checkout is refused (409) before any money moves, and a record write
-  that still fails is a 500 that a retry heals without charging again (the key is applied).
-  Anything failing after that — a full tx queue (503) included — leaves a paid draft, like
-  a card-paid one: publishing again is free and deleting it refunds the wallet.
-- **Ledger**: `walletLedger` is the append-only audit trail (`topup`, `debit`, `refund`
-  rows) and the authority on what happened; the wallet document is authoritative for the
-  balance. `appliedKeys` is bounded to the most recent 5 000 keys
-  (`walletAppliedKeysWindow`), so a long-lived integrator cannot grow the document without
-  limit; an operation older than the window is caught by the ledger's unique index on
-  `idempotencyKey` instead.
-
-Managed orgs are refused at `POST /processes/{id}/checkout` — their payment provenance is
-the wallet, and pricing selects the integrator policy for them. The one checkout route they
-do use is `POST /processes/{id}/census/checkout`, which debits the wallet instead of opening
-a session (see below); it is also the only checkout route callable with an API key, because
-integrators drive census growth with their keys.
+Integrators publish on behalf of managed organizations, so the payer is not present at publish
+time: a managed organization's process is debited from the integrator's wallet by the same
+debit as any other, and a short wallet answers 402 (40175, `{requiredCents, availableCents}`),
+claims released, retryable. A managed organization cannot open a top-up (`/checkout` and the
+wallet routes answer 403, 40181); the integrator tops up its own wallet. The integrator's
+history names, in `processOrgAddress`, the managed organization each `payment` was for. The
+one payment route a managed organization does use is `POST /processes/{id}/census/checkout`,
+which debits the integrator's wallet at once (see below); it is also the only payment route
+callable with an API key, because integrators drive census growth with their keys.
 
 ## Once-per-organization add-ons are claimed, not just checked
 
@@ -250,8 +284,8 @@ of the add-on in `addOns` and in the payment, and the prefix of the organization
 `customUrlPaidAt`…). Each add-on has its own claim and stamp, so claiming, stamping or
 releasing one never touches the other. The claim is a conditional write on the
 **organization** document (`db.ClaimOrganizationAddOn`), taken for every priced, unstamped
-add-on at the two moments money moves: opening a card checkout, and debiting the integrator
-wallet.
+add-on at the two moments a price is fixed: opening a top-up checkout for a process, and the
+wallet debit.
 
 Read paths (`GET .../price`, the publish gate) only *read* the claims, so quoting never takes
 one. A caller that loses a claim has that add-on dropped from its input and the quote
@@ -271,8 +305,8 @@ purpose — cancelled with `DELETE /processes/{id}/checkout`, or deleted with it
 its claims back too, pinned to the claims read before dropping it. Cancel and checkout both
 take the draft's publish claim, so a cancel never releases the claims of a session that a
 concurrent checkout of the same draft is storing.
-Fulfillment (card webhook or wallet charge) stamps `<addOn>PaidAt` for each add-on the payment
-charged (`db.SetOrganizationAddOnPaid`); a refund releases both the stamp and the claim
+The wallet debit stamps `<addOn>PaidAt` for each add-on the payment charged
+(`db.SetOrganizationAddOnPaid`); a credit-back on delete releases both the stamp and the claim
 (`db.ReleaseOrganizationAddOn`). A process that paid for an add-on keeps it in its own price
 after the stamp (the payment records `branding` / `customUrl`), so its census growth is never
 re-quoted without the €149 or €99 it already paid.
@@ -300,21 +334,26 @@ write it allows run under one per-organization lock, so parallel requests cannot
 against the same size; a bulk import holds it until its members are propagated. The publish
 gate re-prices as a backstop.
 
-Growth past that price answers **402** with a `ProcessCensusGrowthQuote`
-(`{lines, totalCents, paidCents, dueCents, censusSize, currency}`) rather than a flat
-refusal, and `POST /processes/{processId}/census/checkout {censusSize, returnURL, locale}`
-sells exactly that difference:
+Growth past that price answers **402** (40178) with a `ProcessCensusGrowthQuote`
+(`{lines, totalCents, paidCents, dueCents, censusSize, currency, balanceCents, shortfallCents}`:
+`shortfallCents` is what the payer's wallet lacks of `dueCents`) rather than a flat refusal, and
+`POST /processes/{processId}/census/checkout {censusSize, returnURL, locale}` sells exactly that
+difference, for every payer, from the wallet:
 
-- **Card payer** — a `mode: payment` session for `dueCents` (at least the €1 minimum charge:
-  one voter in a lower band costs only €0.09–€0.66, and Stripe cannot charge a card that
-  little; the envelope is still raised to the target price only), carrying the target amount in
-  `process_topup_cents` and the amount it was priced from in `process_topup_from_cents`
-  metadata. The envelope is raised by the **webhook** (`RaiseProcessPaymentAmount`, a
-  compare-and-set on that base, keyed on the session id keeping the last 50), never by the
-  redirect. Of two top-ups opened against the same amount, the first paid wins.
-- **Managed organization** — no card exists, so the difference is debited from the
-  integrator wallet synchronously, through the same path a re-publish would use, and takes
-  effect at once.
+- **The wallet covers it** — the difference is debited at once (`chargeProcessWallet`, the same
+  debit a re-publish would use, under the payer's wallet lock, re-reading the envelope inside
+  it) and the envelope raised; the response carries no session and `amountCents` = what was
+  debited. This is the path an API key may take.
+- **A managed organization's integrator wallet falls short** — 402 (40175), as at publish.
+- **A standard organization's wallet falls short** — a wallet top-up checkout for
+  `max(shortfall, €1)`, carrying the target envelope in `process_topup_cents` and the envelope
+  it was priced from in `process_topup_from_cents`. No row is stored (the payment is `paid` and
+  keeps its envelope), so an abandoned top-up leaves nothing to reconcile. Once the webhook
+  credits it, it debits the headroom only while the process still paid exactly
+  `process_topup_from_cents`; a replay finds the envelope raised and debits nothing, and any
+  refusal (the process deleted, the envelope moved, a planned refund) leaves the credit in the
+  wallet, where a new `census/checkout` spends it. Opening this checkout is refused to API keys
+  (403).
 
 The growth guard itself never charges: it can only project an **upper bound** (an id naming
 no member still counts as growth), and money must never move against a projection. The
@@ -322,132 +361,109 @@ caller of `census/checkout` names the size, which is what makes charging there c
 The projection also ignores ids that are already participants, so re-sending a batch that
 already landed is not refused as growth it is not.
 
-## Deleting a paid draft
+## Deleting a draft
 
-`DELETE /processes/{processId}` on a paid draft **returns the money first, then deletes**,
-mirroring how it was paid:
+`DELETE /processes/{processId}` on a draft with a `pending` row expires its open top-up first
+(a consumed row, or a completed session, needs no Stripe call: that money lands in the wallet
+whatever happens to the draft); if Stripe cannot confirm an open session expired, the delete
+fails closed rather than leave a payable session for a process that no longer exists. The row
+goes with the draft and its add-on claims are released.
 
-- card payment → a Stripe refund of the payment intent recorded at fulfillment **and of
-  every census top-up** (`topUpIntents`), each with `Amount` unset so the VAT Stripe
-  collected goes back too, and each under its own idempotency key
-  `refund:<process id>:<payment intent>`. Before refunding, the intent's refunds are
-  listed: a live one (not `failed`/`canceled`) carrying the process's metadata is reused
-  with its own id and status, so a retry — even past Stripe's 24-hour key window — never
-  refunds twice, never repeats a partial refund, and still matches a later failure event.
-  Once a refund of the process on the intent has failed or been canceled, the key gains
-  `:retry<n>` (n of them): within the window Stripe replays a reused key's first response,
-  which would hand the retry that stale refund back as success.
-  An intent refunded outside the flow (the dashboard) counts as returned;
-- wallet payment → a `refund`-kind credit of the whole envelope (wallet-paid census growth
-  included) to the integrator wallet under `refund:<process id>`.
+### Deleting a paid draft
+
+A paid draft **credits its money back first, then deletes**: the whole envelope (census
+headroom included), less any withheld add-on, is credited to the wallet that paid it
+(`payment.payer`, never an organization re-resolved at delete time) as a `creditBack` row under
+`refund:<process id>`, for standard and managed organizations alike. Money never goes back to a
+card. A €0 envelope, or one the withheld add-ons cover entirely, credits nothing.
 
 Before any money moves, the delete fixes a **refund plan** on the payment
 (`refundWithheldCents`: what it keeps back, 0 unless an add-on is relied on — see below — and
-`refundWithheldAddOns`: which add-ons that is, written in the same update),
-conditional on the payment still being `paid` at the amount the delete read; a top-up that
-landed in between makes it answer **409** with nothing moved. A wallet-paid draft plans under
-the integrator's wallet lock, which a wallet charge of headroom holds from its debit to its
-record, so the debit is never left between a refunded envelope and a refused record. A retried
-delete reuses the plan, so it refunds the same intents under the same keys and amounts even if a sibling started or
-stopped relying on an add-on meanwhile. A plan fixed before the custom URL was once per
-organization stored only the cents; read back with cents above 0 and no add-on list it means
-branding, the only add-on it could withhold. A planned payment is locked: census headroom and
-publish refuse it with **409**, a wallet charge refuses it, and a card top-up that lands later
-raises nothing and is refunded on arrival (below). So a delete that failed half-way leaves a
-draft that can only be deleted again. The one exception is a refund Stripe refuses for good (a
-disputed charge, an amount the intent no longer holds): for a card payment with no census
-top-ups nothing can have moved, so the plan is dropped and the delete answers **409** — the
-process is a paid draft again, publishable. With top-ups another intent may already be back, so
-the plan stays and the failure is logged for manual reconciliation. A checkout takes the same
-claim as delete and publish until its pending payment is stored, so a delete cannot drop the
-draft between the checkout's read and its write and leave a payable payment for nothing.
+`refundWithheldAddOns`: which add-ons that is, written in the same update), conditional on the
+payment still being `paid` at the amount the delete read, and under the payer's wallet lock,
+which a headroom charge holds from its debit to its record, so the debit is never left between
+a credited envelope and a refused record. A retried delete reuses the plan, so it credits the
+same amount under the same key even if a sibling started or stopped relying on an add-on
+meanwhile. A planned payment is locked: census headroom and publish refuse it with **409**, and
+a headroom top-up landing later only credits the wallet. A delete that failed half-way leaves a
+draft that can only be deleted again.
 
 Then every once-per-organization add-on the payment charged and the plan does not withhold has
-its organization claim and `<addOn>PaidAt` stamp released (so the organization's next process
-is quoted it again) — before the payment is marked, so a release that fails fails the
-delete and a retry runs it again — the payment becomes `refunded`, its document is **kept** as
-the audit trail, and only then is the draft removed. If the money cannot go
-back, nothing is written and the draft stays: deleting a process whose payment we still hold
-is the one outcome this flow must never produce. The reverse — refunded, but the draft not
-removed — leaves a draft that can only be deleted again: publish refuses it with **409**,
-since the wallet debit's `<process id>:<price>` key is still applied and a re-publish would
-otherwise go on chain unpaid. A `processing` payment still
-refuses deletion, and so does a `pending` one whose session the customer just completed —
-both are retryable once they settle. A `pending` session that is still open is expired
-first; if Stripe cannot confirm it expired, the delete fails closed rather than leave a
-payable session for a process that no longer exists.
+its organization claim and `<addOn>PaidAt` stamp released (so the organization's next process is
+quoted it again) — before the payment is marked, so a release that fails fails the delete and a
+retry runs it again — the payment becomes `refunded`, its document is **kept** as the audit
+trail, and only then is the draft removed. If the credit fails, nothing else is written and the
+draft stays. The reverse — credited, but the draft not removed — leaves a draft that can only be
+deleted again: publish refuses it with **409**, since the debit's `<process id>:<price>` key is
+still applied and a re-publish would otherwise go on chain unpaid.
 
 **Add-ons already relied on.** Branding and the custom URL are paid once per organization, so
 a sibling process may already carry one of them for free on the strength of this payment — it
-is published, or its own payment is `paid`, `processing` or `pending`
-(`db.OrganizationAddOnReliedOn`, per add-on). A pending checkout counts because it was priced
-without the add-on and its payment pins that price: once paid it would publish with it and
-nobody having paid for it. A sibling checkout that reads the stamp before the release but stores
-its payment after the check (a window as wide as the refund call) still slips through; closing
-it would take a re-check on both sides. Each relied-on add-on is in use and does not come back:
-the organization keeps its `<addOn>PaidAt` (the sibling is not re-priced) and the refund
-withholds its list price (€149 branding, €99 custom URL), while an add-on nobody relies on is
-released and refunded with the rest. A wallet payment is credited `amountCents − withheld`. A
-card payment's first intent is refunded `total − round(withheld × total / subtotal)`, using the
-`chargeTotalCents`/`chargeSubtotalCents` recorded at fulfillment so the withheld part carries
-the same VAT the customer paid; the partial refund's key gains the amount
-(`refund:<process id>:<payment intent>:<amount>`), because Stripe refuses a reused key with
-different parameters. Census top-ups carry no add-on and are always refunded in full.
+is published, or its own payment is `paid` or `pending` (`db.OrganizationAddOnReliedOn`, per
+add-on). A pending checkout counts because it was priced without the add-on and its row pins
+that price: once paid it would publish with it and nobody having paid for it. A sibling checkout
+that reads the stamp before the release but stores its payment after the check still slips
+through; closing it would take a re-check on both sides. Each relied-on add-on is in use and does
+not come back: the organization keeps its `<addOn>PaidAt` (the sibling is not re-priced) and the
+credit withholds its list price (€149 branding, €99 custom URL), while an add-on nobody relies
+on is released and credited back with the rest.
 
-A census top-up paid **after** its draft was deleted — or one that raised nothing because
-another top-up moved the envelope off the amount it was priced from — bought nothing, so the
-webhook refunds it in full on the spot under the same per-intent key and logs it; the customer
-buys the new difference instead. A replay of a top-up that did raise the envelope is
-recognised and ignored. A paid checkout session the process no longer references — superseded
-by a newer one, or orphaned when its expiry failed — is refunded the same way.
+## Stripe refunds of top-ups
 
-`refund.updated` closes the loop the other way: a refund that ends `failed` or
-`canceled` puts the payment back to `paid` and logs at **error** level; a failed top-up
-refund cannot revert the status (it names only the first refund) but is logged the same way.
-The draft is already gone and cannot be restored, so this is deliberately a
-manual-reconciliation signal. The event covers every refund on the account; one without
-process metadata (a subscription's) is ignored.
+The service never refunds. A refund made by hand in the Stripe dashboard is mirrored in the
+wallet: on `refund.created` and `refund.updated` with `status: succeeded`, a refund of a payment
+intent that credited a wallet top-up — found through the top-up's ledger row, which records
+`paymentIntentId` (sparse index) and the VAT-included `grossCents` — is debited from that wallet
+net of VAT at the top-up's own ratio, `refund.amount × net credited / amount_total`, rounded
+down, as a `refund` row keyed `striperefund:<refund id>`, so a replay, or the `updated` event of
+a refund already counted when created, debits nothing; a partial refund and a later one each
+debit once. It is debited in full even below zero: the money already left through Stripe, so
+this only records it, and it is the only debit that skips the balance check. A refund of
+anything else (a subscription invoice, a payment intent that credited no top-up) is ignored
+with a log line. Every payment session copies its metadata onto the payment intent
+(`payment_intent_data.metadata`), so a human in the dashboard sees which wallet a charge topped
+up.
 
 ## Error codes
 
 | Code | HTTP | Meaning |
 |---|---|---|
-| 40178 | 402 | publication requires payment (quote in data) |
-| 40175 | 402 | insufficient integrator wallet balance (required/available in data) |
-| 40176 | 422 | census above 50 000 — custom quote only, refused on every payment path |
-| 40177 | 409 | a payment is already processing or completed, or a session is completing |
+| 40178 | 402 | the organization's wallet does not cover a publish (quote, `balanceCents`, `shortfallCents` in data) |
 | 40178 | 402 | census growth beyond the paid price (`ProcessCensusGrowthQuote` in data) |
+| 40175 | 402 | the integrator wallet does not cover a managed organization's debit (`requiredCents`/`availableCents` in data) |
+| 40176 | 422 | census above 50 000 — custom quote only, refused on every payment path |
+| 40177 | 409 | a top-up checkout is open (publish), the draft is already paid (`/checkout`), a checkout is completing, or the payment changed or is being refunded |
+| 40181 | 403 | a managed organization has no wallet (wallet routes, `/checkout`) |
 | 40174 | 403 | an integrator's own organization cannot own processes |
 | 40179 | 400 | the organization already has 5 admins/managers (pending invitations included) |
 
 ## Storage summary (migration 0026)
 
-- `processPayments` — one document per process payment (`_id` = process id).
-- `wallets` — one document per integrator (`_id` = org address).
-- `walletLedger` — append-only, unique index on `idempotencyKey`.
+- `processPayments` — one document per process payment (`_id` = process id): `status`,
+  `payer` (the wallet debited), `amountCents` (the envelope), `checkoutSessionId` (the open
+  top-up while pending, the one that funded the debit once paid), `consumed`, `topUpCents`,
+  `requestedBy`, `branding`/`customUrl` (which once-per-organization add-ons the payment
+  charged), and a delete's refund plan (`refundWithheldCents`, `refundWithheldAddOns`). No card
+  state: no payment intent, charge amounts, refund id or quote hash.
+- `wallets` — one document per payer (`_id` = organization address).
+- `walletLedger` — append-only, unique index on `idempotencyKey` and a sparse index on
+  `paymentIntentId` (a top-up's, which a Stripe refund names); rows carry `kind`, the signed
+  `amountCents`, `processId`/`processOrgAddress`, and a top-up's `grossCents`.
 - `votingProcesses` gains `addOns`; `organizations` gains `brandingPaidAt`,
   `brandingClaimedBy` and `brandingClaimedAt`, and `customUrlPaidAt`, `customUrlClaimedBy` and
   `customUrlClaimedAt` (the once-per-organization custom URL, no migration: absent means unpaid).
-- `processPayments` also records `paymentIntentId` (what a refund is issued against),
-  `chargeSubtotalCents`/`chargeTotalCents` (the first charge net and gross of VAT, to withhold
-  relied-on add-ons), `branding`/`customUrl` (which once-per-organization add-ons the payment
-  charged), `refundWithheldCents` and `refundWithheldAddOns` (a delete's refund plan), `refundId`,
-  `topUpSessions`
-  (the census-headroom sessions already applied, last 50) and
-  `topUpIntents` (their payment intents, never truncated — each is a charge a delete must
-  refund).
 
 ## Testing the flow
 
 Three layers, from hermetic to manual:
 
 1. **Signed-webhook e2e (CI, no network, no cards)** —
-   `api/stripe_checkout_webhook_test.go` signs event payloads with the real Stripe v1
-   signature scheme (`stripe-go/webhook.GenerateTestSignedPayload`) and POSTs them to
-   `/subscriptions/webhook`, driving signature validation, event parsing, fulfillment
-   and server-side publication through the production code path. Card numbers never
-   appear here: the card only matters inside Stripe's browser step, and the webhook is
-   Stripe's signed statement of the outcome.
+   `api/stripe_checkout_webhook_test.go` and `api/stripe_refund_webhook_test.go` sign event
+   payloads with the real Stripe v1 signature scheme (`stripe-go/webhook.GenerateTestSignedPayload`)
+   and POST them to `/subscriptions/webhook`, driving signature validation, event parsing, the
+   wallet credit, server-side publication and refund sync through the production code path.
+   Card numbers never appear here: the card only matters inside Stripe's browser step, and the
+   webhook is Stripe's signed statement of the outcome.
 2. **Live test-mode session lifecycle (opt-in, network)** — set
    `STRIPE_TEST_SECRET_KEY=sk_test_…` to run `stripe/payments_livetest_test.go`, which
    creates, reads and expires a real test-mode session: Stripe itself validates the
@@ -464,16 +480,16 @@ Three layers, from hermetic to manual:
 
    | Test data | Behavior to verify |
    |---|---|
-   | Card `4242 4242 4242 4242` | immediate success → webhook marks paid → process auto-publishes |
+   | Card `4242 4242 4242 4242` | immediate success → webhook credits the wallet → the process auto-publishes from it |
    | Card `4000 0025 0000 3155` | 3DS challenge, then success |
-   | Card `4000 0000 0000 9995` | declined (insufficient funds) → payment `failed` → retry opens a new session |
-   | SEPA IBAN `DE89370400440532013000` | delayed method: `processing`, then `async_payment_succeeded` → publishes |
-   | SEPA IBAN `DE62370400440532013001` | delayed failure: `async_payment_failed` → payable again |
-   | `stripe events resend <evt_…>` | replayed fulfillment is a no-op (no double publish/credit) |
+   | Card `4000 0000 0000 9995` | declined (insufficient funds) — the session stays open, retry in the form |
+   | SEPA IBAN `DE89370400440532013000` | delayed method: nothing credited until `async_payment_succeeded`, which credits and publishes |
+   | SEPA IBAN `DE62370400440532013001` | delayed failure: `async_payment_failed` → the pending row goes, a new checkout opens a new session |
+   | `stripe events resend <evt_…>` | replayed event is a no-op (no second credit, debit or publish) |
+   | Dashboard refund of a top-up | `refund` row in the wallet history, net of VAT; the balance may go negative |
 
-   Also verify: VAT appears on top of the net line items once a billing address is
-   entered; the invoice is generated (invoice_creation); a wallet top-up credits the
-   net amount exactly once.
+   Also verify: VAT appears on top of the net line once a billing address is entered; the
+   invoice is generated (invoice_creation); a top-up credits the net amount exactly once.
 
 ## Open questions / follow-ups
 
@@ -483,9 +499,9 @@ Three layers, from hermetic to manual:
   and do not record `customUrl`: they neither stamp the organization nor withhold or release it
   on refund, and their growth quotes leave the €89 they paid out of the projection, so that much
   census growth fits the envelope for free (accepted, stage data only).
-- Chargebacks are out of scope: a disputed payment is not reverted automatically. A refund
-  Stripe reports as failed after the draft was deleted needs a human — the error log is the
-  only signal, by design.
+- Chargebacks are out of scope: a disputed top-up is not mirrored in the wallet automatically.
+- A top-up refunded in the dashboard before its completed event was credited is ignored (no
+  ledger row names its payment intent yet); a human cannot realistically do that.
 - VAT treatment of wallet top-ups (single- vs multi-purpose voucher) needs accountant
   sign-off before launch; `automatic_tax` is on for top-up sessions.
 - Legacy subscriptions convert to process credits and the subscription system is

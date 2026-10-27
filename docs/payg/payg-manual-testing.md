@@ -1,7 +1,7 @@
 # Manually testing the pay-per-process flow
 
-How to walk the whole flow — draft → quote → checkout → test card → webhook →
-server-side publication — as a real user, against the **local dev stack** and **Stripe's
+How to walk the whole flow — draft → quote → wallet top-up checkout → test card → webhook
+credits the wallet → server-side publication paid from it — as a real user, against the **local dev stack** and **Stripe's
 test environment**, without touching vocdoni-app. Stripe test mode is a full sandbox:
 real sessions, real signed webhooks, standard test cards, no real money.
 
@@ -14,7 +14,7 @@ open, so it talks to the API directly.
 **Two ways to test:**
 
 - **Automated smoke test** ([§0](#0-fast-path-automated-smoke-test)) — one script runs
-  the whole backend flow (register → draft → quote → gate → checkout → pay → publish)
+  the whole backend flow (register → draft → quote → gate → top-up checkout → pay → publish)
   and prints a PASS/FAIL line per step. It signs the payment webhook itself, so it needs
   **no browser and no Stripe account** — ideal for a quick "is the flow healthy" check.
 - **Manual walkthrough** ([§1](#1-prerequisites-one-time-free) onward) — the same flow by
@@ -27,7 +27,8 @@ The repo ships [`test-payg-flow.sh`](test-payg-flow.sh) beside this doc. It does
 everything §3–§8 do, end to end, with clear output — and performs the payment by signing
 a `checkout.session.completed` webhook with the same HMAC scheme Stripe uses (the secret
 from your `.env`), so it drives the real backend path (checkout creation, signature
-verification, fulfillment, on-chain publication) without a card or a Stripe account.
+verification, the wallet credit, the debit, on-chain publication) without a card or a Stripe
+account.
 
 Prerequisites: only the stack ([§2](#2-configure-and-start-the-stack)) running, with a
 **non-placeholder** `VOCDONI_STRIPEWEBHOOKSECRET` in `.env` — for the script that value
@@ -151,20 +152,28 @@ PID=$(curl -s $API/processes -H "$AUTH" -d '{
 ```bash
 curl -s "$API/pricing?voters=2&signedCertificate=true" | jq          # public calculator: 3900
 curl -s $API/processes/$PID/price -H "$AUTH" | jq                    # the draft's quote: 3900
-curl -s -X POST $API/processes/$PID/publish -H "$AUTH" | jq          # 402: publication requires payment
+curl -s -X POST $API/processes/$PID/publish -H "$AUTH" | jq          # 402: the wallet does not cover it
+                                                                     #  (balanceCents, shortfallCents in data)
+curl -s $API/organizations/$ORG/wallet -H "$AUTH" | jq               # balance 0, empty history
 ```
 
-## 5. Open the checkout
+## 5. Open the top-up checkout
 
 ```bash
 curl -s -X POST $API/processes/$PID/checkout -H "$AUTH" \
   -d '{"returnURL":"http://localhost:8000/checkout.html"}' | jq
-# → { clientSecret, sessionId, amountCents: 4900, currency: "eur" }
+# → { clientSecret, sessionId, amountCents: 3900, currency: "eur" }
 ```
 
-Repeating the call returns the **same session** while the price is unchanged; editing
-the draft first (e.g. toggle an add-on) makes the next call expire it and open a
+The checkout tops the organization's wallet up by what it lacks to pay the draft (the
+shortfall, at least €1; the wallet is empty here, so the whole price). Repeating the call
+returns the **same session** while the price and the shortfall are unchanged; editing the draft
+first (e.g. toggle an add-on), or a balance that moved, makes the next call expire it and open a
 replacement — watch it happen under Dashboard → Payments → Checkout sessions.
+
+Alternatively, top the wallet up on its own with
+`POST /organizations/$ORG/wallet/topup -d '{"amountCents":5000,"returnURL":"http://localhost:8000/checkout.html"}'`,
+pay it the same way, and publish with `POST /processes/$PID/publish`: the wallet covers it now.
 
 ## 6. Pay with a Stripe test card
 
@@ -181,7 +190,7 @@ open `http://localhost:8000/checkout.html`, paste your `pk_test_…` key and the
 <body>
   <h3>Pay-per-process checkout harness</h3>
   <input id="pk" placeholder="pk_test_…">
-  <input id="cs" placeholder="clientSecret from POST /processes/{id}/checkout">
+  <input id="cs" placeholder="clientSecret from POST /processes/{id}/checkout or …/wallet/topup">
   <button onclick="mount()">Mount payment form</button>
   <div id="billing-element"></div>
   <div id="payment-element"></div>
@@ -219,8 +228,8 @@ https://docs.stripe.com/testing):
 | `4242 4242 4242 4242` | immediate success |
 | `4000 0025 0000 3155` | 3DS challenge, then success |
 | `4000 0000 0000 9995` | declined (insufficient funds) — the session stays open, retry in the form |
-| SEPA IBAN `DE89370400440532013000` | delayed method: `processing`, succeeds after a few seconds |
-| SEPA IBAN `DE62370400440532013001` | delayed method: fails → payment `failed`, checkout reopens |
+| SEPA IBAN `DE89370400440532013000` | delayed method: nothing is credited until it succeeds, after a few seconds |
+| SEPA IBAN `DE62370400440532013001` | delayed method: fails → the pending checkout is dropped, a new one can be opened |
 
 ## 7. Watch the backend finish without you
 
@@ -231,46 +240,54 @@ terminal the `checkout.session.completed` event flows through; then:
 curl -s $API/processes/$PID/checkout -H "$AUTH" | jq   # status: paid
 curl -s $API/processes/$PID -H "$AUTH" | jq .published # true (publication ran as you,
                                                        #  triggered by the webhook)
+curl -s $API/organizations/$ORG/wallet -H "$AUTH" | jq # balance 0; history: the topup
+                                                       #  (+3900) and the payment (-3900)
 ```
 
 Payment truth only ever comes from the webhook — the redirect back to `returnURL` is
-never what marks anything paid.
+never what credits anything. Whatever the webhook cannot publish (the draft changed, its price
+rose, it was deleted) stays in the wallet for a manual publish; nothing goes back to the card.
 
 ## 8. More paths worth exercising
 
 - **Replay**: `stripe events resend <evt_…>` (id from `stripe listen`) → 200, no second
-  publication, wallet not re-credited.
-- **Failed then retry**: after the failing SEPA IBAN, `GET …/checkout` shows `failed`;
-  `POST …/checkout` opens a fresh session and the card flow works again.
-- **Paid draft is editable**: once paid, `PUT /processes/{id}` still works — the publish
-  gate re-prices whatever the edit produced, so an edit can only repair the draft. What is
-  refused (409) is editing or deleting while a payment is `processing`, or deleting one
-  whose Stripe session you just completed but whose webhook has not landed.
+  credit, debit or publication.
+- **Failed then retry**: after the failing SEPA IBAN, `GET …/checkout` answers 404 (the
+  pending checkout was dropped); `POST …/checkout` opens a fresh session and the card flow
+  works again.
+- **Open checkout blocks publish**: while a top-up checkout is open, `POST …/publish` answers
+  409; `DELETE …/checkout` cancels it (200, then 404 on a repeat) and the draft publishes from
+  the wallet if it covers the price.
+- **Paid draft is editable**: once paid, `PUT /processes/{id}` still works — the debit
+  re-prices whatever the edit produced, so an edit can only repair the draft.
 - **Census headroom**: after publishing, `PUT /processes/{id}/census` with members that keep
   the census inside the free tier (25) costs nothing more; past it every voter is priced
   (€0.66 each in the first band), so the `PUT` answers 402 with
-  `{totalCents, paidCents, dueCents, censusSize}`. Buy the difference
-  with `POST /processes/{id}/census/checkout -d '{"censusSize":<target>,"returnURL":"http://localhost:8000/checkout.html"}'`
-  (a difference under €1 is charged the €1 minimum; the envelope still rises to the target
-  price only), pay it with a test card, and the same `PUT` then lands. For a managed organization the
-  same call debits the integrator wallet instead and takes effect immediately.
-- **Refund on delete**: `DELETE /processes/{id}` on a paid *draft* refunds it first — the
-  Stripe dashboard shows the refund with VAT included, the payment row survives as
-  `refunded`, and an organization that paid branding or the custom URL with it can be charged
-  for them again afterwards (unless another process relies on one: then that add-on's price is
-  withheld from the refund and the organization keeps it). A
-  wallet-paid draft credits the integrator wallet instead, visible as a `refund` row in
-  `GET /wallet`. Note that a paid process normally publishes itself straight away, so a
-  paid draft only exists when that automatic publication failed preflight (the org hitting
-  its plan's process limit between paying and publishing is the realistic way in). The
-  assertions live in `TestDeletePaidDraftRefunds` and
-  `TestDeleteWalletPaidDraftCreditsIntegratorWallet`; the dashboard is what only a browser
-  can show you.
+  `{totalCents, paidCents, dueCents, censusSize, balanceCents, shortfallCents}`. Buy the
+  difference with `POST /processes/{id}/census/checkout -d '{"censusSize":<target>,"returnURL":"http://localhost:8000/checkout.html"}'`:
+  when the wallet covers it the call debits it at once (no session in the response) and the
+  same `PUT` then lands; otherwise it opens a top-up for the shortfall (at least €1, the rest
+  stays in the wallet), and once you pay it with a test card the webhook debits the headroom.
+  For a managed organization the same call debits the integrator wallet, or answers 402 (40175)
+  when it falls short.
+- **Credit back on delete**: `DELETE /processes/{id}` on a paid *draft* credits its envelope
+  back to the wallet that paid it first — a `creditBack` row in
+  `GET /organizations/$ORG/wallet`, the payment row survives as `refunded`, and an organization
+  that paid branding or the custom URL with it can be charged for them again afterwards (unless
+  another process relies on one: then that add-on's price is withheld from the credit and the
+  organization keeps it). Nothing goes back to the card. A paid process normally publishes
+  itself straight away, so a paid draft only exists when that automatic publication failed
+  preflight. The assertions live in `api/processes_refund_test.go`.
+- **Refund a top-up in the dashboard**: refund a top-up's payment from the Stripe dashboard
+  (with `stripe listen` forwarding `refund.created`/`refund.updated`): the wallet history gains
+  a `refund` row for the refunded amount net of VAT, debited even below zero — a negative
+  balance refuses every publish until a top-up covers it.
 - **Integrator wallet**: make your org an integrator
   (`go run ./cmd/cli --setIntegrator --orgAddress $ORG --mongoURL mongodb://root:vocdoni@localhost:27017/saasdb`),
-  then `POST /wallet/topup -d '{"amountCents":10000,"returnURL":"http://localhost:8000/checkout.html"}'`,
-  pay it with a test card, and `GET /wallet` shows the credited balance and ledger; a
-  managed organization's process then publishes by debiting it (no checkout involved).
+  then `POST /organizations/$ORG/wallet/topup -d '{"amountCents":10000,"returnURL":"http://localhost:8000/checkout.html"}'`,
+  pay it with a test card, and `GET /organizations/$ORG/wallet` shows the credited balance and
+  history; a managed organization's process then publishes by debiting it (no checkout
+  involved), and its `payment` row names the managed organization in `processOrgAddress`.
 
 ## Notes
 

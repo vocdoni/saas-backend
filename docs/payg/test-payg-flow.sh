@@ -2,14 +2,14 @@
 # End-to-end smoke test of the pay-per-process flow against the local dev stack.
 #
 # Runs every step a user would (register -> org -> draft -> quote -> gate ->
-# checkout -> pay -> publish) and prints each with a PASS/FAIL line. The payment
-# step is performed by signing a checkout.session.completed webhook with the same
-# HMAC scheme Stripe uses (VOCDONI_STRIPEWEBHOOKSECRET from .env) — so it needs no
-# browser and no Stripe account, yet drives the real backend path: checkout
-# creation, signature verification, fulfillment CAS, and server-side publication.
-# The only thing it does NOT touch is Stripe's own card UI (validated manually).
+# wallet top-up checkout -> pay -> publish) and prints each with a PASS/FAIL line. The
+# payment step is performed by signing a checkout.session.completed webhook with the
+# same HMAC scheme Stripe uses (VOCDONI_STRIPEWEBHOOKSECRET from .env) — so it needs no
+# browser and no Stripe account, yet drives the real backend path: top-up checkout
+# creation, signature verification, the wallet credit, the debit and server-side
+# publication. The only thing it does NOT touch is Stripe's own card UI (validated manually).
 #
-# Usage:  bash docs/tmp/test-payg-flow.sh        # from the repo root, stack up
+# Usage:  bash docs/payg/test-payg-flow.sh        # from the repo root, stack up
 set -uo pipefail
 
 API=${API:-http://localhost:8080}
@@ -76,21 +76,23 @@ PUB=$(curl -sf "$API/pricing?voters=2&signedCertificate=true" | jq -r .totalCent
 DQ=$(curl -sf "$API/processes/$PID/price" -H "$AUTH" | jq -r .totalCents)
 [ "$DQ" = 3900 ] && ok "GET /processes/{id}/price -> 3900 cents" || no "draft quote (got $DQ)"
 
-step "4. publication is gated while unpaid"
+step "4. publication is gated while the wallet does not cover it"
 GATE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API/processes/$PID/publish" -H "$AUTH")
 [ "$GATE" = 402 ] && ok "POST /publish -> 402 Payment Required" || no "expected 402, got $GATE"
 
-step "5. open checkout"
+step "5. open the wallet top-up checkout"
 CO=$(curl -sf -X POST "$API/processes/$PID/checkout" -H "$AUTH" -d '{"returnURL":"http://localhost/none"}')
 SESSION=$(echo "$CO" | jq -r .sessionId); AMT=$(echo "$CO" | jq -r .amountCents)
 [ -n "${SESSION:-}" ] && [ "$SESSION" != null ] && ok "POST /checkout -> session $SESSION ($AMT cents)" || die "checkout failed: $CO"
 
 step "6. pay (self-signed checkout.session.completed webhook)"
-PAYLOAD=$(jq -cn --arg id "evt_test_$(date +%s)" --arg sess "$SESSION" --arg pid "$PID" --arg email "$EMAIL" '{
+# every top-up session names the wallet it credits; the process only selects the follow-up
+PAYLOAD=$(jq -cn --arg id "evt_test_$(date +%s)" --arg sess "$SESSION" --arg pid "$PID" --arg email "$EMAIL" \
+  --arg org "$ORG" --argjson amt "$AMT" '{
   id:$id, object:"event", api_version:"2026-09-30.endive", type:"checkout.session.completed",
   data:{object:{id:$sess, object:"checkout.session", mode:"payment", status:"complete",
-    payment_status:"paid", amount_subtotal:4900, amount_total:4900,
-    metadata:{voting_process_id:$pid, requested_by:$email}}}}')
+    payment_status:"paid", amount_subtotal:$amt, amount_total:$amt,
+    metadata:{wallet_topup_org:$org, voting_process_id:$pid, requested_by:$email}}}}')
 TS=$(date +%s)
 SIG=$(printf '%s' "$TS.$PAYLOAD" | openssl dgst -sha256 -hmac "$SECRET" | sed 's/^.* //')
 WCODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API/subscriptions/webhook" \
