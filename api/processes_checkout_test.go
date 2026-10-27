@@ -392,8 +392,9 @@ func TestProcessCheckoutRefusals(t *testing.T) {
 
 // TestDeleteDraftFailsClosedWhenSessionUnverifiable: deleting a draft expires its
 // checkout session, so a session whose state cannot be read may already have been
-// completed — deleting then captures the money and destroys what it paid for. Not
-// knowing has to be a refusal, exactly as on the checkout path.
+// completed — deleting then captures the money and destroys what it paid for. An
+// unreachable gateway is a refusal, exactly as on the checkout path; a missing one (no
+// Stripe configured) deletes, leaving the session to expire on its own.
 func TestDeleteDraftFailsClosedWhenSessionUnverifiable(t *testing.T) {
 	c := qt.New(t)
 	fake := installFakePaymentGW(t)
@@ -418,17 +419,23 @@ func TestDeleteDraftFailsClosedWhenSessionUnverifiable(t *testing.T) {
 	c.Assert(stored, qt.IsTrue)
 	requestAndAssertError(errors.ErrStripeError, t, http.MethodDelete, token, nil, "processes", pid)
 
-	// no gateway configured at all is the same unknown
-	testAPI.paymentGW = nil
-	requestAndAssertError(errors.ErrPaymentSessionConflict, t, http.MethodDelete, token, nil, "processes", pid)
-	testAPI.paymentGW = fake
-
-	// every refusal left the draft and its payment intact
+	// the refusal left the draft and its payment intact
 	_, err = testDB.VotingProcess(oid)
 	c.Assert(err, qt.IsNil)
 	payment, err := testDB.ProcessPayment(oid)
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPending)
+
+	// no gateway configured at all (cmd/userdel): the session is left to Stripe's own expiry and the
+	// draft goes, with its pending payment; paying the session later only credits the wallet
+	testAPI.paymentGW = nil
+	requestAndAssertCode(http.StatusOK, t, http.MethodDelete, token, nil, "processes", pid)
+	testAPI.paymentGW = fake
+	c.Assert(fake.expired, qt.Not(qt.Contains), "cs_unreachable")
+	_, err = testDB.VotingProcess(oid)
+	c.Assert(err, qt.ErrorIs, db.ErrNotFound)
+	_, err = testDB.ProcessPayment(oid)
+	c.Assert(err, qt.ErrorIs, db.ErrNotFound)
 }
 
 // TestFreePublishRefusedOverOpenCheckout: a draft that shrinks to free while its top-up checkout

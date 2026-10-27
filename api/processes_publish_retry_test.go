@@ -317,9 +317,15 @@ func TestTopUpWebhookReplayAfterFailedPublishDoesNotDebit(t *testing.T) {
 		OrgAddress: orgAddress, ProcessID: bson.NewObjectID(), ProcessOrgAddress: orgAddress,
 		AmountCents: pricedProcessCents, PriceCents: pricedProcessCents,
 	}), qt.IsNil)
+	// a checkout opened after the credit-back and then cancelled must not forget the attempt:
+	// the publish that follows charges again under a new key
+	openProcessTopUp(t, fake, token, pid)
+	requestAndAssertCode(http.StatusOK, t, http.MethodDelete, token, nil, "processes", pid, "checkout")
+	pollPaymentStatus(t, pid, db.ProcessPaymentFailed)
 	_, paidAgain := openProcessTopUp(t, fake, token, pid)
 	c.Assert(postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8),
 		"checkout.session.completed", paidAgain), qt.Equals, http.StatusOK)
 	pollProcessPublished(t, token, pid)
-	assertWallet(t, orgAddress, 0, db.WalletEntryPayment, 3) // the first attempt, the drain, the new attempt
+	// the first attempt, the drain, the new attempt; the cancelled checkout charged nothing
+	assertWallet(t, orgAddress, 0, db.WalletEntryPayment, 3)
 }

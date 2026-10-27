@@ -102,16 +102,32 @@ func (ms *MongoStorage) ConsumeProcessPaymentTopUp(processID bson.ObjectID, sess
 
 // DeleteProcessPaymentCheckout drops the pending payment holding sessionID: its checkout expired,
 // failed, or was cancelled. A compare-and-set on the session, so a newer checkout of the same
-// draft is left alone; reports whether it deleted.
+// draft is left alone; reports whether it dropped it. A row carrying a WalletAttempt is not
+// deleted but turned back into a sessionless failed payment: the attempt keys the next debit,
+// and losing it would let that debit find an earlier, credited-back attempt's key applied.
 func (ms *MongoStorage) DeleteProcessPaymentCheckout(processID bson.ObjectID, sessionID string) (bool, error) {
 	if processID == bson.NilObjectID || sessionID == "" {
 		return false, ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	res, err := ms.processPayments.DeleteOne(ctx, bson.M{
-		"_id": processID, "status": ProcessPaymentPending, "checkoutSessionId": sessionID,
-	})
+	filter := bson.M{"_id": processID, "status": ProcessPaymentPending, "checkoutSessionId": sessionID}
+	kept, err := ms.processPayments.UpdateOne(ctx,
+		bson.M{
+			"_id": processID, "status": ProcessPaymentPending, "checkoutSessionId": sessionID,
+			"walletAttempt": bson.M{"$gt": 0},
+		},
+		bson.M{
+			"$set":   bson.M{"status": ProcessPaymentFailed, "updatedAt": time.Now()},
+			"$unset": bson.M{"checkoutSessionId": "", "consumed": "", "topUpCents": "", "requestedBy": ""},
+		})
+	if err != nil {
+		return false, fmt.Errorf("failed to drop process payment checkout: %w", err)
+	}
+	if kept.MatchedCount == 1 {
+		return true, nil
+	}
+	res, err := ms.processPayments.DeleteOne(ctx, filter)
 	if err != nil {
 		return false, fmt.Errorf("failed to delete process payment checkout: %w", err)
 	}

@@ -126,3 +126,32 @@ func TestProcessPaymentPendingKeepsAttempt(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.WalletAttempt, qt.Equals, 1)
 }
+
+// TestProcessPaymentCheckoutDropKeepsAttempt: dropping the checkout opened on a credited-back
+// payment (cancelled or expired) keeps the attempt the next debit is keyed by.
+func TestProcessPaymentCheckoutDropKeepsAttempt(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	processID := bson.NewObjectID()
+	ok, err := testDB.SetProcessPaymentPaidByWallet(&ProcessPayment{
+		ProcessID: processID, OrgAddress: testOrgAddress, Payer: testOrgAddress, AmountCents: 1_716, Currency: "eur",
+	})
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	ok, err = testDB.RevertWalletProcessPayment(WalletPaymentRevert{
+		ProcessID: processID, AmountCents: 1_716, CreditBackCents: 1_716,
+	})
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_dropped"), "")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	dropped, err := testDB.DeleteProcessPaymentCheckout(processID, "cs_dropped")
+	c.Assert(err, qt.IsNil)
+	c.Assert(dropped, qt.IsTrue)
+	payment, err := testDB.ProcessPayment(processID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, ProcessPaymentFailed)
+	c.Assert(payment.CheckoutSessionID, qt.Equals, "")
+	c.Assert(payment.WalletAttempt, qt.Equals, 1)
+}
