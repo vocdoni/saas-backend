@@ -9,6 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
@@ -1370,4 +1371,28 @@ func TestResizeWaitsForBusyOrgLock(t *testing.T) {
 	elec, err := testAPI.account.Election(restricted.UpstreamID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(elec.Census.MaxCensusSize, qt.Equals, uint64(3))
+}
+
+// TestResizeRecordsAlreadyLargeElectionAsNoOp covers a resize overtaken while it waited: the election
+// already holds the target size, so no tx is sent and the target still gets a no-op outcome.
+func TestResizeRecordsAlreadyLargeElectionAsNoOp(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+
+	_, got := publishedProcess(t, token, orgAddress, memberIDs(members))
+	question := got.Questions[0]
+
+	org, err := testDB.Organization(orgAddress)
+	c.Assert(err, qt.IsNil)
+	orgSigner, err := account.OrganizationSigner(testSecret, org.SignerSeedValue(), org.Nonce)
+	c.Assert(err, qt.IsNil)
+
+	result, err := testAPI.setProcessCensusSizes(orgSigner, []censusSizeTarget{{question: question, size: 1}})
+	c.Assert(err, qt.IsNil)
+	c.Assert(result.Questions, qt.DeepEquals, []db.QuestionJobResult{
+		{QuestionID: question.ID.Hex(), Status: db.JobStatusCompleted, NoOp: true},
+	})
 }

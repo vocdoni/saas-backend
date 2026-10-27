@@ -1017,7 +1017,7 @@ type VoteJobResult struct {
 // QuestionJobResult is the outcome of one question inside a status-change job
 // (JobTypeSetProcessStatus) or a census-update job (JobTypeSetProcessCensus). NoOp marks a
 // question that needed no on-chain transaction: already in the requested status, or, for a
-// census update, an election no longer open on chain.
+// census update, an election that already has the room or is no longer open on chain.
 type QuestionJobResult struct {
 	QuestionID string    `json:"questionId" bson:"questionId"`
 	Status     JobStatus `json:"status,omitempty" bson:"status,omitempty"`

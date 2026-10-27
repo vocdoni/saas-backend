@@ -786,11 +786,10 @@ func (a *API) enqueueSetProcessCensus(orgAddress common.Address, targets []censu
 	return jobID, nil
 }
 
-// setProcessCensusSizes submits one SET_PROCESS_CENSUS tx per target, skipping the elections that
-// already have the room: a resize that waited for the organization lock may have been overtaken by
-// a larger one, and the chain refuses a shrink. An election the chain no longer has open is recorded
-// as a no-op rather than submitted: a stored status can lag the chain, and an ended election refuses
-// a resize.
+// setProcessCensusSizes submits one SET_PROCESS_CENSUS tx per target, recording a no-op instead for
+// the elections that already have the room (a resize that waited for the organization lock may have
+// been overtaken by a larger one, and the chain refuses a shrink) and for those the chain no longer
+// has open (a stored status can lag the chain, and an ended election refuses a resize).
 //
 // Every target is attempted even after one fails, so one election cannot hold back the others. The
 // job fails when any attempted target failed, and its error names each failed question; the
@@ -804,6 +803,7 @@ func (a *API) setProcessCensusSizes(orgSigner *ethereum.SignKeys, targets []cens
 		questionID := t.question.ID.Hex()
 		current, status, err := a.electionSizeAndStatus(&t.question)
 		if err == nil && t.size <= current {
+			entries = append(entries, db.QuestionJobResult{QuestionID: questionID, Status: db.JobStatusCompleted, NoOp: true})
 			continue
 		}
 		if err == nil && !isOpenStatus(status) {
