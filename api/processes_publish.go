@@ -226,13 +226,15 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 		// (by saving the draft again) before the rest of the draft is even worth looking at.
 		// Next comes the organization's typed refusal (403 40174, or the duration cap), as at draft
 		// creation; anything else is a 400.
-		apiErr := errors.ErrMalformedBody
+		var apiErr errors.Error
 		switch {
 		case questionsMismatch:
 			apiErr = errors.ErrProcessQuestionsMismatch
 		case denied != nil:
 			writeSubscriptionError(w, denied)
 			return
+		default:
+			apiErr = errors.ErrMalformedBody
 		}
 		apiErr.Withf("process is not ready to publish: %s", strings.Join(problems, "; ")).Write(w)
 		return
