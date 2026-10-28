@@ -75,3 +75,22 @@ func TestIntegratorFlagMigration(t *testing.T) {
 	c.Assert(n, qt.Equals, int64(0))
 }
 
+// TestIntegratorFlagMigrationFailsClosed: when unmanaged organizations carry integrator limits
+// but the flag rules match none of them, the migration errors out and keeps the limits.
+func TestIntegratorFlagMigrationFailsClosed(t *testing.T) {
+	c := qt.New(t)
+	ctx := context.Background()
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	addr := common.Address{0x11}
+	c.Assert(testDB.SetOrganization(&Organization{Address: addr, CreatedAt: time.Now()}), qt.IsNil)
+	_, err := testDB.organizations.UpdateOne(ctx, bson.M{"_id": addr},
+		bson.M{"$set": bson.M{"integratorLimits": bson.M{"maxManagedOrgs": 0}}})
+	c.Assert(err, qt.IsNil)
+
+	mig := migrationByVersion(c, 35)
+	c.Assert(mig.Up(ctx, testDB.DBClient.Database(testDB.database)), qt.ErrorMatches, "no integrator flagged.*")
+	n, err := testDB.organizations.CountDocuments(ctx, bson.M{"_id": addr, "integratorLimits": bson.M{"$exists": true}})
+	c.Assert(err, qt.IsNil)
+	c.Assert(n, qt.Equals, int64(1))
+}
