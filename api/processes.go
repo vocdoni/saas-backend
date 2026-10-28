@@ -160,6 +160,7 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		StartDate:     start,
 		EndDate:       end,
 		InitialStatus: initialStatus,
+		AddOns:        req.AddOns,
 		CensusID:      census.ID,
 	}
 	vpID, err := a.db.SetVotingProcess(vp)
@@ -378,6 +379,8 @@ func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id bson.ObjectID, u
 //	@Description	Update a voting process while it is still a draft (not published). 409 if already published,
 //	@Description	and 409 (40904) if partially published — an earlier publish already mined some of its
 //	@Description	questions on-chain, so the draft can only be published again (resuming the rest), not edited.
+//	@Description	409 (40177) when the edit turns a once-per-organization add-on on for a draft that was paid
+//	@Description	without it, since an add-on cannot be added after payment.
 //	@Description	The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
 //	@Description	as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
 //	@Description	`typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
@@ -430,6 +433,12 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	}
 	if !user.HasRoleFor(vp.OrgAddress, db.ManagerRole) && !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
 		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization").Write(w)
+		return
+	}
+	// after the role check, so a non-member reads 401 rather than learning from a 409
+	// whether someone is paying for this process. Editing a paid draft is how a draft stranded
+	// by publish preflight is repaired, and every publish path re-prices what the edit produced.
+	if a.refuseOrgAddOnsAfterPayment(w, vp, req.AddOns) {
 		return
 	}
 	// a partially published draft (an earlier publish mined some elections before failing) is not
@@ -489,6 +498,7 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	vp.Title, vp.Description, vp.Header, vp.StreamURI = req.Title, req.Description, req.Header, req.StreamURI
 	vp.StartDate, vp.EndDate, vp.CensusID = start, end, census.ID
 	vp.InitialStatus = initialStatus
+	vp.AddOns = req.AddOns
 	// a stale marker got us past the guard above: editing the draft releases it rather than
 	// writing it back, matching what ClaimVotingProcessForPublish would reclaim anyway. A marker
 	// that went live *after* that guard read is a different matter — the write's own precondition
@@ -754,7 +764,10 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 // validateVotingProcessHandler godoc
 //
 //	@Summary		Validate a voting process for publishing
-//	@Description	Publish-readiness dry-run. Returns { valid, errors } without changing anything.
+//	@Description	Publish-readiness dry-run. Returns { valid, errors } without changing anything. For a draft it
+//	@Description	also lists the payment refusals a publish would give: a wallet that does not cover the price,
+//	@Description	an add-on another draft holds, or a census that cannot be priced.
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
 //	@Produce		json
 //	@Security		BearerAuth
@@ -790,6 +803,13 @@ func (a *API) validateVotingProcessHandler(w http.ResponseWriter, r *http.Reques
 	// the dry-run reports every problem the same way: a mismatched question set is just one more
 	// entry in errors, so the mismatch flag publish acts on is irrelevant here.
 	problems, _, _ := a.publishPreflightProblems(publishTarget{vp: vp, questions: questions, census: census, user: user})
+	// a wallet that does not cover the price, an add-on another draft holds, or a census that
+	// cannot be priced is one more reason a publish would be refused; a server error is not
+	if !vp.Published {
+		if err := a.paymentDueForPublish(vp); refusedForUser(err) {
+			problems = append(problems, err.Error())
+		}
+	}
 	apicommon.HTTPWriteJSON(w, &apicommon.VotingProcessValidateResponse{
 		Valid:  len(problems) == 0,
 		Errors: problems,

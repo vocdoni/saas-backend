@@ -83,6 +83,10 @@ type CreateVotingProcessRequest struct {
 	// vochain whitelist for NewProcess); anything else is rejected with 400. Persisted on
 	// the draft and applied at publish time.
 	InitialStatus string `json:"initialStatus,omitempty" example:"PAUSED"`
+	// AddOns are the paid per-process options (signed results certificate, custom URL,
+	// branding). The 2FA add-ons are not here: they derive from census.twoFaFields.
+	// They change the process price, so editing them invalidates an open checkout session.
+	AddOns db.ProcessAddOns `json:"addOns,omitzero"`
 	// UpdatedAt, on a PUT, is the updatedAt the client last read. The update then applies only if
 	// the process has not been written since, and is rejected with 409 otherwise, so two clients
 	// editing the same draft cannot silently overwrite each other. Optional: omitting it keeps the
@@ -175,10 +179,12 @@ type VotingProcessResponse struct {
 	// Formatted as "2006-01-02T15:04:05Z". Absent when the process ran to its scheduled end, or while
 	// any published question is still open or has no recorded endedAt yet.
 	EndedAt string `json:"endedAt,omitempty"`
+	// AddOns echoes the paid per-process options selected on the draft.
+	AddOns db.ProcessAddOns `json:"addOns,omitzero"`
 }
 
-// ProcessPriceResponse is a server-side pay-per-process quote: the line breakdown and the
-// net total in EUR cents (VAT excluded; Stripe Tax adds it at checkout).
+// ProcessPriceResponse is the server-side quote of a voting process, in EUR cents, VAT
+// excluded (Stripe Tax adds VAT at checkout).
 type ProcessPriceResponse struct {
 	Lines      []pricing.QuoteLine `json:"lines"`
 	TotalCents pricing.Cents       `json:"totalCents"`
@@ -188,6 +194,20 @@ type ProcessPriceResponse struct {
 	// QuoteRequired: census above 50 000 voters — quote-only: no price (no lines, totalCents 0,
 	// which is not free) and no self-service payment.
 	QuoteRequired bool `json:"quoteRequired"`
+	// PaymentStatus is the process's current payment state (pending, failed, paid, refunded);
+	// empty when no payment exists yet.
+	PaymentStatus db.ProcessPaymentStatus `json:"paymentStatus,omitempty"`
+	// AddOnsHeldBy names, per once-per-organization add-on the draft selects (branding,
+	// customUrl), the other process of the organization whose payment holds it. It is priced in,
+	// and publish and checkout answer 409 (40177) until that payment completes or is cancelled.
+	AddOnsHeldBy map[string]string `json:"addOnsHeldBy,omitempty"`
+}
+
+// ProcessCheckoutRequest starts (or resumes) the wallet top-up checkout of a voting process.
+type ProcessCheckoutRequest struct {
+	// ReturnURL is where Stripe redirects after checkout; the session id is appended.
+	ReturnURL string `json:"returnURL"`
+	Locale    string `json:"locale,omitempty"`
 }
 
 // ProcessCheckoutResponse carries the embedded checkout credentials of a wallet top-up.
@@ -198,6 +218,53 @@ type ProcessCheckoutResponse struct {
 	SessionID    string        `json:"sessionId"`
 	AmountCents  pricing.Cents `json:"amountCents"`
 	Currency     string        `json:"currency"`
+}
+
+// ProcessCensusGrowthQuote is the 402 payload of a census that would grow a published
+// process past the price it was paid for: the projected quote at the requested size, what is
+// already covered, the difference the organization has to buy, and how much of it the payer's
+// wallet lacks. Raise the envelope with POST /processes/{processId}/census/checkout, then retry
+// the request that was refused.
+type ProcessCensusGrowthQuote struct {
+	// ProcessID is the process whose envelope is exceeded. A memberbase change can reach the
+	// census of several processes, so it names the one to buy headroom for.
+	ProcessID  string              `json:"processId"`
+	Lines      []pricing.QuoteLine `json:"lines"`
+	TotalCents pricing.Cents       `json:"totalCents"`
+	// PaidCents is the envelope already bought, DueCents the difference to TotalCents.
+	PaidCents pricing.Cents `json:"paidCents"`
+	DueCents  pricing.Cents `json:"dueCents"`
+	// CensusSize is the projected size the quote was computed for.
+	CensusSize int64  `json:"censusSize"`
+	Currency   string `json:"currency"`
+	// BalanceCents is the payer's wallet balance, ShortfallCents what DueCents exceeds it by.
+	BalanceCents   pricing.Cents `json:"balanceCents"`
+	ShortfallCents pricing.Cents `json:"shortfallCents"`
+}
+
+// ProcessPaymentRequired is the 402 (40178) payload of a publish the organization's wallet does
+// not cover: the quote, the balance, and the shortfall POST /processes/{processId}/checkout tops
+// up (charged at least the minimum).
+type ProcessPaymentRequired struct {
+	pricing.Quote
+	BalanceCents   pricing.Cents `json:"balanceCents"`
+	ShortfallCents pricing.Cents `json:"shortfallCents"`
+	// PaidCents and CensusSize are set for a process that already paid part of the price (its
+	// census grew since): it buys the difference with POST /processes/{processId}/census/checkout
+	// for CensusSize, not with a process checkout.
+	PaidCents  pricing.Cents `json:"paidCents,omitempty"`
+	CensusSize int64         `json:"censusSize,omitempty"`
+}
+
+// ProcessCensusCheckoutRequest buys census headroom for a paid process: the difference between
+// what the process paid and what CensusSize would cost, debited from the payer's wallet (topped
+// up through a checkout first when it falls short).
+type ProcessCensusCheckoutRequest struct {
+	// CensusSize is the census size to buy room for; it must exceed what is already paid.
+	CensusSize int64 `json:"censusSize"`
+	// ReturnURL is where Stripe redirects after checkout; the session id is appended.
+	ReturnURL string `json:"returnURL"`
+	Locale    string `json:"locale,omitempty"`
 }
 
 // WalletResponse is an organization's prepaid wallet: EUR balance plus its paged history,
@@ -215,6 +282,30 @@ type WalletTopUpRequest struct {
 	AmountCents pricing.Cents `json:"amountCents"`
 	ReturnURL   string        `json:"returnURL"`
 	Locale      string        `json:"locale,omitempty"`
+}
+
+// ProcessPaymentStatusResponse reports the payment state of a voting process, combining
+// the stored payment with the live checkout session state when one is open.
+type ProcessPaymentStatusResponse struct {
+	Status      db.ProcessPaymentStatus `json:"status"`
+	AmountCents pricing.Cents           `json:"amountCents"`
+	Currency    string                  `json:"currency"`
+	PaidAt      string                  `json:"paidAt,omitempty"`
+	// SessionStatus is the live Stripe session state (open, complete, expired) of the top-up
+	// checkout opened for the process, when there is one.
+	SessionStatus string `json:"sessionStatus,omitempty"`
+	// SessionPaymentStatus is the live Stripe payment state of that session (paid,
+	// unpaid, no_payment_required).
+	SessionPaymentStatus string `json:"sessionPaymentStatus,omitempty"`
+	// Consumed: the top-up was credited to the wallet and the publish it was opened for has not
+	// been recorded yet (the webhook runs it).
+	Consumed bool `json:"consumed"`
+	// Refusal is why the webhook did not publish the process once its top-up was credited; the
+	// credit stays in the wallet and the process is published by hand.
+	Refusal *db.TopUpRefusal `json:"refusal,omitempty"`
+	// JobID is the latest publish job of the process, the top-up webhook's included: poll
+	// GET /jobs/{jobId}, whose errors say why a failed publish failed.
+	JobID string `json:"jobId,omitempty"`
 }
 
 // VotingProcessListResponse is the paginated list of voting processes.
@@ -375,6 +466,7 @@ func VotingProcessResponseFromDB(
 		StreamURI:     vp.StreamURI,
 		Questions:     questions,
 		InitialStatus: vp.InitialStatus,
+		AddOns:        vp.AddOns,
 		ChainID:       chainID,
 	}
 	if !vp.StartDate.IsZero() {

@@ -177,6 +177,11 @@ type API struct {
 	relayTxQueue *txQueue
 	orgTxLocks   *orgTxMutex
 	heldTxJobs   *heldTxJobs
+	// walletLocks serializes charges against one integrator's prepaid wallet
+	walletLocks *orgTxMutex
+	// censusGrowthLocks makes the pay-per-process growth check and the census write it
+	// allows one step per organization, so parallel growth cannot pass the same check
+	censusGrowthLocks *orgTxMutex
 	// writerLocks makes the write-seat cap check (OrgCanAddWriter) and the invitation or role
 	// write it allows one step per organization, so parallel invites cannot pass the same check.
 	// ponytail: in-memory, like orgTxLocks — one API instance; a DB-side conditional write if that changes
@@ -289,6 +294,8 @@ func New(ctx context.Context, conf *Config) *API {
 		oauthServiceURL:       conf.OAuthServiceURL,
 		originSecret:          conf.OriginSecret,
 		orgTxLocks:            newOrgTxMutex(),
+		walletLocks:           newOrgTxMutex(),
+		censusGrowthLocks:     newOrgTxMutex(),
 		writerLocks:           newOrgTxMutex(),
 		otpExpiry:             otpExpiry,
 		otpCooldown:           otpCooldown,
@@ -485,6 +492,11 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPut, processesEndpoint, a.updateVotingProcessHandler)
 		handle(r, http.MethodGet, processesValidateEndpoint, a.validateVotingProcessHandler)
 		handle(r, http.MethodPost, processesPublishEndpoint, a.publishVotingProcessHandler)
+		handle(r, http.MethodGet, processesPriceEndpoint, a.processPriceHandler)
+		handle(r, http.MethodPost, processesCheckoutEndpoint, a.createProcessCheckoutHandler)
+		handle(r, http.MethodGet, processesCheckoutEndpoint, a.processCheckoutStatusHandler)
+		handle(r, http.MethodDelete, processesCheckoutEndpoint, a.cancelProcessCheckoutHandler)
+		handle(r, http.MethodPost, processesCensusCheckoutEndpoint, a.createProcessCensusCheckoutHandler)
 		handle(r, http.MethodPut, processesQuestionsStatusEndpoint, a.setVotingProcessQuestionsStatusHandler)
 		handle(r, http.MethodPut, processesQuestionStatusEndpoint, a.setVotingProcessQuestionStatusHandler)
 		handle(r, http.MethodDelete, processesEndpoint, a.deleteVotingProcessHandler)

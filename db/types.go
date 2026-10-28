@@ -948,6 +948,13 @@ type ProcessPayment struct {
 	Currency  string         `json:"currency" bson:"currency"`
 	// RequestedBy is the checkout user's email; the top-up webhook publishes as this user.
 	RequestedBy string `json:"-" bson:"requestedBy,omitempty"`
+	// PublishJobID is the job of the latest publish of the process (by hand or by the top-up
+	// webhook), so its payment status can point at it.
+	PublishJobID string `json:"-" bson:"publishJobId,omitempty"`
+	// TopUpRefusal is why the top-up webhook did not publish the process once its checkout was
+	// credited; the credit stays in the wallet and the process is published by hand. Written over
+	// by the next payment record (a publish, a new checkout), which drops it.
+	TopUpRefusal *TopUpRefusal `json:"-" bson:"topUpRefusal,omitempty"`
 	// Branding and CustomURL are whether a pending payment's checkout priced each
 	// once-per-organization add-on in. Once charged, the ledger's payment row carries the add-ons
 	// (WalletLedgerEntry.AddOns).
@@ -956,6 +963,13 @@ type ProcessPayment struct {
 	PaidAt    time.Time `json:"paidAt,omitzero" bson:"paidAt,omitempty"`
 	CreatedAt time.Time `json:"-" bson:"createdAt"`
 	UpdatedAt time.Time `json:"-" bson:"updatedAt"`
+}
+
+// TopUpRefusal is the refusal the top-up webhook met publishing a process: the API error code
+// and message a manual publish would have answered.
+type TopUpRefusal struct {
+	Code    int    `json:"code" bson:"code"`
+	Message string `json:"message" bson:"message"`
 }
 
 // Charged reports whether the pending payment's checkout priced the once-per-organization add-on in.

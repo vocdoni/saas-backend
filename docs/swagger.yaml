@@ -404,6 +404,13 @@ definitions:
     type: object
   apicommon.CreateVotingProcessRequest:
     properties:
+      addOns:
+        allOf:
+        - $ref: '#/definitions/db.ProcessAddOns'
+        description: |-
+          AddOns are the paid per-process options (signed results certificate, custom URL,
+          branding). The 2FA add-ons are not here: they derive from census.twoFaFields.
+          They change the process price, so editing them invalidates an open checkout session.
       census:
         $ref: '#/definitions/apicommon.CensusSpec'
       description:
@@ -1045,6 +1052,59 @@ definitions:
       totalItems:
         type: integer
     type: object
+  apicommon.ProcessCensusCheckoutRequest:
+    properties:
+      censusSize:
+        description: CensusSize is the census size to buy room for; it must exceed
+          what is already paid.
+        type: integer
+      locale:
+        type: string
+      returnURL:
+        description: ReturnURL is where Stripe redirects after checkout; the session
+          id is appended.
+        type: string
+    type: object
+  apicommon.ProcessCensusGrowthQuote:
+    properties:
+      balanceCents:
+        description: BalanceCents is the payer's wallet balance, ShortfallCents what
+          DueCents exceeds it by.
+        type: integer
+      censusSize:
+        description: CensusSize is the projected size the quote was computed for.
+        type: integer
+      currency:
+        type: string
+      dueCents:
+        type: integer
+      lines:
+        items:
+          $ref: '#/definitions/pricing.QuoteLine'
+        type: array
+      paidCents:
+        description: PaidCents is the envelope already bought, DueCents the difference
+          to TotalCents.
+        type: integer
+      processId:
+        description: |-
+          ProcessID is the process whose envelope is exceeded. A memberbase change can reach the
+          census of several processes, so it names the one to buy headroom for.
+        type: string
+      shortfallCents:
+        type: integer
+      totalCents:
+        type: integer
+    type: object
+  apicommon.ProcessCheckoutRequest:
+    properties:
+      locale:
+        type: string
+      returnURL:
+        description: ReturnURL is where Stripe redirects after checkout; the session
+          id is appended.
+        type: string
+    type: object
   apicommon.ProcessCheckoutResponse:
     properties:
       amountCents:
@@ -1095,14 +1155,65 @@ definitions:
           $ref: '#/definitions/apicommon.ProcessParticipantEntry'
         type: array
     type: object
+  apicommon.ProcessPaymentStatusResponse:
+    properties:
+      amountCents:
+        type: integer
+      consumed:
+        description: |-
+          Consumed: the top-up was credited to the wallet and the publish it was opened for has not
+          been recorded yet (the webhook runs it).
+        type: boolean
+      currency:
+        type: string
+      jobId:
+        description: |-
+          JobID is the latest publish job of the process, the top-up webhook's included: poll
+          GET /jobs/{jobId}, whose errors say why a failed publish failed.
+        type: string
+      paidAt:
+        type: string
+      refusal:
+        allOf:
+        - $ref: '#/definitions/db.TopUpRefusal'
+        description: |-
+          Refusal is why the webhook did not publish the process once its top-up was credited; the
+          credit stays in the wallet and the process is published by hand.
+      sessionPaymentStatus:
+        description: |-
+          SessionPaymentStatus is the live Stripe payment state of that session (paid,
+          unpaid, no_payment_required).
+        type: string
+      sessionStatus:
+        description: |-
+          SessionStatus is the live Stripe session state (open, complete, expired) of the top-up
+          checkout opened for the process, when there is one.
+        type: string
+      status:
+        $ref: '#/definitions/db.ProcessPaymentStatus'
+    type: object
   apicommon.ProcessPriceResponse:
     properties:
+      addOnsHeldBy:
+        additionalProperties:
+          type: string
+        description: |-
+          AddOnsHeldBy names, per once-per-organization add-on the draft selects (branding,
+          customUrl), the other process of the organization whose payment holds it. It is priced in,
+          and publish and checkout answer 409 (40177) until that payment completes or is cancelled.
+        type: object
       currency:
         type: string
       lines:
         items:
           $ref: '#/definitions/pricing.QuoteLine'
         type: array
+      paymentStatus:
+        allOf:
+        - $ref: '#/definitions/db.ProcessPaymentStatus'
+        description: |-
+          PaymentStatus is the process's current payment state (pending, failed, paid, refunded);
+          empty when no payment exists yet.
       quoteRecommended:
         description: 'QuoteRecommended: census above 15 000 voters — suggest requesting
           a custom quote.'
@@ -1797,6 +1908,10 @@ definitions:
     type: object
   apicommon.VotingProcessResponse:
     properties:
+      addOns:
+        allOf:
+        - $ref: '#/definitions/db.ProcessAddOns'
+        description: AddOns echoes the paid per-process options selected on the draft.
       census:
         $ref: '#/definitions/apicommon.CensusSpec'
       chainId:
@@ -2088,6 +2203,27 @@ definitions:
       teamMembers:
         type: integer
     type: object
+  db.ProcessAddOns:
+    properties:
+      branding:
+        type: boolean
+      customUrl:
+        type: boolean
+      signedCertificate:
+        type: boolean
+    type: object
+  db.ProcessPaymentStatus:
+    enum:
+    - pending
+    - failed
+    - paid
+    - refunded
+    type: string
+    x-enum-varnames:
+    - ProcessPaymentPending
+    - ProcessPaymentFailed
+    - ProcessPaymentPaid
+    - ProcessPaymentRefunded
   db.QuestionJobResult:
     properties:
       error:
@@ -2140,6 +2276,13 @@ definitions:
         type: integer
       uniqueChoices:
         type: boolean
+    type: object
+  db.TopUpRefusal:
+    properties:
+      code:
+        type: integer
+      message:
+        type: string
     type: object
   db.UserRole:
     enum:
@@ -3591,6 +3734,16 @@ paths:
         membership modified.
 
         Also callable with a scoped API key (scope: `members:write`).
+
+        402 when the change would grow a published process's census beyond what it paid for:
+        40178 with the quote in data (its processId names the process to buy headroom for with
+        POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
+        integrator's wallet falls short (data: requiredCents, availableCents).
+        422 when the grown census needs a custom quote.
+        409 (40903) while a process built on a census the change grows holds its publish claim:
+        nothing is written; retry once the claim is released: when its publish job ends, or up to 15
+        minutes after a service restart (PublishStaleAfter), as for POST /processes/{processId}/publish.
+        A checkout, a checkout cancel or an eligibility update of the draft holds the claim briefly too.
       parameters:
       - description: Organization address
         in: path
@@ -3612,7 +3765,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: Census resize jobs and errors; bare OK when neither
+          description: Census resize jobs and errors; bare OK if neither
           schema:
             $ref: '#/definitions/apicommon.UpdateOrganizationMemberGroupResponse'
         "400":
@@ -3623,12 +3776,33 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
+        "402":
+          description: Census growth beyond the price paid
+          schema:
+            allOf:
+            - $ref: '#/definitions/errors.Error'
+            - properties:
+                data:
+                  $ref: '#/definitions/apicommon.ProcessCensusGrowthQuote'
+              type: object
         "403":
           description: Auto-generated group membership cannot be modified
           schema:
             $ref: '#/definitions/errors.Error'
+        "409":
+          description: A process on the census is being published (40903)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "422":
+          description: Census size requires a custom quote
+          schema:
+            $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Busy (50302), retry after Retry-After
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -3824,6 +3998,16 @@ paths:
         empty members list is a no-op that returns added=0.
 
         Also callable with a scoped API key (scope: `members:write`).
+
+        402 when the change would grow a published process's census beyond what it paid for:
+        40178 with the quote in data (its processId names the process to buy headroom for with
+        POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
+        integrator's wallet falls short (data: requiredCents, availableCents).
+        422 when the grown census needs a custom quote.
+        409 (40903) while a process built on a census the change grows holds its publish claim:
+        nothing is written; retry once the claim is released: when its publish job ends, or up to 15
+        minutes after a service restart (PublishStaleAfter), as for POST /processes/{processId}/publish.
+        A checkout, a checkout cancel or an eligibility update of the draft holds the claim briefly too.
       parameters:
       - description: Organization address
         in: path
@@ -3855,12 +4039,33 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
+        "402":
+          description: Census growth beyond the price paid
+          schema:
+            allOf:
+            - $ref: '#/definitions/errors.Error'
+            - properties:
+                data:
+                  $ref: '#/definitions/apicommon.ProcessCensusGrowthQuote'
+              type: object
         "403":
           description: Organization members limit exceeded
           schema:
             $ref: '#/definitions/errors.Error'
+        "409":
+          description: A process on the census is being published (40903)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "422":
+          description: Census size requires a custom quote
+          schema:
+            $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Busy (50302), retry after Retry-After
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -3880,6 +4085,24 @@ paths:
         to keep them.
 
         Also callable with a scoped API key (scope: `members:write`).
+
+        402 when the change would grow a published process's census beyond what it paid for:
+        40178 with the quote in data (its processId names the process to buy headroom for with
+        POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
+        integrator's wallet falls short (data: requiredCents, availableCents).
+        422 when the grown census needs a custom quote.
+        409 (40903) while a process built on a census the change grows holds its publish claim:
+        nothing is written (except for an edit turned into a creation, below); retry once the claim is
+        released: when its publish job ends, or up to 15 minutes after a service restart
+        (PublishStaleAfter), as for POST /processes/{processId}/publish. A checkout, a checkout cancel
+        or an eligibility update of the draft holds the claim briefly too.
+
+        An edit whose member was deleted concurrently turns into a creation. When that creation's
+        growth is refused (409, 402, 422 or a busy lock), the member is written anyway: the answer is
+        a 200 with its id and an error "member created but not added to its censuses", and it is in no
+        census. Re-sending the upsert will not add it: add it with PUT /processes/{processId}/census
+        {memberIds:[id]} for a published process, or by editing the draft's census (PUT
+        /processes/{processId}).
       parameters:
       - description: Organization address
         in: path
@@ -3907,12 +4130,29 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
+        "402":
+          description: Census growth beyond the price paid
+          schema:
+            allOf:
+            - $ref: '#/definitions/errors.Error'
+            - properties:
+                data:
+                  $ref: '#/definitions/apicommon.ProcessCensusGrowthQuote'
+              type: object
+        "409":
+          description: A process on the census is being published (40903)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "422":
+          description: Census size requires a custom quote
+          schema:
+            $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
         "503":
-          description: Server busy hashing, retry after Retry-After (50302)
+          description: Server busy hashing or locked, retry after Retry-After (50302)
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -4944,6 +5184,16 @@ paths:
         published process has on-chain elections and cannot be deleted. Requires
         Manager/Admin role of the organization that owns the process.
 
+        A paid draft is credited back to the wallet that paid it before it is deleted (the
+        organization's own, or its integrator's for a managed organization); nothing is ever
+        refunded to a card. The payment record goes with the draft: the credit-back row in the
+        wallet history (GET /organizations/{orgAddress}/wallet) is the audit trail. The
+        once-per-organization add-ons it paid (branding, custom URL) are released so the
+        organization's next process can buy them — except one another process relies on,
+        which is withheld from the credit and stays the organization's. An open top-up
+        checkout of the draft is expired first; one already completed still credits the
+        wallet when its webhook arrives.
+
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Process ID
@@ -4967,12 +5217,16 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Process already published, partially published (40904), or
-            being published
+          description: Already published, partially published (40904), being published,
+            or payment changed
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Busy (50302), retry after Retry-After
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -5014,6 +5268,8 @@ paths:
         Update a voting process while it is still a draft (not published). 409 if already published,
         and 409 (40904) if partially published — an earlier publish already mined some of its
         questions on-chain, so the draft can only be published again (resuming the rest), not edited.
+        409 (40177) when the edit turns a once-per-organization add-on on for a draft that was paid
+        without it, since an add-on cannot be added after payment.
         The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
         as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
         `typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
@@ -5375,6 +5631,12 @@ paths:
         added synchronously; the maxCensusSize update runs as an async job (poll GET /jobs/{jobId}).
         Questions with an eligibility subset keep their fixed size and are unaffected. Requires
         Manager/Admin role.
+
+        402 when the change would grow a published process's census beyond what it paid for:
+        40178 with the quote in data (its processId names the process to buy headroom for with
+        POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
+        integrator's wallet falls short (data: requiredCents, availableCents).
+        422 when the grown census needs a custom quote.
       parameters:
       - description: Process ID
         in: path
@@ -5406,6 +5668,15 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
+        "402":
+          description: Census growth beyond the price paid
+          schema:
+            allOf:
+            - $ref: '#/definitions/errors.Error'
+            - properties:
+                data:
+                  $ref: '#/definitions/apicommon.ProcessCensusGrowthQuote'
+              type: object
         "404":
           description: Process not found
           schema:
@@ -5414,13 +5685,102 @@ paths:
           description: Process is not published
           schema:
             $ref: '#/definitions/errors.Error'
+        "422":
+          description: Census size requires a custom quote
+          schema:
+            $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Busy (50302), retry after Retry-After
           schema:
             $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
       summary: Add members to a published process's census
+      tags:
+      - processes
+  /processes/{processId}/census/checkout:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Debits the payer's wallet for the difference between what the process already paid
+        and what its census would cost at censusSize, so a census that outgrew its price can
+        be grown (or a paid draft republished) instead of being stuck behind a 402. Add-ons are
+        priced exactly as the original payment priced them, so a once-per-organization add-on
+        (branding, custom URL) is never charged twice. When the wallet covers it the paid
+        amount is raised at once and the response carries no checkout session (amountCents is
+        what was debited). When it does not: a managed organization gets 402 (40175); any other
+        gets a wallet top-up checkout for the shortfall (at least €1), and the headroom is
+        debited once that payment is verified by webhook — never before, so a published process's
+        census stays refused until then; if the process changed meanwhile the credit stays in the
+        wallet.
+        There is no status of its own for that checkout: poll GET /processes/{processId}/checkout,
+        whose amountCents reaches the new price once the headroom is debited, and the wallet
+        history (GET /organizations/{orgAddress}/wallet), which shows the topup credit and then a
+        payment row for the process. A topup with no payment row after it means the debit was
+        refused: for a published process, retry the growth and, on its 402 (shortfallCents 0),
+        call this endpoint again to debit the wallet; for a draft, publish it again: the publish
+        debits the difference from the wallet.
+        400 when the process has no completed payment, or when the target does not cost more
+        than was already paid. Requires Admin role.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Census headroom to buy
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.ProcessCensusCheckoutRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessCheckoutResponse'
+        "400":
+          description: No completed payment, or nothing left to buy
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "402":
+          description: Integrator wallet does not cover the difference (40175)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Payment changed or is being refunded
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "422":
+          description: Census size requires a custom quote
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Busy (50302), retry after Retry-After
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Buy census headroom for a paid process
       tags:
       - processes
   /processes/{processId}/check:
@@ -5473,6 +5833,178 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Check a voter's status for a voting process
+      tags:
+      - processes
+  /processes/{processId}/checkout:
+    delete:
+      description: |-
+        Expires the draft's open top-up checkout so it can no longer be paid, drops its pending
+        payment and releases the add-on claims the checkout took. It is how a draft whose
+        checkout is open is published from the wallet instead (publish refuses it with 409
+        while the session is payable). A checkout already completed is not expired: its money
+        lands in the wallet regardless. 404 (40179) when there is no payment; 409 (40177) when
+        the payment is paid, refunded or failed, or when the checkout's top-up was already spent
+        on the process's publish (its ledger shows it paid): publish it again instead, which
+        charges nothing. Requires Admin role.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found (40038), or no payment or checkout for it
+            (40179)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Paid, refunded or failed, top-up spent on its publish, checkout
+            changed, or draft busy
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Stripe could not verify or expire the session
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Cancel the open top-up checkout of a voting process
+      tags:
+      - processes
+    get:
+      description: |-
+        The stored payment state (pending while a top-up checkout is open, paid, refunded)
+        combined with the live Stripe state of the top-up checkout opened for the process, if
+        any. Payment truth comes from webhooks — this endpoint is for polling the outcome, it
+        never fulfills. consumed is true while a top-up credited to the wallet waits for the
+        publish the webhook then runs. refusal is set when it could not (price rose,
+        wallet short, the draft cannot publish, the requester is no longer an admin...): the
+        credit stays in the wallet and the process is published by hand. consumed with no
+        refusal and status still pending means the webhook will retry the publish: the credit
+        is already in the wallet, so POST /processes/{processId}/publish may be called at once
+        instead of waiting, and the retry then finds the process published. status paid means
+        the process is published or its publish job is running; jobId names the latest publish
+        job (the webhook's included): poll GET /jobs/{jobId}. status failed means the publish
+        failed after the payment and was credited back; that job's errors say why.
+        404 with 40179 means the draft exists but has no payment: none was opened, or a top-up
+        checkout that expired or whose delayed payment failed was dropped (open a new one); 404
+        with 40038 means the process itself is gone.
+        Requires Manager/Admin of the organization.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessPaymentStatusResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found (40038), or no payment or checkout for it
+            (40179)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get the payment status of a voting process
+      tags:
+      - processes
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Opens a one-time Stripe checkout that tops up the organization's wallet by what it
+        lacks to pay the draft's server-calculated price (the shortfall, at least the €1
+        minimum; VAT added by Stripe Tax at checkout), and returns its client secret. Once the
+        payment is verified by webhook the wallet is credited and the process is published as
+        the requesting user, paid from the wallet; if it cannot be (its price rose, it changed
+        or was deleted) the credit stays in the wallet and the process is published by hand.
+        An open session for the same price and shortfall is reused; an obsolete one is
+        expired and replaced. A draft publish would refuse is refused here first, with the same
+        error, before any money is taken. 400 when the process is free, the wallet already
+        covers it (publish directly; an open checkout of the draft is expired and dropped
+        first), or it is not ready to publish. 403 (40181) for a managed
+        organization: its integrator's wallet pays at publish. 409 (40177) when the draft is
+        already paid (buy census headroom instead), a delete refunded it and did not finish
+        (delete it again), its last checkout completed and is being credited, or another
+        draft's payment holds a once-per-organization add-on it selects.
+        422 (40176) above 50 000 voters (quote-only). Requires Admin role.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Checkout parameters
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.ProcessCheckoutRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessCheckoutResponse'
+        "400":
+          description: Free process, wallet covers the price, empty census, or not
+            ready to publish
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Managed organization (no wallet), or an integrator's own organization
+            (40174)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Paid, checkout completing, add-on held by another draft, questions
+            out of sync, or busy
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "422":
+          description: Census size requires a custom quote
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Top up the wallet to publish a voting process
       tags:
       - processes
   /processes/{processId}/participants:
@@ -5571,6 +6103,50 @@ paths:
       summary: Get a voting process participant
       tags:
       - processes
+  /processes/{processId}/price:
+    get:
+      description: |-
+        Server-side price of the draft in EUR cents, VAT excluded: base price from the
+        census size plus the selected add-ons, with the current payment status. Branding
+        and custom URL are once per organization: not priced once the organization paid
+        them. While another draft's payment holds one the draft selects, it stays priced in,
+        addOnsHeldBy names that draft, and publish and checkout answer 409 (40177) until its
+        payment completes (the add-on is then free) or is cancelled. Above 15 000 voters a custom
+        quote is recommended; above 50 000 the process is quote-only: no price (empty
+        lines, totalCents 0, quoteRequired true), and publish and checkout answer 422
+        (40176). Requires Manager/Admin of the organization.
+
+        Also callable with a scoped API key (scope: `voting:write`).
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessPriceResponse'
+        "400":
+          description: Census is empty or invalid
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get the price of a voting process
+      tags:
+      - processes
   /processes/{processId}/publish:
     post:
       consumes:
@@ -5581,6 +6157,15 @@ paths:
         GET /jobs/{jobId}. Idempotent once published.
         409 (40172) means the stored questions do not match the process and the draft has to be
         saved again before it can be published.
+        409 (40177) while a top-up checkout opened for the draft is still open: pay it, or, when
+        the draft's price changed since, call POST /processes/{processId}/checkout again to
+        replace it (or cancel it with DELETE /processes/{processId}/checkout) and publish again.
+        A priced process is paid from its payer's wallet (the organization's own, or its
+        integrator's when managed) at publish. 402 (40178) means the organization's wallet does
+        not cover it: the error data carries the quote, balanceCents and shortfallCents; top it
+        up via POST /processes/{processId}/checkout, which publishes once paid. For a managed
+        organization, 402 (40175) means its integrator's wallet does not cover the price.
+        422 (40176) means the census is above 50 000 voters: quote-only, no self-service price.
       parameters:
       - description: Process ID
         in: path
@@ -5606,6 +6191,10 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
+        "402":
+          description: Wallet short (quote, balance, shortfall in data)
+          schema:
+            $ref: '#/definitions/errors.Error'
         "403":
           description: An integrator's own organization cannot own processes (40174)
           schema:
@@ -5615,12 +6204,17 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Publish in progress, or the stored questions do not match the
-            process
+          description: Publish in progress, questions out of sync, or a top-up checkout
+            is open
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "422":
+          description: Census size requires a custom quote
           schema:
             $ref: '#/definitions/errors.Error'
         "503":
-          description: Service Unavailable
+          description: Busy (50302 wallet or census growth, 50303 org tx), retry after
+            Retry-After
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -5687,6 +6281,12 @@ paths:
         `data.signedMemberIds`.
 
         Also callable with a scoped API key (scope: `voting:write`).
+
+        402 when the change would grow a published process's census beyond what it paid for:
+        40178 with the quote in data (its processId names the process to buy headroom for with
+        POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
+        integrator's wallet falls short (data: requiredCents, availableCents).
+        422 when the grown census needs a custom quote.
       parameters:
       - description: Process ID
         in: path
@@ -5723,12 +6323,25 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
+        "402":
+          description: Census growth beyond the price paid
+          schema:
+            allOf:
+            - $ref: '#/definitions/errors.Error'
+            - properties:
+                data:
+                  $ref: '#/definitions/apicommon.ProcessCensusGrowthQuote'
+              type: object
         "404":
           description: Process or question not found
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
           description: Publish in progress, member already signed for, or list changed
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "422":
+          description: Census size requires a custom quote
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -6022,8 +6635,11 @@ paths:
       - processes
   /processes/{processId}/validation:
     get:
-      description: Publish-readiness dry-run. Returns { valid, errors } without changing
-        anything.
+      description: |-
+        Publish-readiness dry-run. Returns { valid, errors } without changing anything. For a draft it
+        also lists the payment refusals a publish would give: a wallet that does not cover the price,
+        an add-on another draft holds, or a census that cannot be priced.
+        Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Process ID
         in: path

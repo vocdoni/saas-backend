@@ -90,6 +90,30 @@ func (ms *MongoStorage) ConsumeProcessPaymentTopUp(processID bson.ObjectID, sess
 	})
 }
 
+// SetProcessPaymentTopUpRefusal records why the top-up webhook did not publish the process whose
+// payment sessionID still backs (pending, paid by it, or reverted after it); it reports whether
+// it found that payment.
+func (ms *MongoStorage) SetProcessPaymentTopUpRefusal(
+	processID bson.ObjectID, sessionID string, refusal TopUpRefusal,
+) (bool, error) {
+	return ms.transitionProcessPayment(processID, sessionID, processPaymentTransition{
+		from: bson.A{ProcessPaymentPending, ProcessPaymentPaid, ProcessPaymentFailed},
+		set:  bson.M{"topUpRefusal": refusal},
+	})
+}
+
+// SetProcessPaymentPublishJob records jobID as the latest publish job of processID's payment. A
+// process with no payment (a free one) records nothing.
+func (ms *MongoStorage) SetProcessPaymentPublishJob(processID bson.ObjectID, jobID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	if _, err := ms.processPayments.UpdateOne(ctx, bson.M{"_id": processID},
+		bson.M{"$set": bson.M{"publishJobId": jobID}}); err != nil {
+		return fmt.Errorf("failed to record publish job: %w", err)
+	}
+	return nil
+}
+
 // DeleteProcessPaymentCheckout drops the pending payment holding sessionID: its checkout expired,
 // failed, or was cancelled. A compare-and-set on the session, so a newer checkout of the same
 // draft is left alone; reports whether it dropped it.

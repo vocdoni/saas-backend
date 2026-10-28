@@ -76,13 +76,24 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 	)
 	c.Assert(list.Organizations, qt.HasLen, managedOrgs)
 
-	// publish two processes under the managed org: no pooled process quota in the way
+	// publish two priced processes under the managed org: both are paid from the wallet, with
+	// no pooled process quota in the way
 	members := memberIDs(postOrgMembers(t, token, firstManaged, newOrgMembers(db.TestMaxCensusSize+1)...))
 	census := apicommon.CensusSpec{
 		AuthFields: db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber}, MemberIDs: members,
 	}
+	const topUp = 100_000
+	c.Assert(testDB.CreditWallet(db.WalletCredit{
+		OrgAddress: integratorAddr, AmountCents: topUp, IdempotencyKey: "cs_integrator_managed_orgs",
+	}), qt.IsNil)
 	publishCensusProcess(t, token, firstManaged, census, 1)
 	publishCensusProcess(t, token, firstManaged, census, 1)
+	wallet, err := testDB.Wallet(integratorAddr)
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.BalanceCents < topUp, qt.IsTrue)
+	_, entries, err := testDB.WalletLedger(integratorAddr, 1, 10)
+	c.Assert(err, qt.IsNil)
+	c.Assert(entries, qt.HasLen, 3) // the top-up and one debit per process
 }
 
 // TestIntegratorTopLevelOrgCannotOwnProcesses pins that an integrator's own organization holds

@@ -257,18 +257,32 @@ func (a *API) createOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 //	@Description	membership modified.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `members:write`).
+//	@Description
+//	@Description	402 when the change would grow a published process's census beyond what it paid for:
+//	@Description	40178 with the quote in data (its processId names the process to buy headroom for with
+//	@Description	POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
+//	@Description	integrator's wallet falls short (data: requiredCents, availableCents).
+//	@Description	422 when the grown census needs a custom quote.
+//	@Description	409 (40903) while a process built on a census the change grows holds its publish claim:
+//	@Description	nothing is written; retry once the claim is released: when its publish job ends, or up to 15
+//	@Description	minutes after a service restart (PublishStaleAfter), as for POST /processes/{processId}/publish.
+//	@Description	A checkout, a checkout cancel or an eligibility update of the draft holds the claim briefly too.
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			orgAddress	path		string											true	"Organization address"
-//	@Param			groupId		path		string											true	"Group ID"
-//	@Param			group		body		apicommon.UpdateOrganizationMemberGroupsRequest	true	"Group info to update"
-//	@Success		200			{object}	apicommon.UpdateOrganizationMemberGroupResponse	"Census resize jobs and errors; bare OK when neither"
-//	@Failure		400			{object}	errors.Error									"Invalid input data, or organization/group not found"
-//	@Failure		401			{object}	errors.Error									"Unauthorized"
-//	@Failure		403			{object}	errors.Error									"Auto-generated group membership cannot be modified"
-//	@Failure		500			{object}	errors.Error									"Internal server error"
+//	@Param			orgAddress	path		string													true	"Organization address"
+//	@Param			groupId		path		string													true	"Group ID"
+//	@Param			group		body		apicommon.UpdateOrganizationMemberGroupsRequest			true	"Group info to update"
+//	@Success		200			{object}	apicommon.UpdateOrganizationMemberGroupResponse			"Census resize jobs and errors; bare OK if neither"
+//	@Failure		400			{object}	errors.Error											"Invalid input data, or organization/group not found"
+//	@Failure		401			{object}	errors.Error											"Unauthorized"
+//	@Failure		403			{object}	errors.Error											"Auto-generated group membership cannot be modified"
+//	@Failure		402			{object}	errors.Error{data=apicommon.ProcessCensusGrowthQuote}	"Census growth beyond the price paid"
+//	@Failure		409			{object}	errors.Error											"A process on the census is being published (40903)"
+//	@Failure		422			{object}	errors.Error											"Census size requires a custom quote"
+//	@Failure		500			{object}	errors.Error											"Internal server error"
+//	@Failure		503			{object}	errors.Error											"Busy (50302), retry after Retry-After"
 //	@Router			/organizations/{orgAddress}/groups/{groupId} [put]
 func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *http.Request) {
 	// get the group ID from the request path
@@ -350,6 +364,13 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 			addedMembers = append(addedMembers, id)
 		}
 	}
+	// the growth check and the census write it allows are one step (censusGrowthLocks)
+	growthLock, err := a.censusGrowthLocks.lockOrBusy(r.Context(), org.Address)
+	if err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+	defer growthLock.Unlock()
 	if err := a.preflightCensusGrowth(org, group.CensusIDs, len(addedMembers)); err != nil {
 		writeSubscriptionError(w, err)
 		return

@@ -170,11 +170,15 @@ func TestProcessPaymentBase(t *testing.T) {
 	ok, err = testDB.ConsumeProcessPaymentTopUp(consumedID, "cs_consumed")
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
+	ok, err = testDB.SetProcessPaymentTopUpRefusal(consumedID, "cs_consumed", TopUpRefusal{Code: 40904, Message: "refused"})
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
 	c.Assert(base(consumedID, 0), qt.IsTrue)
 	payment, err = testDB.ProcessPayment(consumedID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.Status, qt.Equals, ProcessPaymentPaid)
 	c.Assert(payment.Consumed, qt.IsFalse)
+	c.Assert(payment.TopUpRefusal, qt.IsNil) // published: the webhook's refusal no longer applies
 	c.Assert(payment.AmountCents, qt.Equals, pricing.Cents(0))
 
 	c.Assert(testDB.SetProcessPaymentCache(SetProcessPaymentCacheParams{
@@ -394,4 +398,37 @@ func TestOrganizationBrandingDelivered(t *testing.T) {
 	c.Assert(delivered(mined), qt.IsFalse) // its own elections do not count
 	_, err = testDB.OrganizationAddOnDelivered(org, OrgAddOn("bogus"), payer)
 	c.Assert(err, qt.ErrorIs, ErrInvalidData)
+}
+
+// TestProcessPaymentTopUpRefusal: the refusal the top-up webhook met is recorded only on the
+// payment its session still backs, and the next payment record drops it.
+func TestProcessPaymentTopUpRefusal(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	processID := bson.NewObjectID()
+	stored, err := testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_refused"), "")
+	c.Assert(err, qt.IsNil)
+	c.Assert(stored, qt.IsTrue)
+	consumed, err := testDB.ConsumeProcessPaymentTopUp(processID, "cs_refused")
+	c.Assert(err, qt.IsNil)
+	c.Assert(consumed, qt.IsTrue)
+
+	refusal := TopUpRefusal{Code: 40178, Message: "wallet short"}
+	set, err := testDB.SetProcessPaymentTopUpRefusal(processID, "cs_other", refusal)
+	c.Assert(err, qt.IsNil)
+	c.Assert(set, qt.IsFalse)
+	set, err = testDB.SetProcessPaymentTopUpRefusal(processID, "cs_refused", refusal)
+	c.Assert(err, qt.IsNil)
+	c.Assert(set, qt.IsTrue)
+	payment, err := testDB.ProcessPayment(processID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.TopUpRefusal, qt.DeepEquals, &refusal)
+
+	// a manual publish refreshes the payment as paid, without the refusal
+	c.Assert(testDB.SetProcessPaymentCache(SetProcessPaymentCacheParams{
+		ProcessID: processID, OrgAddress: testOrgAddress, Status: ProcessPaymentPaid, AmountCents: 29_000,
+	}), qt.IsNil)
+	payment, err = testDB.ProcessPayment(processID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.TopUpRefusal, qt.IsNil)
 }

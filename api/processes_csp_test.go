@@ -59,6 +59,24 @@ func publishCensusProcess(t *testing.T, token string, orgAddress common.Address,
 	return publishProcessRequest(t, token, req)
 }
 
+// payIfPriced pays a priced draft of a standard organization as its checkout would. Add-ons are
+// charged at any census size (SMS 2FA on a few voters is priced), so tests about something other
+// than payment pay first. A managed organization's draft is left to the integrator wallet.
+func payIfPriced(t *testing.T, token, pid string) {
+	t.Helper()
+	vp, err := testDB.VotingProcess(objectID(qt.New(t), pid))
+	qt.Assert(t, err, qt.IsNil)
+	org, err := testDB.Organization(vp.OrgAddress)
+	qt.Assert(t, err, qt.IsNil)
+	if org.ManagedBy != (common.Address{}) {
+		return
+	}
+	price := requestAndParse[apicommon.ProcessPriceResponse](t, http.MethodGet, token, nil, "processes", pid, "price")
+	if price.TotalCents > 0 {
+		markProcessPaid(t, pid)
+	}
+}
+
 // publishProcessRequest creates and publishes req, returning the process id and the on-chain
 // election id of each of its questions.
 func publishProcessRequest(t *testing.T, token string, req *apicommon.CreateVotingProcessRequest,
@@ -69,6 +87,7 @@ func publishProcessRequest(t *testing.T, token string, req *apicommon.CreateVoti
 	pid := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, req, processesCreateEndpoint,
 	).ProcessID
+	payIfPriced(t, token, pid)
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
 

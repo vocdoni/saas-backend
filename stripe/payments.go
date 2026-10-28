@@ -3,6 +3,7 @@ package stripe
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/ethereum/go-ethereum/common"
 	stripeapi "github.com/stripe/stripe-go/v87"
@@ -10,6 +11,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/pricing"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -28,6 +30,13 @@ const (
 	// MetadataKeyProcessID marks a top-up as opened for one voting process: once credited, the
 	// wallet pays that process's publish (or census headroom) right away.
 	MetadataKeyProcessID = "voting_process_id"
+	// MetadataKeyProcessTopUpCents marks a process top-up as census headroom, carrying the
+	// *target* envelope the process must be raised to (not the difference charged).
+	MetadataKeyProcessTopUpCents = "process_topup_cents"
+	// MetadataKeyProcessTopUpFromCents carries the envelope the headroom was priced from: it is
+	// applied only while the process still paid exactly that, so a stale session never buys
+	// headroom from a base it did not price.
+	MetadataKeyProcessTopUpFromCents = "process_topup_from_cents"
 	// MetadataKeyRequestedBy carries the email of the user who started the checkout.
 	MetadataKeyRequestedBy = "requested_by"
 )
@@ -214,6 +223,44 @@ func (s *Service) handleCheckoutSessionResult(event *stripeapi.Event) error {
 	return s.creditWalletTopUp(session)
 }
 
+// handleCheckoutSessionFailed processes the two ways a checkout stops short of paying:
+// checkout.session.async_payment_failed (a delayed payment did not clear) and
+// checkout.session.expired (the customer abandoned it and Stripe closed the session). Nothing
+// was credited. A top-up opened for a process drops the process's pending payment, which also
+// releases the add-on claims the checkout took — without this an abandoned checkout would hold
+// the organization's once-per-organization add-ons until the claims went stale.
+func (s *Service) handleCheckoutSessionFailed(event *stripeapi.Event) error {
+	session, err := parseCheckoutSessionFromEvent(event)
+	if err != nil {
+		return err
+	}
+	if session.Metadata[MetadataKeyWalletTopUpOrg] == "" || session.Metadata[MetadataKeyProcessID] == "" {
+		return nil
+	}
+	processID, err := sessionProcessID(session)
+	if err != nil {
+		return err
+	}
+	if s.OnProcessCheckoutDropped == nil {
+		return nil
+	}
+	if err := s.OnProcessCheckoutDropped(processID, session.ID); err != nil {
+		return fmt.Errorf("failed to drop the checkout of process %s: %w", processID.Hex(), err)
+	}
+	return nil
+}
+
+// sessionProcessID parses the process a top-up session was opened for.
+func sessionProcessID(session *stripeapi.CheckoutSession) (bson.ObjectID, error) {
+	raw := session.Metadata[MetadataKeyProcessID]
+	processID, err := bson.ObjectIDFromHex(raw)
+	if err != nil {
+		return bson.NilObjectID, fmt.Errorf("invalid process id %q in session %s metadata (%v): %w",
+			raw, session.ID, err, errPermanentEvent)
+	}
+	return processID, nil
+}
+
 // netPaidCents is what a session's items were paid for, VAT excluded: the subtotal, which
 // Stripe reports before discounts, less any discount.
 func netPaidCents(session *stripeapi.CheckoutSession) pricing.Cents {
@@ -223,14 +270,47 @@ func netPaidCents(session *stripeapi.CheckoutSession) pricing.Cents {
 	return pricing.Cents(session.AmountSubtotal - session.TotalDetails.AmountDiscount)
 }
 
-// creditWalletTopUp credits a verified top-up to the wallet named in the session. The net
-// (pre-tax, after any discount) amount is what was paid for; VAT goes to the tax authority, not
-// the balance. The session id is the idempotency key, so replays cannot double-credit.
+// ProcessTopUp is a credited top-up that was opened for a process: the wallet now pays its
+// publish (HeadroomCents zero) or raises its census envelope from FromCents to HeadroomCents.
+type ProcessTopUp struct {
+	ProcessID     bson.ObjectID
+	SessionID     string
+	HeadroomCents pricing.Cents
+	FromCents     pricing.Cents
+}
+
+// creditWalletTopUp credits a verified top-up to the wallet named in the session, then hands a
+// top-up opened for a process to OnProcessTopUp. The net (pre-tax, after any discount) amount is
+// what was paid for; VAT goes to the tax authority, not the balance. The session id is the
+// idempotency key, so replays cannot double-credit; the follow-up runs on every delivery and is
+// idempotent on its own.
 func (s *Service) creditWalletTopUp(session *stripeapi.CheckoutSession) error {
 	if session.PaymentStatus != stripeapi.CheckoutSessionPaymentStatusPaid {
 		// delayed payment method still clearing: credit nothing until it does
 		return nil
 	}
+	if err := s.creditTopUpSession(session); err != nil {
+		return err
+	}
+	if session.Metadata[MetadataKeyProcessID] == "" || s.OnProcessTopUp == nil {
+		return nil
+	}
+	// parsed after the credit: metadata that cannot name a process still paid for the credit
+	topUp, err := sessionProcessTopUp(session)
+	if err != nil {
+		return err
+	}
+	if err := s.OnProcessTopUp(*topUp); err != nil {
+		return fmt.Errorf("failed to apply the top-up of process %s: %w", topUp.ProcessID.Hex(), err)
+	}
+	return nil
+}
+
+// creditTopUpSession credits a paid top-up session's net amount to the wallet its metadata names,
+// keyed by the session id: crediting it again, from any event, is a no-op. A refund handled before
+// the completed event credits through it alone (topUpOfPaymentIntent): publishing a process from
+// money already returned is left to the completed event, which finds it gone.
+func (s *Service) creditTopUpSession(session *stripeapi.CheckoutSession) error {
 	rawOrg := session.Metadata[MetadataKeyWalletTopUpOrg]
 	if !common.IsHexAddress(rawOrg) {
 		return fmt.Errorf("invalid organization address %q in session %s metadata: %w",
@@ -257,6 +337,25 @@ func (s *Service) creditWalletTopUp(session *stripeapi.CheckoutSession) error {
 			"orgAddress", orgAddress.String(), "amountCents", net, "sessionId", session.ID)
 	}
 	return nil
+}
+
+// sessionProcessTopUp parses the process (and census headroom) a top-up session was opened for.
+func sessionProcessTopUp(session *stripeapi.CheckoutSession) (*ProcessTopUp, error) {
+	processID, err := sessionProcessID(session)
+	if err != nil {
+		return nil, err
+	}
+	topUp := &ProcessTopUp{ProcessID: processID, SessionID: session.ID}
+	if raw := session.Metadata[MetadataKeyProcessTopUpCents]; raw != "" {
+		target, terr := strconv.ParseInt(raw, 10, 64)
+		from, ferr := strconv.ParseInt(session.Metadata[MetadataKeyProcessTopUpFromCents], 10, 64)
+		if terr != nil || ferr != nil || from < 0 || target <= from {
+			return nil, fmt.Errorf("invalid census headroom %q from %q in session %s metadata: %w", raw,
+				session.Metadata[MetadataKeyProcessTopUpFromCents], session.ID, errPermanentEvent)
+		}
+		topUp.HeadroomCents, topUp.FromCents = pricing.Cents(target), pricing.Cents(from)
+	}
+	return topUp, nil
 }
 
 // handleRefund mirrors in the wallet a refund made by hand in the Stripe dashboard (the service
@@ -366,7 +465,7 @@ func (s *Service) topUpOfPaymentIntent(paymentIntentID string) (*db.WalletLedger
 	if session == nil || session.PaymentStatus != stripeapi.CheckoutSessionPaymentStatusPaid {
 		return nil, db.ErrNotFound
 	}
-	if err := s.creditWalletTopUp(session); err != nil {
+	if err := s.creditTopUpSession(session); err != nil {
 		return nil, err
 	}
 	return s.db.WalletTopUpByPaymentIntent(paymentIntentID)

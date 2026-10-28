@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -14,6 +15,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/pricing"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
@@ -94,6 +96,8 @@ type publishTarget struct {
 	questions []db.VotingProcessQuestion
 	census    *db.Census
 	user      *db.User
+	// ceilingCents, when positive, is the most the publish debit may charge (debitProcessWalletUpTo)
+	ceilingCents pricing.Cents
 }
 
 // publishPreflightProblems returns every reason a process would fail to publish that can be
@@ -154,6 +158,24 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	return problems, questionsMismatch, denied
 }
 
+// preflightError is the refusal publish answers for what publishPreflightProblems found: 409
+// (40172) when the stored question set does not match the process, which has to be repaired
+// first; then the organization's typed refusal (403 40174, or the duration cap), as at draft
+// creation; and a 400 for anything else. Nil when nothing was found.
+func preflightError(problems []string, questionsMismatch bool, denied error) error {
+	if len(problems) == 0 {
+		return nil
+	}
+	switch {
+	case questionsMismatch:
+		return errors.ErrProcessQuestionsMismatch.Withf("process is not ready to publish: %s", strings.Join(problems, "; "))
+	case denied != nil:
+		return denied
+	default:
+		return errors.ErrMalformedBody.Withf("process is not ready to publish: %s", strings.Join(problems, "; "))
+	}
+}
+
 // publishVotingProcessHandler godoc
 //
 //	@Summary		Publish a voting process
@@ -162,6 +184,15 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 //	@Description	GET /jobs/{jobId}. Idempotent once published.
 //	@Description	409 (40172) means the stored questions do not match the process and the draft has to be
 //	@Description	saved again before it can be published.
+//	@Description	409 (40177) while a top-up checkout opened for the draft is still open: pay it, or, when
+//	@Description	the draft's price changed since, call POST /processes/{processId}/checkout again to
+//	@Description	replace it (or cancel it with DELETE /processes/{processId}/checkout) and publish again.
+//	@Description	A priced process is paid from its payer's wallet (the organization's own, or its
+//	@Description	integrator's when managed) at publish. 402 (40178) means the organization's wallet does
+//	@Description	not cover it: the error data carries the quote, balanceCents and shortfallCents; top it
+//	@Description	up via POST /processes/{processId}/checkout, which publishes once paid. For a managed
+//	@Description	organization, 402 (40175) means its integrator's wallet does not cover the price.
+//	@Description	422 (40176) means the census is above 50 000 voters: quote-only, no self-service price.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -171,10 +202,13 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 //	@Success		200			{object}	apicommon.CreateVotingProcessResponse	"Already published"
 //	@Failure		400			{object}	errors.Error							"Not ready to publish"
 //	@Failure		401			{object}	errors.Error
+//	@Failure		402			{object}	errors.Error	"Wallet short (quote, balance, shortfall in data)"
 //	@Failure		403			{object}	errors.Error	"An integrator's own organization cannot own processes (40174)"
 //	@Failure		404			{object}	errors.Error
-//	@Failure		409			{object}	errors.Error	"Publish in progress, or the stored questions do not match the process"
+//	@Failure		409			{object}	errors.Error	"Publish in progress, questions out of sync, or a top-up checkout is open"
 //	@Failure		503			{object}	errors.Error
+//	@Failure		422			{object}	errors.Error	"Census size requires a custom quote"
+//	@Failure		503			{object}	errors.Error	"Busy (50302 wallet or census growth, 50303 org tx), retry after Retry-After"
 //	@Router			/processes/{processId}/publish [post]
 func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)
@@ -213,23 +247,16 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 	// predictable is rejected here rather than as an opaque async job failure;
 	// only funding and chain submission are left to the worker.
 	target := publishTarget{vp: vp, questions: questions, census: census, user: user}
-	if problems, questionsMismatch, denied := a.publishPreflightProblems(target); len(problems) > 0 {
-		// a stored question set that does not match the process is server-side state, not a bad
-		// request, so it answers 409. It wins over any other problem present: it has to be repaired
-		// (by saving the draft again) before the rest of the draft is even worth looking at.
-		// Next comes the organization's typed refusal (403 40174, or the duration cap), as at draft
-		// creation; anything else is a 400.
-		var apiErr errors.Error
-		switch {
-		case questionsMismatch:
-			apiErr = errors.ErrProcessQuestionsMismatch
-		case denied != nil:
-			writeSubscriptionError(w, denied)
-			return
-		default:
-			apiErr = errors.ErrMalformedBody
-		}
-		apiErr.Withf("process is not ready to publish: %s", strings.Join(problems, "; ")).Write(w)
+	if err := preflightError(a.publishPreflightProblems(target)); err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+
+	// payment gate: a priced process publishes only when its payer's wallet covers what is due,
+	// and the 402 carries what is missing so the client can go straight to a top-up checkout.
+	// The debit itself happens inside startProcessPublish, after the publish claim.
+	if err := a.paymentDueForPublish(vp); err != nil {
+		writeSubscriptionError(w, err)
 		return
 	}
 
@@ -250,13 +277,14 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 var errProcessAlreadyPublished = fmt.Errorf("process already published")
 
 // startProcessPublish runs the post-preflight publish pipeline: atomic claim,
-// organization signer, census publication, job creation and enqueue.
+// wallet debit, organization signer, census publication, job creation and enqueue.
 // The caller is responsible for preflight (publishPreflightProblems) and authorization.
-// Errors are errors.Error values carrying their HTTP semantics (write with
-// writeSubscriptionError), plain errors mapping to 500, or errProcessAlreadyPublished.
-// ctx bounds only the lock wait below, never the enqueued work.
+// It exists apart from the HTTP handler so payment fulfillment can trigger publication
+// server-side with the same guarantees. Errors are errors.Error values carrying their
+// HTTP semantics (write with writeSubscriptionError), plain errors mapping to 500, or
+// errProcessAlreadyPublished. ctx bounds only the lock waits below, never the enqueued work.
 func (a *API) startProcessPublish(ctx context.Context, t publishTarget) (string, error) {
-	vp, census, user := t.vp, t.census, t.user
+	vp, user := t.vp, t.user
 	oid := vp.ID
 	// atomically claim the process for publishing (duplicate-publish guard). The claim is
 	// conditional on the process not having been updated since this snapshot was read
@@ -288,6 +316,11 @@ func (a *API) startProcessPublish(ctx context.Context, t publishTarget) (string,
 			log.Warnw("could not clear voting process publishing state", "error", e)
 		}
 	}()
+	// again under the claim, which a delete takes too: one that refunded and failed between
+	// the payment gate and here would otherwise go on chain unpaid
+	if err := a.refuseRefundedDraft(vp); err != nil {
+		return "", err
+	}
 	// the snapshot's questions were loaded before the claim; a draft edit in that window bumped
 	// updatedAt and was caught above, but reload them under the claim anyway so the published
 	// elections can only be built from what is stored now.
@@ -303,7 +336,43 @@ func (a *API) startProcessPublish(ctx context.Context, t publishTarget) (string,
 	if err != nil {
 		return "", fmt.Errorf("failed to get organization: %w", err)
 	}
+
+	// the census is read again under the organization's census growth lock, held until it is
+	// written back below: that one read is what the debit prices, what is stored and what the job
+	// publishes (maxCensusSize), so a member added concurrently is in all three or lands after
+	// them. Bounded like the growth paths (503 50302), and taken before the tx lock, in their order:
+	// they hold it while they may take the tx lock.
+	growthLock, err := a.censusGrowthLocks.lockOrBusy(ctx, org.Address)
+	if err != nil {
+		return "", err
+	}
+	releaseGrowth := sync.OnceFunc(growthLock.Unlock)
+	defer releaseGrowth()
+	census, err := a.db.Census(vp.CensusID.Hex())
+	if err != nil {
+		return "", fmt.Errorf("failed to reload the census: %w", err)
+	}
 	nonTestSized := uint64(census.Size) > uint64(db.TestMaxCensusSize)
+
+	// acquire the per-org tx lock with a bounded wait before anything is charged: a worker may hold
+	// it through tx mining, and a caller is better served by a prompt 503 than a parked request. A
+	// busy lock so refuses the publish with nothing debited, and nothing to give back.
+	orgLock, err := a.orgTxLocks.lockCtx(ctx, org.Address)
+	if err != nil {
+		return "", err
+	}
+	lockHeld := true
+	defer func() {
+		if lockHeld {
+			orgLock.Unlock()
+		}
+	}()
+
+	// payment: the process is charged to its payer's wallet here — the only debit of a
+	// publish — after the claim, so two concurrent publishes cannot both debit.
+	if err := a.debitProcessWalletUpTo(publishDebit{vp: vp, org: org, census: census, ceilingCents: t.ceilingCents}); err != nil {
+		return "", err
+	}
 
 	orgSigner, err := account.OrganizationSigner(a.secret, org.SignerSeedValue(), org.Nonce)
 	if err != nil {
@@ -323,26 +392,23 @@ func (a *API) startProcessPublish(ctx context.Context, t publishTarget) (string,
 	if _, err := a.db.SetCensus(census); err != nil {
 		return "", fmt.Errorf("failed to publish census: %w", err)
 	}
-
-	// acquire the per-org tx lock with a bounded wait before the job exists: a worker may hold
-	// it through tx mining, and a caller is better served by a prompt 503 than a parked request.
-	orgLock, err := a.orgTxLocks.lockCtx(ctx, org.Address)
-	if err != nil {
-		return "", err
-	}
-	lockHeld := true
-	defer func() {
-		if lockHeld {
-			orgLock.Unlock()
-		}
-	}()
+	// stored and fixed in the worker's snapshot: a member added from here on is growth of this
+	// process, which the growth guard prices once its elections take votes
+	releaseGrowth()
 
 	jobID, err := apicommon.NewJobID()
 	if err != nil {
 		return "", fmt.Errorf("failed to create job id: %w", err)
 	}
-	if err := a.db.CreateTxJob(jobID, db.JobTypePublishVotingProcess, org.Address); err != nil {
+	// the job names its process, so GET /jobs finds it and a failure (its errors) is traced to it
+	if err := a.db.CreateTxJobWithResult(jobID, db.JobTypePublishVotingProcess, org.Address,
+		&db.JobResult{ProcessID: internal.HexBytes(vp.ID[:])}); err != nil {
 		return "", fmt.Errorf("failed to create tx job: %w", err)
+	}
+	// and the payment names the job: the top-up webhook's publish has no response to return it in
+	if err := a.db.SetProcessPaymentPublishJob(vp.ID, jobID); err != nil {
+		log.Warnw("could not record the publish job on the process payment", "processId", vp.ID.Hex(),
+			"jobId", jobID, "error", err)
 	}
 
 	worker := &publishWorker{
@@ -559,6 +625,12 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 		}
 		return nil, e
 	}
+	// what it paid beyond its ledger is nothing: the debit charged whatever its price was. The
+	// €0 base records that it is published, so its census grows against what it paid (the first
+	// growth check records it if this write fails)
+	if _, e := a.db.SetProcessPaymentBase(pw.vp.ID, pw.vp.OrgAddress, 0); e != nil {
+		log.Warnw("could not record the published process's payment base", "processId", pw.vp.ID.Hex(), "error", e)
+	}
 	if pw.nonTestSized {
 		if e := a.db.IncrementOrganizationProcessesCounter(pw.vp.OrgAddress); e != nil {
 			log.Warnw("could not update organization process counter", "error", e)
@@ -568,7 +640,7 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 	if pw.vp.InitialStatus == db.QuestionStatusPaused {
 		status = db.QuestionStatusPaused
 	}
-	return &db.JobResult{Status: status}, nil
+	return &db.JobResult{Status: status, ProcessID: internal.HexBytes(pw.vp.ID[:])}, nil
 }
 
 // reloadQuestions replaces the worker's questions with what is stored now, refusing a stored

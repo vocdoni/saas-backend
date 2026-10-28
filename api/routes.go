@@ -157,6 +157,9 @@ const (
 	// GET /processes/{processId}/validation publish-readiness dry-run (protected)
 	processesValidateEndpoint = "/processes/{processId}/validation"
 
+	// GET routes to get the server-side price of a voting process
+	processesPriceEndpoint = "/processes/{processId}/price"
+
 	// GET routes to compute a price from formula inputs (public calculator)
 	pricingEndpoint = "/pricing"
 
@@ -165,6 +168,12 @@ const (
 
 	// POST starts a one-time checkout that tops up an organization's wallet
 	walletTopUpEndpoint = "/organizations/{orgAddress}/wallet/topup"
+
+	// POST starts (or resumes) the wallet top-up checkout of a voting process;
+	// GET reports its payment status; DELETE cancels its open checkout
+	processesCheckoutEndpoint = "/processes/{processId}/checkout"
+	// POST buys census headroom for an already-paid process from the wallet (raises the paid envelope)
+	processesCensusCheckoutEndpoint = "/processes/{processId}/census/checkout"
 	// POST /processes/{processId}/check voter eligibility/status (public CSP)
 	processesCheckEndpoint = "/processes/{processId}/check"
 	// POST /processes/{processId}/publish to publish the process (one election per question)
