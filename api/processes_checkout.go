@@ -224,8 +224,11 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 		}
 		switch session.Status {
 		case stripe.SessionStatusComplete:
-			// paid and not credited yet: a second top-up now would be priced from a stale balance
-			errors.ErrPaymentSessionConflict.Withf("the last checkout completed and is being credited; retry shortly").Write(w)
+			// paid and not credited yet: a second top-up now would be priced from a stale balance.
+			// A delayed payment method (SEPA) can stay complete but unpaid for days: cancelling it is
+			// the way out
+			errors.ErrPaymentSessionConflict.Withf("the last checkout completed and is being credited; retry " +
+				"shortly, or cancel it with DELETE /processes/{processId}/checkout if its payment is still clearing").Write(w)
 			return
 		case stripe.SessionStatusOpen:
 			if payment.AmountCents == quote.TotalCents && payment.TopUpCents == chargeCents {
