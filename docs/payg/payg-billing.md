@@ -423,7 +423,16 @@ a refund already counted when created, debits nothing; a partial refund and a la
 debit once. It is debited in full even below zero: the money already left through Stripe, so
 this only records it, and it is the only debit that skips the balance check. A refund of
 anything else (a subscription invoice, a payment intent that credited no top-up) is ignored
-with a log line. Every payment session copies its metadata onto the payment intent
+with a log line.
+
+A refund already debited that Stripe later moves to `failed` or `canceled` is credited back:
+the exact amount of its `striperefund:` row, as a positive `refund` row keyed
+`refundfail:<refund id>`, so the history shows the debit and its reversal as two `refund` rows
+netting to zero (`creditBack` stays reserved for payments of processes). A failed refund never
+debited changes nothing but a log line. The handler trusts delivery order: a `failed` update
+delivered before the `succeeded` one would leave the debit standing.
+
+Every payment session copies its metadata onto the payment intent
 (`payment_intent_data.metadata`), so a human in the dashboard sees which wallet a charge topped
 up.
 

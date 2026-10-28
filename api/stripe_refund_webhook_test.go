@@ -23,7 +23,7 @@ func refundObject(id, paymentIntentID, status string, amountCents pricing.Cents)
 // is mirrored in the wallet: debited net of the top-up's own VAT, once per refund across replays
 // and its later updates, a partial refund and the rest each once, even below zero, and shown in
 // the history as a refund. Refunds that are not settled, or of payments that are not top-ups,
-// change nothing.
+// change nothing; a debited refund that later fails or is canceled is credited back once.
 func TestStripeRefundWebhookDebitsWallet(t *testing.T) {
 	c := qt.New(t)
 	installStripeWebhookService(t)
@@ -78,4 +78,9 @@ func TestStripeRefundWebhookDebitsWallet(t *testing.T) {
 		OrgAddress: orgAddress, ProcessID: bson.NewObjectID(), AmountCents: 1, PriceCents: 1,
 	})
 	c.Assert(err, qt.ErrorIs, db.ErrInsufficientWalletBalance)
+
+	// a debited refund that later fails is credited back once, as a refund row
+	post("evt_"+util.RandomHex(8), "refund.updated", refundObject("re_rest", intent, "failed", 9_075))
+	post("evt_"+util.RandomHex(8), "refund.updated", refundObject("re_rest", intent, "canceled", 9_075))
+	assertWallet(t, orgAddress, -500, db.WalletEntryRefund, 3)
 }

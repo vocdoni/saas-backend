@@ -997,7 +997,9 @@ const (
 	WalletEntryPayment = "payment"
 	// WalletEntryCreditBack returns a payment to the wallet: a deleted paid draft, a failed publish.
 	WalletEntryCreditBack = "creditBack"
-	// WalletEntryRefund is a Stripe refund of a top-up, made by hand in the dashboard.
+	// WalletEntryRefund is money a top-up's payer got back through Stripe (a refund made by hand
+	// in the dashboard, or a dispute's withdrawn funds), negative; and, positive, its reversal when
+	// Stripe undoes it (a refund that failed or was canceled, a dispute reinstated).
 	WalletEntryRefund = "refund"
 )
 
