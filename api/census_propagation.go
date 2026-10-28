@@ -131,7 +131,7 @@ func (a *API) preflightCensusGrowth(org *db.Organization, censusIDs []string, co
 	if err != nil {
 		return fmt.Errorf("could not resolve the processes of the censuses: %w", err)
 	}
-	ongoing, err := a.db.OngoingQuestionsByCensuses(censusIDs)
+	ongoing, err := a.db.OngoingQuestionsOfProcesses(processes)
 	if err != nil {
 		return fmt.Errorf("could not resolve the ongoing questions of the censuses: %w", err)
 	}
