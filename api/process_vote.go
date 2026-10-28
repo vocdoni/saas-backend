@@ -441,16 +441,20 @@ func (a *API) parseRelayVote(payload internal.HexBytes) (*parsedVote, *errors.Er
 
 // voteNullifier works out the nullifier of an envelope without submitting it, so a vote
 // can be identified while its job is still pending and after it failed, along with the voter
-// address it derives from. An anonymous vote carries its own nullifier (and no address);
-// otherwise it is hash(voter address + process id), the same value the chain returns as the
-// voteID once it accepts the vote. Best effort: an envelope we cannot recover a signer from
-// yields neither and is relayed anyway — the chain, not this backend, decides whether a
-// signature is valid.
+// address it derives from. A signed vote (every CSP origin) is hash(voter address + process id):
+// the chain recomputes it from the signature and ignores the envelope's Nullifier field, which
+// the client controls, so that field is never trusted for one. Only an unsigned (anonymous, ZK)
+// vote is identified by the nullifier it carries, with no address. Best effort: an envelope we
+// cannot recover a signer from yields neither and is relayed anyway — the chain, not this
+// backend, decides whether a signature is valid.
 func voteNullifier(signedTx *models.SignedTx, vote *models.VoteEnvelope, pid internal.HexBytes,
 	chainID string,
 ) (nullifier, voter internal.HexBytes) {
-	if len(vote.Nullifier) > 0 {
-		return internal.HexBytes(vote.Nullifier), nil
+	if len(signedTx.Signature) == 0 {
+		if len(vote.Nullifier) > 0 {
+			return internal.HexBytes(vote.Nullifier), nil
+		}
+		return nil, nil
 	}
 	msg, _, err := ethereum.BuildVocdoniTransaction(signedTx.Tx, chainID)
 	if err != nil {
