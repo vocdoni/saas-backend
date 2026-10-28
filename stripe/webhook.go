@@ -108,6 +108,9 @@ func (s *Service) HandleEvent(event *stripeapi.Event) error {
 	// a refund made in the dashboard: created succeeded for cards, or updated once it settles
 	case stripeapi.EventTypeRefundCreated, stripeapi.EventTypeRefundUpdated:
 		return s.handleRefund(event)
+	// a dispute (chargeback) on a top-up: funds withdrawn, or reinstated after it was won
+	case stripeapi.EventTypeChargeDisputeFundsWithdrawn, stripeapi.EventTypeChargeDisputeFundsReinstated:
+		return s.handleDispute(event)
 	default:
 		log.Debugf("stripe webhook: received unhandled event type %s (id %s)", event.Type, event.ID)
 		return nil

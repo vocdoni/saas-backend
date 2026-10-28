@@ -237,7 +237,10 @@ ever refunded to the card.
 - `checkout.session.async_payment_failed` / `checkout.session.expired`: nothing was credited;
   a top-up opened for a process drops its pending row.
 - `refund.created` / `refund.updated`: [Stripe refunds of top-ups](#stripe-refunds-of-top-ups).
-  The webhook endpoint must be subscribed to them.
+- `charge.dispute.funds_withdrawn` / `charge.dispute.funds_reinstated`: disputes on top-ups, in
+  the same section.
+
+The webhook endpoint must be subscribed to these four refund and dispute events on deploy.
 
 There is **no durable event store**. Idempotency is a property of every side effect:
 
@@ -431,6 +434,12 @@ the exact amount of its `striperefund:` row, as a positive `refund` row keyed
 netting to zero (`creditBack` stays reserved for payments of processes). A failed refund never
 debited changes nothing but a log line. The handler trusts delivery order: a `failed` update
 delivered before the `succeeded` one would leave the debit standing.
+
+A dispute (chargeback) on a top-up is mirrored the same way: `charge.dispute.funds_withdrawn`
+debits the disputed amount net of VAT, found through the top-up's payment intent, as a `refund`
+row keyed `dispute:<dispute id>`, even below zero; `charge.dispute.funds_reinstated` (a won
+dispute) credits that debit back keyed `disputereinstated:<dispute id>`. Stripe's dispute fee is
+not the payer's money and is not mirrored.
 
 Every payment session copies its metadata onto the payment intent
 (`payment_intent_data.metadata`), so a human in the dashboard sees which wallet a charge topped

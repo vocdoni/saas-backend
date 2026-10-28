@@ -372,6 +372,21 @@ func (s *Service) handleRefund(event *stripeapi.Event) error {
 	}
 }
 
+// handleDispute mirrors in the wallet a dispute (chargeback) on a top-up: the withdrawn funds are
+// debited like a refund (debitTopUpRefund), keyed "dispute:<dispute id>", even below zero; funds
+// reinstated after a won dispute credit that debit back, keyed "disputereinstated:<dispute id>".
+// The dispute fee Stripe charges is not the payer's money and is not mirrored.
+func (s *Service) handleDispute(event *stripeapi.Event) error {
+	var dispute stripeapi.Dispute
+	if err := json.Unmarshal(event.Data.Raw, &dispute); err != nil {
+		return fmt.Errorf("failed to parse dispute from event %s: %w", event.ID, err)
+	}
+	if event.Type == stripeapi.EventTypeChargeDisputeFundsReinstated {
+		return s.reverseTopUpRefund("dispute:"+dispute.ID, "disputereinstated:"+dispute.ID)
+	}
+	return s.debitTopUpRefund(dispute.PaymentIntent, dispute.Amount, "dispute:"+dispute.ID)
+}
+
 // debitTopUpRefund debits from a wallet amount (VAT included) that Stripe returned to the payer of
 // the top-up paid through paymentIntent — found through the top-up's ledger row — net of VAT at
 // the top-up's own ratio (rounded down), in full even below zero. Money returned on a payment
