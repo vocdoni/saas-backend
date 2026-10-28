@@ -40,6 +40,11 @@ func (ms *MongoStorage) ProcessPayment(processID bson.ObjectID) (*ProcessPayment
 // no payment or a pending/failed one, and only if the stored session is still replacesSessionID
 // (the one the caller expired; empty if it saw none), so two concurrent checkouts cannot both
 // win. Reports false otherwise.
+//
+// Only a first session (replacesSessionID empty) inserts the row. A replacement never does: if
+// the row it replaces is gone — its session's expiry dropped it and released the draft's add-on
+// claims in between — inserting would store a session with no claim behind it, so it reports
+// false and the caller expires the new session.
 func (ms *MongoStorage) SetProcessPaymentPending(payment *ProcessPayment, replacesSessionID string) (bool, error) {
 	if payment == nil || payment.ProcessID == bson.NilObjectID ||
 		(payment.OrgAddress.Cmp(common.Address{}) == 0) || payment.AmountCents <= 0 {
@@ -60,7 +65,7 @@ func (ms *MongoStorage) SetProcessPaymentPending(payment *ProcessPayment, replac
 		"status":            bson.M{"$in": bson.A{ProcessPaymentPending, ProcessPaymentFailed}},
 		"checkoutSessionId": replacesSessionID,
 	}
-	res, err := ms.processPayments.ReplaceOne(ctx, filter, payment, options.Replace().SetUpsert(true))
+	res, err := ms.processPayments.ReplaceOne(ctx, filter, payment, options.Replace().SetUpsert(replacesSessionID == ""))
 	if err != nil {
 		// an excluded document makes the upsert collide on _id: that is the refusal
 		if mongo.IsDuplicateKeyError(err) {

@@ -283,7 +283,9 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
-		errors.ErrPaymentSessionConflict.Write(w)
+		// a concurrent checkout stored first, or the session this one replaces expired meanwhile
+		// and took its row with it: either way the caller retries against the current state
+		errors.ErrPaymentSessionConflict.Withf("the checkout changed meanwhile; retry").Write(w)
 		return
 	}
 	kept = true
