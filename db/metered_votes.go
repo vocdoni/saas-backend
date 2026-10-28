@@ -41,7 +41,11 @@ func (ms *MongoStorage) MeterRelayedVote(org common.Address, nullifier internal.
 		return false, nil // metered before
 	}
 	if err := ms.IncrementOrganizationSentVotesCounter(org); err != nil {
-		// a fresh context: the increment may have failed on a deadline the upsert's ctx shares
+		// a fresh context: the increment may have failed on a deadline the upsert's ctx shares.
+		// Trade-off: if the $inc was applied and only its reply was lost, undoing the record lets a
+		// later relay or overwrite meter the vote a second time; keeping it would instead leave a
+		// failed increment unmetered for good. Both are rare; a "counted" flag set together with
+		// the increment would make it exact.
 		undoCtx, undoCancel := context.WithTimeout(context.Background(), defaultTimeout)
 		defer undoCancel()
 		if _, delErr := ms.meteredVotes.DeleteOne(undoCtx, bson.M{"_id": nullifier}); delErr != nil {
@@ -53,7 +57,7 @@ func (ms *MongoStorage) MeterRelayedVote(org common.Address, nullifier internal.
 }
 
 // DeleteMeteredVotesByOrg removes the metered-vote records of an organization, as part of tearing
-// it down. It returns how many were deleted.
+// it down, through the orgAddress index (migration 33). It returns how many were deleted.
 func (ms *MongoStorage) DeleteMeteredVotesByOrg(orgAddress common.Address) (int64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
