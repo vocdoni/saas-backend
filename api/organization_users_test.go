@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/google/uuid"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -1046,4 +1047,172 @@ func TestOrganizationWriterCap(t *testing.T) {
 		append(usersPath, fmt.Sprint(viewer))...)
 	// a swap between write roles takes no new seat
 	setRole(secondAdmin, db.ManagerRole)()
+}
+
+// invitedOrg is an organization owned by a fresh user; no plan is needed, seats are bounded only by the writer cap.
+type invitedOrg struct {
+	ownerToken string
+	address    common.Address
+	usersPath  []string
+}
+
+func newInvitedOrg(t *testing.T) invitedOrg {
+	t.Helper()
+	ownerToken := testCreateUser(t, "ownerpassword123")
+	address := testCreateOrganization(t, ownerToken)
+	return invitedOrg{
+		ownerToken: ownerToken,
+		address:    address,
+		usersPath:  []string{"organizations", address.String(), "users"},
+	}
+}
+
+// newAdmin adds a verified user to the organization as admin through the invitation flow
+func (o invitedOrg) newAdmin(t *testing.T) (string, apicommon.UserInfo) {
+	t.Helper()
+	token := testCreateUser(t, "adminpassword123")
+	info := requestAndParse[apicommon.UserInfo](t, http.MethodGet, token, nil, usersMeEndpoint)
+	requestAndAssertCode(http.StatusOK, t, http.MethodPost, o.ownerToken,
+		&apicommon.OrganizationInvite{Email: info.Email, Role: db.AdminRole}, o.usersPath...)
+	code := invitationCodeFromEmail(t, info.Email)
+	requestAndAssertCode(http.StatusOK, t, http.MethodPost, token,
+		&apicommon.AcceptOrganizationInvitation{Code: code}, append(o.usersPath, "accept")...)
+	return token, info
+}
+
+// inviteAsAdmin issues an admin invitation with the given inviter token and returns the invitee email and code
+func (o invitedOrg) inviteAsAdmin(t *testing.T, inviterToken string) (email, code string) {
+	t.Helper()
+	email = fmt.Sprintf("invitee-%s@example.com", uuid.New().String())
+	requestAndAssertCode(http.StatusOK, t, http.MethodPost, inviterToken,
+		&apicommon.OrganizationInvite{Email: email, Role: db.AdminRole}, o.usersPath...)
+	return email, invitationCodeFromEmail(t, email)
+}
+
+func (o invitedOrg) usersCounter(t *testing.T) int {
+	t.Helper()
+	info := requestAndParse[apicommon.OrganizationInfo](t, http.MethodGet, o.ownerToken, nil,
+		"organizations", o.address.String())
+	return info.Counters.Users
+}
+
+func (o invitedOrg) pendingCount(t *testing.T) int {
+	t.Helper()
+	list := requestAndParse[apicommon.OrganizationInviteList](t, http.MethodGet, o.ownerToken, nil,
+		append(o.usersPath, "pending")...)
+	return len(list.Invites)
+}
+
+// acceptRefused tries to accept the invitation with the given code as a new user, expecting a refusal
+func (o invitedOrg) acceptRefused(t *testing.T, code string) {
+	t.Helper()
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "",
+		&apicommon.AcceptOrganizationInvitation{
+			Code: code,
+			User: &apicommon.UserInfo{FirstName: "Invitee", LastName: "Test", Password: "inviteepassword123"},
+		}, append(o.usersPath, "accept")...)
+}
+
+// TestRevokedInviterInvitations covers invitations issued by an admin who then loses the role: removing or
+// demoting that admin deletes their pending invitations, and accepting one whose issuer is no longer an admin
+// is refused and drops the invitation without creating the invitee.
+func TestRevokedInviterInvitations(t *testing.T) {
+	t.Run("RemovedInviterInvitationsRevoked", func(t *testing.T) {
+		c := qt.New(t)
+		o := newInvitedOrg(t)
+		adminToken, adminInfo := o.newAdmin(t)
+		countBefore := o.usersCounter(t)
+		_, code := o.inviteAsAdmin(t, adminToken)
+		c.Assert(o.pendingCount(t), qt.Equals, 1)
+		c.Assert(o.usersCounter(t), qt.Equals, countBefore+1)
+
+		requestAndAssertCode(http.StatusOK, t, http.MethodDelete, o.ownerToken, nil,
+			append(o.usersPath, fmt.Sprint(adminInfo.ID))...)
+
+		// the invitation is gone and its slot released, and the invitee cannot accept it
+		c.Assert(o.pendingCount(t), qt.Equals, 0)
+		c.Assert(o.usersCounter(t), qt.Equals, countBefore-1)
+		o.acceptRefused(t, code)
+	})
+
+	t.Run("DemotedInviterInvitationsRevoked", func(t *testing.T) {
+		c := qt.New(t)
+		o := newInvitedOrg(t)
+		adminToken, adminInfo := o.newAdmin(t)
+		countBefore := o.usersCounter(t)
+		_, code := o.inviteAsAdmin(t, adminToken)
+		c.Assert(o.pendingCount(t), qt.Equals, 1)
+
+		requestAndAssertCode(http.StatusOK, t, http.MethodPut, o.ownerToken,
+			&apicommon.UpdateOrganizationUserRoleRequest{Role: string(db.ViewerRole)},
+			append(o.usersPath, fmt.Sprint(adminInfo.ID))...)
+
+		c.Assert(o.pendingCount(t), qt.Equals, 0)
+		c.Assert(o.usersCounter(t), qt.Equals, countBefore)
+		o.acceptRefused(t, code)
+	})
+
+	t.Run("AcceptRefusedWhenInviterLostAdmin", func(t *testing.T) {
+		c := qt.New(t)
+		o := newInvitedOrg(t)
+		adminToken, adminInfo := o.newAdmin(t)
+		countBefore := o.usersCounter(t)
+		inviteeEmail, code := o.inviteAsAdmin(t, adminToken)
+
+		// drop the membership directly in the DB, bypassing the handler cleanup, as user erasure does
+		removed, err := testDB.RemoveOrganizationUser(o.address, adminInfo.ID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(removed, qt.IsTrue)
+
+		o.acceptRefused(t, code)
+
+		// the invitation is dropped and its slot released, and no user is created for the invitee
+		c.Assert(o.pendingCount(t), qt.Equals, 0)
+		c.Assert(o.usersCounter(t), qt.Equals, countBefore)
+		_, err = testDB.UserByEmail(inviteeEmail)
+		c.Assert(err, qt.ErrorIs, db.ErrNotFound)
+	})
+
+	t.Run("ConcurrentRefusedAcceptsReleaseSlotOnce", func(t *testing.T) {
+		c := qt.New(t)
+		o := newInvitedOrg(t)
+		adminToken, adminInfo := o.newAdmin(t)
+		countBefore := o.usersCounter(t)
+		_, code := o.inviteAsAdmin(t, adminToken)
+		removed, err := testDB.RemoveOrganizationUser(o.address, adminInfo.ID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(removed, qt.IsTrue)
+
+		// several accepts of the same revoked code race each other; only one may release the slot
+		const nAccepts = 10
+		acceptPath := append(append([]string{}, o.usersPath...), "accept")
+		body := &apicommon.AcceptOrganizationInvitation{
+			Code: code,
+			User: &apicommon.UserInfo{FirstName: "Invitee", LastName: "Test", Password: "inviteepassword123"},
+		}
+		statuses := make(chan int, nAccepts)
+		var wg sync.WaitGroup
+		for range nAccepts {
+			wg.Go(func() {
+				_, status := testRequest(t, http.MethodPost, "", body, acceptPath...)
+				statuses <- status
+			})
+		}
+		wg.Wait()
+		close(statuses)
+		for status := range statuses {
+			c.Assert(status, qt.Equals, http.StatusUnauthorized)
+		}
+
+		c.Assert(o.pendingCount(t), qt.Equals, 0)
+		c.Assert(o.usersCounter(t), qt.Equals, countBefore)
+	})
+}
+
+// invitationCodeFromEmail extracts the invitation code from the latest email sent to the given address.
+func invitationCodeFromEmail(t *testing.T, email string) string {
+	t.Helper()
+	mailCode := apiTestVerificationCodeRgx.FindStringSubmatch(waitForEmail(t, email))
+	qt.Assert(t, len(mailCode) > 1, qt.IsTrue)
+	return mailCode[1]
 }
