@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	stripeapi "github.com/stripe/stripe-go/v82"
+	stripeapi "github.com/stripe/stripe-go/v87"
 	"github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/dvote/log"
 )
@@ -99,6 +99,15 @@ func (s *Service) HandleEvent(event *stripeapi.Event) error {
 		return s.handleProductUpsert(event)
 	case stripeapi.EventTypeProductDeleted:
 		return s.handleProductDelete(event)
+	case stripeapi.EventTypeCheckoutSessionCompleted,
+		stripeapi.EventTypeCheckoutSessionAsyncPaymentSucceeded:
+		return s.handleCheckoutSessionResult(event)
+	// a refund made in the dashboard: created succeeded for cards, or updated once it settles
+	case stripeapi.EventTypeRefundCreated, stripeapi.EventTypeRefundUpdated:
+		return s.handleRefund(event)
+	// a dispute (chargeback) on a top-up: funds withdrawn, or reinstated after it was won
+	case stripeapi.EventTypeChargeDisputeFundsWithdrawn, stripeapi.EventTypeChargeDisputeFundsReinstated:
+		return s.handleDispute(event)
 	default:
 		log.Debugf("stripe webhook: received unhandled event type %s (id %s)", event.Type, event.ID)
 		return nil

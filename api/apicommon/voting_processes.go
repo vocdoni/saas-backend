@@ -190,6 +190,33 @@ type ProcessPriceResponse struct {
 	QuoteRequired bool `json:"quoteRequired"`
 }
 
+// ProcessCheckoutResponse carries the embedded checkout credentials of a wallet top-up.
+// AmountCents is the net amount the session charges (or, for census headroom paid from the
+// wallet with no checkout, what was debited).
+type ProcessCheckoutResponse struct {
+	ClientSecret string        `json:"clientSecret"`
+	SessionID    string        `json:"sessionId"`
+	AmountCents  pricing.Cents `json:"amountCents"`
+	Currency     string        `json:"currency"`
+}
+
+// WalletResponse is an organization's prepaid wallet: EUR balance plus its paged history,
+// newest first.
+type WalletResponse struct {
+	BalanceCents pricing.Cents          `json:"balanceCents"`
+	Currency     string                 `json:"currency"`
+	History      []db.WalletLedgerEntry `json:"history"`
+	Pagination   *Pagination            `json:"pagination"`
+}
+
+// WalletTopUpRequest starts a one-time checkout that credits the organization's wallet once
+// the payment is webhook-verified. AmountCents is EUR cents, VAT excluded.
+type WalletTopUpRequest struct {
+	AmountCents pricing.Cents `json:"amountCents"`
+	ReturnURL   string        `json:"returnURL"`
+	Locale      string        `json:"locale,omitempty"`
+}
+
 // VotingProcessListResponse is the paginated list of voting processes.
 type VotingProcessListResponse struct {
 	Processes  []VotingProcessResponse `json:"processes"`

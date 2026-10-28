@@ -115,6 +115,9 @@ var (
 	// ErrMaxWritersReached: the organization already has as many admins and managers (pending
 	// invitations included) as it may hold.
 	ErrMaxWritersReached = Error{Code: 40182, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("max admin and manager users reached")}
+	// ErrManagedOrgHasNoWallet: a managed organization's processes are paid from its integrator's
+	// wallet; it has none of its own and cannot top one up.
+	ErrManagedOrgHasNoWallet = Error{Code: 40181, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("managed organizations have no wallet; their integrator pays")}
 	// ErrCheckoutSessionNotFound is the only answer for a checkout session the caller may not
 	// read, whatever the reason (missing, not theirs), so session existence is never revealed.
 	ErrCheckoutSessionNotFound = Error{Code: 40179, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("checkout session not found"), LogLevel: "info"}

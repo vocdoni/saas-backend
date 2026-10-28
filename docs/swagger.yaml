@@ -1045,6 +1045,17 @@ definitions:
       totalItems:
         type: integer
     type: object
+  apicommon.ProcessCheckoutResponse:
+    properties:
+      amountCents:
+        type: integer
+      clientSecret:
+        type: string
+      currency:
+        type: string
+      sessionId:
+        type: string
+    type: object
   apicommon.ProcessParticipantEntry:
     properties:
       email:
@@ -1862,6 +1873,28 @@ definitions:
       valid:
         type: boolean
     type: object
+  apicommon.WalletResponse:
+    properties:
+      balanceCents:
+        type: integer
+      currency:
+        type: string
+      history:
+        items:
+          $ref: '#/definitions/db.WalletLedgerEntry'
+        type: array
+      pagination:
+        $ref: '#/definitions/apicommon.Pagination'
+    type: object
+  apicommon.WalletTopUpRequest:
+    properties:
+      amountCents:
+        type: integer
+      locale:
+        type: string
+      returnURL:
+        type: string
+    type: object
   db.BallotProtocol:
     properties:
       costExponent:
@@ -1969,6 +2002,14 @@ definitions:
     additionalProperties:
       type: string
     type: object
+  db.OrgAddOn:
+    enum:
+    - branding
+    - customUrl
+    type: string
+    x-enum-varnames:
+    - OrgAddOnBranding
+    - OrgAddOnCustomURL
   db.OrgMemberAuthField:
     enum:
     - name
@@ -2206,6 +2247,39 @@ definitions:
       weighted:
         type: boolean
     type: object
+  db.WalletLedgerEntry:
+    properties:
+      amountCents:
+        type: integer
+      createdAt:
+        type: string
+      id:
+        type: string
+      kind:
+        type: string
+      orgAddress:
+        items:
+          type: integer
+        type: array
+      processId:
+        type: string
+      processOrgAddress:
+        description: 'ProcessOrgAddress is the organization owning ProcessID: a managed
+          one for an integrator.'
+        items:
+          type: integer
+        type: array
+      withheldAddOns:
+        items:
+          $ref: '#/definitions/db.OrgAddOn'
+        type: array
+      withheldCents:
+        description: |-
+          WithheldCents and WithheldAddOns are what a creditBack kept back of the payment it returns:
+          the once-per-organization add-ons another process of the organization relies on, which stay
+          the organization's.
+        type: integer
+    type: object
   errors.Error:
     properties:
       code:
@@ -2226,6 +2300,11 @@ definitions:
   github_com_vocdoni_saas-backend_stripe.CheckoutSessionStatus:
     properties:
       customer_email:
+        type: string
+      payment_status:
+        description: |-
+          PaymentStatus is the payment outcome of the session, in every mode: "paid",
+          "unpaid" or "no_payment_required" (e.g. a subscription that starts with a trial).
         type: string
       status:
         type: string
@@ -4498,6 +4577,122 @@ paths:
       security:
       - BearerAuth: []
       summary: Update a pending invitation to an organization
+      tags:
+      - organizations
+  /organizations/{orgAddress}/wallet:
+    get:
+      description: |-
+        Prepaid EUR balance (1 credit = €1, VAT excluded) and paged history, newest first,
+        of an organization's wallet — a standard organization's or an integrator's. History
+        kinds: topup (Stripe checkout credit), payment (a process publish or census
+        headroom; processOrgAddress names the managed organization that spent it),
+        creditBack (a paid draft deleted, or a publish that failed for good) and refund (a
+        top-up refunded through Stripe). amountCents is signed. The balance is negative only
+        after a refund of credit already spent; the next top-up pays that first. 403 (40181)
+        for a managed organization, which has no wallet. Requires Admin or Manager.
+
+        Also callable with a scoped API key (scope: `quota:read`) of this same organization.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: Page number, starting at 1
+        in: query
+        name: page
+        type: string
+      - description: Items per page
+        in: query
+        name: limit
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.WalletResponse'
+        "400":
+          description: Invalid page or limit
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Managed organization, or an API key of another organization
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get an organization's wallet
+      tags:
+      - organizations
+  /organizations/{orgAddress}/wallet/topup:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Opens a one-time Stripe checkout session that credits the organization's wallet once
+        the payment is verified by webhook — never before. The amount is EUR cents, VAT
+        excluded (Stripe Tax adds VAT at checkout), between €1 and €100 000. 403 (40181) for
+        a managed organization. Requires an Admin user session; not callable with an API key.
+        GET /subscriptions/checkout/{sessionId} reports the session's Stripe state; the money
+        is in once GET /organizations/{orgAddress}/wallet shows the `topup` row: poll that. A
+        delayed payment (SEPA) shows nothing until it is paid; one that fails or expires never
+        shows a row, and a new top-up is needed.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: Top-up parameters
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.WalletTopUpRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessCheckoutResponse'
+        "400":
+          description: Amount out of bounds
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Managed organization
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Top up an organization's wallet
       tags:
       - organizations
   /organizations/languages:

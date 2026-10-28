@@ -168,6 +168,9 @@ type API struct {
 	oauthServiceURL string
 	originSecret    string
 	stripeHandlers  *StripeHandlers
+	// paymentGW is the seam to Stripe's one-time checkout used by pay-per-process
+	// billing; nil when the Stripe service is unavailable. Tests install a fake.
+	paymentGW paymentGateway
 	// orgTxQueue runs organization-initiated txs (publish, status, census resize);
 	// relayTxQueue runs public vote relays. Separate so neither class starves the other.
 	orgTxQueue   *txQueue
@@ -307,6 +310,16 @@ func New(ctx context.Context, conf *Config) *API {
 	// heartbeat this process's pending tx jobs and close those stranded by a process that died
 	// (see superviseTxJobs).
 	go a.superviseTxJobs()
+	// post the wallet movements whose own write sequence a crash cut short, so the wallet ledger
+	// matches every balance; any later touch of a wallet posts its own anyway
+	if err := a.db.DrainUnpostedWalletEntries(); err != nil {
+		log.Warnw("could not post unposted wallet movements at startup", "error", err)
+	}
+	// and the add-on releases a crash cut short after their credit-back; a sibling's quote and the
+	// owing process's next touch apply them anyway
+	if err := a.db.ReleaseOwedOrgAddOns(); err != nil {
+		log.Warnw("could not apply owed add-on releases at startup", "error", err)
+	}
 	// clear any publishing markers stranded by a previous crash/restart so those processes are
 	// publishable again (see reconcileStalePublishing).
 	a.reconcileStalePublishing()
@@ -450,6 +463,8 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, managedOrganizationsEndpoint, a.managedOrganizationsHandler)
 		handle(r, http.MethodDelete, managedOrganizationEndpoint, a.deleteManagedOrganizationHandler)
 		handle(r, http.MethodGet, integratorEndpoint, a.integratorInfoHandler)
+		handle(r, http.MethodGet, walletEndpoint, a.walletHandler)
+		handle(r, http.MethodPost, walletTopUpEndpoint, a.createWalletTopUpHandler)
 		handle(r, http.MethodPost, integratorOrgAPIKeysEndpoint, a.createAPIKeyHandler)
 		handle(r, http.MethodGet, integratorOrgAPIKeysEndpoint, a.apiKeysHandler)
 		handle(r, http.MethodDelete, integratorOrgAPIKeyEndpoint, a.revokeAPIKeyHandler)
@@ -504,7 +519,11 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, organizationLanguagesEndpoint, a.organizationsLanguagesHandler)
 		handle(r, http.MethodGet, plansEndpoint, a.plansHandler)
 		handle(r, http.MethodGet, pricingEndpoint, a.pricingHandler)
-		handle(r, http.MethodPost, subscriptionsWebhook, a.stripeHandlers.HandleWebhook)
+		// late-bound: a method value would capture a.stripeHandlers as it is at
+		// router-build time (nil when Stripe init failed or a test installs it later)
+		handle(r, http.MethodPost, subscriptionsWebhook, func(w http.ResponseWriter, r *http.Request) {
+			a.stripeHandlers.HandleWebhook(w, r)
+		})
 		handle(r, http.MethodGet, objectStorageDownloadTypedEndpoint, a.objectStorage.DownloadImageInlineHandler)
 		handle(r, http.MethodGet, jobStatusEndpoint, a.jobStatusHandler)
 		handle(r, http.MethodPost, voteEndpoint, a.relayVoteHandler)

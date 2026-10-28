@@ -11,7 +11,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
-	stripeapi "github.com/stripe/stripe-go/v82"
+	stripeapi "github.com/stripe/stripe-go/v87"
 	"github.com/vocdoni/saas-backend/stripe"
 	"go.vocdoni.io/dvote/util"
 )
@@ -372,6 +372,8 @@ func TestStripeWebhook(t *testing.T) {
 			c.Assert(err, qt.IsNil)
 		}
 
+		// a one-time payment's receipt has no parent: skipped, not refused, or Stripe would
+		// retry it for days
 		{
 			s := mockStripeInvoicePayment(orgAddress, date)
 			s.Parent = nil

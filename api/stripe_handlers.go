@@ -17,7 +17,10 @@ import (
 
 // Constants for webhook handling
 const (
-	MaxBodyBytes = int64(65536) //revive:disable:unexported-naming
+	// MaxBodyBytes caps a webhook body at all the public route group lets through (over 800 KB): an
+	// event carries its whole object, a dispute's evidence alone can exceed 64 KB, and an event
+	// refused here is lost for good once Stripe stops retrying it.
+	MaxBodyBytes = int64(maxPublicBodyBytes) //revive:disable:unexported-naming
 )
 
 // StripeHandlers contains the Stripe service and handles HTTP requests
@@ -297,6 +300,9 @@ func (a *API) InitializeStripeService() error {
 
 	// Create handlers
 	a.stripeHandlers = NewStripeHandlers(service)
+	// wire the pay-per-process seam: the same service backs one-time checkout, and a
+	// verified process payment triggers publication server-side
+	a.paymentGW = service
 
 	log.Infof("Stripe service initialized successfully")
 	return nil

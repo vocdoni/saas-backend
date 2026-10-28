@@ -159,6 +159,12 @@ const (
 
 	// GET routes to compute a price from formula inputs (public calculator)
 	pricingEndpoint = "/pricing"
+
+	// GET an organization's wallet (balance + history); not for managed organizations
+	walletEndpoint = "/organizations/{orgAddress}/wallet"
+
+	// POST starts a one-time checkout that tops up an organization's wallet
+	walletTopUpEndpoint = "/organizations/{orgAddress}/wallet/topup"
 	// POST /processes/{processId}/check voter eligibility/status (public CSP)
 	processesCheckEndpoint = "/processes/{processId}/check"
 	// POST /processes/{processId}/publish to publish the process (one election per question)

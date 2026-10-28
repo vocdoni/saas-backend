@@ -310,7 +310,7 @@ func (ms *MongoStorage) CreditWallet(c WalletCredit) error {
 type WalletRefund struct {
 	OrgAddress  common.Address
 	AmountCents pricing.Cents // net of VAT, positive
-	// Key is the idempotency key: "striperefund:<refund id>" or "dispute:<dispute id>"
+	// Key is the idempotency key: "striperefund:<refund id>" or "dispute:<dispute id>:<n>"
 	Key string
 }
 
