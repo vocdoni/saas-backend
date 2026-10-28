@@ -1,18 +1,25 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
 	"net/http"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -40,7 +47,7 @@ import (
 //	@Success		200			{string}	string			"OK"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		404			{object}	errors.Error	"Process not found"
-//	@Failure		409			{object}	errors.Error	"Process already published, or its payment changed while deleting it"
+//	@Failure		409			{object}	errors.Error	"Already published, partially published (40904), being published, or payment changed"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId} [delete]
 func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
@@ -62,7 +69,7 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	// refund it. So delete takes the claim a publish takes, and the two exclude each other:
 	// checking the marker on the read above would let a publish claim the draft right after.
 	// Every refusal below releases it; a deleted draft takes the marker with it.
-	claimed, err := a.db.ClaimVotingProcessForPublish(oid)
+	owner, claimed, err := a.db.ClaimVotingProcessForPublish(oid, time.Time{})
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
@@ -76,10 +83,30 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		if deleted {
 			return
 		}
-		if e := a.db.ClearVotingProcessPublishing(oid); e != nil {
+		if e := a.db.ClearVotingProcessPublishing(oid, owner); e != nil {
 			log.Warnw("could not release the delete's claim on a draft", "processId", oid.Hex(), "error", e)
 		}
 	}()
+	// a partially published draft (an earlier publish mined some elections before failing) is
+	// not deletable: dropping it would erase the on-chain ids and orphan the mined elections.
+	// Publishing again resumes the remaining questions instead. Reloaded under the claim, so
+	// no publish worker can be minting elections concurrently.
+	questions, err := a.db.QuestionsByProcess(oid)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	current, err := a.db.VotingProcess(oid)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	// the flag is set before a mined election id is stored, so it also covers an election whose
+	// id never reached its question
+	if anyMined(questions) || current.HasMinedElections {
+		errors.ErrProcessPartiallyPublished.Write(w)
+		return
+	}
 	// a paid draft is credited back below; a pending one is released by expiring its open
 	// session so it can no longer be paid, and its payment record goes with the draft.
 	payment, err := a.db.ProcessPayment(oid)
@@ -150,8 +177,13 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 //	@Summary		List voted participants of a voting process
 //	@Description	Manager/Admin lookup of organization members by a single field (email, phone,
 //	@Description	memberNumber, nationalId), intersected with the process census, reporting each
-//	@Description	matched member's per-question voted status. For `phone` pass the plaintext number;
-//	@Description	it is hashed server-side. Requires Manager/Admin of the owning organization.
+//	@Description	matched member's per-question vote status: hasSigned when the CSP signed the member's
+//	@Description	ballot (the vote may not be on chain), hasVoted only when the vote is on chain. In an
+//	@Description	anonymous (blind) census hasVoted is always false and hasSigned is the only signal. When
+//	@Description	the chain cannot be asked about a signed question, that question is reported with
+//	@Description	hasVotedUnknown=true (and hasVoted=false) instead of failing the whole list. For `phone`
+//	@Description	pass the plaintext number; it is hashed server-side. Requires Manager/Admin of the
+//	@Description	owning organization.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
@@ -165,6 +197,7 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		404			{object}	errors.Error	"Process not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		503			{object}	errors.Error	"Server busy hashing the phone, retry after Retry-After (50302)"
 //	@Router			/processes/{processId}/participants [get]
 func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)
@@ -193,7 +226,11 @@ func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Re
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
-		hashed, err := db.NewHashedPhone(value, org)
+		hashed, err := db.NewHashedPhoneContext(r.Context(), value, org)
+		if errors.Is(err, internal.ErrHashingBusy) {
+			writeHashingBusy(w, err)
+			return
+		}
 		if err != nil || hashed.IsEmpty() {
 			errors.ErrMalformedBody.Withf("invalid phone").Write(w)
 			return
@@ -231,19 +268,30 @@ func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Re
 	for _, p := range participants {
 		participantIDs = append(participantIDs, p.ParticipantID)
 	}
-	// per-question voted status: each question is its own on-chain election, keyed by upstreamId.
-	votedByQuestion := make(map[string]map[string]bool, len(questions))
+	// per-question status: each question is its own on-chain election, keyed by upstreamId. One
+	// query fetches the CSP rows of every (question, matched member) pair; a missing pair is
+	// "not signed".
+	upstreamIDs := make([]internal.HexBytes, 0, len(questions))
 	for i := range questions {
-		q := &questions[i]
-		if len(q.UpstreamID) == 0 {
-			continue // question not yet on chain
+		if len(questions[i].UpstreamID) > 0 { // a question not yet on chain has no CSP rows
+			upstreamIDs = append(upstreamIDs, questions[i].UpstreamID)
 		}
-		voted, err := a.db.MembersWithUsedCSPProcess(q.UpstreamID, participantIDs)
-		if err != nil {
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
-		}
-		votedByQuestion[q.ID.Hex()] = voted
+	}
+	rows, err := a.db.CSPProcessesByMembers(upstreamIDs, participantIDs)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	statuses, err := a.resolveVoteStatuses(r.Context(), rows)
+	// the caller gave up waiting: nobody is left to read an answer, and its cancelled lookups are
+	// no node failure to log
+	if r.Context().Err() != nil {
+		return
+	}
+	if err != nil {
+		// a lookup failed: the affected questions are reported with hasVotedUnknown rather than
+		// failing the whole list, whose other data comes from the database
+		log.Warnw("vote status lookup failed", "processId", oid.Hex(), "error", err)
 	}
 	for _, p := range participants {
 		m, exists := membersByID[p.ParticipantID]
@@ -262,15 +310,50 @@ func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Re
 			if len(q.UpstreamID) == 0 {
 				continue
 			}
+			st := statuses[voteStatusKey(m.ID.Hex(), q.UpstreamID.String())]
 			entry.Questions = append(entry.Questions, apicommon.ProcessParticipantQuestionVote{
-				QuestionID: q.ID.Hex(),
-				UpstreamID: q.UpstreamID,
-				HasVoted:   votedByQuestion[q.ID.Hex()][m.ID.Hex()],
+				QuestionID:      q.ID.Hex(),
+				UpstreamID:      q.UpstreamID,
+				HasSigned:       st.Signed,
+				HasVoted:        st.Voted,
+				HasVotedUnknown: st.unknown,
 			})
 		}
 		resp.Participants = append(resp.Participants, entry)
 	}
 	apicommon.HTTPWriteJSON(w, resp)
+}
+
+// voteStatus is a member's resolved status on one election (see handlers.VoteStatusResolver);
+// unknown marks a status whose on-chain lookup failed.
+type voteStatus struct {
+	handlers.VoteStatus
+	unknown bool
+}
+
+// voteStatusKey keys a voteStatus by member id hex and election (upstream) id hex.
+func voteStatusKey(memberID, upstreamID string) string { return memberID + "/" + upstreamID }
+
+// resolveVoteStatuses resolves every CSP row concurrently (one goroutine per row; only uncached,
+// non-blind rows reach the chain, through the semaphore-bounded lookup). A row whose lookup fails
+// keeps its signed status and is marked unknown; the failures are returned joined.
+func (a *API) resolveVoteStatuses(ctx context.Context, rows []db.CSPProcess) (map[string]voteStatus, error) {
+	resolver := handlers.VoteStatusResolver{Store: a.db, Lookup: a.voteOnChain}
+	results := make([]voteStatus, len(rows))
+	errs := make([]error, len(rows))
+	var wg sync.WaitGroup
+	for i := range rows {
+		wg.Go(func() {
+			results[i].VoteStatus, errs[i] = resolver.Resolve(ctx, &rows[i])
+			results[i].unknown = errs[i] != nil
+		})
+	}
+	wg.Wait()
+	statuses := make(map[string]voteStatus, len(rows))
+	for i := range rows {
+		statuses[voteStatusKey(rows[i].UserID.String(), rows[i].ProcessID.String())] = results[i]
+	}
+	return statuses, stderrors.Join(errs...)
 }
 
 // updateVotingProcessCensusHandler godoc
@@ -327,10 +410,11 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 	census := grown.census
 
 	// only whole-census questions grow when participants are added; one that names an eligibility
-	// subset is unaffected by who else joined the census.
+	// subset is unaffected by who else joined the census. A terminal question has no room to take
+	// them, as in census propagation.
 	targets := make([]censusSizeTarget, 0, len(questions))
 	for i := range questions {
-		if len(questions[i].EligibleMemberIDs) == 0 {
+		if isOpenStatus(questions[i].Status) && len(questions[i].EligibleMemberIDs) == 0 {
 			targets = append(targets, censusSizeTarget{
 				question: questions[i], census: census, size: uint64(census.Size),
 			})
@@ -463,9 +547,29 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 	}
 	// while a publish worker holds the process, its questions all look like drafts: an eligibility
 	// write would take the draft path, skip the resize, and the worker would then mint an election
-	// sized from its older snapshot.
-	if refusePublishInProgress(w, vp) {
-		return
+	// sized from its older snapshot. So an unpublished process is changed under the claim a publish
+	// takes, as delete does, and the two exclude each other; checking the marker on the read above
+	// would let a publish claim the process right after. The questions are reloaded under the
+	// claim. A published process is never claimed again, so it needs none.
+	if !vp.Published {
+		owner, claimed, err := a.db.ClaimVotingProcessForPublish(oid, time.Time{})
+		if err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+		if !claimed {
+			errors.ErrPublishInProgress.Write(w)
+			return
+		}
+		defer func() {
+			if e := a.db.ClearVotingProcessPublishing(oid, owner); e != nil {
+				log.Warnw("could not release the eligibility update's claim", "processId", oid.Hex(), "error", e)
+			}
+		}()
+		if questions, err = a.db.QuestionsByProcess(oid); err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
 	}
 	question, ok := questionOfProcess(w, questions, chi.URLParam(r, "questionId"))
 	if !ok {
@@ -721,16 +825,23 @@ type censusSizeTarget struct {
 	size uint64
 }
 
-// electionMaxCensusSize reads a published question's current on-chain maxCensusSize.
-func (a *API) electionMaxCensusSize(q *db.VotingProcessQuestion) (uint64, error) {
+// electionSizeAndStatus reads a published question's current on-chain maxCensusSize and status,
+// from one read of the election.
+func (a *API) electionSizeAndStatus(q *db.VotingProcessQuestion) (uint64, string, error) {
 	election, err := a.account.Election(q.UpstreamID)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	if election.Census == nil {
-		return 0, fmt.Errorf("election %s carries no census", q.UpstreamID.String())
+		return 0, "", fmt.Errorf("election %s carries no census", q.UpstreamID.String())
 	}
-	return election.Census.MaxCensusSize, nil
+	return election.Census.MaxCensusSize, election.Status, nil
+}
+
+// isOpenStatus reports whether an election, on chain or stored, still lets its census change:
+// READY or PAUSED. ENDED, CANCELED and RESULTS are terminal and refuse SET_PROCESS_CENSUS.
+func isOpenStatus(status string) bool {
+	return status == db.QuestionStatusReady || status == db.QuestionStatusPaused
 }
 
 // enqueueSetProcessCensus submits one SET_PROCESS_CENSUS tx per target, as a single background job,
@@ -744,6 +855,9 @@ func (a *API) electionMaxCensusSize(q *db.VotingProcessQuestion) (uint64, error)
 // so blindly submitting the census size would eventually fail the job; each election is read first
 // and only a genuine increase is sent.
 //
+// It never answers ErrOrgTxBusy: when the organization lock is held, the job is created anyway and
+// the resize waits for the lock in the background (see below).
+//
 // A failed election read does not fail the request. By the time this runs, the participant or
 // eligibility write it follows has already committed, so reporting failure would report it for work
 // that landed — the tx goes out anyway and a chain refusal surfaces on the job with its real reason.
@@ -753,7 +867,7 @@ func (a *API) enqueueSetProcessCensus(orgAddress common.Address, targets []censu
 		if len(t.question.UpstreamID) == 0 || t.size == 0 {
 			continue // a draft has no election yet, and there is nothing to size against
 		}
-		current, err := a.electionMaxCensusSize(&t.question)
+		current, status, err := a.electionSizeAndStatus(&t.question)
 		switch {
 		case err != nil:
 			log.Warnw("could not read election size, enqueueing the resize anyway",
@@ -761,6 +875,8 @@ func (a *API) enqueueSetProcessCensus(orgAddress common.Address, targets []censu
 				"upstreamId", t.question.UpstreamID.String(), "error", err)
 		case t.size <= current:
 			continue // the election already has the room
+		case !isOpenStatus(status):
+			continue // an ended election cannot take a resize, so there is no job to make
 		default:
 			// a genuine increase
 		}
@@ -774,7 +890,7 @@ func (a *API) enqueueSetProcessCensus(orgAddress common.Address, targets []censu
 	if err != nil {
 		return "", fmt.Errorf("could not load organization: %w", err)
 	}
-	orgSigner, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce)
+	orgSigner, err := account.OrganizationSigner(a.secret, org.SignerSeedValue(), org.Nonce)
 	if err != nil {
 		return "", fmt.Errorf("could not restore organization signer: %w", err)
 	}
@@ -785,38 +901,113 @@ func (a *API) enqueueSetProcessCensus(orgAddress common.Address, targets []censu
 	if err := a.db.CreateTxJob(jobID, db.JobTypeSetProcessCensus, org.Address); err != nil {
 		return "", fmt.Errorf("could not create tx job: %w", err)
 	}
-
-	orgLock := a.orgTxLocks.lock(org.Address)
-	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
-		defer orgLock.Unlock()
-		for i := range growing {
-			t := &growing[i]
-			tx, err := a.account.BuildSetProcessCensusTx(
-				orgSigner.Address(), t.question.UpstreamID,
-				t.census.Published.Root, t.census.Published.URI, t.size,
-			)
-			if err != nil {
-				return nil, err
-			}
-			fundedTx, _, err := a.account.FundTransaction(tx, orgSigner.Address())
-			if err != nil {
-				return nil, err
-			}
-			stx, err := a.account.SignTransaction(fundedTx, orgSigner)
-			if err != nil {
-				return nil, err
-			}
-			if _, err := a.account.SubmitSignedTx(stx); err != nil {
-				return nil, err
-			}
+	// record keeps the per-question outcomes on the job when it fails as a whole; the default
+	// recorder would drop them.
+	record := func(result *db.JobResult, runErr error) {
+		jobStatus, errMsg := db.JobStatusCompleted, ""
+		if runErr != nil {
+			jobStatus, errMsg = db.JobStatusFailed, runErr.Error()
 		}
-		return &db.JobResult{Status: string(db.JobStatusCompleted)}, nil
-	}}) {
-		orgLock.Unlock()
-		if e := a.db.SetJobStatus(jobID, db.JobStatusFailed, nil, "tx queue full"); e != nil {
-			log.Warnw("could not mark job failed after full queue", "error", e)
+		if e := a.db.SetJobStatus(jobID, jobStatus, result, errMsg); e != nil {
+			log.Warnw("could not record census resize job", "jobId", jobID, "error", e)
 		}
-		return "", errors.ErrTxQueueFull
 	}
+	submit := func(orgLock *orgTxLock) error {
+		if !a.enqueueTx(txTask{jobID: jobID, record: record, run: func() (*db.JobResult, error) {
+			defer orgLock.Unlock()
+			return a.setProcessCensusSizes(orgSigner, growing)
+		}}) {
+			orgLock.Unlock()
+			if e := a.db.SetJobStatus(jobID, db.JobStatusFailed, nil, "tx queue full"); e != nil {
+				log.Warnw("could not mark job failed after full queue", "error", e)
+			}
+			return errors.ErrTxQueueFull
+		}
+		return nil
+	}
+	if orgLock, ok := a.orgTxLocks.tryLock(org.Address); ok {
+		if err := submit(orgLock); err != nil {
+			return "", err
+		}
+		return jobID, nil
+	}
+	// The organization has a tx in flight, and a publish holds the lock through every mining
+	// round. The participant or eligibility write this follows has already committed and no
+	// caller retries the resize, so it waits for the lock in the background instead of being
+	// dropped; the job stays pending meanwhile and is what the caller polls. The lock is always
+	// released once its holder's tx is done, so the wait ends.
+	a.heldTxJobs.hold(jobID)
+	go func() {
+		defer a.heldTxJobs.release(jobID)
+		if err := submit(a.orgTxLocks.lock(org.Address)); err != nil {
+			log.Warnw("could not enqueue a deferred census resize", "org", org.Address, "jobId", jobID, "error", err)
+		}
+	}()
 	return jobID, nil
+}
+
+// setProcessCensusSizes submits one SET_PROCESS_CENSUS tx per target, recording a no-op instead for
+// the elections that already have the room (a resize that waited for the organization lock may have
+// been overtaken by a larger one, and the chain refuses a shrink) and for those the chain no longer
+// has open (a stored status can lag the chain, and an ended election refuses a resize).
+//
+// Every target is attempted even after one fails, so one election cannot hold back the others. The
+// job fails when any attempted target failed, and its error names each failed question; the
+// per-question outcomes are kept on the job either way, as the status-change job does.
+func (a *API) setProcessCensusSizes(orgSigner *ethereum.SignKeys, targets []censusSizeTarget) (*db.JobResult, error) {
+	entries := make([]db.QuestionJobResult, 0, len(targets))
+	attempted := 0
+	var failures []string
+	for i := range targets {
+		t := &targets[i]
+		questionID := t.question.ID.Hex()
+		current, status, err := a.electionSizeAndStatus(&t.question)
+		if err == nil && t.size <= current {
+			entries = append(entries, db.QuestionJobResult{QuestionID: questionID, Status: db.JobStatusCompleted, NoOp: true})
+			continue
+		}
+		if err == nil && !isOpenStatus(status) {
+			log.Infow("skipping census resize of an election that is no longer open",
+				"question", questionID, "upstreamId", t.question.UpstreamID.String(), "status", status)
+			entries = append(entries, db.QuestionJobResult{QuestionID: questionID, Status: db.JobStatusCompleted, NoOp: true})
+			continue
+		}
+		attempted++
+		entry := db.QuestionJobResult{QuestionID: questionID, Status: db.JobStatusCompleted}
+		if err := a.submitSetProcessCensus(orgSigner, t); err != nil {
+			log.Warnw("could not resize census of an election", "question", questionID, "error", err)
+			entry.Status = db.JobStatusFailed
+			entry.Error = err.Error()
+			failures = append(failures, fmt.Sprintf("question %s: %v", questionID, err))
+		}
+		entries = append(entries, entry)
+	}
+	result := &db.JobResult{Questions: entries}
+	if len(failures) > 0 {
+		return result, fmt.Errorf("%d of %d census resizes failed: %s",
+			len(failures), attempted, strings.Join(failures, "; "))
+	}
+	result.Status = string(db.JobStatusCompleted)
+	return result, nil
+}
+
+// submitSetProcessCensus builds, funds, signs and submits one SET_PROCESS_CENSUS tx for a target.
+func (a *API) submitSetProcessCensus(orgSigner *ethereum.SignKeys, t *censusSizeTarget) error {
+	tx, err := a.account.BuildSetProcessCensusTx(
+		orgSigner.Address(), t.question.UpstreamID,
+		t.census.Published.Root, t.census.Published.URI, t.size,
+	)
+	if err != nil {
+		return err
+	}
+	fundedTx, _, err := a.account.FundTransaction(tx, orgSigner.Address())
+	if err != nil {
+		return err
+	}
+	stx, err := a.account.SignTransaction(fundedTx, orgSigner)
+	if err != nil {
+		return err
+	}
+	_, err = a.account.SubmitSignedTx(stx)
+	return err
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/textproto"
 	"time"
 
 	"github.com/enriquebris/goconcurrentqueue"
@@ -76,7 +75,7 @@ type QueueConfig struct {
 // Queue is a FIFO queue that delivers notifications concurrently. A pool of
 // workers drains the queue; each send is guarded by a per-provider circuit
 // breaker so that a failing provider is given time to recover instead of being
-// hammered. Permanent failures are not retried (see isPermanentSendError);
+// hammered. Permanent failures are not retried (see IsPermanentSendError);
 // every other error is treated as transient and retried within the MaxRetries
 // and TTL bounds. The result of every item (delivered or given up) is reported
 // on the Done channel.
@@ -340,14 +339,21 @@ func (q *Queue) sleep(d time.Duration) {
 	}
 }
 
-// IsPermanentSendError reports whether a send error is permanent (retrying
-// will never succeed). Permanent errors are SMTP 5xx replies. Everything else
-// (network timeouts, transient deferrals, context cancellations) is treated as
-// transient and will be retried up to the queue's MaxRetries/TTL bounds.
-//
-// When delivery goes through a failover service the result is an errors.Join of
-// every provider's error. Such a joined error is only permanent if all branches
-// are permanent.
+// PermanentError marks a send error that retrying will never fix, such as a
+// provider rejecting the recipient. Providers wrap their own permanent errors in
+// it so the queue gives up on them instead of retrying.
+type PermanentError struct {
+	Err error
+}
+
+// Error implements the error interface.
+func (e *PermanentError) Error() string { return e.Err.Error() }
+
+// Unwrap returns the provider error.
+func (e *PermanentError) Unwrap() error { return e.Err }
+
+// IsPermanentSendError reports whether a send error is wrapped in a PermanentError.
+// A failover service's joined error is only permanent if every branch is.
 func IsPermanentSendError(err error) bool {
 	if err == nil {
 		return false
@@ -364,9 +370,6 @@ func IsPermanentSendError(err error) bool {
 		}
 		return true
 	}
-	var protoErr *textproto.Error
-	if errors.As(err, &protoErr) {
-		return protoErr.Code >= 500 && protoErr.Code < 600
-	}
-	return false
+	var permErr *PermanentError
+	return errors.As(err, &permErr)
 }

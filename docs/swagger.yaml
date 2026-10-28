@@ -94,6 +94,10 @@ definitions:
           the mail/sms/auth 2FA channel; may be combined with Weighted (V2 binds the weight into the salt).
         type: boolean
       authFields:
+        description: |-
+          AuthFields are the member fields a voter logs in with. "password" is checked against the
+          member's stored password after the other fields find the participant, so it needs at least
+          one other auth field or a 2FA field.
         items:
           $ref: '#/definitions/db.OrgMemberAuthField'
         type: array
@@ -657,6 +661,10 @@ definitions:
       email:
         description: Member's email address
         type: string
+      hasPassword:
+        description: 'HasPassword is true on reads when the member has a password.
+          Read-only: ignored on writes.'
+        type: boolean
       id:
         description: Member's internal unique internal ID
         type: string
@@ -674,7 +682,11 @@ definitions:
         description: Additional custom fields
         type: object
       password:
-        description: Member's password (for authentication)
+        description: |-
+          Member's password, write-only: the client hash of the plaintext, 64 lowercase hex characters,
+          lowercase_hex(SHA-256(UTF-8("vocdoni-member-password:" + org address as 0x + 40 lowercase hex +
+          ":" + trim(password).normalize("NFC")))). Stored as an argon2 hash salted per member (with the
+          member id) and never returned: reads report hasPassword.
         type: string
       phone:
         description: Member's phone number
@@ -1123,7 +1135,11 @@ definitions:
     type: object
   apicommon.ProcessParticipantQuestionVote:
     properties:
+      hasSigned:
+        type: boolean
       hasVoted:
+        type: boolean
+      hasVotedUnknown:
         type: boolean
       questionId:
         type: string
@@ -1489,6 +1505,12 @@ definitions:
         type: string
       progress:
         type: integer
+      questions:
+        description: Questions is the per-question outcome of a status-change or census-update
+          job, in target order
+        items:
+          $ref: '#/definitions/db.QuestionJobResult'
+        type: array
       status:
         type: string
       total:
@@ -1616,7 +1638,9 @@ definitions:
         description: Additional custom fields, replaced as a whole
         type: object
       password:
-        description: Member's password (for authentication)
+        description: |-
+          Member's password as its client hash (see OrgMember.Password). Empty clears it; leave it out
+          to keep it.
         type: string
       phone:
         description: Member's phone number
@@ -2076,6 +2100,7 @@ definitions:
     - memberNumber
     - nationalId
     - birthDate
+    - password
     type: string
     x-enum-varnames:
     - OrgMemberAuthFieldsName
@@ -2083,6 +2108,7 @@ definitions:
     - OrgMemberAuthFieldsMemberNumber
     - OrgMemberAuthFieldsNationalID
     - OrgMemberAuthFieldsBirthDate
+    - OrgMemberAuthFieldsPassword
   db.OrgMemberTwoFaField:
     enum:
     - email
@@ -2166,6 +2192,17 @@ definitions:
     - ProcessPaymentFailed
     - ProcessPaymentPaid
     - ProcessPaymentRefunded
+  db.QuestionJobResult:
+    properties:
+      error:
+        type: string
+      noOp:
+        type: boolean
+      questionId:
+        type: string
+      status:
+        $ref: '#/definitions/db.JobStatus'
+    type: object
   db.QuestionResults:
     properties:
       finalResults:
@@ -2350,7 +2387,8 @@ definitions:
         description: HTTP status code to return
         type: integer
       logLevel:
-        description: Log level for this error (defaults to "debug")
+        description: Log level for this error (defaults to "debug" for 4xx and "error"
+          for 5xx)
         type: string
     type: object
   github_com_vocdoni_saas-backend_stripe.CheckoutSessionStatus:
@@ -2378,6 +2416,13 @@ definitions:
       name:
         type: string
       nationalId:
+        type: string
+      password:
+        description: |-
+          Password is the member password as its client hash, 64 lowercase hex characters:
+          lowercase_hex(SHA-256(UTF-8("vocdoni-member-password:" + org address as 0x + 40 lowercase hex +
+          ":" + trim(password).normalize("NFC")))), as in apicommon.OrgMember.Password. Only read when the
+          census auth fields include "password".
         type: string
       phone:
         type: string
@@ -2513,6 +2558,8 @@ definitions:
   handlers.ProcessQuestionStatus:
     properties:
       canVote:
+        type: boolean
+      hasSigned:
         type: boolean
       hasVoted:
         type: boolean
@@ -2710,6 +2757,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
+          schema:
+            $ref: '#/definitions/errors.Error'
       summary: Login to get a JWT token
       tags:
       - auth
@@ -2742,6 +2793,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -3263,6 +3318,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
+          schema:
+            $ref: '#/definitions/errors.Error'
       summary: Login using OAuth service or classic credentials
       tags:
       - auth
@@ -3294,11 +3353,12 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.OrganizationInfo'
         "400":
-          description: Invalid input data
+          description: Invalid input data, or the user has reached the maximum number
+            of organizations
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Unauthorized
+          description: Unauthorized, or the user is not an admin of the parent organization
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
@@ -3852,7 +3912,10 @@ paths:
         memberbase is capped at 50 000 members (40145).
         With `async=true` the import runs in the background and the response
         carries a `jobId` to poll via GET /jobs/{jobId}; otherwise it
-        completes synchronously. An empty members list is a no-op that returns added=0.
+        completes synchronously. A synchronous import whose members carry more than 150 phones and
+        passwords in total (each one is an expensive hash) runs as if `async=true` had been sent: the
+        response carries a `jobId` instead of the added count, so a client must check for one. An
+        empty members list is a no-op that returns added=0.
 
         Also callable with a scoped API key (scope: `members:write`).
       parameters:
@@ -3942,6 +4005,10 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy hashing, retry after Retry-After (50302)
+          schema:
+            $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
       summary: Create or update an organization member
@@ -3951,7 +4018,11 @@ paths:
     delete:
       consumes:
       - application/json
-      description: Deletes a set of keys from the meta information of an organization.
+      description: |-
+        Deletes a set of keys from the meta information of an organization.
+        Requires Manager/Admin role. Only admins may delete the organization identity keys
+        (name, logo, description); a manager's request naming one of them that is stored is rejected with 401.
+        Keys are dot paths: an empty or "$"-prefixed segment, or a key that is a prefix of another, is rejected with 400.
       parameters:
       - description: Organization address
         in: path
@@ -3971,6 +4042,11 @@ paths:
           description: OK
           schema:
             type: string
+        "400":
+          description: Invalid meta information (e.g. an empty path segment or conflicting
+            keys)
+          schema:
+            $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
           schema:
@@ -3981,10 +4057,6 @@ paths:
             $ref: '#/definitions/errors.Error'
         "404":
           description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "422":
-          description: Invalid meta information
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -4038,8 +4110,12 @@ paths:
     post:
       consumes:
       - application/json
-      description: Overwrite the meta information of an organization. Requires Manager/Admin
-        role.
+      description: |-
+        Overwrite the meta information of an organization. Requires Manager/Admin role.
+        Only admins may change the organization identity keys (name, logo, description): a manager's
+        request must carry them exactly as they are stored, or it is rejected with 401.
+        Keys cannot be empty, contain dots or start with "$", at any level, for any role (400), except that
+        the nested values of a top-level key left unchanged from the stored one are accepted as they are.
       parameters:
       - description: Organization address
         in: path
@@ -4059,6 +4135,10 @@ paths:
           description: OK
           schema:
             type: string
+        "400":
+          description: Invalid meta information (e.g. a key containing a dot)
+          schema:
+            $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
           schema:
@@ -4069,10 +4149,6 @@ paths:
             $ref: '#/definitions/errors.Error'
         "404":
           description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "422":
-          description: Invalid meta information
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -4091,7 +4167,12 @@ paths:
         Updates existing or adds new key/value pairs in the meta information of an organization.
         Has only one layer of depth. If a second layer document is provided, for example meta.doc = [a,b,c],
         the entire document will be updated.
-        Requires Manager/Admin role.
+        Requires Manager/Admin role. Only admins may change the organization identity keys
+        (name, logo, description, including dotted sub-keys such as name.default): a manager may
+        resend them with their stored value, but any other write to them is rejected with 401.
+        Keys are dot paths: an empty or "$"-prefixed segment, or a key that is a prefix of another, is rejected with 400.
+        Nested keys cannot be empty, contain dots or start with "$" (400), unless the top-level key's value
+        is unchanged from the stored one, which is accepted as it is.
       parameters:
       - description: Organization address
         in: path
@@ -4111,6 +4192,11 @@ paths:
           description: OK
           schema:
             type: string
+        "400":
+          description: Invalid meta information (e.g. an empty path segment or conflicting
+            keys)
+          schema:
+            $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
           schema:
@@ -4121,10 +4207,6 @@ paths:
             $ref: '#/definitions/errors.Error'
         "404":
           description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "422":
-          description: Invalid meta information
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -4286,7 +4368,8 @@ paths:
           schema:
             type: string
         "400":
-          description: Invalid input data
+          description: Invalid input data, or the organization's plan allows no more
+            users
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -4446,6 +4529,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Accept an invitation to an organization
@@ -4959,8 +5046,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Process already published, or its payment changed while deleting
-            it
+          description: Already published, partially published (40904), being published,
+            or payment changed
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -5003,7 +5090,9 @@ paths:
       consumes:
       - application/json
       description: |-
-        Update a voting process while it is still a draft (not published). 409 if already published.
+        Update a voting process while it is still a draft (not published). 409 if already published,
+        and 409 (40904) if partially published — an earlier publish already mined some of its
+        questions on-chain, so the draft can only be published again (resuming the rest), not edited.
         The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
         as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
         `typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
@@ -5064,11 +5153,23 @@ paths:
         Two-step voter authentication for a multi-question voting process (the /processes
         replacement of the bundle auth flow); the issued token is anchored to the process.
         - Step 0: handlers.AuthRequest — member identification fields (name, surname,
-        memberNumber, nationalId, birthDate, email, phone); which are required depends on the
-        census auth configuration. If valid, a challenge is sent and a token returned.
+        memberNumber, nationalId, birthDate, email, phone, password); which are required depends
+        on the census auth configuration. If valid, a challenge is sent and a token returned.
+        `password` is the member password's client hash (64 lowercase hex characters, see
+        handlers.AuthRequest); a wrong one answers exactly like an unknown participant (40802)
+        and spends the same failed-attempt budget. When the server's password-hashing capacity
+        is exhausted, it answers 503, code 50302: retry later (this spends no budget).
         - Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
         If valid the token is marked verified and returned. Auth-only censuses may not require
         a challenge solution.
+        Step 0 returns the same error (40802) whether the login data matches no census participant
+        or the contact data does not match an existing one. Failed attempts are capped per UTC hour
+        on the process for each submitted set of login and contact fields, and, ten times higher,
+        for each set of login fields across all contacts tried. Once either is exhausted, step 0
+        answers 40017 until the hour ends (the voter cap even with the right contact data);
+        data.retryAfter gives the seconds left.
+        A member's challenge sends (new tokens + resends) are capped per UTC day, also answering
+        40017 with data.retryAfter.
       parameters:
       - description: Process ID
         in: path
@@ -5094,19 +5195,26 @@ paths:
           schema:
             $ref: '#/definitions/handlers.AuthResponse'
         "400":
-          description: Invalid input data
+          description: Invalid input data, or failed-attempt or daily send limit reached
+            (40017)
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Unauthorized, cooldown not reached, or invalid challenge
+          description: Invalid authentication data, cooldown not reached, or invalid
+            challenge
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
-          description: Process, census, organization, or participant not found
+          description: Process, census, or organization not found
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Password- or phone-hashing capacity exhausted, retry later
+            (50302)
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Authenticate a voter for a voting process
@@ -5120,6 +5228,8 @@ paths:
         Resend the challenge for an existing (non-verified) authentication token of a voting
         process. The request must include the auth token and a valid contact method for the
         census type (email/phone). The same token is returned if the challenge is queued.
+        A token can be resent at most 3 times, and a contact that does not match the member spends
+        one of them too.
       parameters:
       - description: Process ID
         in: path
@@ -5140,8 +5250,8 @@ paths:
           schema:
             $ref: '#/definitions/handlers.AuthResponse'
         "400":
-          description: Malformed body, missing auth token, invalid contact, or token
-            already verified
+          description: Malformed body, missing token, invalid contact, verified token,
+            or resend limit (40017)
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -5155,6 +5265,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Phone-hashing capacity exhausted, retry later (50302)
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Resend a voting process auth challenge
@@ -5474,6 +5588,11 @@ paths:
         question eligibility and vote status. The voter is identified solely by the auth token
         (the only voter data the client stores); the token must be verified and issued for this
         process. Ineligibility is reported as belongsToProcess=false with HTTP 200, not an error.
+        Per question, hasSigned reports that the CSP signed the voter's ballot (the vote may not be
+        on chain), and hasVoted that the vote is on chain. In an anonymous (blind) census hasVoted
+        is always false, since the CSP never learns the voting address: hasSigned is the only
+        signal. When the chain cannot be asked about a signed question the call fails with 500
+        rather than report the vote as missing.
       parameters:
       - description: Process ID
         in: path
@@ -5497,12 +5616,16 @@ paths:
           description: Malformed body or missing auth token
           schema:
             $ref: '#/definitions/errors.Error'
+        "401":
+          description: Auth token not verified or not issued for this process
+          schema:
+            $ref: '#/definitions/errors.Error'
         "404":
           description: Process or census not found
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
-          description: Internal server error
+          description: Internal server error or blockchain request failed
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Check a voter's status for a voting process
@@ -5657,8 +5780,13 @@ paths:
       description: |-
         Manager/Admin lookup of organization members by a single field (email, phone,
         memberNumber, nationalId), intersected with the process census, reporting each
-        matched member's per-question voted status. For `phone` pass the plaintext number;
-        it is hashed server-side. Requires Manager/Admin of the owning organization.
+        matched member's per-question vote status: hasSigned when the CSP signed the member's
+        ballot (the vote may not be on chain), hasVoted only when the vote is on chain. In an
+        anonymous (blind) census hasVoted is always false and hasSigned is the only signal. When
+        the chain cannot be asked about a signed question, that question is reported with
+        hasVotedUnknown=true (and hasVoted=false) instead of failing the whole list. For `phone`
+        pass the plaintext number; it is hashed server-side. Requires Manager/Admin of the
+        owning organization.
 
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
@@ -5698,6 +5826,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy hashing the phone, retry after Retry-After (50302)
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -5987,6 +6119,14 @@ paths:
           description: Accepted
           schema:
             $ref: '#/definitions/apicommon.EnqueuedResponse'
+        "400":
+          description: Invalid status, or a question in a terminal status cannot change
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Organization transaction in progress (50303), or tx queue full
+          schema:
+            $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
       summary: Change status of one question
@@ -6015,6 +6155,14 @@ paths:
           description: Accepted
           schema:
             $ref: '#/definitions/apicommon.EnqueuedResponse'
+        "400":
+          description: Invalid status, or a question in a terminal status cannot change
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Organization transaction in progress (50303), or tx queue full
+          schema:
+            $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
       summary: Change status of many questions
@@ -6130,9 +6278,9 @@ paths:
         already signed for a different address; re-send with the address sign-info
         reports) or sign_failed (internal failure; retry). Retry ONLY the entries that
         carry a retryable code: re-sending the whole batch re-signs the ballots that
-        already succeeded, and each re-sign counts toward the election's finite overwrite
-        budget (MaxVoteOverwritesPerProcess, 10) — past it the election is permanently
-        locked.
+        already succeeded, and every signature, re-signs included, counts toward the election's
+        limit (MaxCSPSignaturesPerElection, 10 in total) — past it the election is permanently
+        locked for the voter.
       parameters:
       - description: Process ID
         in: path
@@ -6309,8 +6457,9 @@ paths:
         explicit memberIds subset, or the whole organization when neither is set. Returns 400
         with the offending member ids (duplicates / missingData) when the census is not usable,
         otherwise 200. A field that is empty or only whitespace counts as missing data, and
-        members with missing data are never reported as duplicates. Requires Manager/Admin role
-        of the organization.
+        members with missing data are never reported as duplicates. The `password` auth field
+        never identifies a member on its own: a census with no other auth field and no 2FA field
+        is a 400. Requires Manager/Admin role of the organization.
 
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
@@ -6483,7 +6632,8 @@ paths:
               type: string
             type: object
         "400":
-          description: Invalid input data
+          description: Invalid input data, or the plan has no price for the billing
+            period
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -6492,6 +6642,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "404":
           description: Organization or plan not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Organization already has a paid subscription
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -6507,7 +6661,10 @@ paths:
     get:
       consumes:
       - application/json
-      description: Retrieve the status of a Stripe checkout session
+      description: |-
+        Retrieve the status of a Stripe checkout session. Only an admin of the organization
+        the session was created for may read it; any other session id answers 404, so the
+        existence of a session is never revealed.
       parameters:
       - description: Checkout session ID
         in: path
@@ -6525,10 +6682,20 @@ paths:
           description: Invalid session ID
           schema:
             $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Checkout session not found
+          schema:
+            $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
       summary: Get checkout session status
       tags:
       - plans
@@ -6595,6 +6762,10 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
+          schema:
+            $ref: '#/definitions/errors.Error'
       summary: Register a new user
       tags:
       - users
@@ -6626,7 +6797,15 @@ paths:
     put:
       consumes:
       - application/json
-      description: Update information for the authenticated user
+      description: |-
+        Update information for the authenticated user. Changing the email does not take
+        effect immediately: a verification code is sent to the requested address and the
+        email is switched only once the code is confirmed via POST /users/me/email/verify.
+        Changing the email of an account with a password requires the current password in
+        the password field; accounts without a password (OAuth-only) cannot change it, and
+        neither can any account when the service runs without a mail service.
+        A new change code can be requested once per OTP cooldown. The code is mailed to the
+        new address with a link to the web app page /account/email/verify?code=<code>.
       parameters:
       - description: User information to update
         in: body
@@ -6649,6 +6828,10 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
+        "409":
+          description: Email already in use
+          schema:
+            $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
           schema:
@@ -6658,11 +6841,60 @@ paths:
       summary: Update user information
       tags:
       - users
+  /users/me/email/verify:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Confirm the email change requested via PUT /users/me with the code sent to the
+        new address. On success the account email is switched, every existing session is
+        revoked and a fresh token is returned.
+      parameters:
+      - description: Verification code
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.UserVerification'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.LoginResponse'
+        "400":
+          description: Invalid input data or max attempts reached
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized or code mismatch
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Email already in use
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "410":
+          description: Verification code expired
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Confirm a pending email change
+      tags:
+      - users
   /users/password:
     put:
       consumes:
       - application/json
-      description: Update the password for the authenticated user
+      description: |-
+        Update the password for the authenticated user. Every existing session is revoked;
+        a fresh token for the current client is returned in the response.
       parameters:
       - description: Password update information
         in: body
@@ -6676,7 +6908,7 @@ paths:
         "200":
           description: OK
           schema:
-            type: string
+            $ref: '#/definitions/apicommon.LoginResponse'
         "400":
           description: Invalid input data
           schema:
@@ -6687,6 +6919,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -6763,6 +6999,10 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
+          schema:
+            $ref: '#/definitions/errors.Error'
       summary: Reset user password
       tags:
       - users
@@ -6828,18 +7068,6 @@ paths:
             $ref: '#/definitions/apicommon.UserVerification'
         "400":
           description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: User not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "409":
-          description: User already verified
           schema:
             $ref: '#/definitions/errors.Error'
         "500":

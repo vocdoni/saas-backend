@@ -22,12 +22,14 @@ const (
 	CodeTypePasswordReset   CodeType = "password_reset"
 	CodeTypeOrgInvite       CodeType = "organization_invite"
 	CodeTypeOrgInviteUpdate CodeType = "organization_invite_update"
+	CodeTypeUpdateEmail     CodeType = "update_email"
 
 	// max census size allowed for user test purposes; the same size prices to a free base,
 	// so it is defined once, by pricing
 	TestMaxCensusSize = pricing.FreeCensusSize
-	// max vote overwrites per process
-	MaxVoteOverwritesPerProcess = 10
+	// MaxCSPSignaturesPerElection is the total number of CSP signatures (first one included) a voter
+	// can get for one election; past it the election is locked for that voter.
+	MaxCSPSignaturesPerElection = 10
 	// MaxQuestionsPerProcess bounds the number of questions a new or edited voting process may
 	// hold. It does not apply to processes published before it was lowered.
 	MaxQuestionsPerProcess = 15

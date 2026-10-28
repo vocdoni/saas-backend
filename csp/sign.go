@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 	blind "github.com/vocdoni/go-blindsecp256k1"
@@ -200,10 +201,14 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID, weight internal.
 	} else if consumed {
 		return nil, nil, nil, ErrProcessAlreadyConsumed
 	}
-	// lock the user data to avoid concurrent signing. Every return below this line carries
-	// authTokenData.UserID — error or not — so Sign's deferred unlock always releases the key
-	// that was locked here.
-	c.lock(authTokenData.UserID, processID)
+	// lock the user data to avoid concurrent signing. The isLocked check above is only a fast
+	// path: a concurrent Sign may have taken the lock since, and then this one must back off
+	// returning a nil userID, so Sign's deferred unlock does not release the other's lock. Every
+	// return below this line carries authTokenData.UserID — error or not — so Sign's deferred
+	// unlock always releases the key that was locked here.
+	if !c.lock(authTokenData.UserID, processID) {
+		return nil, nil, nil, ErrUserAlreadySigning
+	}
 
 	// prepare the data for the signature
 	caBundle := &models.CAbundle{
@@ -244,7 +249,8 @@ func (c *CSP) finishSaltedKeySigner(token, address, processID internal.HexBytes)
 	}
 	// check if the process is already consumed for this user
 	if consumed, err := c.Storage.IsCSPProcessConsumed(authTokenData.UserID, processID); err != nil {
-		fmt.Println(err)
+		log.Warnw("could not check whether the process is consumed",
+			"userID", authTokenData.UserID, "processID", processID, "error", err)
 		return ErrSign
 	} else if consumed {
 		return ErrProcessAlreadyConsumed
@@ -263,18 +269,24 @@ func (c *CSP) finishSaltedKeySigner(token, address, processID internal.HexBytes)
 	return nil
 }
 
-func (c *CSP) lock(userID, processID internal.HexBytes) {
-	id := sha256.Sum256(append(userID, processID...))
-	c.signerLock.Store(id, struct{}{})
+// signerLockKey derives the signer lock key of a user and process. It concatenates into a new
+// slice: append(userID, processID...) would write into userID's backing array when it has spare
+// capacity, corrupting the caller's data.
+func signerLockKey(userID, processID internal.HexBytes) [sha256.Size]byte {
+	return sha256.Sum256(slices.Concat(userID, processID))
+}
+
+// lock takes the signer lock of the user and process, reporting false if it was already held.
+func (c *CSP) lock(userID, processID internal.HexBytes) bool {
+	_, held := c.signerLock.LoadOrStore(signerLockKey(userID, processID), struct{}{})
+	return !held
 }
 
 func (c *CSP) isLocked(userID, processID internal.HexBytes) bool {
-	id := sha256.Sum256(append(userID, processID...))
-	_, ok := c.signerLock.Load(id)
+	_, ok := c.signerLock.Load(signerLockKey(userID, processID))
 	return ok
 }
 
 func (c *CSP) unlock(userID, processID internal.HexBytes) {
-	id := sha256.Sum256(append(userID, processID...))
-	c.signerLock.Delete(id)
+	c.signerLock.Delete(signerLockKey(userID, processID))
 }

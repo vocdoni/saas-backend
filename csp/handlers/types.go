@@ -21,6 +21,11 @@ type AuthRequest struct {
 	BirthDate    string `json:"birthDate"`
 	Email        string `json:"email"`
 	Phone        string `json:"phone"`
+	// Password is the member password as its client hash, 64 lowercase hex characters:
+	// lowercase_hex(SHA-256(UTF-8("vocdoni-member-password:" + org address as 0x + 40 lowercase hex +
+	// ":" + trim(password).normalize("NFC")))), as in apicommon.OrgMember.Password. Only read when the
+	// census auth fields include "password".
+	Password string `json:"password,omitempty"`
 }
 
 // AuthResendRequest defines the payload for the 2FA resend request.
@@ -170,10 +175,15 @@ type ProcessCheckResponse struct {
 }
 
 // ProcessQuestionStatus is the per-question voter status within a ProcessCheckResponse.
+// HasSigned is true once the CSP signed the voter's ballot for the question; the vote may still
+// not be on chain, and in an anonymous (blind) census it is the only signal the backend has.
+// HasVoted is true only when the vote is on chain; it is always false in a blind census, where
+// the CSP never learns the voting address.
 type ProcessQuestionStatus struct {
 	QuestionID string            `json:"questionId"`
 	UpstreamID internal.HexBytes `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	CanVote    bool              `json:"canVote"`
+	HasSigned  bool              `json:"hasSigned"`
 	HasVoted   bool              `json:"hasVoted"`
 }
 

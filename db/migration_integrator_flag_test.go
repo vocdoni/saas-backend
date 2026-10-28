@@ -10,7 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-// TestIntegratorFlagMigration asserts migration 0027 flags as integrators exactly the
+// TestIntegratorFlagMigration asserts migration 0035 flags as integrators exactly the
 // organizations that were one under integrator limits (override, non-default integrator plan,
 // managing orgs, holding API keys), never one only on the default plan or a managed one, and
 // strips the limits and their counters.
@@ -50,7 +50,7 @@ func TestIntegratorFlagMigration(t *testing.T) {
 	_, err = testDB.apiKeys.InsertOne(ctx, bson.M{"_id": bson.NewObjectID(), "orgAddress": keyHolder})
 	c.Assert(err, qt.IsNil)
 
-	mig := migrationByVersion(c, 27)
+	mig := migrationByVersion(c, 35)
 	c.Assert(mig.Up(ctx, database), qt.IsNil)
 	c.Assert(mig.Up(ctx, database), qt.IsNil) // idempotent
 

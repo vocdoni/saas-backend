@@ -14,7 +14,7 @@ on:
 jobs:
   api-swagger:
     name: Generate swagger.yaml
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -71,7 +71,7 @@ jobs:
     # on.push.branches is already [stage], so a push event is always stage.
     # Pull request runs must never publish.
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
     # Scoped to this job on purpose: api-swagger pushes the regenerated
     # swagger.yaml with the repo-default token, so it must keep its own scopes.
     permissions:

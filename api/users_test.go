@@ -168,6 +168,10 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	}
 	resp, code = testRequest(t, http.MethodPost, "", verification, verifyUserEndpoint)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	// keep the session token issued on verification: the reset must revoke it
+	var preResetSession apicommon.LoginResponse
+	c.Assert(json.Unmarshal(resp, &preResetSession), qt.IsNil)
+	requestAndAssertCode(http.StatusOK, t, http.MethodGet, preResetSession.Token, nil, usersMeEndpoint)
 
 	// Request password recovery
 	recoverInfo := &apicommon.UserInfo{
@@ -190,6 +194,9 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	}
 	resp, code = testRequest(t, http.MethodPost, "", resetPass, usersResetPasswordEndpoint)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	// The reset revoked every session minted before it
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodGet, preResetSession.Token, nil, usersMeEndpoint)
 
 	// Try to login with the old password (should fail)
 	loginInfo := &apicommon.UserInfo{
@@ -313,9 +320,10 @@ func TestResetPasswordBruteForceLockout(t *testing.T) {
 	c.Assert(len(passResetMailCode) > 1, qt.IsTrue)
 	validCode := passResetMailCode[1]
 
-	// exhaust the guess budget with wrong codes. The stored counter starts at 1, so
-	// VerificationCodeMaxAttempts-1 wrong guesses are compared-and-rejected (401) before lockout.
-	for i := 0; i < apicommon.VerificationCodeMaxAttempts-1; i++ {
+	// exhaust the guess budget with wrong codes. The guess counter starts at zero (deliveries are
+	// tracked separately), so exactly VerificationCodeMaxAttempts wrong guesses are
+	// compared-and-rejected (401) before lockout.
+	for i := 0; i < apicommon.VerificationCodeMaxAttempts; i++ {
 		resp, code = testRequest(t, http.MethodPost, "", &apicommon.UserPasswordReset{
 			Email: mail, Code: validCode + "x", NewPassword: "attackerpassword",
 		}, usersResetPasswordEndpoint)
@@ -468,13 +476,13 @@ func TestResendVerificationCodeHandler(t *testing.T) {
 	c.Assert(len(linkCode) > 1, qt.IsTrue)
 	c.Assert(len(linkCode) < 7, qt.IsTrue)
 
-	// Test resending multiple times until max attempts
-	for i := 2; i < apicommon.VerificationCodeMaxAttempts; i++ {
+	// Test resending multiple times until the delivery cap (the registration email was send 1)
+	for i := 2; i < apicommon.VerificationCodeMaxSends; i++ {
 		resp, code = testRequest(t, http.MethodPost, "", verification, verifyUserCodeEndpoint)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("attempt %d response: %s", i+1, resp))
 	}
 
-	// Test max attempts reached
+	// Test delivery cap reached
 	resp, code = testRequest(t, http.MethodPost, "", verification, verifyUserCodeEndpoint)
 	c.Assert(code, qt.Equals, http.StatusBadRequest)
 	c.Assert(string(resp), qt.Contains, "40017")

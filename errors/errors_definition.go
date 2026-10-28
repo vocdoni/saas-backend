@@ -76,6 +76,9 @@ var (
 	ErrDuplicateConflict           = Error{Code: 40901, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("resource already exists")}
 	ErrUpdateWouldCreateDuplicates = Error{Code: 40902, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("update would create duplicates")}
 	ErrPublishInProgress           = Error{Code: 40903, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("process publish already in progress")}
+	// ErrProcessPartiallyPublished refuses draft edits/deletes of a process some of whose
+	// questions already mined on-chain elections: publish it again to finish, instead.
+	ErrProcessPartiallyPublished = Error{Code: 40904, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("process is partially published: some questions already have on-chain elections")}
 
 	// TODO: most of theses errors should be unauthorized
 	// Subscription errors (400)
@@ -89,6 +92,7 @@ var (
 	ErrAutoGroupCannotBeDeleted         = Error{Code: 40150, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("the \"All members\" group is auto-generated and cannot be deleted")}
 	ErrAutoGroupMembersCannotBeModified = Error{Code: 40151, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("membership of the auto-generated \"All members\" group cannot be manually modified")}
 	ErrNotAnIntegrator                  = Error{Code: 40153, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("organization is not an integrator")}
+	ErrOriginNotAllowed                 = Error{Code: 40199, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("requests must go through the public endpoint")}
 	ErrInvalidAPIKey                    = Error{Code: 40156, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("invalid, revoked or expired API key"), LogLevel: "info"}
 	ErrAPIKeyNotAllowed                 = Error{Code: 40157, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("API keys are not permitted for this endpoint"), LogLevel: "info"}
 	ErrInsufficientAPIKeyScope          = Error{Code: 40158, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("API key lacks the required scope"), LogLevel: "info"}
@@ -110,7 +114,7 @@ var (
 	ErrIntegratorTopLevelOrgCannotOwnProcess = Error{Code: 40174, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("integrator top-level organizations cannot own elections; use a managed organization")}
 	// ErrMaxWritersReached: the organization already has as many admins and managers (pending
 	// invitations included) as it may hold.
-	ErrMaxWritersReached = Error{Code: 40179, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("max admin and manager users reached")}
+	ErrMaxWritersReached = Error{Code: 40182, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("max admin and manager users reached")}
 	// ErrPaymentRequired: the organization's wallet does not cover the price; data carries the
 	// quote, balanceCents and shortfallCents, which POST /processes/{processId}/checkout tops up.
 	ErrPaymentRequired = Error{Code: 40178, HTTPstatus: http.StatusPaymentRequired, Err: fmt.Errorf("process publication requires payment")}
@@ -125,9 +129,22 @@ var (
 	// ErrPaymentSessionConflict: the process's payment is in a state the request cannot act on
 	// (processing, completed, or changed while being read); retry once it settles.
 	ErrPaymentSessionConflict = Error{Code: 40177, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("a payment for this process is already processing or completed")}
+	// ErrCheckoutSessionNotFound is the only answer for a checkout session the caller may not
+	// read, whatever the reason (missing, not theirs), so session existence is never revealed.
+	ErrCheckoutSessionNotFound = Error{Code: 40179, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("checkout session not found"), LogLevel: "info"}
+	// ErrOrganizationAlreadySubscribed refuses a new subscription checkout while the organization
+	// has a paid subscription: plan changes go through the billing portal.
+	ErrOrganizationAlreadySubscribed = Error{
+		Code: 40180, HTTPstatus: http.StatusConflict, LogLevel: "info",
+		Err: fmt.Errorf("organization already has a paid subscription, manage it from the billing portal"),
+	}
 
 	// CSP errors (408)
 	ErrZeroWeightVoter = Error{Code: 40801, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("voter weight cannot be zero")}
+	// ErrCSPAuthFailed is deliberately returned both when the login data matches no census
+	// participant and when a participant was found but the contact data does not match, so a
+	// caller cannot probe who belongs to a census or which contact a participant registered.
+	ErrCSPAuthFailed = Error{Code: 40802, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("invalid authentication data"), LogLevel: "info"}
 
 	// Server errors (500) - These should be used sparingly and only for true internal errors
 	ErrMarshalingServerJSONFailed  = Error{Code: 50001, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: failed to process response"), LogLevel: "error"}
@@ -141,4 +158,8 @@ var (
 
 	// Service unavailable errors (503)
 	ErrTxQueueFull = Error{Code: 50301, HTTPstatus: http.StatusServiceUnavailable, Err: fmt.Errorf("transaction queue is full, retry later"), LogLevel: "warn"}
+	ErrServerBusy  = Error{Code: 50302, HTTPstatus: http.StatusServiceUnavailable, Err: fmt.Errorf("server is busy, retry later"), LogLevel: "warn"}
+	// ErrOrgTxBusy: the organization already has a transaction being built/submitted and the
+	// wait for its turn ran out; nothing was enqueued, retry later.
+	ErrOrgTxBusy = Error{Code: 50303, HTTPstatus: http.StatusServiceUnavailable, Err: fmt.Errorf("another transaction for this organization is in progress, retry later"), LogLevel: "info"}
 )

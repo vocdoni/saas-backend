@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -462,7 +463,9 @@ func (a *API) publishPaidProcess(t stripe.ProcessTopUp) error {
 			"processId", processID.Hex(), "problems", strings.Join(problems, "; "))
 		return nil
 	}
-	jobID, err := a.startProcessPublish(target)
+	// no request context to bound the org tx lock wait: it is bounded by orgTxLockTimeout, and
+	// a busy lock (503) is returned like any other retryable failure
+	jobID, err := a.startProcessPublish(context.Background(), target)
 	switch {
 	case errors.Is(err, errProcessAlreadyPublished):
 		return nil
