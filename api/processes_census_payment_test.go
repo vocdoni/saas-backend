@@ -574,6 +574,25 @@ func TestManagedCensusGrowthChargesIntegratorWallet(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(wallet.BalanceCents, qt.Equals, 100_000-paidCents)
 
+	// with the integrator's wallet short of the difference, the refusal is the 40175 its
+	// census/checkout would answer, not the standalone checkout hint
+	dueCents := grownCents - paidCents
+	drain := 100_000 - paidCents - dueCents + 1
+	c.Assert(testDB.DebitWalletForProcess(db.WalletDebit{
+		OrgAddress: integratorAddr, ProcessID: bson.NewObjectID(), ProcessOrgAddress: managedAddr,
+		AmountCents: drain, PriceCents: drain,
+	}), qt.IsNil)
+	short := requestAndParseWithAssertCode[struct {
+		Code int                      `json:"code"`
+		Data map[string]pricing.Cents `json:"data"`
+	}](http.StatusPaymentRequired, t, http.MethodPut, token,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[growthTierEnd:]}, "processes", pid, "census")
+	c.Assert(short.Code, qt.Equals, errors.ErrInsufficientWalletBalance.Code)
+	c.Assert(short.Data, qt.DeepEquals, map[string]pricing.Cents{"requiredCents": dueCents, "availableCents": dueCents - 1})
+	c.Assert(testDB.CreditWallet(db.WalletCredit{
+		OrgAddress: integratorAddr, AmountCents: drain, IdempotencyKey: "cs_managed_growth_refill",
+	}), qt.IsNil)
+
 	// the integrator buys the headroom from its wallet — no checkout session, effective at once
 	headroom := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, token,
 		&apicommon.ProcessCensusCheckoutRequest{CensusSize: growthTotalVoters, ReturnURL: "https://example.com/r"},
