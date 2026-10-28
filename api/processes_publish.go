@@ -97,32 +97,28 @@ func (a *API) reconcileStalePublishing() {
 	}
 	for _, claim := range claims {
 		id := claim.ID
-		// release only the claim the scan found, and only while it is still stale: a sibling
-		// replica may have reclaimed the process since, and its fresh claim must survive
-		released, e := a.db.ReleaseStalePublishClaim(claim)
+		// take over only the claim the scan found, and only while it is still stale: a sibling
+		// replica or a publish may have reclaimed the process since, and its fresh claim must
+		// survive. Holding the claim, no publish can start on the process while its questions are
+		// reset and its payment reverted.
+		owner, reclaimed, e := a.db.ReclaimStalePublishClaim(claim)
 		if e != nil {
-			log.Warnw("could not clear stale publishing marker", "processId", id.Hex(), "error", e)
+			log.Warnw("could not reclaim stale publishing marker", "processId", id.Hex(), "error", e)
 			continue
 		}
-		if !released {
+		if !reclaimed {
 			continue
 		}
 		// mined questions keep their election ids: this only resets the unmined ones
 		if e := a.db.ResetQuestionsPublish(id); e != nil {
 			log.Warnw("could not reset questions of stale publishing process", "processId", id.Hex(), "error", e)
 		}
-		// the publish it held died with the worker: a final failure, so the wallet debit goes back,
-		// under a claim of its own so no publish can start on the payment while it is reverted. A
-		// publish that claimed the process since keeps it, and the payment with it.
-		if owner, claimed, e := a.db.ClaimVotingProcessForPublish(id, time.Time{}); e != nil || !claimed {
-			log.Warnw("stale publishing process claimed meanwhile, its wallet debit stays", "processId", id.Hex(), "error", e)
-		} else {
-			if e := a.reversePublishDebit(id); e != nil {
-				log.Errorw(e, "could not credit back the wallet debit of a stale publish; it stays a paid draft")
-			}
-			if e := a.db.ClearVotingProcessPublishing(id, owner); e != nil {
-				log.Warnw("could not release the stale publish reconcile claim", "processId", id.Hex(), "error", e)
-			}
+		// the publish it held died with the worker: a final failure, so the wallet debit goes back
+		if e := a.reversePublishDebit(id); e != nil {
+			log.Errorw(e, "could not credit back the wallet debit of a stale publish; it stays a paid draft")
+		}
+		if e := a.db.ClearVotingProcessPublishing(id, owner); e != nil {
+			log.Warnw("could not release the stale publish reconcile claim", "processId", id.Hex(), "error", e)
 		}
 		log.Infow("reconciled stale publishing process", "processId", id.Hex())
 	}

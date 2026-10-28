@@ -537,10 +537,11 @@ func TestSetVotingProcessDraftRefusesMinedProcess(t *testing.T) {
 	c.Assert(testDB.MarkVotingProcessMined(bson.NewObjectID()), qt.Equals, ErrNotFound)
 }
 
-// TestReleaseStalePublishClaim pins that the startup reconciliation releases only the stale claim
-// it found: a claim reclaimed (or renewed) since the scan — by a sibling replica — is left alone, so
-// a third publish cannot claim the process while that one is minting.
-func TestReleaseStalePublishClaim(t *testing.T) {
+// TestReclaimStalePublishClaim pins that the stale-publish sweep takes over only the stale claim
+// it found, by a compare-and-swap on its owner and marker: a claim reclaimed (or renewed) since the
+// scan — by a publish or a sibling replica — is left alone, so the sweep never resets or reverses
+// a publish that is minting.
+func TestReclaimStalePublishClaim(t *testing.T) {
 	c := qt.New(t)
 	org := common.Address{0x16}
 	setupVotingProcessOrg(c, org)
@@ -576,27 +577,42 @@ func TestReleaseStalePublishClaim(t *testing.T) {
 	newOwner, claimed, err := testDB.ClaimVotingProcessForPublish(id, time.Time{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(claimed, qt.IsTrue)
-	released, err := testDB.ReleaseStalePublishClaim(*found)
+	_, reclaimed, err := testDB.ReclaimStalePublishClaim(*found)
 	c.Assert(err, qt.IsNil)
-	c.Assert(released, qt.IsFalse)
+	c.Assert(reclaimed, qt.IsFalse)
 	got, err := testDB.VotingProcess(id)
 	c.Assert(err, qt.IsNil)
 	c.Assert(got.PublishingOwner, qt.Equals, newOwner)
 
-	// a claim that is still the scanned one and still stale is released
-	released, err = testDB.ReleaseStalePublishClaim(StalePublishClaim{ID: id, Owner: newOwner})
+	// a claim that is still the scanned one and still stale is taken over: a new owner holds it
+	stale, err = testDB.StaleVotingProcesses()
 	c.Assert(err, qt.IsNil)
-	c.Assert(released, qt.IsTrue)
+	for i := range stale {
+		if stale[i].ID == id {
+			found = &stale[i]
+		}
+	}
+	c.Assert(found.Owner, qt.Equals, newOwner)
+	sweeper, reclaimed, err := testDB.ReclaimStalePublishClaim(*found)
+	c.Assert(err, qt.IsNil)
+	c.Assert(reclaimed, qt.IsTrue)
 	got, err = testDB.VotingProcess(id)
 	c.Assert(err, qt.IsNil)
-	c.Assert(got.PublishingOwner, qt.Equals, "")
+	c.Assert(got.PublishingOwner, qt.Equals, sweeper)
+	// the same scanned claim cannot be taken over twice
+	_, reclaimed, err = testDB.ReclaimStalePublishClaim(*found)
+	c.Assert(err, qt.IsNil)
+	c.Assert(reclaimed, qt.IsFalse)
+	c.Assert(testDB.ClearVotingProcessPublishing(id, sweeper), qt.IsNil)
 
 	// a fresh (renewed) claim is never released, even by its own scanned owner
 	PublishStaleAfter = restore
 	owner, claimed, err = testDB.ClaimVotingProcessForPublish(id, time.Time{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(claimed, qt.IsTrue)
-	released, err = testDB.ReleaseStalePublishClaim(StalePublishClaim{ID: id, Owner: owner})
+	got, err = testDB.VotingProcess(id)
 	c.Assert(err, qt.IsNil)
-	c.Assert(released, qt.IsFalse)
+	_, reclaimed, err = testDB.ReclaimStalePublishClaim(StalePublishClaim{ID: id, Owner: owner, Publishing: got.Publishing})
+	c.Assert(err, qt.IsNil)
+	c.Assert(reclaimed, qt.IsFalse)
 }

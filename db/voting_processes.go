@@ -350,11 +350,12 @@ func (ms *MongoStorage) RenewVotingProcessPublishClaim(id bson.ObjectID, owner s
 	return res.MatchedCount == 1, nil
 }
 
-// StalePublishClaim identifies a stale publish claim: the process and the owner token of the
-// claim as it was found (empty for a marker written before claims carried an owner).
+// StalePublishClaim identifies a stale publish claim: the process, the owner token of the claim
+// as it was found (empty for a marker written before claims carried an owner) and its marker.
 type StalePublishClaim struct {
-	ID    bson.ObjectID `bson:"_id"`
-	Owner string        `bson:"publishingOwner,omitempty"`
+	ID         bson.ObjectID `bson:"_id"`
+	Owner      string        `bson:"publishingOwner,omitempty"`
+	Publishing time.Time     `bson:"publishing"`
 }
 
 // StaleVotingProcesses returns the processes whose publishing marker is stale (older than
@@ -367,7 +368,7 @@ func (ms *MongoStorage) StaleVotingProcesses() ([]StalePublishClaim, error) {
 	cutoff := time.Now().Add(-PublishStaleAfter)
 	cur, err := ms.votingProcesses.Find(ctx,
 		bson.M{"published": false, "publishing": bson.M{"$exists": true, "$lt": cutoff}},
-		options.Find().SetProjection(bson.M{"_id": 1, "publishingOwner": 1}))
+		options.Find().SetProjection(bson.M{"_id": 1, "publishingOwner": 1, "publishing": 1}))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query stale publishing processes: %w", err)
 	}
@@ -383,33 +384,43 @@ func (ms *MongoStorage) StaleVotingProcesses() ([]StalePublishClaim, error) {
 	return out, cur.Err()
 }
 
-// ReleaseStalePublishClaim clears a claim found by StaleVotingProcesses, only if it is still that
-// same claim and still stale. Between the scan and this write another replica may have reclaimed
-// the process (a new owner and a fresh marker), or the worker may have renewed it; neither must be
-// wiped, or a third publish could claim the process while that one is minting. It reports whether
-// the claim was released.
-func (ms *MongoStorage) ReleaseStalePublishClaim(claim StalePublishClaim) (bool, error) {
+// ReclaimStalePublishClaim takes over a claim found by StaleVotingProcesses, only if it is still
+// that same claim — same owner, same marker — and still stale: a compare-and-swap that writes a
+// fresh marker and a new owner token, returned with true. Between the scan and this write another
+// replica or a publish may have reclaimed the process (a new owner and a fresh marker), or the
+// worker may have renewed it; neither must be touched, so the caller resets, reverses and clears
+// only what it holds the claim to (ClearVotingProcessPublishing with the returned owner).
+func (ms *MongoStorage) ReclaimStalePublishClaim(claim StalePublishClaim) (string, bool, error) {
 	if claim.ID == bson.NilObjectID {
-		return false, ErrInvalidData
+		return "", false, ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
+	now := time.Now()
 	filter := bson.M{
-		"_id":        claim.ID,
-		"published":  false,
-		"publishing": bson.M{"$lt": time.Now().Add(-PublishStaleAfter)},
+		"_id":       claim.ID,
+		"published": false,
+		"$and": bson.A{
+			bson.M{"publishing": bson.M{"$lt": now.Add(-PublishStaleAfter)}},
+			// Mongo stores dates to the millisecond; the scan read it back at that precision
+			bson.M{"publishing": claim.Publishing.UTC().Truncate(time.Millisecond)},
+		},
 	}
 	if claim.Owner != "" {
 		filter["publishingOwner"] = claim.Owner
 	} else {
 		filter["publishingOwner"] = bson.M{"$exists": false}
 	}
-	update := bson.M{"$unset": bson.M{"publishing": "", "publishingOwner": ""}} //nolint:goconst
+	owner := internal.RandomHex(16)
+	update := bson.M{"$set": bson.M{"publishing": now, "publishingOwner": owner}} //nolint:goconst
 	res, err := ms.votingProcesses.UpdateOne(ctx, filter, update)
 	if err != nil {
-		return false, fmt.Errorf("failed to release stale publish claim: %w", err)
+		return "", false, fmt.Errorf("failed to reclaim stale publish claim: %w", err)
 	}
-	return res.MatchedCount == 1, nil
+	if res.MatchedCount != 1 {
+		return "", false, nil
+	}
+	return owner, true, nil
 }
 
 // DeleteVotingProcessesByOrg removes every voting process of an organization and all their
@@ -438,8 +449,8 @@ func (ms *MongoStorage) DeleteVotingProcessesByOrg(orgAddress common.Address) (i
 // ClaimVotingProcessForPublish, so a publish that fails after claiming does not leave the
 // process permanently unclaimable. With a non-empty owner it only clears a claim that owner
 // still holds, so a worker whose stale claim was reclaimed cannot wipe the new claimant's
-// marker; an empty owner clears unconditionally. Stale markers found at startup go through
-// ReleaseStalePublishClaim instead.
+// marker; an empty owner clears unconditionally. Stale markers found by the sweep are first
+// taken over with ReclaimStalePublishClaim.
 // No-op once the process is published.
 func (ms *MongoStorage) ClearVotingProcessPublishing(id bson.ObjectID, owner string) error {
 	if id == bson.NilObjectID {
