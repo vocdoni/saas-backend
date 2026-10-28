@@ -196,3 +196,121 @@ func TestSetJob(t *testing.T) {
 	c.Assert(retrievedJob.Added, qt.Equals, 30)
 	c.Assert(retrievedJob.Errors, qt.HasLen, 2)
 }
+
+// TestFailInterruptedTxJobs pins the sweep for jobs orphaned by a stopped service process: the tx
+// queues are in-memory, so a job still pending from a process that died has no worker left and
+// would stay pending forever. The sweep fails the jobs whose owner stopped heartbeating (never
+// replaying the transactions) and closes the pending entries of their batch vote jobs, while the
+// jobs a live process keeps heartbeating, its own or a sibling's, are left alone — a replica
+// starting next to live ones must not fail their work. A job of the sweeping process that it no
+// longer heartbeats (nothing holds it) is swept too. Jobs written before jobs had an owner are
+// judged by age; completed jobs and statusless import jobs are never touched.
+func TestFailInterruptedTxJobs(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	org := common.HexToAddress("0x1234567890123456789012345678901234567890")
+
+	restore := TxJobStaleAfter
+	TxJobStaleAfter = 200 * time.Millisecond
+	c.Cleanup(func() { TxJobStaleAfter = restore })
+
+	// two more handles on the same database, acting as replicas: one that dies, one that lives
+	dead, err := New(mongoURI, testDB.database)
+	c.Assert(err, qt.IsNil)
+	c.Cleanup(dead.Close)
+	live, err := New(mongoURI, testDB.database)
+	c.Assert(err, qt.IsNil)
+	c.Cleanup(live.Close)
+
+	// the dead replica's pending tx job, completed job and half-reported batch vote job
+	c.Assert(dead.CreateTxJob("interrupted-tx", JobTypePublishVotingProcess, org), qt.IsNil)
+	c.Assert(dead.CreateTxJob("finished-tx", JobTypeSetProcessStatus, org), qt.IsNil)
+	c.Assert(dead.SetJobStatus("finished-tx", JobStatusCompleted, nil, ""), qt.IsNil)
+	votes := []VoteJobResult{
+		{ProcessID: internal.HexBytes{1}, Status: JobStatusPending},
+		{ProcessID: internal.HexBytes{2}, Status: JobStatusPending},
+	}
+	c.Assert(dead.CreateVoteBatchJob("interrupted-batch", org, votes), qt.IsNil)
+	c.Assert(dead.RecordBatchVoteOutcome("interrupted-batch", 0, internal.HexBytes{0xaa}, ""), qt.IsNil)
+	// a pending job written before jobs carried an owner, and an import job
+	c.Assert(testDB.SetJob(&Job{
+		JobID: "legacy-tx", Type: JobTypeRelayVote, OrgAddress: org, Errors: []string{},
+		Status: JobStatusPending, CreatedAt: time.Now(),
+	}), qt.IsNil)
+	c.Assert(testDB.CreateJob("import-job", JobTypeOrgMembers, org, 10), qt.IsNil)
+	// pending jobs of the live replica and of the sweeping process itself
+	c.Assert(live.CreateTxJob("sibling-tx", JobTypeSetProcessStatus, org), qt.IsNil)
+	c.Assert(testDB.CreateTxJob("own-tx", JobTypeSetProcessStatus, org), qt.IsNil)
+	c.Assert(testDB.CreateTxJob("own-unheld-tx", JobTypeSetProcessStatus, org), qt.IsNil)
+
+	// nothing is stale yet: a fresh job of a stopped process is not swept before its heartbeat
+	// has had time to lapse
+	n, err := live.FailInterruptedTxJobs()
+	c.Assert(err, qt.IsNil)
+	c.Assert(n, qt.Equals, int64(0))
+
+	// time passes: the live replica keeps heartbeating, the dead one does not
+	time.Sleep(2 * TxJobStaleAfter)
+	// a heartbeat only refreshes the given jobs of the calling process
+	beats, err := live.HeartbeatTxJobs([]string{"sibling-tx", "own-tx"})
+	c.Assert(err, qt.IsNil)
+	c.Assert(beats, qt.Equals, int64(1))
+	beats, err = testDB.HeartbeatTxJobs([]string{"own-tx"})
+	c.Assert(err, qt.IsNil)
+	c.Assert(beats, qt.Equals, int64(1))
+	beats, err = testDB.HeartbeatTxJobs(nil)
+	c.Assert(err, qt.IsNil)
+	c.Assert(beats, qt.Equals, int64(0))
+
+	n, err = testDB.FailInterruptedTxJobs()
+	c.Assert(err, qt.IsNil)
+	c.Assert(n, qt.Equals, int64(4)) // interrupted-tx, interrupted-batch, legacy-tx, own-unheld-tx
+
+	// the sweeper's own job that nothing held anymore is failed too
+	job, err := testDB.Job("own-unheld-tx")
+	c.Assert(err, qt.IsNil)
+	c.Assert(job.Status, qt.Equals, JobStatusFailed)
+
+	// the dead replica's pending tx job is failed with the restart explanation
+	job, err = testDB.Job("interrupted-tx")
+	c.Assert(err, qt.IsNil)
+	c.Assert(job.Status, qt.Equals, JobStatusFailed)
+	c.Assert(job.Error, qt.Contains, "restart")
+	c.Assert(job.CompletedAt.IsZero(), qt.IsFalse)
+
+	// so is the ownerless legacy job, by age
+	job, err = testDB.Job("legacy-tx")
+	c.Assert(err, qt.IsNil)
+	c.Assert(job.Status, qt.Equals, JobStatusFailed)
+
+	// the completed job is untouched
+	job, err = testDB.Job("finished-tx")
+	c.Assert(err, qt.IsNil)
+	c.Assert(job.Status, qt.Equals, JobStatusCompleted)
+	c.Assert(job.Error, qt.Equals, "")
+
+	// the batch vote job is failed and only its still-pending entry was closed
+	job, err = testDB.Job("interrupted-batch")
+	c.Assert(err, qt.IsNil)
+	c.Assert(job.Status, qt.Equals, JobStatusFailed)
+	c.Assert(job.Result.Votes, qt.HasLen, 2)
+	c.Assert(job.Result.Votes[0].Status, qt.Equals, JobStatusCompleted)
+	c.Assert(job.Result.Votes[0].Error, qt.Equals, "")
+	c.Assert(job.Result.Votes[1].Status, qt.Equals, JobStatusFailed)
+	c.Assert(job.Result.Votes[1].Error, qt.Contains, "restart")
+
+	// the live sibling's job and the sweeper's own job are still pending
+	for _, id := range []string{"sibling-tx", "own-tx"} {
+		job, err = testDB.Job(id)
+		c.Assert(err, qt.IsNil)
+		c.Assert(job.Status, qt.Equals, JobStatusPending, qt.Commentf("job %s", id))
+		c.Assert(job.Error, qt.Equals, "")
+	}
+
+	// the import job carries no status field and is left alone
+	job, err = testDB.Job("import-job")
+	c.Assert(err, qt.IsNil)
+	c.Assert(job.Status, qt.Equals, JobStatus(""))
+	c.Assert(job.Error, qt.Equals, "")
+	c.Assert(job.CompletedAt.IsZero(), qt.IsTrue)
+}

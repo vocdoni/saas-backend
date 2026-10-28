@@ -75,7 +75,7 @@ func (ms *MongoStorage) SetProcessQuestions(
 	if processID == bson.NilObjectID {
 		return nil, ErrInvalidData
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	ids := make([]bson.ObjectID, 0, len(questions))

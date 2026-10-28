@@ -275,13 +275,24 @@ func TestCSPVoting(t *testing.T) {
 		c.Assert(bytes.Equal(resp.Weight, big.NewInt(1).Bytes()), qt.IsTrue,
 			qt.Commentf("unexpected weight %x", resp.Weight))
 
-		// Once the member consumes the election, hasVoted flips to true.
+		c.Assert(resp.Questions[0].HasSigned, qt.IsFalse)
+
+		// Once the CSP signs the member's ballot, hasSigned flips to true, but hasVoted stays
+		// false: nothing is on chain yet.
 		voter := ethereum.SignKeys{}
 		c.Assert(voter.Generate(), qt.IsNil)
-		c.Assert(testDB.ConsumeCSPProcess(authToken, processID,
-			internal.HexBytes(voter.Address().Bytes())), qt.IsNil)
+		voterAddr := internal.HexBytes(voter.Address().Bytes())
+		signature := testCSPSign(t, pid, authToken, processID, voterAddr)
 		resp = check(checkReq)
 		c.Assert(resp.BelongsToProcess, qt.IsTrue)
+		c.Assert(resp.Questions[0].HasSigned, qt.IsTrue)
+		c.Assert(resp.Questions[0].HasVoted, qt.IsFalse)
+
+		// hasVoted flips to true only once the vote is mined.
+		testCastVote(t, vocdoniClient, &voter, processID,
+			testGenerateVoteProof(processID, voterAddr, signature, 1), []byte("[\"1\"]"))
+		resp = check(checkReq)
+		c.Assert(resp.Questions[0].HasSigned, qt.IsTrue)
 		c.Assert(resp.Questions[0].HasVoted, qt.IsTrue)
 
 		// The normal auth flow cannot mint a verified token for a non-participant, so seed one
@@ -400,8 +411,8 @@ func TestCSPVoting(t *testing.T) {
 				MemberNumber: "INVALID",
 				Email:        "john.doe@example.com",
 			}
-			resp, code := testRequest(t, http.MethodPost, "", authReq, "processes", pid, "auth", "0")
-			c.Assert(code, qt.Equals, http.StatusNotFound, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
+			// a non-participant and a wrong contact answer the same, so neither can be told apart
+			requestAndAssertError(errors.ErrCSPAuthFailed, t, http.MethodPost, "", authReq, "processes", pid, "auth", "0")
 		})
 
 		// Test case 2: Try to authenticate with valid fields but wrong email
@@ -412,8 +423,8 @@ func TestCSPVoting(t *testing.T) {
 				MemberNumber: "P001",
 				Email:        "wrong.email@example.com",
 			}
-			resp, code := testRequest(t, http.MethodPost, "", authReq, "processes", pid, "auth", "0")
-			c.Assert(code, qt.Equals, http.StatusNotFound, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
+			// a non-participant and a wrong contact answer the same, so neither can be told apart
+			requestAndAssertError(errors.ErrCSPAuthFailed, t, http.MethodPost, "", authReq, "processes", pid, "auth", "0")
 		})
 
 		// Test case 3: Try to authenticate with wrong name but correct other fields
@@ -424,8 +435,8 @@ func TestCSPVoting(t *testing.T) {
 				MemberNumber: "P001",
 				Email:        "john.doe@example.com",
 			}
-			resp, code := testRequest(t, http.MethodPost, "", authReq, "processes", pid, "auth", "0")
-			c.Assert(code, qt.Equals, http.StatusNotFound, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
+			// a non-participant and a wrong contact answer the same, so neither can be told apart
+			requestAndAssertError(errors.ErrCSPAuthFailed, t, http.MethodPost, "", authReq, "processes", pid, "auth", "0")
 		})
 
 		// Test case 4: Try to authenticate with wrong surname but correct other fields
@@ -436,8 +447,8 @@ func TestCSPVoting(t *testing.T) {
 				MemberNumber: "P001",
 				Email:        "john.doe@example.com",
 			}
-			resp, code := testRequest(t, http.MethodPost, "", authReq, "processes", pid, "auth", "0")
-			c.Assert(code, qt.Equals, http.StatusNotFound, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
+			// a non-participant and a wrong contact answer the same, so neither can be told apart
+			requestAndAssertError(errors.ErrCSPAuthFailed, t, http.MethodPost, "", authReq, "processes", pid, "auth", "0")
 		})
 
 		// Test case 5: Try to authenticate with missing required auth fields
@@ -612,10 +623,8 @@ func TestCSPVoting(t *testing.T) {
 				BirthDate:  "1990-01-01",
 				Email:      "john.doe@example.com",
 			}
-			resp, code := testRequest(t, http.MethodPost, "", wrongAuthReq,
+			requestAndAssertError(errors.ErrCSPAuthFailed, t, http.MethodPost, "", wrongAuthReq,
 				"processes", complexPID, "auth", "0")
-			c.Assert(code, qt.Equals, http.StatusNotFound,
-				qt.Commentf("expected unauthorized for wrong national ID, got %d: %s", code, resp))
 		})
 	})
 

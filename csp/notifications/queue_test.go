@@ -74,7 +74,7 @@ func (m *configurableMail) maxConcurrent() int {
 func TestIsPermanentSendError(t *testing.T) {
 	c := qt.New(t)
 
-	perm := &textproto.Error{Code: 550, Msg: "no such user"}
+	perm := &notifications.PermanentError{Err: &textproto.Error{Code: 550, Msg: "no such user"}}
 	transientProto := &textproto.Error{Code: 451, Msg: "try later"}
 	netErr := fmt.Errorf("dial tcp: connection refused")
 
@@ -315,7 +315,7 @@ func TestNotificationChallengeQueue(t *testing.T) {
 		defer cancel()
 
 		mail := &configurableMail{
-			sendErr: &textproto.Error{Code: 550, Msg: "no such user"}, // permanent
+			sendErr: &notifications.PermanentError{Err: &textproto.Error{Code: 550, Msg: "no such user"}}, // permanent
 		}
 		queue := NewQueue(ctx, QueueConfig{
 			TTL:         time.Minute,

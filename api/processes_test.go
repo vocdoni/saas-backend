@@ -843,11 +843,11 @@ func TestVotingProcessStalePublishReclaim(t *testing.T) {
 	oid, err := bson.ObjectIDFromHex(created.ProcessID)
 	c.Assert(err, qt.IsNil)
 
-	won, err := testDB.ClaimVotingProcessForPublish(oid)
+	_, won, err := testDB.ClaimVotingProcessForPublish(oid, time.Time{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue)
 	// a fresh marker blocks a concurrent claim
-	won, err = testDB.ClaimVotingProcessForPublish(oid)
+	_, won, err = testDB.ClaimVotingProcessForPublish(oid, time.Time{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsFalse)
 
@@ -859,14 +859,14 @@ func TestVotingProcessStalePublishReclaim(t *testing.T) {
 	stale, err := testDB.StaleVotingProcesses()
 	c.Assert(err, qt.IsNil)
 	found := false
-	for _, id := range stale {
-		if id == oid {
+	for _, claim := range stale {
+		if claim.ID == oid {
 			found = true
 		}
 	}
 	c.Assert(found, qt.IsTrue)
 
-	won, err = testDB.ClaimVotingProcessForPublish(oid)
+	_, won, err = testDB.ClaimVotingProcessForPublish(oid, time.Time{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue, qt.Commentf("a stale marker must be reclaimable"))
 }

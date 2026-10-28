@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
@@ -349,6 +350,8 @@ func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id bson.ObjectID, u
 		errors.ErrDuplicateConflict.Withf("process already published and not in draft mode").Write(w)
 	case current.PublishInProgress():
 		errors.ErrPublishInProgress.Write(w)
+	case current.HasMinedElections:
+		errors.ErrProcessPartiallyPublished.Write(w)
 	default:
 		errors.ErrStaleUpdate.Withf("the process was modified after updatedAt %s; refetch and retry",
 			updatedAt).Write(w)
@@ -358,7 +361,9 @@ func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id bson.ObjectID, u
 // updateVotingProcessHandler godoc
 //
 //	@Summary		Update a voting process draft
-//	@Description	Update a voting process while it is still a draft (not published). 409 if already published.
+//	@Description	Update a voting process while it is still a draft (not published). 409 if already published,
+//	@Description	and 409 (40904) if partially published — an earlier publish already mined some of its
+//	@Description	questions on-chain, so the draft can only be published again (resuming the rest), not edited.
 //	@Description	The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
 //	@Description	as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
 //	@Description	`typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
@@ -420,6 +425,18 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	if a.refusePaymentLocked(w, oid) || a.refuseOrgAddOnsAfterPayment(w, vp, req.AddOns) {
 		return
 	}
+	// a partially published draft (an earlier publish mined some elections before failing) is not
+	// editable: replacing its questions would erase their on-chain ids and orphan the mined
+	// elections. Publishing again resumes the remaining questions instead.
+	storedQuestions, err := a.db.QuestionsByProcess(oid)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if anyMined(storedQuestions) {
+		errors.ErrProcessPartiallyPublished.Write(w)
+		return
+	}
 	if len(req.Questions) == 0 || len(req.Questions) > db.MaxQuestionsPerProcess {
 		errors.ErrMalformedBody.Withf("questions must be between 1 and %d", db.MaxQuestionsPerProcess).Write(w)
 		return
@@ -466,6 +483,7 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	// that went live *after* that guard read is a different matter — the write's own precondition
 	// refuses it rather than replacing it away.
 	vp.Publishing = time.Time{}
+	vp.PublishingOwner = ""
 	if err := a.db.SetVotingProcessDraft(vp, seen); err != nil {
 		_ = a.db.DelCensus(census.ID.Hex())
 		if stderrors.Is(err, db.ErrConflict) {
@@ -542,10 +560,10 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// resolve the vote encryption keys of encrypted questions (so clients can seal encrypted ballots)
 	// and the live on-chain tally of each published question (finalResults marks final), concurrently:
 	// each needs a Vochain round-trip, so bounded pools keep this read fast for a many-question process.
-	a.resolveQuestionEncryptionKeysBatch(questions)
+	a.resolveQuestionEncryptionKeysBatch(r.Context(), questions)
 	// memos (free-text voter input on open-value choices) are manager-only, so they are resolved into
 	// the results only for a manager/admin caller — never for the public view.
-	a.resolveQuestionResultsBatch(questions, isManager)
+	a.resolveQuestionResultsBatch(r.Context(), questions, isManager)
 	// a draft written before the two ballot halves were reconciled is served reconciled, so the
 	// body a client echoes back is one authoring still accepts.
 	reconcileDraftQuestionShapes(questions)
@@ -830,11 +848,11 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 	// made directly on-chain (outside this API) is picked up.
 	a.enqueueReconcileIfStale(question)
 	// resolve the vote encryption keys so voters can seal an encrypted ballot for this question.
-	question.EncryptionKeys = a.resolveQuestionEncryptionKeys(question)
+	question.EncryptionKeys = a.resolveQuestionEncryptionKeys(r.Context(), question)
 	// surface the live on-chain tally for a published question; memos (manager-only) are included only
 	// when the caller is a manager/admin of the owning org.
 	isManager := a.optionalManager(r, vp.OrgAddress)
-	question.Results = a.resolveQuestionResults(question, isManager)
+	question.Results = a.resolveQuestionResults(r.Context(), question, isManager)
 	resp := apicommon.PublicQuestionResponseFromDB(question, census)
 	// the eligibility subset names who may vote: only a manager/admin of the owning org sees it
 	if isManager {
@@ -861,11 +879,31 @@ func parallelForEach(n int, fn func(i int)) {
 	wg.Wait()
 }
 
+// parallelForEachCtx is parallelForEach for request-scoped work: it stops scheduling new iterations
+// once ctx is cancelled (already-started ones finish), so an abandoned request stops fanning out
+// chain reads.
+func parallelForEachCtx(ctx context.Context, n int, fn func(i int)) {
+	const workers = 8
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	for i := range n {
+		if ctx.Err() != nil {
+			break
+		}
+		sem <- struct{}{}
+		wg.Go(func() {
+			defer func() { <-sem }()
+			fn(i)
+		})
+	}
+	wg.Wait()
+}
+
 // resolveQuestionEncryptionKeysBatch resolves the vote encryption keys of every question concurrently
 // (bounded), setting q.EncryptionKeys in place. Gated/cached questions return immediately (no chain call).
-func (a *API) resolveQuestionEncryptionKeysBatch(questions []db.VotingProcessQuestion) {
-	parallelForEach(len(questions), func(i int) {
-		questions[i].EncryptionKeys = a.resolveQuestionEncryptionKeys(&questions[i])
+func (a *API) resolveQuestionEncryptionKeysBatch(ctx context.Context, questions []db.VotingProcessQuestion) {
+	parallelForEachCtx(ctx, len(questions), func(i int) {
+		questions[i].EncryptionKeys = a.resolveQuestionEncryptionKeys(ctx, &questions[i])
 	})
 }
 
@@ -875,7 +913,7 @@ func (a *API) resolveQuestionEncryptionKeysBatch(questions []db.VotingProcessQue
 // and serves cached keys without a chain round-trip. The result is cached only when non-empty:
 // between an election's creation and the keykeepers publishing its keys the node returns an empty
 // set, and a later read must still resolve them (mirror of resolveProcessEncryptionKeys).
-func (a *API) resolveQuestionEncryptionKeys(q *db.VotingProcessQuestion) []db.EncryptionKey {
+func (a *API) resolveQuestionEncryptionKeys(ctx context.Context, q *db.VotingProcessQuestion) []db.EncryptionKey {
 	// gate: only encrypted questions have encryption keys; keeps every other question chain-free.
 	if !q.SecretUntilTheEnd {
 		return nil
@@ -888,6 +926,12 @@ func (a *API) resolveQuestionEncryptionKeys(q *db.VotingProcessQuestion) []db.En
 	if len(q.EncryptionKeys) > 0 {
 		return q.EncryptionKeys
 	}
+	// a chain read: take a service-wide slot so bursts queue instead of swamping the node, and give
+	// up (nil, best-effort like every other failure here) if the request is cancelled meanwhile.
+	if !a.electionReads.acquireSlot(ctx) {
+		return nil
+	}
+	defer a.electionReads.releaseSlot()
 	keys, err := a.account.ElectionEncryptionKeys(q.UpstreamID)
 	if err != nil {
 		log.Warnw("encryption keys: election keys fetch failed",
@@ -962,11 +1006,17 @@ func questionResultsFromElection(e *dvoteapi.Election) db.QuestionResults {
 // ponytail: ElectionMemos is an N+1 over the election's votes (page the list + a per-memo-vote fetch to
 // correlate the memo to a choice). Bounded to manager reads of open-value questions; add a short-TTL
 // cache if a manager polls a large open-value election hard.
-func (a *API) resolveQuestionMemos(q *db.VotingProcessQuestion) []string {
+func (a *API) resolveQuestionMemos(ctx context.Context, q *db.VotingProcessQuestion) []string {
 	selectsOpen := account.OpenChoiceMatcher(q.Type, q.Choices)
 	if selectsOpen == nil || len(q.UpstreamID) == 0 {
 		return nil
 	}
+	// the memos take one chain read per vote: hold a service-wide read slot for them, and give up
+	// (nil, like any other failure here) if the request is cancelled while waiting for one
+	if !a.electionReads.acquireSlot(ctx) {
+		return nil
+	}
+	defer a.electionReads.releaseSlot()
 	memos, err := a.account.ElectionMemos(q.UpstreamID, selectsOpen)
 	if err != nil {
 		log.Warnw("results: memos fetch failed",
@@ -982,16 +1032,17 @@ func (a *API) resolveQuestionMemos(q *db.VotingProcessQuestion) []string {
 // returns empty results until the keys are revealed (the node hides the tally, not this gate). When
 // withMemos is set (a manager/admin caller), the open-value question's voter memos are included too.
 //
-// ponytail: not cached, so a live read hits the chain per poll (one Election call per published
-// question); add a short-TTL cache if this read gets hot — /results already does the same per poll.
+// Election reads go through a.electionReads: concurrent polls of the same election share one chain
+// round-trip and a short-TTL cache (longer once the election is finished), and the service-wide
+// slot pool bounds how many chain reads can be in flight at once.
 //
 //nolint:revive // withMemos gates the manager-only memo fetch; a bool keeps the three resolvers uniform
-func (a *API) resolveQuestionResults(q *db.VotingProcessQuestion, withMemos bool) *db.QuestionResults {
+func (a *API) resolveQuestionResults(ctx context.Context, q *db.VotingProcessQuestion, withMemos bool) *db.QuestionResults {
 	// nothing on chain yet (draft) — no results.
 	if len(q.UpstreamID) == 0 {
 		return nil
 	}
-	election, err := a.account.Election(q.UpstreamID)
+	election, err := a.electionReads.election(ctx, q.UpstreamID)
 	if err != nil {
 		log.Warnw("results: election fetch failed",
 			"question", q.ID.Hex(), "upstreamId", q.UpstreamID.String(), "error", err)
@@ -1011,7 +1062,7 @@ func (a *API) resolveQuestionResults(q *db.VotingProcessQuestion, withMemos bool
 	}
 	qr := questionResultsFromElection(election)
 	if withMemos {
-		qr.Memos = a.resolveQuestionMemos(q)
+		qr.Memos = a.resolveQuestionMemos(ctx, q)
 	}
 	return &qr
 }
@@ -1019,9 +1070,9 @@ func (a *API) resolveQuestionResults(q *db.VotingProcessQuestion, withMemos bool
 // resolveQuestionResultsBatch resolves the on-chain tally of every published question concurrently
 // (bounded), setting q.Results in place. Draft questions short-circuit to nil without a chain call.
 // withMemos (a manager/admin caller) additionally includes each open-value question's voter memos.
-func (a *API) resolveQuestionResultsBatch(questions []db.VotingProcessQuestion, withMemos bool) {
-	parallelForEach(len(questions), func(i int) {
-		questions[i].Results = a.resolveQuestionResults(&questions[i], withMemos)
+func (a *API) resolveQuestionResultsBatch(ctx context.Context, questions []db.VotingProcessQuestion, withMemos bool) {
+	parallelForEachCtx(ctx, len(questions), func(i int) {
+		questions[i].Results = a.resolveQuestionResults(ctx, &questions[i], withMemos)
 	})
 }
 
@@ -1034,23 +1085,23 @@ func (a *API) resolveQuestionResultsBatch(questions []db.VotingProcessQuestion, 
 //
 //nolint:revive // withMemos gates the manager-only memo fetch; a bool keeps the three resolvers uniform
 func (a *API) electionResultsBatch(
-	questions []db.VotingProcessQuestion, withMemos bool,
+	ctx context.Context, questions []db.VotingProcessQuestion, withMemos bool,
 ) ([]apicommon.VotingProcessQuestionResults, error) {
 	entries := make([]*apicommon.VotingProcessQuestionResults, len(questions))
 	errs := make([]error, len(questions))
-	parallelForEach(len(questions), func(i int) {
+	parallelForEachCtx(ctx, len(questions), func(i int) {
 		q := &questions[i]
 		if len(q.UpstreamID) == 0 {
 			return // question not yet on chain
 		}
-		election, err := a.account.Election(q.UpstreamID)
+		election, err := a.electionReads.election(ctx, q.UpstreamID)
 		if err != nil {
 			errs[i] = fmt.Errorf("question %s: %w", q.ID.Hex(), err)
 			return
 		}
 		qr := questionResultsFromElection(election)
 		if withMemos {
-			qr.Memos = a.resolveQuestionMemos(q)
+			qr.Memos = a.resolveQuestionMemos(ctx, q)
 		}
 		entries[i] = &apicommon.VotingProcessQuestionResults{
 			QuestionID:      q.ID.Hex(),
@@ -1058,6 +1109,11 @@ func (a *API) electionResultsBatch(
 			QuestionResults: qr,
 		}
 	})
+	// a cancelled request (client gone, or the router timeout) stops scheduling questions, and the
+	// ones never scheduled have neither an entry nor an error: report it rather than a partial set
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("results read abandoned: %w", err)
+	}
 	var out []apicommon.VotingProcessQuestionResults
 	for i := range questions {
 		if errs[i] != nil {
@@ -1157,7 +1213,7 @@ func (a *API) votingProcessResultsHandler(w http.ResponseWriter, r *http.Request
 	// fetch every published question's tally concurrently (bounded); all-or-error so this endpoint
 	// never emits a partial tally set (a transient chain error on one question fails the response).
 	// memos (manager-only) are folded in only for a manager/admin caller.
-	entries, err := a.electionResultsBatch(questions, a.optionalManager(r, vp.OrgAddress))
+	entries, err := a.electionResultsBatch(r.Context(), questions, a.optionalManager(r, vp.OrgAddress))
 	if err != nil {
 		errors.ErrVochainRequestFailed.WithErr(err).Write(w)
 		return

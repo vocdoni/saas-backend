@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -160,7 +161,7 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 	// refresh below and that write would release the add-on claims of the session it stores; a
 	// delete would drop the draft and leave a payable payment behind for a process that is gone.
 	// Winning the claim proves the draft is still an unpublished draft, so it is re-read under it.
-	claimed, err := a.db.ClaimVotingProcessForPublish(oid)
+	owner, claimed, err := a.db.ClaimVotingProcessForPublish(oid, time.Time{})
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
@@ -170,7 +171,7 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	defer func() {
-		if e := a.db.ClearVotingProcessPublishing(oid); e != nil {
+		if e := a.db.ClearVotingProcessPublishing(oid, owner); e != nil {
 			log.Warnw("could not release the checkout's claim on a draft", "processId", oid.Hex(), "error", e)
 		}
 	}()
@@ -447,7 +448,7 @@ func (a *API) cancelProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 	case db.ProcessPaymentPending:
 		// cancel takes the claim checkout takes, so a checkout of this draft cannot store a new
 		// session — and take the add-on claims for it — between the reads below and the release
-		claimed, err := a.db.ClaimVotingProcessForPublish(oid)
+		owner, claimed, err := a.db.ClaimVotingProcessForPublish(oid, time.Time{})
 		if err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
@@ -457,7 +458,7 @@ func (a *API) cancelProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		defer func() {
-			if e := a.db.ClearVotingProcessPublishing(oid); e != nil {
+			if e := a.db.ClearVotingProcessPublishing(oid, owner); e != nil {
 				log.Warnw("could not release the cancel's claim on a draft", "processId", oid.Hex(), "error", e)
 			}
 		}()

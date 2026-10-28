@@ -11,7 +11,7 @@ import (
 )
 
 func init() {
-	AddMigration(26, "payg_billing", upPaygBilling, downPaygBilling)
+	AddMigration(34, "payg_billing", upPaygBilling, downPaygBilling)
 }
 
 // upPaygBilling creates processPayments (keyed by process id), wallets (keyed by org) and

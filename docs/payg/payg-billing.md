@@ -198,14 +198,15 @@ would only bury the events that can still succeed.
 
 ## Integrator wallet (managed organizations)
 
-An integrator is an organization flagged `integrator` (`cmd/cli --setIntegrator`, or opted in at
-creation). It manages any number of organizations and has no quota of its own: the only limit on
+An integrator is an organization flagged `integrator`, opted in at creation
+(`POST /organizations` with `integrator: true`). It manages any number of organizations and has no quota of its own: the only limit on
 what it spends is its wallet balance. Its own organization holds no processes (403, 40174); to
 run its own votes it creates a managed organization of itself.
 
-The migration that introduced the flag also flagged organizations on an active non-default
+The migration that introduced the flag (0035) also flagged organizations on an active non-default
 integrator plan. Subscribing to an integrator plan in Stripe no longer grants integrator status:
-an operator runs `cmd/cli --setIntegrator`, or the organization is created with `integrator: true`.
+the organization has to be created with `integrator: true`. There is no command to flag an
+existing organization later.
 
 Integrators publish on behalf of managed organizations, so the payer is not present at
 publish time. Each integrator holds a prepaid **EUR balance** (money, not resource
@@ -418,9 +419,9 @@ process metadata (a subscription's) is ignored.
 | 40177 | 409 | a payment is already processing or completed, or a session is completing |
 | 40178 | 402 | census growth beyond the paid price (`ProcessCensusGrowthQuote` in data) |
 | 40174 | 403 | an integrator's own organization cannot own processes |
-| 40179 | 400 | the organization already has 5 admins/managers (pending invitations included) |
+| 40182 | 400 | the organization already has 5 admins/managers (pending invitations included) |
 
-## Storage summary (migration 0026)
+## Storage summary (migration 0034)
 
 - `processPayments` — one document per process payment (`_id` = process id).
 - `wallets` — one document per integrator (`_id` = org address).
