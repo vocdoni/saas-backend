@@ -19,6 +19,8 @@ linters:
       rules:
       - name: line-length-limit # lll is already run by golangci-lint
         disabled: true
+      - name: multiline-if-init # new in golangci-lint v2.13; the codebase wraps long calls inside if-init on purpose
+        disabled: true
       - name: unnecessary-format # we prefer fmt.Errorf rather than errors.New
         disabled: true
       - name: unhandled-error # ignore errors from stdout printing and in-memory writers (which never fail)
