@@ -185,6 +185,9 @@ func (ms *MongoStorage) eraseOrgData(address common.Address) error {
 	if _, err := ms.DeleteJobsByOrg(address); err != nil {
 		errs = append(errs, fmt.Errorf("deleting jobs: %w", err))
 	}
+	if _, err := ms.DeleteMeteredVotesByOrg(address); err != nil {
+		errs = append(errs, fmt.Errorf("deleting metered votes: %w", err))
+	}
 	if _, err := ms.DeleteInvitationsByOrg(address); err != nil {
 		errs = append(errs, fmt.Errorf("deleting invitations: %w", err))
 	}

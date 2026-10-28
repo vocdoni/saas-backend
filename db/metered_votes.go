@@ -41,10 +41,25 @@ func (ms *MongoStorage) MeterRelayedVote(org common.Address, nullifier internal.
 		return false, nil // metered before
 	}
 	if err := ms.IncrementOrganizationSentVotesCounter(org); err != nil {
-		if _, delErr := ms.meteredVotes.DeleteOne(ctx, bson.M{"_id": nullifier}); delErr != nil {
+		// a fresh context: the increment may have failed on a deadline the upsert's ctx shares
+		undoCtx, undoCancel := context.WithTimeout(context.Background(), defaultTimeout)
+		defer undoCancel()
+		if _, delErr := ms.meteredVotes.DeleteOne(undoCtx, bson.M{"_id": nullifier}); delErr != nil {
 			log.Warnw("could not undo metered vote record", "nullifier", nullifier.String(), "error", delErr)
 		}
 		return false, fmt.Errorf("could not increment sent votes counter: %w", err)
 	}
 	return true, nil
+}
+
+// DeleteMeteredVotesByOrg removes the metered-vote records of an organization, as part of tearing
+// it down. It returns how many were deleted.
+func (ms *MongoStorage) DeleteMeteredVotesByOrg(orgAddress common.Address) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
+	defer cancel()
+	res, err := ms.meteredVotes.DeleteMany(ctx, bson.M{"orgAddress": orgAddress})
+	if err != nil {
+		return 0, fmt.Errorf("could not delete metered votes: %w", err)
+	}
+	return res.DeletedCount, nil
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
 )
@@ -55,4 +56,26 @@ func TestMeterRelayedVote(t *testing.T) {
 	}
 	c.Assert(meteredCount, qt.Equals, 1)
 	c.Assert(sentVotes(), qt.Equals, 2)
+}
+
+func TestDeleteMeteredVotesByOrg(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	other := common.Address{0x77}
+	for _, addr := range []common.Address{testOrgAddress, other} {
+		c.Assert(testDB.SetOrganization(&Organization{Address: addr, CreatedAt: time.Now()}), qt.IsNil)
+	}
+	for i, addr := range []common.Address{testOrgAddress, testOrgAddress, other} {
+		_, err := testDB.MeterRelayedVote(addr, internal.HexBytes{byte(i + 1)})
+		c.Assert(err, qt.IsNil)
+	}
+
+	deleted, err := testDB.DeleteMeteredVotesByOrg(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(deleted, qt.Equals, int64(2))
+	// the other organization's records stay: its vote is still metered once
+	metered, err := testDB.MeterRelayedVote(other, internal.HexBytes{3})
+	c.Assert(err, qt.IsNil)
+	c.Assert(metered, qt.IsFalse)
 }
