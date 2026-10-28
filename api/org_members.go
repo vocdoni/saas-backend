@@ -186,8 +186,9 @@ func memberHashCount(members []apicommon.OrgMember) int {
 // addOrganizationMembersHandler godoc
 //
 //	@Summary		Add members to an organization
-//	@Description	Add multiple members to an organization. Requires Manager/Admin role and is subject to the
-//	@Description	plan's member quota. With `async=true` the import runs in the background and the response
+//	@Description	Add multiple members to an organization. Requires Manager/Admin role; the organization's
+//	@Description	memberbase is capped at 50 000 members (40145).
+//	@Description	With `async=true` the import runs in the background and the response
 //	@Description	carries a `jobId` to poll via GET /jobs/{jobId}; otherwise it
 //	@Description	completes synchronously. A synchronous import whose members carry more than 150 phones and
 //	@Description	passwords in total (each one is an expensive hash) runs as if `async=true` had been sent: the
@@ -205,7 +206,7 @@ func memberHashCount(members []apicommon.OrgMember) int {
 //	@Success		200			{object}	apicommon.AddMembersResponse	"Added count (sync) or jobId (async)"
 //	@Failure		400			{object}	errors.Error					"Invalid input data"
 //	@Failure		401			{object}	errors.Error					"Unauthorized"
-//	@Failure		403			{object}	errors.Error					"Plan member quota exceeded"
+//	@Failure		403			{object}	errors.Error					"Organization members limit exceeded"
 //	@Failure		500			{object}	errors.Error					"Internal server error"
 //	@Router			/organizations/{orgAddress}/members [post]
 func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Request) {
@@ -415,9 +416,9 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 	// A new member joins the auto "All members" group, so it joins the censuses built from it.
 	// Quota and signer are checked first: an over-quota request must not create the member either.
 	//
-	// Only a creation grows a census, so only a creation is preflighted. Checking unconditionally
-	// would refuse every edit of an existing member once the census sits at the plan limit — the
-	// quota is on census size, and an edit does not change it. An id that names no member of this
+	// Only a creation grows the memberbase and a census, so only a creation is preflighted.
+	// Checking unconditionally would refuse every edit of an existing member once the
+	// organization sits at its limit, and an edit does not change its size. An id that names no member of this
 	// organization counts as a creation, which is what the upsert will do with it.
 	//
 	// This read and the upsert are not atomic, and the upsert decides `created` from its own read

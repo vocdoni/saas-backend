@@ -262,10 +262,9 @@ type OrganizationInfo struct {
 	// Description is a shorthand for meta["description"]. Same encoding rules as Name.
 	Description *MultilingualText `json:"description,omitempty"`
 
-	// Whether to subscribe the new organization to the free integrator plan at
-	// creation time (opt-in). Used by the integrator portal so a newly created org
-	// becomes an integrator on the free tier with no checkout. Default false uses
-	// the regular default plan.
+	// Whether the new organization is an integrator (opt-in, used by the integrator
+	// portal): it may create managed organizations and pay for their processes from
+	// its wallet.
 	Integrator bool `json:"integrator,omitempty"`
 }
 
@@ -302,9 +301,8 @@ type UserOrganization struct {
 	// Organization information
 	Organization *OrganizationInfo `json:"organization"`
 
-	// Whether this organization is enabled as an integrator. Computed from the
-	// organization's integrator limits / active plan (see Subscriptions.IsIntegrator),
-	// not stored. Populated by GET /users/me; omitted when false.
+	// Whether this organization is enabled as an integrator (see
+	// Subscriptions.IsIntegrator). Populated by GET /users/me; omitted when false.
 	IsIntegrator bool `json:"isIntegrator,omitempty"`
 }
 
@@ -661,40 +659,20 @@ type DeleteManagedOrganizationResponse struct {
 	Address string `json:"address"`
 }
 
-// IntegratorUsage holds an integrator's current managed-resource usage counters. SentVotes/
-// SentSMS/SentEmails are the shared-pool totals summed across the integrator's managed orgs.
+// IntegratorUsage holds an integrator's usage summed across its managed organizations: how
+// many it manages, and the votes relayed and 2FA SMS/emails sent by them.
 type IntegratorUsage struct {
-	ManagedOrgs      int `json:"managedOrgs"`
-	ManagedProcesses int `json:"managedProcesses"`
-	SentVotes        int `json:"sentVotes"`
-	SentSMS          int `json:"sentSMS"`
-	SentEmails       int `json:"sentEmails"`
+	ManagedOrgs int `json:"managedOrgs"`
+	SentVotes   int `json:"sentVotes"`
+	SentSMS     int `json:"sentSMS"`
+	SentEmails  int `json:"sentEmails"`
 }
 
-// IntegratorLimits holds an integrator's effective caps for the dashboard. MaxManagedOrgs is
-// the effective integrator limit; the rest are the integrator's subscription-plan caps for the
-// pools shared across its managed orgs.
-//
-// Zero is not uniformly "unlimited". Only MaxVotes treats 0 as unlimited (vote enforcement is
-// skipped when the plan's MaxVotes is 0). MaxManagedProcesses, MaxSMS and MaxEmails are hard
-// caps where 0 means no allowance. Separately, the plan-sourced fields (everything except
-// MaxManagedOrgs, which always comes from the effective integrator limit) are left at 0 when an
-// override-enabled integrator has no subscription plan to source caps from — an "unknown" the
-// dashboard should treat distinctly from a real 0 cap.
-type IntegratorLimits struct {
-	MaxManagedOrgs      int `json:"maxManagedOrgs"`
-	MaxManagedProcesses int `json:"maxManagedProcesses"`
-	MaxVotes            int `json:"maxVotes"`
-	MaxSMS              int `json:"maxSMS"`
-	MaxEmails           int `json:"maxEmails"`
-}
-
-// IntegratorInfoResponse is returned by the path-less GET /integrator.
-// Limits is only present when Enabled is true.
+// IntegratorInfoResponse is returned by the path-less GET /integrator. An integrator has no
+// limits: what it spends is bounded by its wallet balance (GET /wallet).
 type IntegratorInfoResponse struct {
-	Enabled bool              `json:"enabled"`
-	Limits  *IntegratorLimits `json:"limits,omitempty"`
-	Usage   IntegratorUsage   `json:"usage"`
+	Enabled bool            `json:"enabled"`
+	Usage   IntegratorUsage `json:"usage"`
 }
 
 // OrganizationSubscriptionInfo provides detailed information about an organization's subscription.
@@ -743,9 +721,6 @@ type SubscriptionPlan struct {
 
 	// Features available in this plan
 	Features SubscriptionFeatures `json:"features"`
-
-	// Integrator limits for this plan (zero when the plan is not an integrator plan)
-	IntegratorLimits SubscriptionIntegratorLimits `json:"integratorLimits"`
 }
 
 // SubscriptionPlanFromDB converts a db.Plan to a SubscriptionPlan.
@@ -764,7 +739,6 @@ func SubscriptionPlanFromDB(plan *db.Plan) SubscriptionPlan {
 		Organization:         SubscriptionPlanLimits(plan.Organization),
 		VotingTypes:          SubscriptionVotingTypes(plan.VotingTypes),
 		Features:             SubscriptionFeatures(plan.Features),
-		IntegratorLimits:     SubscriptionIntegratorLimits(plan.IntegratorLimits),
 	}
 }
 
@@ -798,17 +772,6 @@ type SubscriptionPlanLimits struct {
 
 	// Whether this is a custom plan
 	CustomPlan bool `json:"customPlan"`
-}
-
-// SubscriptionIntegratorLimits represents the integrator limits of a subscription plan.
-// It is the mirror struct of db.IntegratorLimits. All-zero means the plan is not an
-// integrator plan.
-// swagger:model SubscriptionIntegratorLimits
-type SubscriptionIntegratorLimits struct {
-	// Maximum number of organizations the integrator may manage. The aggregate
-	// process and census-size caps across managed orgs come from the plan's
-	// top-level limits (maxProcesses / maxCensus).
-	MaxManagedOrgs int `json:"maxManagedOrgs"`
 }
 
 // SubscriptionVotingTypes represents the voting types available in a subscription plan.

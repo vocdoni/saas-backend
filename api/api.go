@@ -170,10 +170,14 @@ type API struct {
 	stripeHandlers  *StripeHandlers
 	// orgTxQueue runs organization-initiated txs (publish, status, census resize);
 	// relayTxQueue runs public vote relays. Separate so neither class starves the other.
-	orgTxQueue    *txQueue
-	relayTxQueue  *txQueue
-	orgTxLocks    *orgTxMutex
-	heldTxJobs    *heldTxJobs
+	orgTxQueue   *txQueue
+	relayTxQueue *txQueue
+	orgTxLocks   *orgTxMutex
+	heldTxJobs   *heldTxJobs
+	// writerLocks makes the write-seat cap check (OrgCanAddWriter) and the invitation or role
+	// write it allows one step per organization, so parallel invites cannot pass the same check.
+	// ponytail: in-memory, like orgTxLocks — one API instance; a DB-side conditional write if that changes
+	writerLocks   *orgTxMutex
 	otpExpiry     time.Duration
 	otpCooldown   time.Duration
 	notifySync    bool
@@ -187,6 +191,10 @@ type API struct {
 	electionReads *electionReads
 	// voteOnChain tells whether a vote is on chain (see Config.VoteOnChainLookup).
 	voteOnChain handlers.VoteOnChainLookup
+	// draftLocks makes the draft cap check (OrgCanCreateVotingProcessDraft) and the draft write it
+	// allows one step per organization, so parallel creations cannot pass the same count.
+	// ponytail: in-memory, like orgTxLocks — one API instance; a DB-side conditional write if that changes
+	draftLocks *orgTxMutex
 }
 
 // enqueueConfirm asks the status syncer to confirm a status change landed on-chain; a no-op when
@@ -278,6 +286,7 @@ func New(ctx context.Context, conf *Config) *API {
 		oauthServiceURL:       conf.OAuthServiceURL,
 		originSecret:          conf.OriginSecret,
 		orgTxLocks:            newOrgTxMutex(),
+		writerLocks:           newOrgTxMutex(),
 		otpExpiry:             otpExpiry,
 		otpCooldown:           otpCooldown,
 		notifySync:            conf.NotificationsSyncDelivery,
@@ -285,6 +294,7 @@ func New(ctx context.Context, conf *Config) *API {
 		electionCache:         electionCache,
 		liveElectionCache:     liveElectionCache,
 		legacyProjectionCache: legacyProjectionCache,
+		draftLocks:            newOrgTxMutex(),
 	}
 	a.electionReads = newElectionReads(func(id internal.HexBytes) (*dvoteapi.Election, error) {
 		return a.account.Election(id)

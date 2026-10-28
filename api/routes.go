@@ -99,7 +99,7 @@ const (
 	organizationGroupEndpoint = "/organizations/{orgAddress}/groups/{groupId}"
 	// GET /organizations/{orgAddress}/groups/{groupId}/members to get the members of an organization member group
 	organizationGroupMembersEndpoint = "/organizations/{orgAddress}/groups/{groupId}/members"
-	// GET /integrator to get integrator quota and usage for the caller's own integrator org.
+	// GET /integrator to get integrator status and usage for the caller's own integrator org.
 	// Path-less: the integrator org is resolved from the API key (its org) or the user session.
 	integratorEndpoint = "/integrator"
 	// POST /integrator/organizations to create a managed org; GET to list them, for the caller's

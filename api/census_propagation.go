@@ -24,7 +24,7 @@ type censusPropagation struct {
 // ordered so that a failure can only ever degrade in one direction:
 //
 //  1. resolve the target censuses     (read-only)
-//  2. plan quota, per census          (read-only) — a refusal here means zero writes
+//  2. census growth limits           (read-only) — none since plan quotas were removed
 //  3. chain signer preflight          (read-only) — a failure here means zero writes
 //  4. the memberbase write            (done by the caller, before calling this)
 //  5. participants + census size      (additive and idempotent)
@@ -96,30 +96,16 @@ func (a *API) propagateMembersToCensuses(
 }
 
 // preflightCensusGrowth runs the read-only checks that must pass before the memberbase write:
-// the plan's census quota for each target census, and restoring the organization's chain signer.
-// Both are refusals that have to leave the memberbase and the censuses untouched, so an over-quota
-// request changes nothing at all.
+// restoring the organization's chain signer, a refusal that has to leave the memberbase and the
+// censuses untouched.
 //
 // The signer is not returned: enqueueSetProcessCensus restores its own. This only proves it can be.
 //
-// The quota is a soft limit. Counting participants is a read, so concurrent requests can each pass
-// against the same count and overshoot it by up to the number in flight. Making it hard would take
-// the check inside the locked write path, which would put a subscriptions dependency in the db
-// layer; the overshoot is small, bounded, and refused on the next request.
-//
-// count is an upper bound on the growth, not the growth itself: adding a member who is already a
-// census participant is a no-op, and callers that cannot cheaply tell (the bulk import, which
-// learns what was net-new only from the insert) pass the submitted count. Erring toward refusal is
-// the safe direction for a quota. Callers that already hold the current membership pass the net-new
-// count instead — see the group update.
+// count is an upper bound on the growth, not the growth itself: callers that cannot cheaply tell
+// what is net-new pass the submitted count, and nothing to add means nothing to check.
 func (a *API) preflightCensusGrowth(org *db.Organization, censusIDs []string, count int) error {
 	if len(censusIDs) == 0 || count == 0 {
 		return nil
-	}
-	for _, censusID := range censusIDs {
-		if err := a.subscriptions.OrgCanAddCensusParticipants(org.Address, censusID, count); err != nil {
-			return err
-		}
 	}
 	if _, err := account.OrganizationSigner(a.secret, org.SignerSeedValue(), org.Nonce); err != nil {
 		return fmt.Errorf("could not restore organization signer: %w", err)

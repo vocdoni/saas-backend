@@ -373,7 +373,7 @@ func TestProcessCSPSignBatch(t *testing.T) {
 	requestAndAssertError(errors.ErrVoteBatchTooLarge, t, http.MethodPost, "",
 		&handlers.SignBatchRequest{
 			AuthToken: tok1,
-			Ballots:   make([]handlers.SignBatchBallot, db.MaxQuestionsPerProcess+1),
+			Ballots:   make([]handlers.SignBatchBallot, db.MaxBallotsPerBatch+1),
 		},
 		"processes", pid, "sign-batch")
 	// a ballot without an address is rejected, and takes the batch with it

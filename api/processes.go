@@ -17,6 +17,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/log"
@@ -79,6 +80,7 @@ func parseProcessDates(req *apicommon.CreateVotingProcessRequest) (start, end ti
 //	@Failure		400		{object}	errors.Error
 //	@Failure		401		{object}	errors.Error
 //	@Failure		403		{object}	errors.Error
+//	@Failure		503		{object}	errors.Error	"Busy (50302), retry after Retry-After"
 //	@Router			/processes [post]
 func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
 	req := &apicommon.CreateVotingProcessRequest{}
@@ -107,6 +109,14 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrMalformedBody.Withf("questions must be between 1 and %d", db.MaxQuestionsPerProcess).Write(w)
 		return
 	}
+	// the draft cap is counted and the draft written under the organization's draft lock, held
+	// until the draft and its questions are stored, so parallel creations cannot pass one count
+	draftLock, err := a.draftLocks.lockOrBusy(r.Context(), orgAddr)
+	if err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+	defer draftLock.Unlock()
 	if err := a.subscriptions.OrgCanCreateVotingProcessDraft(orgAddr); err != nil {
 		writeSubscriptionError(w, err)
 		return
@@ -114,6 +124,11 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	start, end, err := parseProcessDates(req)
 	if err != nil {
 		errors.ErrMalformedBody.WithErr(err).Write(w)
+		return
+	}
+	// a draft that runs longer than publish allows could never be published
+	if err := subscriptions.DraftDurationAllowed(start, end); err != nil {
+		writeSubscriptionError(w, err)
 		return
 	}
 	initialStatus, err := account.NormalizeInitialStatus(req.InitialStatus)
@@ -436,6 +451,11 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	start, end, err := parseProcessDates(req)
 	if err != nil {
 		errors.ErrMalformedBody.WithErr(err).Write(w)
+		return
+	}
+	// a draft that runs longer than publish allows could never be published
+	if err := subscriptions.DraftDurationAllowed(start, end); err != nil {
+		writeSubscriptionError(w, err)
 		return
 	}
 	// a draft update re-resolves the census into a fresh unpublished db.Census; the previous
@@ -769,7 +789,7 @@ func (a *API) validateVotingProcessHandler(w http.ResponseWriter, r *http.Reques
 	census, _ := a.db.Census(vp.CensusID.Hex())
 	// the dry-run reports every problem the same way: a mismatched question set is just one more
 	// entry in errors, so the mismatch flag publish acts on is irrelevant here.
-	problems, _ := a.publishPreflightProblems(publishTarget{vp: vp, questions: questions, census: census, user: user})
+	problems, _, _ := a.publishPreflightProblems(publishTarget{vp: vp, questions: questions, census: census, user: user})
 	apicommon.HTTPWriteJSON(w, &apicommon.VotingProcessValidateResponse{
 		Valid:  len(problems) == 0,
 		Errors: problems,
@@ -1296,7 +1316,8 @@ func questionSetProblem(vp *db.VotingProcess, questions []db.VotingProcessQuesti
 
 // writeSubscriptionError writes a typed API error verbatim, falling back to 500.
 func writeSubscriptionError(w http.ResponseWriter, err error) {
-	if apiErr, ok := err.(errors.Error); ok {
+	var apiErr errors.Error
+	if errors.As(err, &apiErr) {
 		apiErr.Write(w)
 		return
 	}

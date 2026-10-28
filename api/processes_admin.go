@@ -301,7 +301,7 @@ func (a *API) resolveVoteStatuses(ctx context.Context, rows []db.CSPProcess) (ma
 //	@Description	and raise each affected on-chain election's maxCensusSize so the new members can vote. Members are
 //	@Description	added synchronously; the maxCensusSize update runs as an async job (poll GET /jobs/{jobId}).
 //	@Description	Questions with an eligibility subset keep their fixed size and are unaffected. Requires
-//	@Description	Manager/Admin role and is subject to the plan's census quota.
+//	@Description	Manager/Admin role.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -344,11 +344,6 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 	}
 	if len(req.MemberIDs) == 0 {
 		apicommon.HTTPWriteJSON(w, &apicommon.UpdateProcessCensusResponse{Added: 0})
-		return
-	}
-
-	if err := a.subscriptions.OrgCanAddCensusParticipants(census.OrgAddress, census.ID.Hex(), len(req.MemberIDs)); err != nil {
-		writeSubscriptionError(w, err)
 		return
 	}
 

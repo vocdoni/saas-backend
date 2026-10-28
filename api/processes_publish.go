@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -99,14 +98,18 @@ type publishTarget struct {
 
 // publishPreflightProblems returns every reason a process would fail to publish that can be
 // determined synchronously (without building/funding a tx or touching the chain): the structural
-// checks, plus the plan/quota/permission denials that would otherwise only surface asynchronously
+// checks, plus the role/duration/integrator denials that would otherwise only surface asynchronously
 // as an opaque job failure. It is shared by GET .../check (reported as {valid,errors}) and by
 // publish (enforced before enqueueing). Funding and chain submission stay async.
 //
 // questionsMismatch singles out the one problem that is not the caller's request but the server's
 // own data state — a stored question set that does not match the process. Publish answers that with
 // a 409 rather than a 400; the dry-run ignores the flag and just reports the problem.
-func (a *API) publishPreflightProblems(t publishTarget) (problems []string, questionsMismatch bool) {
+//
+// denied is the organization's typed refusal (OrgCanPublishProcess: the integrator's own org,
+// 40174, or the 90-day duration cap), also listed in problems. Publish answers it as that error,
+// as draft creation does, rather than folding it into a 400.
+func (a *API) publishPreflightProblems(t publishTarget) (problems []string, questionsMismatch bool, denied error) {
 	vp, questions, census, user := t.vp, t.questions, t.census, t.user
 	problems = validateVotingProcessForPublish(vp, questions, census)
 	if p := questionSetProblem(vp, questions); p != "" {
@@ -114,42 +117,16 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 		questionsMismatch = true
 	}
 	if census == nil {
-		return problems, questionsMismatch // plan checks below need the census
+		return problems, questionsMismatch, nil // the checks below need the census
 	}
 	orgDoc, err := a.db.Organization(vp.OrgAddress)
 	if err != nil {
-		return append(problems, "organization not found"), questionsMismatch
+		return append(problems, "organization not found"), questionsMismatch, nil
 	}
 	if !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
 		problems = append(problems, "publishing requires the admin role")
 	}
-	// Per-question plan voting-type gate, on the ballot each question actually encodes rather
-	// than the type it is labelled with: a stored type is only a label, and a question written
-	// before the two halves were reconciled may carry one its protocol contradicts.
-	//
-	// EffectiveQuestionType recognises the four named types (singlechoice, multichoice, ranked,
-	// cumulative) from their canonical protocol and gates each on its plan flag, so a raw protocol
-	// that encodes one of them is gated too — the label cannot be dropped to evade the plan.
-	//
-	// What still slips through is a protocol that is *almost* canonical: {maxCount:2, maxValue:1,
-	// maxTotalCost:2} is the multichoice ballot field-for-field bar costExponent, so it is not
-	// recognised and stays ungated. EffectiveQuestionType recognises a shape only when it is
-	// exactly canonical, which is what storage needs and what authorization does not. Actually
-	// holding the gate needs a deliberately loose classifier (maxValue == 1 && maxCount > 1 ⇒
-	// effectively multiple-choice, whatever else is set), not this one.
-	for i := range questions {
-		// a question that already mined (UpstreamID set) is immutable on chain: its type cannot be
-		// changed, and gating it would only block a resume that mints the remaining questions. So the
-		// voting-type gate covers only questions still pending their first publish.
-		if len(questions[i].UpstreamID) > 0 {
-			continue
-		}
-		if err := a.subscriptions.OrgAllowsVotingType(vp.OrgAddress, account.EffectiveQuestionType(&questions[i])); err != nil {
-			problems = append(problems, err.Error())
-		}
-	}
-	// the largest per-question census is the binding constraint for the plan MaxCensus cap;
-	// process count/weighted/duration are process-level, so one call covers them all.
+	// the largest per-question census: a process whose every question has no voter cannot publish
 	var maxSize uint64
 	for i := range questions {
 		if s := account.ComputeMaxCensusSize(questions[i].EligibleMemberIDs, census.Size); s > maxSize {
@@ -160,7 +137,7 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	// the checks below but fail in the worker (electionParamsForQuestion). Reject it here.
 	if maxSize == 0 {
 		problems = append(problems, "census has no members")
-		return problems, questionsMismatch
+		return problems, questionsMismatch, nil
 	}
 	start := vp.StartDate
 	if start.IsZero() || start.Before(time.Now()) {
@@ -170,28 +147,11 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	if vp.EndDate.After(start) {
 		durationSeconds = uint32(vp.EndDate.Sub(start).Seconds())
 	}
-	if err := a.subscriptions.OrgCanPublishProcess(orgDoc, maxSize, durationSeconds, census.Weighted); err != nil {
+	if err := a.subscriptions.OrgCanPublishProcess(orgDoc, durationSeconds); err != nil {
 		problems = append(problems, err.Error())
+		denied = err
 	}
-	// managed orgs draw a process slot from the integrator's shared quota (read-only here). Key
-	// this on census.Size — the same basis reserveManagedProcessSlot uses at publish — so the
-	// dry-run and the real reservation agree.
-	if drawsManagedSlot(orgDoc, census, questions) {
-		if integrator, err := a.db.Organization(orgDoc.ManagedBy); err != nil {
-			problems = append(problems, "integrator organization not found")
-		} else if err := a.subscriptions.CanReserveManagedPublish(integrator); err != nil {
-			problems = append(problems, err.Error())
-		}
-	}
-	// email/SMS/vote allowance for the inline census. One auth (2FA challenge) per voter, but the
-	// N questions are N elections so each voter can cast N ballots → votes scale with the question
-	// count while notifications do not.
-	notifyCount := int(census.Size)
-	voteCount := int(census.Size) * len(questions)
-	if err := a.subscriptions.OrgCanPublishCensus(census, notifyCount, voteCount); err != nil {
-		problems = append(problems, err.Error())
-	}
-	return problems, questionsMismatch
+	return problems, questionsMismatch, denied
 }
 
 // publishVotingProcessHandler godoc
@@ -211,6 +171,7 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 //	@Success		200			{object}	apicommon.CreateVotingProcessResponse	"Already published"
 //	@Failure		400			{object}	errors.Error							"Not ready to publish"
 //	@Failure		401			{object}	errors.Error
+//	@Failure		403			{object}	errors.Error	"An integrator's own organization cannot own processes (40174)"
 //	@Failure		404			{object}	errors.Error
 //	@Failure		409			{object}	errors.Error	"Publish in progress, or the stored questions do not match the process"
 //	@Failure		503			{object}	errors.Error
@@ -248,17 +209,25 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	// full synchronous publish-readiness gate (same as GET .../check): structural checks plus
-	// plan voting-type, census-size, process-count, duration, managed-quota and email/SMS/vote
-	// allowance. Anything predictable is rejected here rather than as an opaque async job failure;
+	// admin role, integrator top-level guard and the 90-day duration cap. Anything
+	// predictable is rejected here rather than as an opaque async job failure;
 	// only funding and chain submission are left to the worker.
 	target := publishTarget{vp: vp, questions: questions, census: census, user: user}
-	if problems, questionsMismatch := a.publishPreflightProblems(target); len(problems) > 0 {
+	if problems, questionsMismatch, denied := a.publishPreflightProblems(target); len(problems) > 0 {
 		// a stored question set that does not match the process is server-side state, not a bad
 		// request, so it answers 409. It wins over any other problem present: it has to be repaired
 		// (by saving the draft again) before the rest of the draft is even worth looking at.
-		apiErr := errors.ErrMalformedBody
-		if questionsMismatch {
+		// Next comes the organization's typed refusal (403 40174, or the duration cap), as at draft
+		// creation; anything else is a 400.
+		var apiErr errors.Error
+		switch {
+		case questionsMismatch:
 			apiErr = errors.ErrProcessQuestionsMismatch
+		case denied != nil:
+			writeSubscriptionError(w, denied)
+			return
+		default:
+			apiErr = errors.ErrMalformedBody
 		}
 		apiErr.Withf("process is not ready to publish: %s", strings.Join(problems, "; ")).Write(w)
 		return
@@ -280,8 +249,8 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 // chain — success for the caller, just nothing to enqueue.
 var errProcessAlreadyPublished = fmt.Errorf("process already published")
 
-// startProcessPublish runs the post-preflight publish pipeline: atomic claim, managed
-// slot reservation, organization signer, census publication, job creation and enqueue.
+// startProcessPublish runs the post-preflight publish pipeline: atomic claim,
+// organization signer, census publication, job creation and enqueue.
 // The caller is responsible for preflight (publishPreflightProblems) and authorization.
 // Errors are errors.Error values carrying their HTTP semantics (write with
 // writeSubscriptionError), plain errors mapping to 500, or errProcessAlreadyPublished.
@@ -334,28 +303,7 @@ func (a *API) startProcessPublish(ctx context.Context, t publishTarget) (string,
 	if err != nil {
 		return "", fmt.Errorf("failed to get organization: %w", err)
 	}
-	// a process is one billed unit; reserve a single managed slot when applicable. A resume (a
-	// re-publish of a process that already mined some elections) must NOT reserve again — the
-	// original reservation from the first attempt still stands.
 	nonTestSized := uint64(census.Size) > uint64(db.TestMaxCensusSize)
-	var integratorAddr common.Address
-	var managedReserved bool
-	if !anyMined(questions) {
-		integratorAddr, managedReserved, err = a.reserveManagedProcessSlot(org, uint64(census.Size))
-		if err != nil {
-			return "", err
-		}
-	}
-	if managedReserved {
-		defer func() {
-			if !managedReserved {
-				return
-			}
-			if e := a.db.AddOrganizationManagedProcesses(integratorAddr, -1); e != nil {
-				log.Warnw("could not roll back managed processes counter", "error", e)
-			}
-		}()
-	}
 
 	orgSigner, err := account.OrganizationSigner(a.secret, org.SignerSeedValue(), org.Nonce)
 	if err != nil {
@@ -397,11 +345,9 @@ func (a *API) startProcessPublish(ctx context.Context, t publishTarget) (string,
 		return "", fmt.Errorf("failed to create tx job: %w", err)
 	}
 
-	reserved := managedReserved
 	worker := &publishWorker{
 		a: a, vp: vp, questions: questions, census: census, org: org, user: user,
-		orgSigner: orgSigner, cspPubKey: cspPubKey, integratorAddr: integratorAddr,
-		reserved: reserved, nonTestSized: nonTestSized, owner: owner,
+		orgSigner: orgSigner, cspPubKey: cspPubKey, nonTestSized: nonTestSized, owner: owner,
 		minedUnpersisted: make(map[bson.ObjectID]internal.HexBytes),
 	}
 	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
@@ -413,9 +359,8 @@ func (a *API) startProcessPublish(ctx context.Context, t publishTarget) (string,
 		}
 		return "", errors.ErrTxQueueFull
 	}
-	// the worker now owns the lock, the publishing claim and the managed reservation.
+	// the worker now owns the lock and the publishing claim.
 	committed = true
-	managedReserved = false
 	lockHeld = false
 	return jobID, nil
 }
@@ -423,17 +368,15 @@ func (a *API) startProcessPublish(ctx context.Context, t publishTarget) (string,
 // publishWorker carries the state of an async voting-process publish across the batch +
 // retry rounds executed on the tx worker pool.
 type publishWorker struct {
-	a              *API
-	vp             *db.VotingProcess
-	questions      []db.VotingProcessQuestion
-	census         *db.Census
-	org            *db.Organization
-	user           *db.User
-	orgSigner      *ethereum.SignKeys
-	cspPubKey      []byte
-	integratorAddr common.Address
-	reserved       bool
-	nonTestSized   bool
+	a            *API
+	vp           *db.VotingProcess
+	questions    []db.VotingProcessQuestion
+	census       *db.Census
+	org          *db.Organization
+	user         *db.User
+	orgSigner    *ethereum.SignKeys
+	cspPubKey    []byte
+	nonTestSized bool
 	// owner is the publish-claim token returned by ClaimVotingProcessForPublish: the worker
 	// renews the claim with it while it runs and every state write it does on the process
 	// (clear, publish) is conditional on still holding it.
@@ -673,11 +616,8 @@ func (pw *publishWorker) confirmClaim() (bool, error) {
 }
 
 // abandon rolls back a failed/aborted publish: it resets the not-yet-mined questions (so a later
-// publish resumes them), clears the publishing marker, and releases the managed-process
-// reservation only when nothing was mined. A partial-mine failure keeps the slot so the resume
-// (which skips a new reservation) consumes it, avoiding a leak or a double-reserve. The release
-// does not depend on still owning the claim: whoever claims the process next finds nothing mined
-// and reserves its own slot.
+// publish resumes them) and clears the publishing marker, only while this worker still owns the
+// claim.
 func (pw *publishWorker) abandon() {
 	a := pw.a
 	// last chance to persist elections that mined but whose DB write kept failing: losing the
@@ -700,11 +640,6 @@ func (pw *publishWorker) abandon() {
 		}
 		if e := a.db.ClearVotingProcessPublishing(pw.vp.ID, pw.owner); e != nil {
 			log.Warnw("could not clear publishing state after failed publish", "error", e)
-		}
-	}
-	if pw.reserved && !anyMined(pw.questions) && len(pw.minedUnpersisted) == 0 {
-		if e := a.db.AddOrganizationManagedProcesses(pw.integratorAddr, -1); e != nil {
-			log.Warnw("could not roll back managed processes counter", "error", e)
 		}
 	}
 }
@@ -1132,54 +1067,4 @@ func parseProcessStatus(s string) (models.ProcessStatus, bool) {
 	default:
 		return 0, false
 	}
-}
-
-// drawsManagedSlot reports whether publishing questions draws a slot from the integrator's
-// managed-process quota: a managed organization publishing a non-test-sized census, unless this
-// is a resume. A resume (some question already mined) consumes the reservation the first attempt
-// took — startProcessPublish does not reserve again — so probing the quota for it would refuse a
-// half-published process once the integrator is at its limit, leaving it stuck.
-func drawsManagedSlot(org *db.Organization, census *db.Census, questions []db.VotingProcessQuestion) bool {
-	return org.ManagedBy != (common.Address{}) &&
-		uint64(census.Size) > uint64(db.TestMaxCensusSize) &&
-		!anyMined(questions)
-}
-
-// reserveManagedProcessSlot reserves one process slot against the integrator's shared
-// ManagedProcesses quota when org is a managed organization publishing a non-test-sized
-// election. It returns the integrator address and reserved=true when a slot was taken — the
-// caller MUST roll it back with AddOrganizationManagedProcesses(integratorAddr, -1) if the
-// publish/sign later fails. For a standalone org or a test-sized election it is a no-op
-// (reserved=false, nil error).
-//
-// HasTxPermission skips the per-org process-count check for managed orgs precisely because
-// this integrator-level reservation enforces it instead.
-func (a *API) reserveManagedProcessSlot(org *db.Organization, maxCensusSize uint64) (common.Address, bool, error) {
-	// draft creation already rejects integrator top-level orgs; re-check at publish.
-	if org.ManagedBy == (common.Address{}) && a.subscriptions.IsIntegrator(org) {
-		return common.Address{}, false, errors.ErrIntegratorTopLevelOrgCannotOwnProcess
-	}
-	if org.ManagedBy == (common.Address{}) || maxCensusSize <= uint64(db.TestMaxCensusSize) {
-		return common.Address{}, false, nil
-	}
-	integrator, err := a.db.Organization(org.ManagedBy)
-	if err != nil {
-		// a managed org whose integrator no longer exists is a not-found condition, not a
-		// server fault — map it like subscriptions.limitsOwner does rather than 500.
-		if err == db.ErrNotFound {
-			return common.Address{}, false, errors.ErrOrganizationNotFound.WithErr(err)
-		}
-		return common.Address{}, false, errors.ErrGenericInternalServerError.Withf("could not get integrator organization: %v", err)
-	}
-	maxProcesses, err := a.subscriptions.ManagedPublishLimits(integrator)
-	if err != nil {
-		return common.Address{}, false, err
-	}
-	if err := a.db.ReserveManagedPublish(integrator.Address, maxProcesses); err != nil {
-		if err == db.ErrManagedQuotaReached {
-			return common.Address{}, false, errors.ErrIntegratorQuotaExceeded
-		}
-		return common.Address{}, false, errors.ErrGenericInternalServerError.WithErr(err)
-	}
-	return integrator.Address, true, nil
 }

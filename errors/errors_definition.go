@@ -82,46 +82,39 @@ var (
 
 	// TODO: most of theses errors should be unauthorized
 	// Subscription errors (400)
-	ErrOrganizationHasNoSubscription          = Error{Code: 40020, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("organization has no subscription")}
-	ErrOrganizationSubscriptionInactive       = Error{Code: 40021, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("organization subscription is not active")}
-	ErrNoDefaultPlan                          = Error{Code: 40022, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("no default plan available")}
-	ErrMaxDraftsReached                       = Error{Code: 40031, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("max drafts reached")}
-	ErrMaxProcessesReached                    = Error{Code: 40033, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("max processes reached")}
-	ErrUserHasNoAdminRole                     = Error{Code: 40032, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("user does not have admin role")}
-	ErrProcessCensusSizeExceedsPlanLimit      = Error{Code: 40035, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("process census size exceeds plan limit")}
-	ErrProcessCensusSizeExceedsEmailAllowance = Error{Code: 40046, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("process census size exceeds email allowance")}
-	ErrProcessCensusSizeExceedsSMSAllowance   = Error{Code: 40047, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("process census size exceeds sms allowance")}
-	ErrProcessCensusSizeExceedsVoteAllowance  = Error{Code: 40162, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("process census size exceeds vote allowance")}
-	ErrMaxOrganizationsReached                = Error{Code: 40048, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("user has reached maximum number of organizations")}
-	ErrMaxSubOrgsReached                      = Error{Code: 40198, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("the parent organization's plan allows no more suborganizations")}
-	ErrMaxUsersReached                        = Error{Code: 40200, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("the organization's plan allows no more users")}
-	ErrExceedsOrganizationMembersLimit        = Error{Code: 40145, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("operation would exceed organization members limit")}
-	ErrAutoGroupCannotBeDeleted               = Error{Code: 40150, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("the \"All members\" group is auto-generated and cannot be deleted")}
-	ErrAutoGroupMembersCannotBeModified       = Error{Code: 40151, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("membership of the auto-generated \"All members\" group cannot be manually modified")}
-	ErrNotAnIntegrator                        = Error{Code: 40153, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("organization is not an integrator")}
-	ErrOriginNotAllowed                       = Error{Code: 40199, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("requests must go through the public endpoint")}
-	ErrMaxManagedOrgsReached                  = Error{Code: 40154, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("max managed organizations reached")}
-	ErrIntegratorQuotaExceeded                = Error{Code: 40155, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("integrator quota exceeded")}
-	ErrInvalidAPIKey                          = Error{Code: 40156, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("invalid, revoked or expired API key"), LogLevel: "info"}
-	ErrAPIKeyNotAllowed                       = Error{Code: 40157, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("API keys are not permitted for this endpoint"), LogLevel: "info"}
-	ErrInsufficientAPIKeyScope                = Error{Code: 40158, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("API key lacks the required scope"), LogLevel: "info"}
-	ErrInvalidAPIKeyScope                     = Error{Code: 40159, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid API key scope")}
-	ErrAPIKeyNotFound                         = Error{Code: 40160, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("API key not found")}
-	ErrManagedOrgHasActiveElections           = Error{Code: 40161, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("managed organization has active elections and cannot be deleted")}
-	ErrVotingTypeNotAllowed                   = Error{Code: 40163, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("voting type not allowed by the subscription plan")}
-	ErrVoteBatchEmpty                         = Error{Code: 40164, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("vote batch is empty")}
-	ErrVoteBatchTooLarge                      = Error{Code: 40165, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("vote batch is too large")}
-	ErrVoteBatchMixedOrganizations            = Error{Code: 40166, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("vote batch spans several organizations")}
-	ErrRequestBodyTooLarge                    = Error{Code: 40167, HTTPstatus: http.StatusRequestEntityTooLarge, Err: fmt.Errorf("request body is too large")}
-	ErrStaleUpdate                            = Error{Code: 40171, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("resource changed since it was read"), LogLevel: "info"}
-	ErrProcessQuestionsMismatch               = Error{Code: 40172, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("stored questions do not match the process"), LogLevel: "warn"}
+	ErrOrganizationHasNoSubscription    = Error{Code: 40020, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("organization has no subscription")}
+	ErrOrganizationSubscriptionInactive = Error{Code: 40021, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("organization subscription is not active")}
+	ErrNoDefaultPlan                    = Error{Code: 40022, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("no default plan available")}
+	ErrMaxDraftsReached                 = Error{Code: 40031, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("max drafts reached")}
+	ErrUserHasNoAdminRole               = Error{Code: 40032, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("user does not have admin role")}
+	ErrMaxOrganizationsReached          = Error{Code: 40048, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("user has reached maximum number of organizations")}
+	ErrExceedsOrganizationMembersLimit  = Error{Code: 40145, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("operation would exceed organization members limit")}
+	ErrAutoGroupCannotBeDeleted         = Error{Code: 40150, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("the \"All members\" group is auto-generated and cannot be deleted")}
+	ErrAutoGroupMembersCannotBeModified = Error{Code: 40151, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("membership of the auto-generated \"All members\" group cannot be manually modified")}
+	ErrNotAnIntegrator                  = Error{Code: 40153, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("organization is not an integrator")}
+	ErrOriginNotAllowed                 = Error{Code: 40199, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("requests must go through the public endpoint")}
+	ErrInvalidAPIKey                    = Error{Code: 40156, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("invalid, revoked or expired API key"), LogLevel: "info"}
+	ErrAPIKeyNotAllowed                 = Error{Code: 40157, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("API keys are not permitted for this endpoint"), LogLevel: "info"}
+	ErrInsufficientAPIKeyScope          = Error{Code: 40158, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("API key lacks the required scope"), LogLevel: "info"}
+	ErrInvalidAPIKeyScope               = Error{Code: 40159, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid API key scope")}
+	ErrAPIKeyNotFound                   = Error{Code: 40160, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("API key not found")}
+	ErrManagedOrgHasActiveElections     = Error{Code: 40161, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("managed organization has active elections and cannot be deleted")}
+	ErrVoteBatchEmpty                   = Error{Code: 40164, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("vote batch is empty")}
+	ErrVoteBatchTooLarge                = Error{Code: 40165, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("vote batch is too large")}
+	ErrVoteBatchMixedOrganizations      = Error{Code: 40166, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("vote batch spans several organizations")}
+	ErrRequestBodyTooLarge              = Error{Code: 40167, HTTPstatus: http.StatusRequestEntityTooLarge, Err: fmt.Errorf("request body is too large")}
+	ErrStaleUpdate                      = Error{Code: 40171, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("resource changed since it was read"), LogLevel: "info"}
+	ErrProcessQuestionsMismatch         = Error{Code: 40172, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("stored questions do not match the process"), LogLevel: "warn"}
 	// ErrCensusMemberAlreadySignedFor carries the offending ids in data.signedMemberIds. The naming
 	// is deliberate: the CSP records consumption when it issues the signature, not when the ballot
 	// reaches the chain, so this means "already signed for" and must never be reported as "voted".
 	ErrCensusMemberAlreadySignedFor = Error{Code: 40173, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("member has already been signed for in an ongoing process")}
-	// An integrator's top-level organization is a management shell for its managed orgs; running elections
-	// there would bypass the shared MaxManagedProcesses/MaxVotes/MaxSMS/MaxEmails pool.
+	// ErrIntegratorTopLevelOrgCannotOwnProcess: an integrator's own organization holds no
+	// processes; it publishes through managed organizations, one of which may be its own.
 	ErrIntegratorTopLevelOrgCannotOwnProcess = Error{Code: 40174, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("integrator top-level organizations cannot own elections; use a managed organization")}
+	// ErrMaxWritersReached: the organization already has as many admins and managers (pending
+	// invitations included) as it may hold.
+	ErrMaxWritersReached = Error{Code: 40182, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("max admin and manager users reached")}
 	// ErrCheckoutSessionNotFound is the only answer for a checkout session the caller may not
 	// read, whatever the reason (missing, not theirs), so session existence is never revealed.
 	ErrCheckoutSessionNotFound = Error{Code: 40179, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("checkout session not found"), LogLevel: "info"}

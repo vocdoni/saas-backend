@@ -64,7 +64,7 @@ func TestCreateSubOrganizationHandler(t *testing.T) {
 	// Create a parent organization
 	parentOrgAddress := testCreateOrganization(t, token)
 
-	// Test creating a suborganization - should fail because free plan doesn't allow suborganizations (SubOrgs: 0)
+	// Test creating a suborganization - no plan caps suborganizations anymore, so it is created
 	subOrgInfo := &apicommon.OrganizationInfo{
 		Type:    string(db.CompanyType),
 		Website: "https://suborganization.com",
@@ -72,7 +72,9 @@ func TestCreateSubOrganizationHandler(t *testing.T) {
 			Address: parentOrgAddress,
 		},
 	}
-	requestAndAssertError(errors.ErrMaxSubOrgsReached, t, http.MethodPost, token, subOrgInfo, organizationsEndpoint)
+	subOrg := requestAndParse[apicommon.OrganizationInfo](t, http.MethodPost, token, subOrgInfo, organizationsEndpoint)
+	c.Assert(subOrg.Parent, qt.Not(qt.IsNil))
+	c.Assert(subOrg.Parent.Address, qt.Equals, parentOrgAddress)
 
 	// Test creating suborganization with non-existent parent
 	nonExistentParent := common.HexToAddress("0x0000000000000000000000000000000000000001")
@@ -86,8 +88,7 @@ func TestCreateSubOrganizationHandler(t *testing.T) {
 	_, code := testRequest(t, http.MethodPost, token, invalidSubOrgInfo, organizationsEndpoint)
 	c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
-	// Test creating suborganization when user is not admin of parent
-	// (same error as above - permission check happens first)
+	// an admin of the parent creates a suborganization of it; no plan caps them
 	anotherUserToken := testCreateUser(t, "anotherpassword")
 	anotherUserOrgAddress := testCreateOrganization(t, anotherUserToken)
 	subOrgByNonAdmin := &apicommon.OrganizationInfo{
@@ -98,7 +99,7 @@ func TestCreateSubOrganizationHandler(t *testing.T) {
 		},
 	}
 	_, code = testRequest(t, http.MethodPost, anotherUserToken, subOrgByNonAdmin, organizationsEndpoint)
-	c.Assert(code, qt.Equals, http.StatusBadRequest)
+	c.Assert(code, qt.Equals, http.StatusOK)
 
 	// a user who is not an admin of the parent is refused by the permission check itself
 	subOrgByOutsider := &apicommon.OrganizationInfo{

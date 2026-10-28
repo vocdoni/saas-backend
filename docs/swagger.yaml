@@ -210,10 +210,9 @@ definitions:
           rules as Name.
       integrator:
         description: |-
-          Whether to subscribe the new organization to the free integrator plan at
-          creation time (opt-in). Used by the integrator portal so a newly created org
-          becomes an integrator on the free tier with no checkout. Default false uses
-          the regular default plan.
+          Whether the new organization is an integrator (opt-in, used by the integrator
+          portal): it may create managed organizations and pay for their processes from
+          its wallet.
         type: boolean
       logo:
         allOf:
@@ -327,10 +326,9 @@ definitions:
           rules as Name.
       integrator:
         description: |-
-          Whether to subscribe the new organization to the free integrator plan at
-          creation time (opt-in). Used by the integrator portal so a newly created org
-          becomes an integrator on the free tier with no checkout. Default false uses
-          the regular default plan.
+          Whether the new organization is an integrator (opt-in, used by the integrator
+          portal): it may create managed organizations and pay for their processes from
+          its wallet.
         type: boolean
       logo:
         allOf:
@@ -518,29 +516,12 @@ definitions:
     properties:
       enabled:
         type: boolean
-      limits:
-        $ref: '#/definitions/apicommon.IntegratorLimits'
       usage:
         $ref: '#/definitions/apicommon.IntegratorUsage'
-    type: object
-  apicommon.IntegratorLimits:
-    properties:
-      maxEmails:
-        type: integer
-      maxManagedOrgs:
-        type: integer
-      maxManagedProcesses:
-        type: integer
-      maxSMS:
-        type: integer
-      maxVotes:
-        type: integer
     type: object
   apicommon.IntegratorUsage:
     properties:
       managedOrgs:
-        type: integer
-      managedProcesses:
         type: integer
       sentEmails:
         type: integer
@@ -816,10 +797,9 @@ definitions:
           rules as Name.
       integrator:
         description: |-
-          Whether to subscribe the new organization to the free integrator plan at
-          creation time (opt-in). Used by the integrator portal so a newly created org
-          becomes an integrator on the free tier with no checkout. Default false uses
-          the regular default plan.
+          Whether the new organization is an integrator (opt-in, used by the integrator
+          portal): it may create managed organizations and pay for their processes from
+          its wallet.
         type: boolean
       logo:
         allOf:
@@ -1122,7 +1102,7 @@ definitions:
           which is not free) and no self-service payment.
         type: boolean
       totalCents:
-        $ref: '#/definitions/pricing.Cents'
+        type: integer
     type: object
   apicommon.PublicQuestionResponse:
     properties:
@@ -1304,15 +1284,6 @@ definitions:
         description: Whether white labeling is available
         type: boolean
     type: object
-  apicommon.SubscriptionIntegratorLimits:
-    properties:
-      maxManagedOrgs:
-        description: |-
-          Maximum number of organizations the integrator may manage. The aggregate
-          process and census-size caps across managed orgs come from the plan's
-          top-level limits (maxProcesses / maxCensus).
-        type: integer
-    type: object
   apicommon.SubscriptionPlan:
     properties:
       default:
@@ -1325,11 +1296,6 @@ definitions:
       id:
         description: Unique identifier for the plan (its Stripe product ID)
         type: string
-      integratorLimits:
-        allOf:
-        - $ref: '#/definitions/apicommon.SubscriptionIntegratorLimits'
-        description: Integrator limits for this plan (zero when the plan is not an
-          integrator plan)
       monthlyPrice:
         description: Monthly price
         type: integer
@@ -1650,9 +1616,8 @@ definitions:
     properties:
       isIntegrator:
         description: |-
-          Whether this organization is enabled as an integrator. Computed from the
-          organization's integrator limits / active plan (see Subscriptions.IsIntegrator),
-          not stored. Populated by GET /users/me; omitted when false.
+          Whether this organization is enabled as an integrator (see
+          Subscriptions.IsIntegrator). Populated by GET /users/me; omitted when false.
         type: boolean
       organization:
         allOf:
@@ -1970,11 +1935,6 @@ definitions:
       whiteLabel:
         type: boolean
     type: object
-  db.IntegratorLimits:
-    properties:
-      maxManagedOrgs:
-        type: integer
-    type: object
   db.JobStatus:
     enum:
     - pending
@@ -2043,8 +2003,6 @@ definitions:
         type: integer
       id:
         type: string
-      integratorLimits:
-        $ref: '#/definitions/db.IntegratorLimits'
       monthlyPrice:
         type: integer
       name:
@@ -2082,9 +2040,7 @@ definitions:
       maxProcesses:
         type: integer
       maxVotes:
-        description: |-
-          Max votes that may be relayed; 0 means unlimited. For managed orgs this is the
-          integrator's shared pool, summed across all its managed orgs.
+        description: Max votes that may be relayed; 0 means unlimited.
         type: integer
       subOrgs:
         type: integer
@@ -2549,37 +2505,10 @@ definitions:
         format: hex
         type: string
     type: object
-  pricing.Cents:
-    enum:
-    - 1
-    - 100
-    - 1
-    - 5
-    - 3900
-    - 14900
-    - 9900
-    - 100
-    format: int64
-    type: integer
-    x-enum-comments:
-      signedCertPrice: per process
-      smsTwoFAPerVoter: per eligible voter
-    x-enum-descriptions:
-    - per eligible voter
-    - per process
-    x-enum-varnames:
-    - Cent
-    - Euro
-    - integratorEmailTwoFAPerVoter
-    - smsTwoFAPerVoter
-    - signedCertPrice
-    - BrandingCents
-    - CustomURLCents
-    - MinimumChargeCents
   pricing.QuoteLine:
     properties:
       amountCents:
-        $ref: '#/definitions/pricing.Cents'
+        type: integer
       description:
         type: string
       kind:
@@ -2778,10 +2707,11 @@ paths:
     get:
       description: |-
         Returns whether the caller's organization (resolved from the API key's org or the user
-        session — no address in the URL) is enabled as an integrator, along with its effective
-        managed-resource limits and current usage. The caller must be an admin or manager of the
-        organization. When the organization is not an integrator, `enabled` is false and `limits`
-        is omitted (usage counters are still returned). A 0 in any limit field means unlimited.
+        session — no address in the URL) is enabled as an integrator, along with the usage summed
+        across its managed organizations. The caller must be an admin or manager of the
+        organization. An integrator has no limits: its spending is bounded by its wallet
+        balance (GET /organizations/{orgAddress}/wallet). When the organization is not an integrator,
+        `enabled` is false.
 
         Also callable with a scoped API key (scope: `quota:read`).
       produces:
@@ -2809,7 +2739,7 @@ paths:
             $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
-      summary: Get integrator quota and usage
+      summary: Get integrator status and usage
       tags:
       - integrator
   /integrator/organizations:
@@ -2860,8 +2790,8 @@ paths:
         Create a new organization managed by the caller's integrator organization. The
         integrator is resolved from the authenticated principal (the API key's org, or the
         user's organization for a session) — no address is passed in the URL. The caller must
-        be an admin of that integrator organization, which must be enabled as an integrator and
-        within its managed-organizations quota. The managed org's on-chain account is always
+        be an admin of that integrator organization, which must be enabled as an integrator;
+        there is no limit on how many organizations it manages. The managed org's on-chain account is always
         provisioned eagerly. The optional `ownerEmail` designates the managed org's owner/admin
         (defaults to the calling user); the per-user MaxOrgsPerUser cap is bypassed for managed orgs.
 
@@ -2889,7 +2819,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "403":
-          description: Not an integrator or quota reached
+          description: Not an integrator
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
@@ -2912,8 +2842,7 @@ paths:
         tied to it (memberbase, censuses + participants, processes, bundles, CSP tokens,
         jobs, pending invites), and unlink it from its members. The caller must be an admin
         of their integrator organization (resolved from the API key's org or the user session
-        — no address in the URL), and the target must be managed by it. The integrator's usage
-        counters are rolled back accordingly.
+        — no address in the URL), and the target must be managed by it.
 
         Deletion is blocked with 409 when any of the managed org's published elections is
         still active on-chain (READY/PAUSED); end them (or wait for them to end) first.
@@ -3234,9 +3163,8 @@ paths:
 
         Two optional opt-in fields support the chain-abstracted flow (both default false, preserving the legacy
         behavior): `provisionAccount` forges the organization's on-chain account eagerly at creation time
-        (idempotent) instead of leaving it to the legacy SDK createAccount path; `integrator` subscribes the
-        new organization to the free integrator plan so it becomes an integrator on the free tier with no
-        checkout.
+        (idempotent) instead of leaving it to the legacy SDK createAccount path; `integrator` flags the
+        new organization as an integrator, so it may create managed organizations.
       parameters:
       - description: Organization info (+ optional provisionAccount / integrator)
         in: body
@@ -3261,7 +3189,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
-          description: Parent org not found, or free integrator plan unavailable (integrator=true)
+          description: Parent org not found
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -3807,8 +3735,9 @@ paths:
       consumes:
       - application/json
       description: |-
-        Add multiple members to an organization. Requires Manager/Admin role and is subject to the
-        plan's member quota. With `async=true` the import runs in the background and the response
+        Add multiple members to an organization. Requires Manager/Admin role; the organization's
+        memberbase is capped at 50 000 members (40145).
+        With `async=true` the import runs in the background and the response
         carries a `jobId` to poll via GET /jobs/{jobId}; otherwise it
         completes synchronously. A synchronous import whose members carry more than 150 phones and
         passwords in total (each one is an expensive hash) runs as if `async=true` had been sent: the
@@ -3848,7 +3777,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "403":
-          description: Plan member quota exceeded
+          description: Organization members limit exceeded
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -4282,6 +4211,10 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
+        "503":
+          description: Busy (50302), retry after Retry-After
+          schema:
+            $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
       summary: Invite a new user to an organization
@@ -4375,6 +4308,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Busy (50302), retry after Retry-After
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -4552,6 +4489,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Busy (50302), retry after Retry-After
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -4790,6 +4731,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "403":
           description: Forbidden
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Busy (50302), retry after Retry-After
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -5234,7 +5179,7 @@ paths:
         and raise each affected on-chain election's maxCensusSize so the new members can vote. Members are
         added synchronously; the maxCensusSize update runs as an async job (poll GET /jobs/{jobId}).
         Questions with an eligibility subset keep their fixed size and are unaffected. Requires
-        Manager/Admin role and is subject to the plan's census quota.
+        Manager/Admin role.
       parameters:
       - description: Process ID
         in: path
@@ -5464,6 +5409,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: An integrator's own organization cannot own processes (40174)
           schema:
             $ref: '#/definitions/errors.Error'
         "404":

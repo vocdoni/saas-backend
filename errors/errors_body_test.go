@@ -156,3 +156,21 @@ func TestWriteKeepsDetailOn4xx(t *testing.T) {
 	_, body = writtenBody(t, testBadInputErr.Withf("field %q is required", "name"))
 	c.Assert(body["error"], qt.Equals, `malformed body: field "name" is required`)
 }
+
+// TestWriteSetsRetryAfterOn503: a 503 tells the client when to retry, unless the caller set its
+// own delay; other statuses carry none.
+func TestWriteSetsRetryAfterOn503(t *testing.T) {
+	c := qt.New(t)
+	rec := httptest.NewRecorder()
+	ErrServerBusy.Write(rec)
+	c.Assert(rec.Header().Get("Retry-After"), qt.Equals, "10")
+
+	rec = httptest.NewRecorder()
+	rec.Header().Set("Retry-After", "2")
+	ErrServerBusy.Write(rec)
+	c.Assert(rec.Header().Get("Retry-After"), qt.Equals, "2")
+
+	rec = httptest.NewRecorder()
+	testInternalErr.Write(rec)
+	c.Assert(rec.Header().Get("Retry-After"), qt.Equals, "")
+}

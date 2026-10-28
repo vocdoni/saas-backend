@@ -230,26 +230,15 @@ func processProductToPlan(product *stripeapi.Product, prices []stripeapi.Price) 
 		return nil, err
 	}
 
-	// integratorLimits is optional: only integrator plans carry it. Skip parsing when the
-	// product has no such metadata so non-integrator plans don't fail to sync.
-	var integratorLimitsData db.IntegratorLimits
-	if raw := product.Metadata["integratorLimits"]; raw != "" {
-		integratorLimitsData, err = extractPlanMetadata[db.IntegratorLimits](raw)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	plan := &db.Plan{
-		ID:               product.ID,
-		Name:             product.Name,
-		Default:          isDefaultPlan(product),
-		Public:           isPublicPlan(product),
-		Organization:     organizationData,
-		VotingTypes:      votingTypesData,
-		Features:         featuresData,
-		IntegratorLimits: integratorLimitsData,
-		FreeTrialDays:    0,
+		ID:            product.ID,
+		Name:          product.Name,
+		Default:       isDefaultPlan(product),
+		Public:        isPublicPlan(product),
+		Organization:  organizationData,
+		VotingTypes:   votingTypesData,
+		Features:      featuresData,
+		FreeTrialDays: 0,
 	}
 
 	for _, price := range prices {
