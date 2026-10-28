@@ -101,6 +101,7 @@ func TestWalletIntegratorHistoryAndKeys(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "walletkeypass123")
 	integratorAddr, managedA := newIntegratorWithManagedOrg(t, token, "prod_test_wallet_keys")
+	fundWallet(t, integratorAddr, 10_000) // a second managed organization needs a top-up first
 	managedB := requestAndParse[apicommon.OrganizationInfo](
 		t, http.MethodPost, token, &apicommon.CreateManagedOrganizationRequest{
 			OrganizationInfo: apicommon.OrganizationInfo{
@@ -109,7 +110,6 @@ func TestWalletIntegratorHistoryAndKeys(t *testing.T) {
 		}, "integrator", "organizations").Address
 	otherOrg := testCreateOrganization(t, token) // a standard organization the same user administers
 
-	fundWallet(t, integratorAddr, 10_000)
 	for i, managed := range []common.Address{managedA, managedB} {
 		cents := pricing.Cents(1_000 * (i + 1))
 		c.Assert(testDB.DebitWalletForProcess(db.WalletDebit{

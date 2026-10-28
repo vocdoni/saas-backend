@@ -538,7 +538,8 @@ func (a *API) resolveVoteStatuses(ctx context.Context, rows []db.CSPProcess) (ma
 //	@Description	402 when the change would grow a published process's census beyond what it paid for:
 //	@Description	40178 with the quote in data (its processId names the process to buy headroom for with
 //	@Description	POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
-//	@Description	integrator's wallet falls short (data: requiredCents, availableCents).
+//	@Description	integrator's wallet falls short (data: requiredCents, availableCents), or 40183 past the
+//	@Description	spend cap its integrator set (data: capCents, spentCents, requiredCents).
 //	@Description	422 when the grown census needs a custom quote.
 //	@Tags			processes
 //	@Accept			json
@@ -700,7 +701,8 @@ func (a *API) addProcessCensusMembers(
 //	@Description	402 when the change would grow a published process's census beyond what it paid for:
 //	@Description	40178 with the quote in data (its processId names the process to buy headroom for with
 //	@Description	POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
-//	@Description	integrator's wallet falls short (data: requiredCents, availableCents).
+//	@Description	integrator's wallet falls short (data: requiredCents, availableCents), or 40183 past the
+//	@Description	spend cap its integrator set (data: capCents, spentCents, requiredCents).
 //	@Description	422 when the grown census needs a custom quote.
 //	@Tags			processes
 //	@Accept			json

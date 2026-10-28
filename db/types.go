@@ -135,6 +135,10 @@ type Organization struct {
 	// Integrator enables the organization to create and pay for managed organizations
 	// (ignored on a managed organization itself).
 	Integrator bool `json:"integrator,omitempty" bson:"integrator,omitempty"`
+	// ManagedOrgsCreated counts every managed organization this integrator ever created, deleted
+	// ones included: each one is an on-chain account the service funded. Only ever incremented
+	// (IncrementManagedOrgsCreated); SetOrganization never writes it.
+	ManagedOrgsCreated int `json:"-" bson:"managedOrgsCreated,omitempty"`
 	// AddOnsDelivered are the once-per-organization add-ons a published process of the
 	// organization, or one with elections mined, received: what an organization teardown records
 	// before it drops any draft (RecordOrganizationAddOnsDelivered), so a retry after the drafts

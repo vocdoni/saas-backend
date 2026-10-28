@@ -201,7 +201,8 @@ func memberHashCount(members []apicommon.OrgMember) int {
 //	@Description	402 when the change would grow a published process's census beyond what it paid for:
 //	@Description	40178 with the quote in data (its processId names the process to buy headroom for with
 //	@Description	POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
-//	@Description	integrator's wallet falls short (data: requiredCents, availableCents).
+//	@Description	integrator's wallet falls short (data: requiredCents, availableCents), or 40183 past the
+//	@Description	spend cap its integrator set (data: capCents, spentCents, requiredCents).
 //	@Description	422 when the grown census needs a custom quote.
 //	@Description	409 (40903) while a process built on a census the change grows holds its publish claim:
 //	@Description	nothing is written; retry once the claim is released: when its publish job ends, or up to 15
@@ -403,7 +404,8 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 //	@Description	402 when the change would grow a published process's census beyond what it paid for:
 //	@Description	40178 with the quote in data (its processId names the process to buy headroom for with
 //	@Description	POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
-//	@Description	integrator's wallet falls short (data: requiredCents, availableCents).
+//	@Description	integrator's wallet falls short (data: requiredCents, availableCents), or 40183 past the
+//	@Description	spend cap its integrator set (data: capCents, spentCents, requiredCents).
 //	@Description	422 when the grown census needs a custom quote.
 //	@Description	409 (40903) while a process built on a census the change grows holds its publish claim:
 //	@Description	nothing is written (except for an edit turned into a creation, below); retry once the claim is

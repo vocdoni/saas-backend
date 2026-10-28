@@ -111,6 +111,8 @@ func (ms *MongoStorage) SetOrganization(org *Organization) error {
 			setOnInsert["subscription"] = subscription
 		}
 		delete(set, "signerSeed")
+		// monotonic, written only by $inc: a stale read written back must not lower it
+		delete(set, "managedOrgsCreated")
 		// grows only through RecordOrganizationAddOnsDelivered
 		delete(set, "addOnsDelivered")
 		// written only by OweOrganizationAddOnCredit and SettleOrganizationAddOnCredit
@@ -811,6 +813,21 @@ func (ms *MongoStorage) IncrementOrganizationSentSMSCounter(address common.Addre
 // for the organization with the given address.
 func (ms *MongoStorage) IncrementOrganizationSentVotesCounter(address common.Address) error {
 	return ms.addToOrganizationCounter(address, "sentVotes", 1)
+}
+
+// IncrementManagedOrgsCreated counts one more managed organization created by the integrator at
+// address. Never decremented: the unfunded integrator cap counts creations, not survivors.
+func (ms *MongoStorage) IncrementManagedOrgsCreated(address common.Address) error {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.organizations.UpdateOne(ctx, bson.M{"_id": address}, bson.M{"$inc": bson.M{"managedOrgsCreated": 1}})
+	if err != nil {
+		return fmt.Errorf("failed to count the managed organization created: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // ListManagedOrganizations returns a paginated list of organizations managed by

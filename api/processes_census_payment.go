@@ -169,6 +169,13 @@ func (a *API) censusGrowthPaymentError(g censusGrowth) error {
 		return errors.ErrGenericInternalServerError.WithErr(err)
 	}
 	dueCents := quote.TotalCents - paidCents
+	// census/checkout debits as a publish does, refusing a managed organization's spend cap before
+	// its integrator's balance, and so does this
+	if p.org.ManagedBy != (common.Address{}) {
+		if err := spendCapError(wallet.ManagedOrgSpend(p.org.Address), dueCents); err != nil {
+			return err
+		}
+	}
 	// a managed organization has no checkout: census/checkout debits its integrator's wallet, and
 	// when that falls short refuses with 40175, so the refusal here is that same 40175
 	if p.org.ManagedBy != (common.Address{}) && wallet.BalanceCents < dueCents {
@@ -213,6 +220,7 @@ func (a *API) censusGrowthPaymentError(g censusGrowth) error {
 //	@Description	debits the difference from the wallet.
 //	@Description	400 when the process has no completed payment, or when the target does not cost more
 //	@Description	than was already paid. Requires Admin role.
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -221,7 +229,7 @@ func (a *API) censusGrowthPaymentError(g censusGrowth) error {
 //	@Param			request		body		apicommon.ProcessCensusCheckoutRequest	true	"Census headroom to buy"
 //	@Success		200			{object}	apicommon.ProcessCheckoutResponse
 //	@Failure		400			{object}	errors.Error	"No completed payment, or nothing left to buy"
-//	@Failure		402			{object}	errors.Error	"Integrator wallet does not cover the difference (40175)"
+//	@Failure		402			{object}	errors.Error	"Integrator wallet does not cover the difference (40175), or spend cap reached (40183)"
 //	@Failure		401			{object}	errors.Error
 //	@Failure		404			{object}	errors.Error
 //	@Failure		409			{object}	errors.Error	"Payment changed or being refunded (40177), or organization being deleted (40901)"

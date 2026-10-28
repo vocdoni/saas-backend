@@ -14,6 +14,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/pricing"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -56,8 +57,11 @@ func (a *API) integratorAddress(w http.ResponseWriter, r *http.Request) (common.
 //	@Description	Create a new organization managed by the caller's integrator organization. The
 //	@Description	integrator is resolved from the authenticated principal (the API key's org, or the
 //	@Description	user's organization for a session) — no address is passed in the URL. The caller must
-//	@Description	be an admin of that integrator organization, which must be enabled as an integrator;
-//	@Description	there is no limit on how many organizations it manages. The managed org's on-chain account is always
+//	@Description	be an admin of that integrator organization, which must be enabled as an integrator.
+//	@Description	Until the integrator has topped up its wallet (top-ups less Stripe refunds and disputes
+//	@Description	above zero) it may manage one organization: the next is refused with 402 (40184, data:
+//	@Description	managedOrgs, managedOrgsCreated, netTopUpCents). Once it has, there is no limit on how many it manages,
+//	@Description	whatever its current balance. The managed org's on-chain account is always
 //	@Description	provisioned eagerly. The optional `ownerEmail` designates the managed org's owner/admin
 //	@Description	(defaults to the calling user); the per-user MaxOrgsPerUser cap is bypassed for managed orgs.
 //	@Description
@@ -70,9 +74,11 @@ func (a *API) integratorAddress(w http.ResponseWriter, r *http.Request) (common.
 //	@Success		200		{object}	apicommon.OrganizationInfo
 //	@Failure		400		{object}	errors.Error	"Invalid input data"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		402		{object}	errors.Error	"Top up the integrator wallet to create another managed organization (40184)"
 //	@Failure		403		{object}	errors.Error	"Not an integrator"
 //	@Failure		404		{object}	errors.Error	"Integrator organization not found"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Failure		503		{object}	errors.Error	"Busy (50302), retry after Retry-After"
 //	@Router			/integrator/organizations [post]
 func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -97,7 +103,7 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	// eligibility: an integrator may manage any number of organizations
+	// eligibility: being an integrator (the cap of an unfunded one is checked under its lock below)
 	if err := a.subscriptions.CanCreateManagedOrg(integrator); err != nil {
 		var apiErr errors.Error
 		if errors.As(err, &apiErr) {
@@ -174,6 +180,27 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 			Active:    true,
 		},
 	}
+	// an integrator whose wallet kept a top-up has no cap; one that has not may create
+	// maxUnfundedManagedOrgs, and the count and the creation it allows are one step per integrator,
+	// so only that path is serialized (with a bounded wait: it holds through the faucet funding)
+	netTopUp, err := a.db.WalletNetTopUpCents(integratorAddr)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if netTopUp <= 0 {
+		// ponytail: in-memory lock, like orgTxLocks — one API instance; a DB CAS if that changes
+		managedOrgLock, err := a.managedOrgLocks.lockOrBusy(r.Context(), integratorAddr)
+		if err != nil {
+			writeSubscriptionError(w, err)
+			return
+		}
+		defer managedOrgLock.Unlock()
+		if err := a.unfundedManagedOrgError(integratorAddr); err != nil {
+			writeSubscriptionError(w, err)
+			return
+		}
+	}
 	// forge the managed org's on-chain account (always eager) BEFORE persisting the DB
 	// row. CreateOrgAccount is idempotent and the address derives from the signer, so a
 	// failure here leaves nothing to clean up and the request can be retried safely.
@@ -194,9 +221,71 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+	// counted after the fact: while the organization exists the cap also counts it live, so a lost
+	// increment only shows once it is deleted
+	if err := a.db.IncrementManagedOrgsCreated(integratorAddr); err != nil {
+		log.Errorw(err, fmt.Sprintf("could not count managed organization %s created by %s", dbOrg.Address, integratorAddr))
+	}
 	info := apicommon.OrganizationFromDB(dbOrg, nil)
 	redactBillingEmails(info, user)
 	apicommon.HTTPWriteJSON(w, info)
+}
+
+// maxUnfundedManagedOrgs is how many organizations an integrator may create before it has topped
+// up its wallet: each one is an on-chain account the service funds, and a deleted one stays funded.
+const maxUnfundedManagedOrgs = 1
+
+// managedOrgCap is where an integrator stands against maxUnfundedManagedOrgs.
+type managedOrgCap struct {
+	live    int64 // managed organizations it has now
+	created int64 // managed organizations it ever created, deleted ones included
+	// netTopUpCents is what its wallet kept from Stripe top-ups (WalletNetTopUpCents)
+	netTopUpCents pricing.Cents
+}
+
+// allowed reports whether the integrator may create one more managed organization: always once its
+// wallet kept a top-up, whatever its balance; until then while it created fewer than the cap.
+func (c managedOrgCap) allowed() bool {
+	return c.netTopUpCents > 0 || c.created < maxUnfundedManagedOrgs
+}
+
+// managedOrgCap reads where integratorAddr stands against the unfunded cap. Creations are counted by
+// Organization.ManagedOrgsCreated, never decremented, so deleting an organization frees nothing; an
+// integrator migrated with organizations it created before the counter existed (it reads 0) counts
+// at least the ones it manages now.
+func (a *API) managedOrgCap(integratorAddr common.Address) (managedOrgCap, error) {
+	integrator, err := a.db.Organization(integratorAddr)
+	if err != nil {
+		return managedOrgCap{}, fmt.Errorf("failed to get integrator: %w", err)
+	}
+	netTopUp, err := a.db.WalletNetTopUpCents(integratorAddr)
+	if err != nil {
+		return managedOrgCap{}, err
+	}
+	live, _, err := a.db.ListManagedOrganizations(integratorAddr, 1, 1)
+	if err != nil {
+		return managedOrgCap{}, fmt.Errorf("failed to count managed organizations: %w", err)
+	}
+	return managedOrgCap{
+		live: live, created: max(int64(integrator.ManagedOrgsCreated), live), netTopUpCents: netTopUp,
+	}, nil
+}
+
+// unfundedManagedOrgError refuses one more managed organization to an integrator whose wallet
+// never kept a top-up (WalletNetTopUpCents ≤ 0) once it created maxUnfundedManagedOrgs. Once it
+// has, there is no cap, whatever its balance. The caller holds the integrator's managedOrgLocks.
+func (a *API) unfundedManagedOrgError(integratorAddr common.Address) error {
+	standing, err := a.managedOrgCap(integratorAddr)
+	if err != nil || standing.allowed() {
+		return err
+	}
+	return errors.ErrManagedOrgTopUpRequired.Withf("an integrator creates %d organization until it tops up its "+
+		"wallet, deleted ones included: top it up with POST /organizations/{orgAddress}/wallet/topup",
+		maxUnfundedManagedOrgs).
+		WithData(map[string]int64{
+			"managedOrgs": standing.live, "managedOrgsCreated": standing.created,
+			"netTopUpCents": int64(standing.netTopUpCents),
+		})
 }
 
 // managedOrganizationsHandler godoc
@@ -204,7 +293,9 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 //	@Summary		List organizations managed by an integrator
 //	@Description	Returns a paginated list of organizations managed by the caller's integrator
 //	@Description	organization (resolved from the API key's org or the user session — no address in the
-//	@Description	URL). The caller must be an admin or manager of the integrator organization.
+//	@Description	URL). The caller must be an admin or manager of the integrator organization. Each item
+//	@Description	carries its spend cap (`spendCapCents`, null when unlimited) and what its processes hold
+//	@Description	debited from the integrator wallet (`spentCents`).
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `managed:read`).
 //	@Tags			integrator
@@ -246,10 +337,15 @@ func (a *API) managedOrganizationsHandler(w http.ResponseWriter, r *http.Request
 		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
-	list := make([]*apicommon.OrganizationInfo, 0, len(orgs))
+	wallet, err := a.db.Wallet(integratorAddr)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	list := make([]*apicommon.ManagedOrganizationInfo, 0, len(orgs))
 	for i := range orgs {
-		info := apicommon.OrganizationFromDB(&orgs[i], nil)
-		redactBillingEmails(info, user)
+		info := apicommon.ManagedOrganizationFromDB(&orgs[i], wallet.ManagedOrgSpend(orgs[i].Address))
+		redactBillingEmails(&info.OrganizationInfo, user)
 		list = append(list, info)
 	}
 	apicommon.HTTPWriteJSON(w, &apicommon.ListManagedOrganizations{
@@ -264,9 +360,13 @@ func (a *API) managedOrganizationsHandler(w http.ResponseWriter, r *http.Request
 //	@Description	Returns whether the caller's organization (resolved from the API key's org or the user
 //	@Description	session — no address in the URL) is enabled as an integrator, along with the usage summed
 //	@Description	across its managed organizations. The caller must be an admin or manager of the
-//	@Description	organization. An integrator has no limits: its spending is bounded by its wallet
-//	@Description	balance (GET /organizations/{orgAddress}/wallet). When the organization is not an integrator,
-//	@Description	`enabled` is false.
+//	@Description	organization. Its spending is bounded by its wallet balance
+//	@Description	(GET /organizations/{orgAddress}/wallet). Until its wallet keeps a top-up
+//	@Description	(`netTopUpCents` > 0) it creates one managed organization, deleted ones included, and the
+//	@Description	next creation answers 402 (40184); then there is no limit. `managedOrgsCreated` counts the
+//	@Description	creations and `canCreateManagedOrg` says whether one more is allowed now. An integrator
+//	@Description	migrated with managed organizations counts at least those, so it tops up before adding
+//	@Description	another. When the organization is not an integrator, `enabled` is false.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `quota:read`).
 //	@Tags			integrator
@@ -315,6 +415,14 @@ func (a *API) integratorInfoHandler(w http.ResponseWriter, r *http.Request) {
 			SentSMS:     counters.SentSMS,
 			SentEmails:  counters.SentEmails,
 		}
+		standing, err := a.managedOrgCap(integratorAddr)
+		if err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+		resp.ManagedOrgsCreated = standing.created
+		resp.NetTopUpCents = standing.netTopUpCents
+		resp.CanCreateManagedOrg = standing.allowed()
 	}
 	apicommon.HTTPWriteJSON(w, resp)
 }
@@ -524,6 +632,11 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+	// its drafts were credited back above; what is left of its spend entry describes an
+	// organization that no longer exists
+	if err := a.db.DropManagedOrgSpend(integratorAddr, managedAddr); err != nil {
+		log.Warnw("could not drop the spend entry of a deleted managed org", "org", managedAddr.Hex(), "error", err)
+	}
 
 	log.Infow("deleted managed organization", "integrator", integratorAddr.Hex(), "org", managedAddr.Hex())
 	apicommon.HTTPWriteJSON(w, &apicommon.DeleteManagedOrganizationResponse{Address: managedAddr.Hex()})
@@ -554,6 +667,87 @@ func (a *API) managedOrgFromPath(
 		return nil, false
 	}
 	return managed, true
+}
+
+// updateManagedOrganizationHandler godoc
+//
+//	@Summary		Set a managed organization's spend cap
+//	@Description	Caps what the managed organization at {orgAddress} may spend from the caller's integrator
+//	@Description	wallet: the most its processes may hold debited at once, in EUR cents (VAT excluded).
+//	@Description	The body must hold exactly `spendCapCents`: `null` lifts the cap, and a missing key or
+//	@Description	any other key is a 400, so a typo never lifts it. Organizations start unlimited.
+//	@Description	The cap is checked in the same write as the wallet balance, so a publish or census
+//	@Description	top-up that would pass it is refused with 402
+//	@Description	(40183, data: capCents, spentCents, requiredCents) without charging anything. Refunds of
+//	@Description	deleted drafts and credit-backs of failed publishes free their amount again. A cap below
+//	@Description	what is already spent only refuses further debits. The caller must be an admin of their
+//	@Description	integrator organization, and the target must be managed by it.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `managed:write`).
+//	@Tags			integrator
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			orgAddress	path		string										true	"Managed organization address"
+//	@Param			request		body		apicommon.UpdateManagedOrganizationRequest	true	"Spend cap"
+//	@Success		200			{object}	apicommon.ManagedOrganizationInfo
+//	@Failure		400			{object}	errors.Error	"Invalid address, negative cap, or a body without exactly spendCapCents"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		403			{object}	errors.Error	"Not an integrator"
+//	@Failure		404			{object}	errors.Error	"Managed organization not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/integrator/organizations/{orgAddress} [put]
+func (a *API) updateManagedOrganizationHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	integratorAddr, ok := a.integratorAddress(w, r)
+	if !ok {
+		return
+	}
+	if !user.HasRoleFor(integratorAddr, db.AdminRole) {
+		errors.ErrUnauthorized.Withf("user is not admin of the integrator organization").Write(w)
+		return
+	}
+	managed, ok := a.managedOrgFromPath(w, r, integratorAddr)
+	if !ok {
+		return
+	}
+	// a money control: the key must be there (null is the only way to lift the cap), so neither
+	// {} nor a misspelt key silently lifts it
+	var fields map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	raw, ok := fields["spendCapCents"]
+	if !ok || len(fields) != 1 {
+		errors.ErrMalformedBody.Withf("the body must hold exactly spendCapCents (null lifts the cap)").Write(w)
+		return
+	}
+	req := &apicommon.UpdateManagedOrganizationRequest{}
+	if err := json.Unmarshal(raw, &req.SpendCapCents); err != nil {
+		errors.ErrMalformedBody.Withf("spendCapCents must be a number of cents or null").Write(w)
+		return
+	}
+	if req.SpendCapCents != nil && *req.SpendCapCents < 0 {
+		errors.ErrMalformedBody.Withf("spendCapCents cannot be negative").Write(w)
+		return
+	}
+	if err := a.db.SetManagedOrgSpendCap(integratorAddr, managed.Address, req.SpendCapCents); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	wallet, err := a.db.Wallet(integratorAddr)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	info := apicommon.ManagedOrganizationFromDB(managed, wallet.ManagedOrgSpend(managed.Address))
+	redactBillingEmails(&info.OrganizationInfo, user)
+	apicommon.HTTPWriteJSON(w, info)
 }
 
 // refuseTearingDown refuses with 409 work in an organization whose teardown is running.

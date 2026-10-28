@@ -47,3 +47,25 @@ func TestSumManagedCounters(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(none, qt.DeepEquals, ManagedCounters{})
 }
+
+// TestManagedOrgsCreatedIsMonotonic: the count of managed organizations an integrator created only
+// grows, and a stale organization written back through SetOrganization cannot lower it.
+func TestManagedOrgsCreatedIsMonotonic(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	integrator := common.Address{0xA3}
+	c.Assert(testDB.SetOrganization(&Organization{Address: integrator, Country: "ES"}), qt.IsNil)
+	stale, err := testDB.Organization(integrator)
+	c.Assert(err, qt.IsNil)
+	c.Assert(testDB.IncrementManagedOrgsCreated(integrator), qt.IsNil)
+	c.Assert(testDB.IncrementManagedOrgsCreated(integrator), qt.IsNil)
+
+	stale.ManagedOrgsCreated = 1
+	c.Assert(testDB.SetOrganization(stale), qt.IsNil)
+	org, err := testDB.Organization(integrator)
+	c.Assert(err, qt.IsNil)
+	c.Assert(org.ManagedOrgsCreated, qt.Equals, 2)
+
+	c.Assert(testDB.IncrementManagedOrgsCreated(common.Address{0xEE}), qt.ErrorIs, ErrNotFound)
+}

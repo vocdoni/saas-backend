@@ -13,7 +13,7 @@ import (
 )
 
 // TestIntegratorManagedOrgs exercises the integrator layer: a non-integrator org is rejected,
-// an integrator creates managed orgs with no cap, the integrator info and managed-org list
+// an integrator that topped up creates managed orgs with no cap, the integrator info and managed-org list
 // reflect usage, and publishing under a managed org is bounded only by the integrator wallet —
 // no pooled process quota, and no plan on either side.
 func TestIntegratorManagedOrgs(t *testing.T) {
@@ -34,7 +34,12 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 	integratorOrg.Integrator = true
 	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
 
-	// managed orgs are not capped (three is past what the old per-integrator limit allowed)
+	// once topped up, managed orgs are not capped (three is past what the old per-integrator limit
+	// allowed); TestUnfundedIntegratorManagesOneOrg covers an integrator that never topped up
+	const topUp = 100_000
+	c.Assert(testDB.CreditWallet(db.WalletCredit{
+		OrgAddress: integratorAddr, AmountCents: topUp, IdempotencyKey: "cs_integrator_managed_orgs",
+	}), qt.IsNil)
 	const managedOrgs = 3
 	var firstManaged common.Address
 	for i := range managedOrgs {
@@ -82,10 +87,6 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 	census := apicommon.CensusSpec{
 		AuthFields: db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber}, MemberIDs: members,
 	}
-	const topUp = 100_000
-	c.Assert(testDB.CreditWallet(db.WalletCredit{
-		OrgAddress: integratorAddr, AmountCents: topUp, IdempotencyKey: "cs_integrator_managed_orgs",
-	}), qt.IsNil)
 	publishCensusProcess(t, token, firstManaged, census, 1)
 	publishCensusProcess(t, token, firstManaged, census, 1)
 	wallet, err := testDB.Wallet(integratorAddr)

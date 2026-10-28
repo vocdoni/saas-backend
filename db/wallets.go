@@ -699,6 +699,36 @@ func (ms *MongoStorage) WalletTopUpByPaymentIntent(paymentIntentID string) (*Wal
 	return entry, nil
 }
 
+// WalletNetTopUpCents is what orgAddress has put into its wallet through Stripe and kept: its
+// top-ups less the refunds and disputes Stripe returned (net of their reversals). Spending and
+// credit-backs do not count, so a wallet spent down to zero keeps what it once paid in.
+func (ms *MongoStorage) WalletNetTopUpCents(orgAddress common.Address) (pricing.Cents, error) {
+	if err := ms.drainWallet(orgAddress); err != nil {
+		return 0, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	cursor, err := ms.walletLedger.Aggregate(ctx, mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{
+			"orgAddress": orgAddress, "kind": bson.M{"$in": bson.A{WalletEntryTopUp, WalletEntryRefund}},
+		}}},
+		{{Key: "$group", Value: bson.M{"_id": nil, "cents": bson.M{"$sum": "$amountCents"}}}},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to sum wallet top-ups: %w", err)
+	}
+	var sums []struct {
+		Cents pricing.Cents `bson:"cents"`
+	}
+	if err := cursor.All(ctx, &sums); err != nil {
+		return 0, fmt.Errorf("failed to decode wallet top-ups: %w", err)
+	}
+	if len(sums) == 0 {
+		return 0, nil
+	}
+	return sums[0].Cents, nil
+}
+
 // WalletLedger returns a page of an organization's wallet ledger, newest first.
 func (ms *MongoStorage) WalletLedger(
 	orgAddress common.Address, page, limit int64,

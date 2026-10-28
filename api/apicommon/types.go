@@ -14,6 +14,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
+	"github.com/vocdoni/saas-backend/pricing"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/log"
 )
@@ -649,8 +650,38 @@ type CreateManagedOrganizationRequest struct {
 
 // ListManagedOrganizations is the paginated list of organizations managed by an integrator.
 type ListManagedOrganizations struct {
-	Pagination    *Pagination         `json:"pagination"`
-	Organizations []*OrganizationInfo `json:"organizations"`
+	Pagination    *Pagination                `json:"pagination"`
+	Organizations []*ManagedOrganizationInfo `json:"organizations"`
+}
+
+// ManagedOrganizationInfo is a managed organization as its integrator sees it: the organization
+// plus what it may spend and has spent from the integrator's wallet.
+type ManagedOrganizationInfo struct {
+	OrganizationInfo
+	// SpendCapCents is the most the organization's processes may hold debited from the wallet at
+	// once, in EUR cents; null is unlimited.
+	SpendCapCents *pricing.Cents `json:"spendCapCents" extensions:"x-nullable"`
+	// SpentCents is what its processes hold debited now: refunds and failed-publish credit-backs
+	// take their amount off again.
+	SpentCents pricing.Cents `json:"spentCents"`
+}
+
+// ManagedOrganizationFromDB builds the integrator's view of a managed organization from the
+// organization and its spending as recorded on the integrator's wallet.
+func ManagedOrganizationFromDB(org *db.Organization, spend db.ManagedOrgSpend) *ManagedOrganizationInfo {
+	return &ManagedOrganizationInfo{
+		OrganizationInfo: *OrganizationFromDB(org, nil),
+		SpendCapCents:    spend.CapCents,
+		SpentCents:       spend.SpentCents,
+	}
+}
+
+// UpdateManagedOrganizationRequest is the body of PUT /integrator/organizations/{orgAddress}.
+type UpdateManagedOrganizationRequest struct {
+	// SpendCapCents caps what the organization's processes may hold debited from the
+	// integrator's wallet, in EUR cents; null lifts the cap. Required: a body without it (or
+	// with any other key) is refused.
+	SpendCapCents *pricing.Cents `json:"spendCapCents" extensions:"x-nullable"`
 }
 
 // DeleteManagedOrganizationResponse is returned by DELETE
@@ -668,11 +699,18 @@ type IntegratorUsage struct {
 	SentEmails  int `json:"sentEmails"`
 }
 
-// IntegratorInfoResponse is returned by the path-less GET /integrator. An integrator has no
-// limits: what it spends is bounded by its wallet balance (GET /wallet).
+// IntegratorInfoResponse is returned by the path-less GET /integrator. What an integrator spends
+// is bounded by its wallet balance (GET /wallet). Until its wallet keeps a top-up it creates one
+// managed organization, deleted ones included (40184 past it); then there is no limit.
 type IntegratorInfoResponse struct {
 	Enabled bool            `json:"enabled"`
 	Usage   IntegratorUsage `json:"usage"`
+	// ManagedOrgsCreated counts the managed organizations it ever created, deleted ones included.
+	ManagedOrgsCreated int64 `json:"managedOrgsCreated"`
+	// NetTopUpCents is what its wallet kept from Stripe top-ups (refunds and disputes subtract).
+	NetTopUpCents pricing.Cents `json:"netTopUpCents"`
+	// CanCreateManagedOrg: one more managed organization would be allowed now.
+	CanCreateManagedOrg bool `json:"canCreateManagedOrg"`
 }
 
 // OrganizationSubscriptionInfo provides detailed information about an organization's subscription.

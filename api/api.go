@@ -183,6 +183,9 @@ type API struct {
 	// censusGrowthLocks makes the pay-per-process growth check and the census write it
 	// allows one step per organization, so parallel growth cannot pass the same check
 	censusGrowthLocks *orgTxMutex
+	// managedOrgLocks makes the unfunded integrator's managed-organization cap and the creation it
+	// allows one step per integrator, so parallel creations cannot pass the same count
+	managedOrgLocks *orgTxMutex
 	// publishFault, when set, runs at the start of every publish attempt and fails it with what it
 	// returns. A test seam for the retry and credit-back paths; nil in production.
 	publishFault func() error
@@ -313,6 +316,7 @@ func New(ctx context.Context, conf *Config) *API {
 		orgTxLocks:            newOrgTxMutex(),
 		walletLocks:           newOrgTxMutex(),
 		censusGrowthLocks:     newOrgTxMutex(),
+		managedOrgLocks:       newOrgTxMutex(),
 		writerLocks:           newOrgTxMutex(),
 		otpExpiry:             otpExpiry,
 		otpCooldown:           otpCooldown,
@@ -490,6 +494,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, managedOrganizationsEndpoint, a.createManagedOrganizationHandler)
 		handle(r, http.MethodGet, managedOrganizationsEndpoint, a.managedOrganizationsHandler)
 		handle(r, http.MethodDelete, managedOrganizationEndpoint, a.deleteManagedOrganizationHandler)
+		handle(r, http.MethodPut, managedOrganizationEndpoint, a.updateManagedOrganizationHandler)
 		handle(r, http.MethodGet, integratorEndpoint, a.integratorInfoHandler)
 		handle(r, http.MethodGet, walletEndpoint, a.walletHandler)
 		handle(r, http.MethodPost, walletTopUpEndpoint, a.createWalletTopUpHandler)

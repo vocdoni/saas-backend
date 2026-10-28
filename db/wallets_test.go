@@ -397,3 +397,41 @@ func TestWalletRefundDebit(t *testing.T) {
 	c.Assert(entries[0].Kind, qt.Equals, WalletEntryRefund)
 	c.Assert(entries[0].AmountCents, qt.Equals, pricing.Cents(1_500))
 }
+
+func TestWalletNetTopUpCents(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	net := func() pricing.Cents {
+		cents, err := testDB.WalletNetTopUpCents(testOrgAddress)
+		c.Assert(err, qt.IsNil)
+		return cents
+	}
+	c.Assert(net(), qt.Equals, pricing.Cents(0)) // no wallet at all
+
+	c.Assert(topUpTestWallet(5_000, "cs_net_a"), qt.IsNil)
+	c.Assert(topUpTestWallet(3_000, "cs_net_b"), qt.IsNil)
+	// spending and credit-backs are not top-ups: spent down to zero, it still put money in
+	processID := bson.NewObjectID()
+	c.Assert(debitProcess(testOrgAddress, 8_000, processID), qt.IsNil)
+	c.Assert(testDB.CreditWallet(WalletCredit{
+		OrgAddress: testOrgAddress, AmountCents: 1_000, IdempotencyKey: "refund:" + processID.Hex(),
+		Kind: WalletEntryCreditBack, ProcessID: processID,
+	}), qt.IsNil)
+	c.Assert(net(), qt.Equals, pricing.Cents(8_000))
+
+	// a Stripe refund takes it off, its reversal puts it back
+	c.Assert(testDB.DebitWalletForRefund(WalletRefund{OrgAddress: testOrgAddress, AmountCents: 5_000, Key: "re_net"}), qt.IsNil)
+	c.Assert(net(), qt.Equals, pricing.Cents(3_000))
+	reversed, err := testDB.ReverseWalletRefund(testOrgAddress, "re_net", "refundfail:re_net")
+	c.Assert(err, qt.IsNil)
+	c.Assert(reversed, qt.IsTrue)
+	c.Assert(net(), qt.Equals, pricing.Cents(8_000))
+	c.Assert(testDB.DebitWalletForRefund(WalletRefund{OrgAddress: testOrgAddress, AmountCents: 8_000, Key: "re_all"}), qt.IsNil)
+	c.Assert(net(), qt.Equals, pricing.Cents(0))
+
+	// another wallet's top-ups are its own
+	c.Assert(testDB.CreditWallet(WalletCredit{
+		OrgAddress: common.Address{0x43}, AmountCents: 2_000, IdempotencyKey: "cs_net_other",
+	}), qt.IsNil)
+	c.Assert(net(), qt.Equals, pricing.Cents(0))
+}

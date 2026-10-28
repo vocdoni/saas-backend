@@ -521,8 +521,20 @@ definitions:
     type: object
   apicommon.IntegratorInfoResponse:
     properties:
+      canCreateManagedOrg:
+        description: 'CanCreateManagedOrg: one more managed organization would be
+          allowed now.'
+        type: boolean
       enabled:
         type: boolean
+      managedOrgsCreated:
+        description: ManagedOrgsCreated counts the managed organizations it ever created,
+          deleted ones included.
+        type: integer
+      netTopUpCents:
+        description: NetTopUpCents is what its wallet kept from Stripe top-ups (refunds
+          and disputes subtract).
+        type: integer
       usage:
         $ref: '#/definitions/apicommon.IntegratorUsage'
     type: object
@@ -572,7 +584,7 @@ definitions:
     properties:
       organizations:
         items:
-          $ref: '#/definitions/apicommon.OrganizationInfo'
+          $ref: '#/definitions/apicommon.ManagedOrganizationInfo'
         type: array
       pagination:
         $ref: '#/definitions/apicommon.Pagination'
@@ -596,6 +608,111 @@ definitions:
         type: string
       token:
         description: JWT authentication token
+        type: string
+    type: object
+  apicommon.ManagedOrganizationInfo:
+    properties:
+      address:
+        description: The organization's blockchain address
+        items:
+          type: integer
+        type: array
+      color:
+        description: The organization's brand color in hex format
+        type: string
+      communications:
+        description: Whether the organization has enabled communications
+        type: boolean
+      counters:
+        allOf:
+        - $ref: '#/definitions/apicommon.SubscriptionUsage'
+        description: Usage counters for the organization
+      country:
+        description: The country where the organization is based
+        type: string
+      createdAt:
+        description: Creation timestamp in RFC3339 format
+        type: string
+      defaultLang:
+        description: |-
+          Language of the notifications sent on behalf of the organization. It wins on
+          authenticated endpoints; on public ones an explicit lang param wins instead.
+          Optional on creation, where it defaults to en; empty on update means unchanged
+        type: string
+      description:
+        allOf:
+        - $ref: '#/definitions/apicommon.MultilingualText'
+        description: Description is a shorthand for meta["description"]. Same encoding
+          rules as Name.
+      integrator:
+        description: |-
+          Whether the new organization is an integrator (opt-in, used by the integrator
+          portal): it may create managed organizations and pay for their processes from
+          its wallet.
+        type: boolean
+      logo:
+        allOf:
+        - $ref: '#/definitions/apicommon.MultilingualText'
+        description: Logo is a shorthand for meta["logo"]. Same encoding rules as
+          Name.
+      managedBy:
+        description: |-
+          Integrator organization that manages this org, when it was created through
+          the integrator portal. Nil for regular organizations. Lets clients tell
+          managed orgs apart from the user's own orgs (e.g. to hide them from the org
+          switcher), a distinction Parent does not capture (managed orgs set ManagedBy,
+          not Parent).
+
+          A pointer so it is omitted rather than emitted as the zero address: json's
+          omitempty does not skip the fixed-size common.Address array.
+        example: deadbeef
+        format: hex
+        type: string
+      meta:
+        additionalProperties: {}
+        description: Arbitrary key value fields with metadata regarding the organization
+        type: object
+      name:
+        allOf:
+        - $ref: '#/definitions/apicommon.MultilingualText'
+        description: |-
+          Name is a shorthand for meta["name"]. On write accepts a plain string
+          (stored as {"default": "<string>"}) or a locale map; on read it mirrors
+          whatever is stored in meta["name"]. If both Name and meta["name"] are
+          provided on a create request, meta["name"] takes precedence.
+      parent:
+        allOf:
+        - $ref: '#/definitions/apicommon.OrganizationInfo'
+        description: Parent organization if this is a sub-organization
+      size:
+        description: The size category of the organization
+        type: string
+      spendCapCents:
+        description: |-
+          SpendCapCents is the most the organization's processes may hold debited from the wallet at
+          once, in EUR cents; null is unlimited.
+        type: integer
+        x-nullable: true
+      spentCents:
+        description: |-
+          SpentCents is what its processes hold debited now: refunds and failed-publish credit-backs
+          take their amount off again.
+        type: integer
+      subdomain:
+        description: The organization's subdomain
+        type: string
+      subscription:
+        allOf:
+        - $ref: '#/definitions/apicommon.SubscriptionDetails'
+        description: Subscription details for the organization
+      timezone:
+        description: The organization's timezone
+        type: string
+      type:
+        description: The type of organization
+        type: string
+      website:
+        description: The organization's website URL
         type: string
     type: object
   apicommon.MultilingualText:
@@ -1155,6 +1272,35 @@ definitions:
           $ref: '#/definitions/apicommon.ProcessParticipantEntry'
         type: array
     type: object
+  apicommon.ProcessPaymentRequired:
+    properties:
+      balanceCents:
+        type: integer
+      censusSize:
+        type: integer
+      lines:
+        items:
+          $ref: '#/definitions/pricing.QuoteLine'
+        type: array
+      paidCents:
+        description: |-
+          PaidCents and CensusSize are set for a process that already paid part of the price (its
+          census grew since): it buys the difference with POST /processes/{processId}/census/checkout
+          for CensusSize, not with a process checkout.
+        type: integer
+      quoteRecommended:
+        description: 'census above 15 000: suggest a custom quote'
+        type: boolean
+      quoteRequired:
+        description: |-
+          QuoteRequired: census above 50 000. The quote has no price (no lines, a zero total that
+          is never "free") and nothing may be paid or published through self-service.
+        type: boolean
+      shortfallCents:
+        type: integer
+      totalCents:
+        type: integer
+    type: object
   apicommon.ProcessPaymentStatusResponse:
     properties:
       amountCents:
@@ -1548,6 +1694,16 @@ definitions:
         items:
           $ref: '#/definitions/db.VoteJobResult'
         type: array
+    type: object
+  apicommon.UpdateManagedOrganizationRequest:
+    properties:
+      spendCapCents:
+        description: |-
+          SpendCapCents caps what the organization's processes may hold debited from the
+          integrator's wallet, in EUR cents; null lifts the cap. Required: a body without it (or
+          with any other key) is refused.
+        type: integer
+        x-nullable: true
     type: object
   apicommon.UpdateOrganizationMemberGroupResponse:
     properties:
@@ -2931,9 +3087,13 @@ paths:
         Returns whether the caller's organization (resolved from the API key's org or the user
         session — no address in the URL) is enabled as an integrator, along with the usage summed
         across its managed organizations. The caller must be an admin or manager of the
-        organization. An integrator has no limits: its spending is bounded by its wallet
-        balance (GET /organizations/{orgAddress}/wallet). When the organization is not an integrator,
-        `enabled` is false.
+        organization. Its spending is bounded by its wallet balance
+        (GET /organizations/{orgAddress}/wallet). Until its wallet keeps a top-up
+        (`netTopUpCents` > 0) it creates one managed organization, deleted ones included, and the
+        next creation answers 402 (40184); then there is no limit. `managedOrgsCreated` counts the
+        creations and `canCreateManagedOrg` says whether one more is allowed now. An integrator
+        migrated with managed organizations counts at least those, so it tops up before adding
+        another. When the organization is not an integrator, `enabled` is false.
 
         Also callable with a scoped API key (scope: `quota:read`).
       produces:
@@ -2969,7 +3129,9 @@ paths:
       description: |-
         Returns a paginated list of organizations managed by the caller's integrator
         organization (resolved from the API key's org or the user session — no address in the
-        URL). The caller must be an admin or manager of the integrator organization.
+        URL). The caller must be an admin or manager of the integrator organization. Each item
+        carries its spend cap (`spendCapCents`, null when unlimited) and what its processes hold
+        debited from the integrator wallet (`spentCents`).
 
         Also callable with a scoped API key (scope: `managed:read`).
       parameters:
@@ -3012,8 +3174,11 @@ paths:
         Create a new organization managed by the caller's integrator organization. The
         integrator is resolved from the authenticated principal (the API key's org, or the
         user's organization for a session) — no address is passed in the URL. The caller must
-        be an admin of that integrator organization, which must be enabled as an integrator;
-        there is no limit on how many organizations it manages. The managed org's on-chain account is always
+        be an admin of that integrator organization, which must be enabled as an integrator.
+        Until the integrator has topped up its wallet (top-ups less Stripe refunds and disputes
+        above zero) it may manage one organization: the next is refused with 402 (40184, data:
+        managedOrgs, managedOrgsCreated, netTopUpCents). Once it has, there is no limit on how many it manages,
+        whatever its current balance. The managed org's on-chain account is always
         provisioned eagerly. The optional `ownerEmail` designates the managed org's owner/admin
         (defaults to the calling user); the per-user MaxOrgsPerUser cap is bypassed for managed orgs.
 
@@ -3040,6 +3205,11 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
+        "402":
+          description: Top up the integrator wallet to create another managed organization
+            (40184)
+          schema:
+            $ref: '#/definitions/errors.Error'
         "403":
           description: Not an integrator
           schema:
@@ -3050,6 +3220,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Busy (50302), retry after Retry-After
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -3125,6 +3299,66 @@ paths:
       security:
       - BearerAuth: []
       summary: Delete a managed organization and all its data
+      tags:
+      - integrator
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Caps what the managed organization at {orgAddress} may spend from the caller's integrator
+        wallet: the most its processes may hold debited at once, in EUR cents (VAT excluded).
+        The body must hold exactly `spendCapCents`: `null` lifts the cap, and a missing key or
+        any other key is a 400, so a typo never lifts it. Organizations start unlimited.
+        The cap is checked in the same write as the wallet balance, so a publish or census
+        top-up that would pass it is refused with 402
+        (40183, data: capCents, spentCents, requiredCents) without charging anything. Refunds of
+        deleted drafts and credit-backs of failed publishes free their amount again. A cap below
+        what is already spent only refuses further debits. The caller must be an admin of their
+        integrator organization, and the target must be managed by it.
+
+        Also callable with a scoped API key (scope: `managed:write`).
+      parameters:
+      - description: Managed organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: Spend cap
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.UpdateManagedOrganizationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ManagedOrganizationInfo'
+        "400":
+          description: Invalid address, negative cap, or a body without exactly spendCapCents
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Not an integrator
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Managed organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Set a managed organization's spend cap
       tags:
       - integrator
   /integrator/organizations/{orgAddress}/apikeys:
@@ -3751,7 +3985,8 @@ paths:
         402 when the change would grow a published process's census beyond what it paid for:
         40178 with the quote in data (its processId names the process to buy headroom for with
         POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
-        integrator's wallet falls short (data: requiredCents, availableCents).
+        integrator's wallet falls short (data: requiredCents, availableCents), or 40183 past the
+        spend cap its integrator set (data: capCents, spentCents, requiredCents).
         422 when the grown census needs a custom quote.
         409 (40903) while a process built on a census the change grows holds its publish claim:
         nothing is written; retry once the claim is released: when its publish job ends, or up to 15
@@ -4015,7 +4250,8 @@ paths:
         402 when the change would grow a published process's census beyond what it paid for:
         40178 with the quote in data (its processId names the process to buy headroom for with
         POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
-        integrator's wallet falls short (data: requiredCents, availableCents).
+        integrator's wallet falls short (data: requiredCents, availableCents), or 40183 past the
+        spend cap its integrator set (data: capCents, spentCents, requiredCents).
         422 when the grown census needs a custom quote.
         409 (40903) while a process built on a census the change grows holds its publish claim:
         nothing is written; retry once the claim is released: when its publish job ends, or up to 15
@@ -4102,7 +4338,8 @@ paths:
         402 when the change would grow a published process's census beyond what it paid for:
         40178 with the quote in data (its processId names the process to buy headroom for with
         POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
-        integrator's wallet falls short (data: requiredCents, availableCents).
+        integrator's wallet falls short (data: requiredCents, availableCents), or 40183 past the
+        spend cap its integrator set (data: capCents, spentCents, requiredCents).
         422 when the grown census needs a custom quote.
         409 (40903) while a process built on a census the change grows holds its publish claim:
         nothing is written (except for an edit turned into a creation, below); retry once the claim is
@@ -5653,7 +5890,8 @@ paths:
         402 when the change would grow a published process's census beyond what it paid for:
         40178 with the quote in data (its processId names the process to buy headroom for with
         POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
-        integrator's wallet falls short (data: requiredCents, availableCents).
+        integrator's wallet falls short (data: requiredCents, availableCents), or 40183 past the
+        spend cap its integrator set (data: capCents, spentCents, requiredCents).
         422 when the grown census needs a custom quote.
       parameters:
       - description: Process ID
@@ -5745,6 +5983,7 @@ paths:
         debits the difference from the wallet.
         400 when the process has no completed payment, or when the target does not cost more
         than was already paid. Requires Admin role.
+        Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Process ID
         in: path
@@ -5773,7 +6012,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "402":
-          description: Integrator wallet does not cover the difference (40175)
+          description: Integrator wallet does not cover the difference (40175), or
+            spend cap reached (40183)
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
@@ -6205,8 +6445,16 @@ paths:
         A priced process is paid from its payer's wallet (the organization's own, or its
         integrator's when managed) at publish. 402 (40178) means the organization's wallet does
         not cover it: the error data carries the quote, balanceCents and shortfallCents; top it
-        up via POST /processes/{processId}/checkout, which publishes once paid. For a managed
-        organization, 402 (40175) means its integrator's wallet does not cover the price.
+        up via POST /processes/{processId}/checkout, which publishes once paid. A draft that already
+        paid part of its price (its census grew since) gets the data's paidCents and censusSize
+        too, and buys the difference with POST /processes/{processId}/census/checkout. For a managed
+        organization, 402 (40175) means its integrator's wallet does not cover the price (data:
+        requiredCents, availableCents), and 402 (40183) that the price would take it past the
+        spend cap its integrator set (data: capCents, spentCents, requiredCents).
+        409 (40177) also answers while another draft is paying for a once-per-organization add-on
+        (branding, custom URL) this one selects, and while it selects one its payment does not
+        include that the organization has not paid for either: deselect it, or publish once
+        another process pays for it.
         422 (40176) means the census is above 50 000 voters: quote-only, no self-service price.
       parameters:
       - description: Process ID
@@ -6234,9 +6482,14 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "402":
-          description: Wallet short (quote, balance, shortfall in data)
+          description: Wallet short or spend cap reached
           schema:
-            $ref: '#/definitions/errors.Error'
+            allOf:
+            - $ref: '#/definitions/errors.Error'
+            - properties:
+                data:
+                  $ref: '#/definitions/apicommon.ProcessPaymentRequired'
+              type: object
         "403":
           description: An integrator's own organization cannot own processes (40174)
           schema:
@@ -6246,7 +6499,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Publish in progress, out of sync, top-up checkout open, or
+          description: Publish in progress, out of sync, checkout open, add-on held,
             org being deleted (40901)
           schema:
             $ref: '#/definitions/errors.Error'
@@ -6327,7 +6580,8 @@ paths:
         402 when the change would grow a published process's census beyond what it paid for:
         40178 with the quote in data (its processId names the process to buy headroom for with
         POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
-        integrator's wallet falls short (data: requiredCents, availableCents).
+        integrator's wallet falls short (data: requiredCents, availableCents), or 40183 past the
+        spend cap its integrator set (data: capCents, spentCents, requiredCents).
         422 when the grown census needs a custom quote.
       parameters:
       - description: Process ID

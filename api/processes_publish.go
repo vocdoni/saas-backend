@@ -248,8 +248,16 @@ func preflightError(problems []string, questionsMismatch bool, denied error) err
 //	@Description	A priced process is paid from its payer's wallet (the organization's own, or its
 //	@Description	integrator's when managed) at publish. 402 (40178) means the organization's wallet does
 //	@Description	not cover it: the error data carries the quote, balanceCents and shortfallCents; top it
-//	@Description	up via POST /processes/{processId}/checkout, which publishes once paid. For a managed
-//	@Description	organization, 402 (40175) means its integrator's wallet does not cover the price.
+//	@Description	up via POST /processes/{processId}/checkout, which publishes once paid. A draft that already
+//	@Description	paid part of its price (its census grew since) gets the data's paidCents and censusSize
+//	@Description	too, and buys the difference with POST /processes/{processId}/census/checkout. For a managed
+//	@Description	organization, 402 (40175) means its integrator's wallet does not cover the price (data:
+//	@Description	requiredCents, availableCents), and 402 (40183) that the price would take it past the
+//	@Description	spend cap its integrator set (data: capCents, spentCents, requiredCents).
+//	@Description	409 (40177) also answers while another draft is paying for a once-per-organization add-on
+//	@Description	(branding, custom URL) this one selects, and while it selects one its payment does not
+//	@Description	include that the organization has not paid for either: deselect it, or publish once
+//	@Description	another process pays for it.
 //	@Description	422 (40176) means the census is above 50 000 voters: quote-only, no self-service price.
 //	@Tags			processes
 //	@Accept			json
@@ -259,11 +267,11 @@ func preflightError(problems []string, questionsMismatch bool, denied error) err
 //	@Success		202			{object}	apicommon.EnqueuedResponse
 //	@Success		200			{object}	apicommon.CreateVotingProcessResponse	"Already published"
 //	@Failure		400			{object}	errors.Error							"Not ready to publish"
+//	@Failure		403			{object}	errors.Error							"An integrator's own organization cannot own processes (40174)"
 //	@Failure		401			{object}	errors.Error
-//	@Failure		402			{object}	errors.Error	"Wallet short (quote, balance, shortfall in data)"
-//	@Failure		403			{object}	errors.Error	"An integrator's own organization cannot own processes (40174)"
+//	@Failure		402			{object}	errors.Error{data=apicommon.ProcessPaymentRequired}	"Wallet short or spend cap reached"
 //	@Failure		404			{object}	errors.Error
-//	@Failure		409			{object}	errors.Error	"Publish in progress, out of sync, top-up checkout open, or org being deleted (40901)"
+//	@Failure		409			{object}	errors.Error	"Publish in progress, out of sync, checkout open, add-on held, org being deleted (40901)"
 //	@Failure		422			{object}	errors.Error	"Census size requires a custom quote"
 //	@Failure		503			{object}	errors.Error	"Busy (50302 wallet or census growth, 50303 org tx), retry after Retry-After"
 //	@Router			/processes/{processId}/publish [post]

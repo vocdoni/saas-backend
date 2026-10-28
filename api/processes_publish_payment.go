@@ -126,10 +126,12 @@ func (a *API) withPaymentRow(processID bson.ObjectID, state *db.ProcessLedgerSta
 // debit inside startProcessPublish would refuse anyway, with the answer the client needs. Nil
 // means clear to publish: the process is free, already paid, or its payer's wallet covers what is
 // due. Otherwise: ErrQuoteRequired (422) for a quote-only census, 409 while a top-up checkout opened
-// for the process is still open, and walletShortError (402) when the wallet falls short. Only a
+// for the process is still open, spendCapError (402, 40183) when a managed organization's debit
+// would pass its spend cap, and walletShortError (402) when the wallet falls short. Only a
 // courtesy: the balance can move before the debit, whose own refusal is the authoritative answer.
 // It also answers 409 while another process holds a once-per-organization add-on the draft
-// selects (quotedDraft.heldError). It only reads: whatever a credit-back still owes is applied by
+// selects (quotedDraft.heldError), or while one it selects is left unpriced with the organization
+// not stamped for it (unstampedOrgAddOnError). It only reads: whatever a credit-back still owes is applied by
 // the debit, under the payer's wallet lock.
 func (a *API) paymentDueForPublish(vp *db.VotingProcess) error {
 	org, err := a.db.Organization(vp.OrgAddress)
@@ -178,12 +180,32 @@ func (a *API) paymentDueForPublish(vp *db.VotingProcess) error {
 	if err != nil {
 		return fmt.Errorf("failed to get wallet: %w", err)
 	}
+	// the debit checks the managed organization's spend cap before the balance, and so does this
+	if org.ManagedBy != (common.Address{}) {
+		if err := spendCapError(wallet.ManagedOrgSpend(org.Address), dueCents); err != nil {
+			return err
+		}
+	}
 	if wallet.BalanceCents >= dueCents {
 		return nil
 	}
 	return walletShortError(walletShort{
 		org: org, quote: quote, dueCents: dueCents, balanceCents: wallet.BalanceCents,
 		paidCents: paidCents, censusSize: int64(quoted.CensusSize),
+	})
+}
+
+// spendCapError is the 402 (40183) of a debit of dueCents that would take a managed organization
+// past the spend cap its integrator set, with capCents, spentCents and requiredCents; nil when the
+// debit stays within it, or there is no cap.
+func spendCapError(spend db.ManagedOrgSpend, dueCents pricing.Cents) error {
+	if spend.CapCents == nil || spend.SpentCents+dueCents <= *spend.CapCents {
+		return nil
+	}
+	return errors.ErrManagedOrgSpendCapReached.WithData(map[string]pricing.Cents{
+		"capCents":      *spend.CapCents,
+		"spentCents":    spend.SpentCents,
+		"requiredCents": dueCents,
 	})
 }
 
@@ -270,7 +292,8 @@ func (a *API) debitProcessWalletUpTo(d publishDebit) error {
 	// refused before the debit, nothing backs the claims; any later failure keeps them, since
 	// the debit it follows may already be applied
 	if errors.Is(err, errors.ErrInsufficientWalletBalance) || errors.Is(err, errors.ErrPaymentRequired) ||
-		errors.Is(err, errors.ErrQuoteRequired) || errors.Is(err, errors.ErrDuplicateConflict) {
+		errors.Is(err, errors.ErrQuoteRequired) || errors.Is(err, errors.ErrManagedOrgSpendCapReached) ||
+		errors.Is(err, errors.ErrDuplicateConflict) {
 		a.releaseRefusedOrgAddOnClaims(vp, claims)
 	}
 	return err
@@ -418,6 +441,14 @@ func (a *API) chargeProcessWallet(c processCharge) (pricing.Cents, error) {
 		AddOns:            addOns,
 		ManagedOrg:        managedOrg,
 	}); err != nil {
+		if errors.Is(err, db.ErrManagedOrgSpendCapReached) {
+			if wallet, werr := a.db.Wallet(payer); werr == nil {
+				if capErr := spendCapError(wallet.ManagedOrgSpend(c.vp.OrgAddress), dueCents); capErr != nil {
+					return 0, capErr
+				}
+			}
+			return 0, errors.ErrManagedOrgSpendCapReached
+		}
 		if errors.Is(err, db.ErrInsufficientWalletBalance) {
 			wallet, werr := a.db.Wallet(payer)
 			if werr != nil {
@@ -881,5 +912,6 @@ func refusedForUser(err error) bool {
 		return true
 	}
 	return errors.Is(err, errors.ErrPaymentSessionConflict) || errors.Is(err, errors.ErrQuoteRequired) ||
-		errors.Is(err, errors.ErrPaymentRequired) || errors.Is(err, errors.ErrInsufficientWalletBalance)
+		errors.Is(err, errors.ErrPaymentRequired) || errors.Is(err, errors.ErrInsufficientWalletBalance) ||
+		errors.Is(err, errors.ErrManagedOrgSpendCapReached)
 }

@@ -228,8 +228,9 @@ func (*Subscriptions) IsIntegrator(org *db.Organization) bool {
 	return org != nil && org.Integrator && !managed(org)
 }
 
-// CanCreateManagedOrg checks that the organization may create managed organizations. Being an
-// integrator is all it takes: there is no limit on how many.
+// CanCreateManagedOrg checks that the organization may create managed organizations: it must be
+// an integrator. How many it may create is the API's call: one until it tops up its wallet, then
+// no limit.
 func (p *Subscriptions) CanCreateManagedOrg(integrator *db.Organization) error {
 	if !p.IsIntegrator(integrator) {
 		return errors.ErrNotAnIntegrator

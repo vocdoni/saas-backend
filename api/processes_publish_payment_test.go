@@ -512,6 +512,7 @@ func TestRefusedForUser(t *testing.T) {
 		errors.ErrQuoteRequired,
 		errors.ErrPaymentRequired.WithData(&apicommon.ProcessPaymentRequired{}),
 		errors.ErrInsufficientWalletBalance,
+		errors.ErrManagedOrgSpendCapReached,
 		errors.ErrMalformedBody.Withf("census is empty"),
 		errors.ErrProcessQuestionsMismatch,
 		errors.ErrStaleUpdate,
