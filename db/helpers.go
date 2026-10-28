@@ -35,9 +35,12 @@ func (ms *MongoStorage) collectionsMap() map[string]**mongo.Collection {
 		"walletLedger":        &ms.walletLedger,
 		"cspTokens":           &ms.cspTokens,
 		"cspTokensStatus":     &ms.cspTokensStatus,
+		"cspCounters":         &ms.cspCounters,
 		"jobs":                &ms.jobs,
 		"apiKeys":             &ms.apiKeys,
+		"meteredVotes":        &ms.meteredVotes,
 		"migrations":          &ms.migrations,
+		"counters":            &ms.counters,
 	}
 }
 
@@ -96,7 +99,7 @@ func paginatedDocuments[T any](collection *mongo.Collection, page, limit int64,
 	filter any, findOptions *options.FindOptionsBuilder,
 ) (int64, []T, error) {
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	// Count total documents

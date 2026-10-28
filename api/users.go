@@ -1,8 +1,11 @@
 package api
 
 import (
+	"context"
+	"crypto/subtle"
 	"encoding/json"
-	"io"
+	"fmt"
+	"math"
 	"net/http"
 	"time"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"go.vocdoni.io/dvote/log"
+	"go.vocdoni.io/dvote/util"
 )
 
 // registerHandler godoc
@@ -26,16 +30,12 @@ import (
 //	@Failure		400		{object}	errors.Error		"Invalid input data"
 //	@Failure		409		{object}	errors.Error		"User already exists"
 //	@Failure		500		{object}	errors.Error		"Internal server error"
+//	@Failure		503		{object}	errors.Error		"Server busy, retry after the Retry-After delay"
 //	@Router			/users [post]
 func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 	userInfo := &apicommon.UserInfo{}
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		errors.ErrMalformedBody.Write(w)
-		return
-	}
-	if err := json.Unmarshal(body, userInfo); err != nil {
-		errors.ErrMalformedBody.Write(w)
+	if apiErr := apicommon.DecodeCappedJSON(w, r, userInfo, maxCredentialsBodyBytes); apiErr != nil {
+		apiErr.Write(w)
 		return
 	}
 	// check the email is correct format
@@ -58,8 +58,20 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrMalformedBody.Withf("last name is empty").Write(w)
 		return
 	}
+	// reject an already registered email before hashing, so repeated registrations of the same
+	// address do not each cost a password hash (SetUser still enforces uniqueness on insert)
+	if _, err := a.db.UserByEmail(userInfo.Email); err == nil {
+		errors.ErrDuplicateConflict.With("user already exists").Write(w)
+		return
+	} else if err != db.ErrNotFound {
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
 	// hash the password
-	hPassword := internal.HexHashPassword(passwordSalt, userInfo.Password)
+	hPassword, ok := hashPassword(w, r, userInfo.Password)
+	if !ok {
+		return
+	}
 	// add the user to the database
 	userID, err := a.db.SetUser(&db.User{
 		Email:     userInfo.Email,
@@ -194,8 +206,8 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
-	// generate a new token with the user name as the subject
-	res, err := a.buildLoginResponse(user.Email)
+	// generate a new token bound to the user's ID and current session version
+	res, err := a.buildLoginResponse(user)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Write(w)
 		return
@@ -214,9 +226,6 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 //	@Param			email	query		string	true	"User email"
 //	@Success		200		{object}	apicommon.UserVerification
 //	@Failure		400		{object}	errors.Error	"Invalid input data"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"User not found"
-//	@Failure		409		{object}	errors.Error	"User already verified"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/users/verify/code [get]
 func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Request) {
@@ -227,38 +236,32 @@ func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Req
 		errors.ErrInvalidUserData.With("no email provided").Write(w)
 		return
 	}
-	var err error
-	var user *db.User
-	// get the user information from the database by email
-	user, err = a.db.UserByEmail(userEmail)
-	if err != nil {
-		if err == db.ErrNotFound {
-			errors.ErrUserNotFound.Write(w)
-			return
-		}
+	// the endpoint is public and must not reveal whether an account exists or is verified:
+	// every outcome (unknown email, already verified, no pending code) gets the same 200
+	// response shape, with Valid=true and the expiry only when a verification challenge is
+	// actually pending — which the legitimate owner knows, having just requested it
+	response := apicommon.UserVerification{Email: userEmail, Valid: false}
+	user, err := a.db.UserByEmail(userEmail)
+	if err != nil && err != db.ErrNotFound {
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
-	// check if the user is already verified
-	if user.Verified {
-		errors.ErrUserAlreadyVerified.Write(w)
-		return
-	}
-	// get the userVerification from the database
-	userVerification, err := a.db.UserVerificationCode(user, db.CodeTypeVerifyAccount)
-	if err != nil {
-		if err != db.ErrNotFound {
+	if err == nil && !user.Verified {
+		userVerification, err := a.db.UserVerificationCode(user, db.CodeTypeVerifyAccount)
+		switch {
+		case err == nil:
+			response.Expiration = userVerification.Expiration
+			response.Valid = userVerification.Expiration.After(time.Now())
+		case err != db.ErrNotFound:
 			log.Warnw("could not get verification code", "error", err)
+			errors.ErrGenericInternalServerError.Write(w)
+			return
+		default:
+			// no pending challenge: keep the neutral response
 		}
-		errors.ErrUnauthorized.Write(w)
-		return
 	}
 	// return the verification code information
-	apicommon.HTTPWriteJSON(w, apicommon.UserVerification{
-		Email:      user.Email,
-		Expiration: userVerification.Expiration,
-		Valid:      userVerification.Expiration.After(time.Now()),
-	})
+	apicommon.HTTPWriteJSON(w, response)
 }
 
 // resendUserVerificationCodeHandler godoc
@@ -309,10 +312,38 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
-	// if the verification code is not expired
-	if userVerification.Expiration.After(time.Now()) {
-		// check if the maximum number of attempts has been reached for resending
-		if userVerification.Attempts >= apicommon.VerificationCodeMaxAttempts {
+	// an exhausted code is replaced by a fresh one, so spending its guess budget cannot block the
+	// account owner until it expires; the replacement is still bound by the resend cooldown
+	if userVerification.Expiration.After(time.Now()) && !codeReusable(userVerification) {
+		sent, err := a.db.VerificationCodeTrySend(user, db.CodeTypeVerifyAccount, a.otpCooldown, math.MaxInt32)
+		if err != nil {
+			if err != db.ErrNotFound {
+				log.Warnw("could not record verification code send", "error", err)
+			}
+			errors.ErrUnauthorized.Write(w)
+			return
+		}
+		if !sent {
+			errors.ErrVerificationMaxAttempts.WithData(apicommon.UserVerification{
+				Expiration: userVerification.Expiration,
+			}).Write(w)
+			return
+		}
+	}
+	// if the verification code is still usable, resend the same code instead of replacing it
+	if codeReusable(userVerification) {
+		// spend one delivery from the send budget, which is separate from the guess-attempt
+		// counter so resending the code never eats into the brute-force budget. The update is
+		// a single conditional write, so concurrent resends cannot exceed the cap.
+		sent, err := a.db.VerificationCodeTrySend(user, db.CodeTypeVerifyAccount, 0, apicommon.VerificationCodeMaxSends)
+		if err != nil {
+			if err != db.ErrNotFound {
+				log.Warnw("could not record verification code send", "error", err)
+			}
+			errors.ErrUnauthorized.Write(w)
+			return
+		}
+		if !sent {
 			errors.ErrVerificationMaxAttempts.WithData(apicommon.UserVerification{
 				Expiration: userVerification.Expiration,
 			}).Write(w)
@@ -323,7 +354,7 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 			errors.ErrGenericInternalServerError.Write(w)
 			return
 		}
-		link, err := a.generateVerificationLink(user, code)
+		link, err := a.generateVerificationLink(user, db.CodeTypeVerifyAccount, code)
 		if err != nil {
 			log.Warnw("could not generate verification link", "error", err)
 			errors.ErrGenericInternalServerError.Write(w)
@@ -338,11 +369,6 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 			userVerification.Expiration,
 		); err != nil {
 			log.Warnw("could not resend verification code", "error", err)
-			errors.ErrGenericInternalServerError.Write(w)
-			return
-		}
-		if err = a.db.VerificationCodeIncrementAttempts(userVerification.SealedCode, db.CodeTypeVerifyAccount); err != nil {
-			log.Warnw("could not increment verification code attempts", "error", err)
 			errors.ErrGenericInternalServerError.Write(w)
 			return
 		}
@@ -407,9 +433,13 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		// flag integrator status per organization so multi-org users can tell
 		// which of their organizations is the integrator one
+		info := apicommon.OrganizationFromDB(org, parent)
+		// members other than admins (and admins of a suborganization, for its parent) do not get
+		// the billing email
+		redactBillingEmails(info, user)
 		userOrgs = append(userOrgs, &apicommon.UserOrganization{
 			Role:         string(orgInfo.Role),
-			Organization: apicommon.OrganizationFromDB(org, parent),
+			Organization: info,
 			IsIntegrator: a.subscriptions.IsIntegrator(org),
 		})
 	}
@@ -434,7 +464,14 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 // updateUserInfoHandler godoc
 //
 //	@Summary		Update user information
-//	@Description	Update information for the authenticated user
+//	@Description	Update information for the authenticated user. Changing the email does not take
+//	@Description	effect immediately: a verification code is sent to the requested address and the
+//	@Description	email is switched only once the code is confirmed via POST /users/me/email/verify.
+//	@Description	Changing the email of an account with a password requires the current password in
+//	@Description	the password field; accounts without a password (OAuth-only) cannot change it, and
+//	@Description	neither can any account when the service runs without a mail service.
+//	@Description	A new change code can be requested once per OTP cooldown. The code is mailed to the
+//	@Description	new address with a link to the web app page /account/email/verify?code=<code>.
 //	@Tags			users
 //	@Accept			json
 //	@Produce		json
@@ -443,6 +480,7 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 //	@Success		200		{object}	apicommon.LoginResponse
 //	@Failure		400		{object}	errors.Error	"Invalid input data"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		409		{object}	errors.Error	"Email already in use"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/users/me [put]
 func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
@@ -456,60 +494,255 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrMalformedBody.Write(w)
 		return
 	}
-	// create a flag to check if the user information has changed and needs to
-	// be updated and store the current email to check if it has changed
-	// specifically
-	updateUser := false
-	currentEmail := user.Email
-	// check the email is correct format if it is not empty
-	if userInfo.Email != "" {
+	// an email change must prove ownership of the new mailbox: it is recorded as a pending
+	// email and only applied once the code sent to it is confirmed
+	pendingEmail := ""
+	if userInfo.Email != "" && userInfo.Email != user.Email {
 		if !internal.ValidEmail(userInfo.Email) {
 			errors.ErrEmailMalformed.Write(w)
 			return
 		}
-		// update the user email and set the flag to true to update the user
-		// info
-		user.Email = userInfo.Email
-		updateUser = true
+		// re-authenticate before an email change: proving ownership of the new mailbox does not
+		// prove the caller is the account owner. Without this, a stolen session could move the
+		// account to an attacker-controlled address (whose code the attacker receives), then
+		// reset the password through it and revoke the owner's sessions. OAuth-only accounts
+		// have no password to re-check, and their OAuth login is bound to the provider's email,
+		// so their email cannot be changed here.
+		if user.Password == "" {
+			errors.ErrNotSupported.With("accounts without a password cannot change their email").Write(w)
+			return
+		}
+		// without a mail service no code can reach the new address, so its ownership cannot be proven
+		if a.mail == nil {
+			errors.ErrNotSupported.With("email changes need the mail service").Write(w)
+			return
+		}
+		if userInfo.Password == "" {
+			errors.ErrUnauthorized.Withf("current password required to change the email").Write(w)
+			return
+		}
+		hPassword, ok := hashPassword(w, r, userInfo.Password)
+		if !ok {
+			return
+		}
+		if subtle.ConstantTimeCompare([]byte(hPassword), []byte(user.Password)) != 1 {
+			errors.ErrUnauthorized.Withf("current password required to change the email").Write(w)
+			return
+		}
+		// refuse an address already bound to another account (the unique index would reject
+		// the switch later anyway; failing now gives the owner a clear answer)
+		if _, err := a.db.UserByEmail(userInfo.Email); err == nil {
+			errors.ErrDuplicateConflict.With("email already in use").Write(w)
+			return
+		} else if err != db.ErrNotFound {
+			errors.ErrGenericInternalServerError.Write(w)
+			return
+		}
+		// bound how often a session can make the service mail an arbitrary address: a change
+		// code delivered within the OTP cooldown blocks issuing another one. The claim is a single
+		// conditional update on the previous code, so concurrent requests cannot both pass it
+		// (a fresh code replaces the claimed one, which is why the send budget is not capped here).
+		sent, err := a.db.VerificationCodeTrySend(user, db.CodeTypeUpdateEmail, a.otpCooldown, math.MaxInt32)
+		switch {
+		case err == nil && !sent:
+			errors.ErrVerificationMaxAttempts.With("an email change code was sent recently, retry later").Write(w)
+			return
+		case err != nil && err != db.ErrNotFound:
+			log.Warnw("could not claim email update code send", "error", err)
+			errors.ErrGenericInternalServerError.Write(w)
+			return
+		}
+		pendingEmail = userInfo.Email
+	} else if userInfo.Email != "" && !internal.ValidEmail(userInfo.Email) {
+		errors.ErrEmailMalformed.Write(w)
+		return
 	}
-	// check the first name is not empty
-	if userInfo.FirstName != "" {
-		// update the user first name and set the flag to true to update the
-		// user info
-		user.FirstName = userInfo.FirstName
-		updateUser = true
-	}
-	// check the last name is not empty
-	if userInfo.LastName != "" {
-		// update the user last name and set the flag to true to update the
-		// user info
-		user.LastName = userInfo.LastName
-		updateUser = true
-	}
-	// update the user information if needed
-	if updateUser {
-		if _, err := a.db.SetUser(user); err != nil {
+	// update the profile fields with a field-specific write: the user snapshot in the context
+	// was loaded at authentication time, and writing it back whole could restore memberships
+	// an admin revoked (or a password that changed) while this request was in flight
+	if userInfo.FirstName != "" || userInfo.LastName != "" {
+		if err := a.db.UpdateUserProfile(user.ID, userInfo.FirstName, userInfo.LastName); err != nil {
 			log.Warnw("could not update user", "error", err)
 			errors.ErrGenericInternalServerError.Write(w)
 			return
 		}
-		// if user email has changed, update the creator email in the
-		// organizations where the user is creator
-		if user.Email != currentEmail {
-			if err := a.db.ReplaceCreatorEmail(currentEmail, user.Email); err != nil {
-				// revert the user update if the creator email update fails
-				user.Email = currentEmail
-				if _, err := a.db.SetUser(user); err != nil {
-					log.Warnw("could not revert user update", "error", err)
-				}
-				// return an error
-				errors.ErrGenericInternalServerError.Write(w)
-				return
-			}
+	}
+	// store the pending email change and send the verification code to the new address
+	if pendingEmail != "" {
+		if err := a.sendEmailUpdateCode(r.Context(), user, pendingEmail); err != nil {
+			log.Warnw("could not send email update code", "error", err)
+			errors.ErrGenericInternalServerError.Write(w)
+			return
 		}
 	}
-	// generate a new token with the new user email as the subject
-	res, err := a.buildLoginResponse(user.Email)
+	// the identity (user ID) is unchanged, so the current token stays valid; return a fresh
+	// one anyway to keep the previous response contract
+	res, err := a.buildLoginResponse(user)
+	if err != nil {
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+	apicommon.HTTPWriteJSON(w, res)
+}
+
+// sendEmailUpdateCode generates an email-update verification code for the user, stores it
+// (sealed to the pending address) and mails it to that address. The user's email is only
+// switched once the code is confirmed by updateUserEmailVerifyHandler.
+func (a *API) sendEmailUpdateCode(ctx context.Context, user *db.User, pendingEmail string) error {
+	// generate the code only when the mail service is available, mirroring
+	// generateVerificationCodeAndLink's mocked verification for test setups
+	code := ""
+	if a.mail != nil {
+		code = util.RandomHex(apicommon.VerificationCodeLength)
+	}
+	// seal the code to the pending address, so it only opens for that exact email
+	sealedCode, err := internal.SealToken(code, pendingEmail, a.secret)
+	if err != nil {
+		return fmt.Errorf("could not seal email update code: %w", err)
+	}
+	expiration := time.Now().Add(a.otpExpiry)
+	if err := a.db.SetVerificationCode(&db.UserVerification{
+		UserID:       user.ID,
+		SealedCode:   sealedCode,
+		Type:         db.CodeTypeUpdateEmail,
+		PendingEmail: pendingEmail,
+		Expiration:   expiration,
+	}); err != nil {
+		return fmt.Errorf("could not store email update code: %w", err)
+	}
+	// the link opens the web app page that confirms the change with POST /users/me/email/verify
+	// from the signed-in session; the account email is not a parameter, the code is enough
+	link, err := a.buildWebAppURL(mailtemplates.VerifyEmailChangeNotification.WebAppURI, map[string]any{
+		"code": code,
+	})
+	if err != nil {
+		return fmt.Errorf("could not build email update link: %w", err)
+	}
+	if err := a.sendMail(ctx, nil, pendingEmail, mailtemplates.VerifyEmailChangeNotification,
+		struct {
+			Code string
+			Link string
+		}{code, link},
+		expiration,
+	); err != nil {
+		return fmt.Errorf("could not send email update code: %w", err)
+	}
+	return nil
+}
+
+// updateUserEmailVerifyHandler godoc
+//
+//	@Summary		Confirm a pending email change
+//	@Description	Confirm the email change requested via PUT /users/me with the code sent to the
+//	@Description	new address. On success the account email is switched, every existing session is
+//	@Description	revoked and a fresh token is returned.
+//	@Tags			users
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			request	body		apicommon.UserVerification	true	"Verification code"
+//	@Success		200		{object}	apicommon.LoginResponse
+//	@Failure		400		{object}	errors.Error	"Invalid input data or max attempts reached"
+//	@Failure		401		{object}	errors.Error	"Unauthorized or code mismatch"
+//	@Failure		409		{object}	errors.Error	"Email already in use"
+//	@Failure		410		{object}	errors.Error	"Verification code expired"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Router			/users/me/email/verify [post]
+func (a *API) updateUserEmailVerifyHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	verification := &apicommon.UserVerification{}
+	if err := json.NewDecoder(r.Body).Decode(verification); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	if a.mail != nil && verification.Code == "" {
+		errors.ErrInvalidUserData.With("no verification code provided").Write(w)
+		return
+	}
+	// load the pending email change
+	userVerification, err := a.db.UserVerificationCode(user, db.CodeTypeUpdateEmail)
+	if err != nil {
+		if err != db.ErrNotFound {
+			log.Warnw("could not get email update code", "error", err)
+		}
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	// check the verification code is not expired
+	if userVerification.Expiration.Before(time.Now()) {
+		errors.ErrVerificationCodeExpired.Write(w)
+		return
+	}
+	// bound brute-force: atomically spend one verification attempt, failing closed once the
+	// per-code cap is reached (same guard as account verification and password reset)
+	recorded, err := a.db.VerificationCodeCheckAndAddAttempt(user, db.CodeTypeUpdateEmail, apicommon.VerificationCodeMaxAttempts)
+	if err != nil {
+		if err != db.ErrNotFound {
+			log.Warnw("could not record email update attempt", "error", err)
+		}
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	if !recorded {
+		errors.ErrVerificationMaxAttempts.Write(w)
+		return
+	}
+	// check the verification code is correct (sealed to the pending address)
+	code, err := internal.OpenToken(userVerification.SealedCode, userVerification.PendingEmail, a.secret)
+	if err != nil {
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+	if code != verification.Code {
+		errors.ErrUnauthorized.With("code mismatch").Write(w)
+		return
+	}
+	// consume the exact code before switching the email so it can never be redeemed twice,
+	// even by concurrent requests: exactly one delete wins
+	if err := a.db.ConsumeVerificationCode(user, db.CodeTypeUpdateEmail, userVerification.SealedCode); err != nil {
+		if err != db.ErrNotFound {
+			log.Warnw("could not consume email update code", "error", err)
+			errors.ErrGenericInternalServerError.Write(w)
+			return
+		}
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	// switch the email; the same atomic update bumps the session version, revoking every
+	// outstanding session (they were bound to an account reachable through the old address)
+	if err := a.db.UpdateUserEmail(user.ID, userVerification.PendingEmail); err != nil {
+		if err == db.ErrAlreadyExists {
+			errors.ErrDuplicateConflict.With("email already in use").Write(w)
+			return
+		}
+		log.Warnw("could not update user email", "error", err)
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+	// pending account-verification and password-reset codes are sealed to the old address and
+	// would no longer open; drop them so the owner can request new ones
+	for _, t := range []db.CodeType{db.CodeTypeVerifyAccount, db.CodeTypePasswordReset} {
+		if err := a.db.DeleteUserVerificationCode(user, t); err != nil {
+			log.Warnw("could not delete a pending verification code after an email change",
+				"userId", user.ID, "type", t, "error", err)
+		}
+	}
+	// keep the organizations the user created pointing at their current address. The signing key
+	// does not depend on it (it is derived from the immutable signer seed)
+	if err := a.db.ReplaceCreatorEmail(user.Email, userVerification.PendingEmail); err != nil {
+		log.Errorw(err, "could not update the creator email of the user's organizations")
+	}
+	// reload the user to mint a token for the new session version
+	updated, err := a.db.User(user.ID)
+	if err != nil {
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+	res, err := a.buildLoginResponse(updated)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Write(w)
 		return
@@ -520,16 +753,18 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 // updateUserPasswordHandler godoc
 //
 //	@Summary		Update user password
-//	@Description	Update the password for the authenticated user
+//	@Description	Update the password for the authenticated user. Every existing session is revoked;
+//	@Description	a fresh token for the current client is returned in the response.
 //	@Tags			users
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			request	body		apicommon.UserPasswordUpdate	true	"Password update information"
-//	@Success		200		{string}	string							"OK"
-//	@Failure		400		{object}	errors.Error					"Invalid input data"
-//	@Failure		401		{object}	errors.Error					"Unauthorized or old password does not match"
-//	@Failure		500		{object}	errors.Error					"Internal server error"
+//	@Success		200		{object}	apicommon.LoginResponse
+//	@Failure		400		{object}	errors.Error	"Invalid input data"
+//	@Failure		401		{object}	errors.Error	"Unauthorized or old password does not match"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Failure		503		{object}	errors.Error	"Server busy, retry after the Retry-After delay"
 //	@Router			/users/password [put]
 func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -543,8 +778,8 @@ func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	userPasswords := &apicommon.UserPasswordUpdate{}
-	if err := json.NewDecoder(r.Body).Decode(userPasswords); err != nil {
-		errors.ErrMalformedBody.Write(w)
+	if apiErr := apicommon.DecodeCappedJSON(w, r, userPasswords, maxCredentialsBodyBytes); apiErr != nil {
+		apiErr.Write(w)
 		return
 	}
 	// check the password is correct format
@@ -553,19 +788,39 @@ func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// hash the password the old password to compare it with the stored one
-	hOldPassword := internal.HexHashPassword(passwordSalt, userPasswords.OldPassword)
+	hOldPassword, ok := hashPassword(w, r, userPasswords.OldPassword)
+	if !ok {
+		return
+	}
 	if hOldPassword != user.Password {
 		errors.ErrUnauthorized.Withf("old password does not match").Write(w)
 		return
 	}
-	// hash and update the new password
-	user.Password = internal.HexHashPassword(passwordSalt, userPasswords.NewPassword)
-	if _, err := a.db.SetUser(user); err != nil {
+	// hash the new password
+	newPassword, ok := hashPassword(w, r, userPasswords.NewPassword)
+	if !ok {
+		return
+	}
+	// field-specific write: only the password is updated, and the same atomic update bumps the
+	// session version, revoking every outstanding session (including the one making this request)
+	if err := a.db.UpdateUserPassword(user.ID, newPassword); err != nil {
 		log.Warnw("could not update user password", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
-	apicommon.HTTPWriteOK(w)
+	// reload the user to mint a token for the new session version, so the client changing the
+	// password stays logged in while every other session is revoked
+	updated, err := a.db.User(user.ID)
+	if err != nil {
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+	res, err := a.buildLoginResponse(updated)
+	if err != nil {
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+	apicommon.HTTPWriteJSON(w, res)
 }
 
 // recoverUserPasswordHandler godoc
@@ -599,62 +854,85 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
+	// OAuth-only accounts have no password to recover (PUT /users/password refuses them too).
+	// Answer like for an unknown email so the endpoint does not reveal the account type.
+	if user.Verified && user.Password == "" {
+		apicommon.HTTPWriteOK(w)
+		return
+	}
+	// pick the challenge the account actually needs: an unverified account gets the account
+	// verification code instead, so it can complete registration and then log in
+	codeType := db.CodeTypePasswordReset
+	template := mailtemplates.PasswordResetNotification
 	if !user.Verified {
-		// user exists but hasn't verified their email yet; send the account
-		// verification email so they can complete registration and then log in
-		code, link, err := a.generateVerificationCodeAndLink(user, db.CodeTypeVerifyAccount)
-		if err != nil {
+		codeType = db.CodeTypeVerifyAccount
+		template = mailtemplates.VerifyAccountNotification
+	}
+	// a single cooldown guards both branches: a code delivered too recently means we silently
+	// skip sending another, preventing email flooding without leaking whether the account exists
+	var code, link string
+	expiration := time.Now().Add(a.otpExpiry)
+	existing, err := a.db.UserVerificationCode(user, codeType)
+	switch {
+	case err == nil:
+		// atomically claim one delivery: the previous one must be older than the cooldown and, for a
+		// reusable code, the send budget must not be spent. A single conditional update, so
+		// concurrent recovery requests cannot both pass it; when blocked (or raced), silently skip.
+		reusable := codeReusable(existing)
+		maxSends := apicommon.VerificationCodeMaxSends
+		if !reusable {
+			// an expired or exhausted code is replaced by a fresh one below, which resets the send
+			// and guess budgets
+			maxSends = math.MaxInt32
+		}
+		sent, err := a.db.VerificationCodeTrySend(user, codeType, a.otpCooldown, maxSends)
+		if err != nil || !sent {
+			if err != nil && !errors.Is(err, db.ErrNotFound) {
+				log.Warnw("could not record recovery code send", "error", err)
+			}
+			apicommon.HTTPWriteOK(w)
+			return
+		}
+		if reusable {
+			// resend the still-usable code rather than replace it, so repeated recovery requests
+			// cannot invalidate the code the user is about to type
+			if code, err = internal.OpenToken(existing.SealedCode, user.Email, a.secret); err != nil {
+				errors.ErrGenericInternalServerError.Write(w)
+				return
+			}
+			if link, err = a.generateVerificationLink(user, codeType, code); err != nil {
+				errors.ErrGenericInternalServerError.Write(w)
+				return
+			}
+			expiration = existing.Expiration
+		} else if code, link, err = a.generateVerificationCodeAndLink(user, codeType); err != nil {
 			log.Warnw("could not generate verification code", "error", err)
 			errors.ErrGenericInternalServerError.Write(w)
 			return
 		}
-		if err := a.sendMail(r.Context(), nil, user.Email, mailtemplates.VerifyAccountNotification,
-			struct {
-				Code string
-				Link string
-			}{code, link},
-			time.Now().Add(a.otpExpiry),
-		); err != nil {
-			log.Warnw("could not send verification code", "error", err)
+	case errors.Is(err, db.ErrNotFound):
+		// no pending code: generate and store a fresh one
+		if code, link, err = a.generateVerificationCodeAndLink(user, codeType); err != nil {
+			log.Warnw("could not generate verification code", "error", err)
 			errors.ErrGenericInternalServerError.Write(w)
 			return
 		}
-		apicommon.HTTPWriteOK(w)
-		return
-	}
-
-	// enforce cooldown: if a code was already issued recently, silently skip
-	// sending a new one to prevent email flooding without leaking timing info.
-	if existing, err := a.db.UserVerificationCode(user, db.CodeTypePasswordReset); err == nil {
-		if !existing.CreatedAt.IsZero() && time.Since(existing.CreatedAt) < a.otpCooldown {
-			apicommon.HTTPWriteOK(w)
-			return
-		}
-	} else if !errors.Is(err, db.ErrNotFound) {
-		// Unexpected DB error: treat conservatively as cooldown-active so a
-		// transient storage failure cannot be exploited to bypass rate limiting.
+	default:
+		// unexpected DB error: treat conservatively as cooldown-active so a transient storage
+		// failure cannot be exploited to bypass rate limiting
 		log.Warnw("could not check password recovery cooldown", "error", err)
 		apicommon.HTTPWriteOK(w)
 		return
 	}
-
-	// generate a new verification code
-	code, link, err := a.generateVerificationCodeAndLink(user, db.CodeTypePasswordReset)
-	if err != nil {
-		log.Warnw("could not generate verification code", "error", err)
-		errors.ErrGenericInternalServerError.Write(w)
-		return
-	}
-	// send the password reset mail to the user email with the verification
-	// code and the verification link
-	if err := a.sendMail(r.Context(), nil, user.Email, mailtemplates.PasswordResetNotification,
+	// send the code and the verification link to the user email
+	if err := a.sendMail(r.Context(), nil, user.Email, template,
 		struct {
 			Code string
 			Link string
 		}{code, link},
-		time.Now().Add(a.otpExpiry),
+		expiration,
 	); err != nil {
-		log.Warnw("could not send reset password code", "error", err)
+		log.Warnw("could not send recovery code", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
@@ -675,6 +953,7 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 //	@Failure		404		{object}	errors.Error				"User not found"
 //	@Failure		410		{object}	errors.Error				"Verification code expired"
 //	@Failure		500		{object}	errors.Error				"Internal server error"
+//	@Failure		503		{object}	errors.Error				"Server busy, retry after the Retry-After delay"
 //	@Router			/users/password/reset [post]
 func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	userPasswords := &apicommon.UserPasswordReset{}
@@ -696,6 +975,12 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+	// OAuth-only accounts have no password to reset, consistently with PUT /users/password:
+	// setting one here would add a credential to an account that never had one
+	if user.Verified && user.Password == "" {
+		errors.ErrOAuthUserCannotUsePasswordRecovery.Write(w)
 		return
 	}
 
@@ -740,21 +1025,39 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// invalidate the reset code before updating the password so it cannot be
-	// reused. fail closed: if the code cannot be deleted we must not report
-	// success, otherwise the still-valid code could be replayed.
-	if err := a.db.DeleteUserVerificationCode(user, db.CodeTypePasswordReset); err != nil {
-		log.Warnw("could not delete password reset code", "error", err)
+	// hash the new password before consuming the code: hashing can be refused when the server is
+	// busy, and that must leave the code usable for a retry
+	newPassword, ok := hashPassword(w, r, userPasswords.NewPassword)
+	if !ok {
+		return
+	}
+
+	// consume the exact reset code before updating the password so it is atomically single-use:
+	// of two concurrent requests holding a valid code, exactly one deletion succeeds and only
+	// that request resets the password. fail closed on any other error — reporting success with
+	// the code still stored would leave it replayable.
+	if err := a.db.ConsumeVerificationCode(user, db.CodeTypePasswordReset, userVerification.SealedCode); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			errors.ErrUnauthorized.Write(w)
+			return
+		}
+		log.Warnw("could not consume password reset code", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 
-	// hash and update the new password
-	user.Password = internal.HexHashPassword(passwordSalt, userPasswords.NewPassword)
-	if _, err := a.db.SetUser(user); err != nil {
+	// field-specific password write; the same atomic update bumps the session version, revoking
+	// every session minted with the old credentials
+	if err := a.db.UpdateUserPassword(user.ID, newPassword); err != nil {
 		log.Warnw("could not update user password", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 	apicommon.HTTPWriteOK(w)
+}
+
+// codeReusable reports whether a stored verification code can be delivered again as is: it has
+// not expired and its guess budget is not spent. Any other code is replaced by a fresh one.
+func codeReusable(v *db.UserVerification) bool {
+	return v.Expiration.After(time.Now()) && v.Attempts < apicommon.VerificationCodeMaxAttempts
 }

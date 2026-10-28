@@ -162,13 +162,37 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+// maxSyncMemberHashes is the most argon2 hashes (member phones and passwords) a synchronous member
+// import may need. An import hashes one field after another in the one shared slot background work
+// gets, at up to a few hundred milliseconds each on a small pod, so this keeps it well within the
+// request timeouts of the server and the edge proxy; a larger import runs as a job.
+const maxSyncMemberHashes = 150
+
+// memberHashCount returns how many argon2 hashes importing members needs: one per phone and one
+// per password.
+func memberHashCount(members []apicommon.OrgMember) int {
+	n := 0
+	for i := range members {
+		if members[i].Phone != "" {
+			n++
+		}
+		if members[i].Password != "" {
+			n++
+		}
+	}
+	return n
+}
+
 // addOrganizationMembersHandler godoc
 //
 //	@Summary		Add members to an organization
 //	@Description	Add multiple members to an organization. Requires Manager/Admin role and is subject to the
 //	@Description	plan's member quota. With `async=true` the import runs in the background and the response
 //	@Description	carries a `jobId` to poll via GET /jobs/{jobId}; otherwise it
-//	@Description	completes synchronously. An empty members list is a no-op that returns added=0.
+//	@Description	completes synchronously. A synchronous import whose members carry more than 150 phones and
+//	@Description	passwords in total (each one is an expensive hash) runs as if `async=true` had been sent: the
+//	@Description	response carries a `jobId` instead of the added count, so a client must check for one. An
+//	@Description	empty members list is a no-op that returns added=0.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `members:write`).
 //	@Tags			organizations
@@ -212,6 +236,12 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 		log.Error(err)
 		errors.ErrMalformedBody.Withf("missing members").Write(w)
 		return
+	}
+	// every phone and password is an argon2 hash, and an import hashes them one after another in a
+	// single shared slot: past maxSyncMemberHashes a synchronous import could outlast the request
+	// timeouts, so it runs as a job instead
+	if !async && memberHashCount(members.Members) > maxSyncMemberHashes {
+		async = true
 	}
 	// check if there are members to add
 	if len(members.Members) == 0 {
@@ -310,19 +340,21 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 		var lastProgress *db.BulkOrgMembersJob
 		for p := range progressChan {
 			lastProgress = p
-			// Persist progress live so GET /jobs reflects it; stamp the final count + errors +
-			// completedAt only at the end.
-			if p.Progress == 100 {
-				if err := a.db.CompleteJob(jobID.String(), p.Added, p.ErrorsAsStrings()); err != nil {
-					log.Warnw("failed to persist job completion", "error", err, "jobId", jobID.String())
-				}
-			} else if err := a.db.UpdateJobProgress(jobID.String(), p.Added); err != nil {
+			// Persist progress live so GET /jobs reflects it.
+			if err := a.db.UpdateJobProgress(jobID.String(), p.Added); err != nil {
 				log.Warnw("failed to persist job progress", "error", err, "jobId", jobID.String())
+			}
+		}
+		// The channel closes once every batch ran, so the job ends here even when some rows
+		// failed to insert and Progress never reached 100.
+		if lastProgress != nil {
+			if err := a.db.CompleteJob(jobID.String(), lastProgress.Added, lastProgress.ErrorsAsStrings()); err != nil {
+				log.Warnw("failed to persist job completion", "error", err, "jobId", jobID.String())
 			}
 		}
 
 		// The members that were actually inserted join the auto group's censuses. Discarding the
-		// result is deliberate: the import job has already completed above, and CompleteJob $sets
+		// result is deliberate: the import job has already been completed, and CompleteJob $sets
 		// errors wholesale, so a second write would clobber the import errors rather than merge
 		// the propagation ones — a failure here is logged, not reported. #628 tracks surfacing it.
 		if lastProgress != nil {
@@ -359,6 +391,7 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 //	@Failure		400			{object}	errors.Error						"Invalid input data"
 //	@Failure		401			{object}	errors.Error						"Unauthorized"
 //	@Failure		500			{object}	errors.Error						"Internal server error"
+//	@Failure		503			{object}	errors.Error						"Server busy hashing, retry after Retry-After (50302)"
 //	@Router			/organizations/{orgAddress}/members [put]
 func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
@@ -423,6 +456,12 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if !isUpdate {
+		// the same member-base quota the bulk POST enforces: a creation grows the member base by
+		// one, while an edit of an existing member at the limit must stay allowed
+		if err := a.subscriptions.OrgCanAddNMembers(org.Address, 1); err != nil {
+			writeSubscriptionError(w, err)
+			return
+		}
 		if err := a.preflightCensusGrowth(org, autoCensuses, 1); err != nil {
 			writeSubscriptionError(w, err)
 			return
@@ -430,9 +469,12 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	// upsert the member in the database
-	memberID, created, err := a.db.UpsertOrgMemberAndCensusParticipants(org, update, passwordSalt)
+	memberID, created, err := a.db.UpsertOrgMemberAndCensusParticipants(r.Context(), org, update, passwordSalt)
 	switch {
-	case errors.Is(err, db.ErrUpdateWouldCreateDuplicates):
+	case errors.Is(err, internal.ErrHashingBusy):
+		writeHashingBusy(w, err)
+		return
+	case errors.Is(err, db.ErrUpdateWouldCreateDuplicates), errors.Is(err, db.ErrInvalidData):
 		errors.ErrInvalidData.WithErr(err).Write(w)
 		return
 	case err != nil:

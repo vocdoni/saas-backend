@@ -1,6 +1,7 @@
 package stripe
 
 import (
+	stderrors "errors"
 	"fmt"
 
 	stripeapi "github.com/stripe/stripe-go/v87"
@@ -9,6 +10,7 @@ import (
 	stripecustomer "github.com/stripe/stripe-go/v87/customer"
 	stripeprice "github.com/stripe/stripe-go/v87/price"
 	stripeproduct "github.com/stripe/stripe-go/v87/product"
+	stripesubscription "github.com/stripe/stripe-go/v87/subscription"
 	stripewebhook "github.com/stripe/stripe-go/v87/webhook"
 	"github.com/vocdoni/saas-backend/errors"
 )
@@ -46,20 +48,6 @@ func (*Client) GetCustomer(customerID string) (*stripeapi.Customer, error) {
 	return customer, nil
 }
 
-// GetCustomerByEmail retrieves a customer by email address
-func (*Client) GetCustomerByEmail(email string) (*stripeapi.Customer, error) {
-	params := &stripeapi.CustomerListParams{
-		Email: new(email),
-	}
-
-	customers := stripecustomer.List(params)
-	if !customers.Next() {
-		return nil, errors.ErrStripeError.Withf("customer with email %s not found", email)
-	}
-
-	return customers.Customer(), nil
-}
-
 // UpdateCustomerMetadata updates a customer's metadata
 func (*Client) UpdateCustomerMetadata(customerID string, metadata map[string]string) error {
 	params := &stripeapi.CustomerParams{
@@ -87,6 +75,27 @@ func (*Client) GetCustomerByAddress(address string) (*stripeapi.Customer, error)
 
 	return customers.Customer(), nil
 }
+
+// GetSubscription retrieves a subscription by ID straight from the Stripe API, with its
+// customer expanded. Webhook handling uses it to act on the subscription's live state
+// instead of a possibly stale or out-of-order event payload (Stripe's recommended pattern).
+func (*Client) GetSubscription(subscriptionID string) (*stripeapi.Subscription, error) {
+	params := &stripeapi.SubscriptionParams{}
+	params.AddExpand("customer")
+	subscription, err := stripesubscription.Get(subscriptionID, params)
+	if err != nil {
+		var stripeErr *stripeapi.Error
+		if stderrors.As(err, &stripeErr) && stripeErr.Code == stripeapi.ErrorCodeResourceMissing {
+			return nil, fmt.Errorf("subscription %s: %w", subscriptionID, errSubscriptionNotFound)
+		}
+		return nil, errors.ErrStripeError.Withf("failed to get subscription: %v", err)
+	}
+	return subscription, nil
+}
+
+// errSubscriptionNotFound is Stripe answering that a subscription does not exist: unlike a
+// network or rate-limit failure, asking again will not change the answer.
+var errSubscriptionNotFound = fmt.Errorf("subscription not found")
 
 // GetProduct retrieves a product by ID with expanded default price
 func (*Client) GetProduct(productID string) (*stripeapi.Product, error) {
@@ -181,7 +190,12 @@ func (c *Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeap
 		AutomaticTax: &stripeapi.CheckoutSessionAutomaticTaxParams{
 			Enabled: new(true),
 		},
-		// We store in the metadata the address of the organization
+		// We store in the metadata the address of the organization, both on the session
+		// itself (so reading the session back can authorize the caller against the
+		// organization before the subscription exists) and on the subscription it creates
+		Metadata: map[string]string{
+			"address": params.OrgAddress,
+		},
 		SubscriptionData: &stripeapi.CheckoutSessionSubscriptionDataParams{
 			Metadata: map[string]string{
 				"address": params.OrgAddress,
@@ -233,6 +247,10 @@ func (*Client) GetCheckoutSession(sessionID string) (*CheckoutSessionStatus, err
 
 	session, err := stripecheckoutsession.Get(sessionID, params)
 	if err != nil {
+		var stripeErr *stripeapi.Error
+		if stderrors.As(err, &stripeErr) && stripeErr.Code == stripeapi.ErrorCodeResourceMissing {
+			return nil, errors.ErrCheckoutSessionNotFound
+		}
 		return nil, errors.ErrStripeError.Withf("failed to get checkout session: %v", err)
 	}
 
@@ -253,18 +271,19 @@ func checkoutSessionStatus(session *stripeapi.CheckoutSession) *CheckoutSessionS
 	if session.Subscription != nil {
 		status.SubscriptionStatus = string(session.Subscription.Status)
 	}
+	// the organization address stamped at creation; sessions created before it was stamped
+	// on the session itself carry it on the subscription (once the checkout completed)
+	status.OrgAddress = session.Metadata["address"]
+	if status.OrgAddress == "" && session.Subscription != nil {
+		status.OrgAddress = session.Subscription.Metadata["address"]
+	}
 	return status
 }
 
-// CreatePortalSession creates a billing portal session for a customer
-func (c *Client) CreatePortalSession(customerEmail string) (*stripeapi.BillingPortalSession, error) {
-	customer, err := c.GetCustomerByEmail(customerEmail)
-	if err != nil {
-		return nil, err
-	}
-
+// CreatePortalSession creates a billing portal session for the given customer ID
+func (*Client) CreatePortalSession(customerID string) (*stripeapi.BillingPortalSession, error) {
 	params := &stripeapi.BillingPortalSessionParams{
-		Customer: &customer.ID,
+		Customer: new(customerID),
 	}
 
 	session, err := stripeportalsession.New(params)
@@ -294,4 +313,7 @@ type CheckoutSessionStatus struct {
 	// PaymentStatus is the payment outcome of the session, in every mode: "paid",
 	// "unpaid" or "no_payment_required" (e.g. a subscription that starts with a trial).
 	PaymentStatus string `json:"payment_status,omitempty"`
+	// OrgAddress is the organization the session was created for, used to authorize who
+	// may read the session; it never reaches the wire.
+	OrgAddress string `json:"-"`
 }

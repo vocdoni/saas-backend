@@ -59,7 +59,7 @@ func TestProvisionAccountOnOrgCreation(t *testing.T) {
 		// on-chain account already exists.
 		dbOrg, err := testDB.Organization(addr)
 		c.Assert(err, qt.IsNil)
-		orgSigner, err := account.OrganizationSigner(testSecret, dbOrg.Creator, dbOrg.Nonce)
+		orgSigner, err := account.OrganizationSigner(testSecret, dbOrg.SignerSeedValue(), dbOrg.Nonce)
 		c.Assert(err, qt.IsNil)
 		accClient, err := account.New(test.VoconedFoundedPrivKey, testAPIEndpoint)
 		c.Assert(err, qt.IsNil)

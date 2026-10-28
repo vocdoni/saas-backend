@@ -23,9 +23,12 @@ type UserErasureReport struct {
 	KeptOrgs []common.Address
 	// CreatorEmailRetained lists surviving organizations whose creator field
 	// still holds the erased user's email. It is retained deliberately: the
-	// organization signing key is derived from secret+creator+nonce (see
-	// account.OrganizationSigner), so redacting it would change the derived
-	// key and break the organization's on-chain account.
+	// organization signing key is derived from secret+signerSeed+nonce (see
+	// Organization.SignerSeedValue), where signerSeed is the creator's email at
+	// creation time and must never change, and rows without a seed still fall
+	// back to the creator field. The email therefore also survives in signerSeed,
+	// and redacting either would change the derived key and break the
+	// organization's on-chain account.
 	CreatorEmailRetained []common.Address
 }
 
@@ -79,11 +82,14 @@ func (ms *MongoStorage) EraseUser(userID uint64) (*UserErasureReport, error) {
 			report.DeletedOrgs = append(report.DeletedOrgs, userOrg.Address)
 			continue
 		}
-		if err := ms.RemoveOrganizationUser(userOrg.Address, user.ID); err != nil {
+		removed, err := ms.RemoveOrganizationUser(userOrg.Address, user.ID)
+		if err != nil {
 			errs = append(errs, fmt.Errorf("removing membership in org %s: %w", userOrg.Address, err))
 		}
-		if err := ms.DecrementOrganizationUsersCounter(userOrg.Address); err != nil {
-			errs = append(errs, fmt.Errorf("decrementing users counter of org %s: %w", userOrg.Address, err))
+		if removed {
+			if err := ms.DecrementOrganizationUsersCounter(userOrg.Address); err != nil {
+				errs = append(errs, fmt.Errorf("decrementing users counter of org %s: %w", userOrg.Address, err))
+			}
 		}
 		report.KeptOrgs = append(report.KeptOrgs, userOrg.Address)
 		if org, err := ms.Organization(userOrg.Address); err == nil && org.Creator == user.Email {
@@ -112,7 +118,7 @@ func (ms *MongoStorage) deleteAllVerificationCodes(userID uint64) error {
 	defer ms.keysLock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	_, err := ms.verifications.DeleteMany(ctx, bson.M{"_id": userID})
+	_, err := ms.verifications.DeleteMany(ctx, bson.M{"userId": userID})
 	return err
 }
 
@@ -178,6 +184,9 @@ func (ms *MongoStorage) eraseOrgData(address common.Address) error {
 	}
 	if _, err := ms.DeleteJobsByOrg(address); err != nil {
 		errs = append(errs, fmt.Errorf("deleting jobs: %w", err))
+	}
+	if _, err := ms.DeleteMeteredVotesByOrg(address); err != nil {
+		errs = append(errs, fmt.Errorf("deleting metered votes: %w", err))
 	}
 	if _, err := ms.DeleteInvitationsByOrg(address); err != nil {
 		errs = append(errs, fmt.Errorf("deleting invitations: %w", err))

@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -339,4 +340,106 @@ func TestOrganizationInvites(t *testing.T) {
 		_, err = testDB.InvitationByEmail(newUserEmail)
 		c.Assert(err, qt.ErrorIs, ErrNotFound)
 	})
+}
+
+// TestDeleteInvitationsByInviter covers DeleteInvitationsByInviter: it removes only the pending invites
+// of the given org issued by the given user, leaving the same user's invites in other orgs and other
+// inviters' invites in the same org untouched.
+func TestDeleteInvitationsByInviter(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	orgA := common.HexToAddress("0xa1000000000000000000000000000000000000a1")
+	orgB := common.HexToAddress("0xb1000000000000000000000000000000000000b1")
+	seedOrg(t, orgA)
+	seedOrg(t, orgB)
+	// inviter1 is admin of both orgs, inviter2 only of orgA
+	inviter1, err := testDB.SetUser(&User{
+		Email: "inviter1@x.test", Password: "p", FirstName: "I", LastName: "1",
+		Organizations: []OrganizationUser{{Address: orgA, Role: AdminRole}, {Address: orgB, Role: AdminRole}},
+	})
+	c.Assert(err, qt.IsNil)
+	inviter2, err := testDB.SetUser(&User{
+		Email: "inviter2@x.test", Password: "p", FirstName: "I", LastName: "2",
+		Organizations: []OrganizationUser{{Address: orgA, Role: AdminRole}},
+	})
+	c.Assert(err, qt.IsNil)
+	expiration := time.Now().Add(time.Hour)
+
+	invites := []struct {
+		org     common.Address
+		inviter uint64
+		email   string
+		code    string
+	}{
+		{orgA, inviter1, "a1@x.test", "revokeA1x"},
+		{orgA, inviter1, "a2@x.test", "revokeA2x"},
+		{orgA, inviter2, "a3@x.test", "revokeA3x"},
+		{orgB, inviter1, "b1@x.test", "revokeB1x"},
+	}
+	for _, in := range invites {
+		c.Assert(testDB.CreateInvitation(&OrganizationInvite{
+			OrganizationAddress: in.org,
+			CurrentUserID:       in.inviter,
+			NewUserEmail:        in.email,
+			Role:                ViewerRole,
+			Expiration:          expiration,
+			InvitationCode:      in.code,
+		}), qt.IsNil)
+	}
+
+	n, err := testDB.DeleteInvitationsByInviter(orgA, inviter1)
+	c.Assert(err, qt.IsNil)
+	c.Assert(n, qt.Equals, int64(2))
+
+	// orgA keeps inviter2's invite, orgB keeps inviter1's invite to it
+	aPending, err := testDB.PendingInvitations(orgA)
+	c.Assert(err, qt.IsNil)
+	c.Assert(aPending, qt.HasLen, 1)
+	c.Assert(aPending[0].CurrentUserID, qt.Equals, inviter2)
+	bPending, err := testDB.PendingInvitations(orgB)
+	c.Assert(err, qt.IsNil)
+	c.Assert(bPending, qt.HasLen, 1)
+
+	// nothing left to delete for that inviter in orgA
+	n, err = testDB.DeleteInvitationsByInviter(orgA, inviter1)
+	c.Assert(err, qt.IsNil)
+	c.Assert(n, qt.Equals, int64(0))
+
+	_, err = testDB.DeleteInvitationsByInviter(common.Address{}, inviter1)
+	c.Assert(err, qt.ErrorIs, ErrInvalidData)
+}
+
+// TestRevokeInvitationByCode covers RevokeInvitationByCode: only the call that deletes the invitation reports true.
+func TestRevokeInvitationByCode(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	orgA := common.HexToAddress("0xa3000000000000000000000000000000000000a3")
+	seedOrg(t, orgA)
+	inviter, err := testDB.SetUser(&User{
+		Email: "inviter-revoke@x.test", Password: "p", FirstName: "I", LastName: "R",
+		Organizations: []OrganizationUser{{Address: orgA, Role: AdminRole}},
+	})
+	c.Assert(err, qt.IsNil)
+	c.Assert(testDB.CreateInvitation(&OrganizationInvite{
+		OrganizationAddress: orgA,
+		CurrentUserID:       inviter,
+		NewUserEmail:        "revoke@x.test",
+		Role:                ViewerRole,
+		Expiration:          time.Now().Add(time.Hour),
+		InvitationCode:      "revokeOnce",
+	}), qt.IsNil)
+
+	revoked, err := testDB.RevokeInvitationByCode("revokeOnce")
+	c.Assert(err, qt.IsNil)
+	c.Assert(revoked, qt.IsTrue)
+
+	// a second revocation of the same code, or of an unknown one, deletes nothing
+	revoked, err = testDB.RevokeInvitationByCode("revokeOnce")
+	c.Assert(err, qt.IsNil)
+	c.Assert(revoked, qt.IsFalse)
+	revoked, err = testDB.RevokeInvitationByCode("unknownCode")
+	c.Assert(err, qt.IsNil)
+	c.Assert(revoked, qt.IsFalse)
 }

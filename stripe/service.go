@@ -4,6 +4,7 @@ package stripe
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -47,19 +48,39 @@ func NewService(config *Config, database *db.MongoStorage) (*Service, error) {
 	}, nil
 }
 
-// CreateCheckoutSessionWithLookupKey creates a new checkout session by resolving the lookup key to get the plan
+// CreateCheckoutSessionWithLookupKey creates a new checkout session by resolving the lookup key to get the plan.
+// It answers errors.ErrPlanNotFound for an unknown plan and for a private plan the organization is not on,
+// and errors.ErrOrganizationAlreadySubscribed while the organization has a paid subscription: plan changes
+// go through the billing portal, so an organization never pays for two subscriptions at once.
 func (s *Service) CreateCheckoutSessionWithLookupKey(
 	lookupKey string, billingPeriod, returnURL string, orgAddress common.Address, locale string,
 ) (*stripeapi.CheckoutSession, error) {
 	// Resolve the lookup key (the plan's Stripe product ID) to get the plan
 	plan, err := s.db.Plan(lookupKey)
+	if stderrors.Is(err, db.ErrNotFound) {
+		return nil, errors.ErrPlanNotFound
+	}
 	if err != nil {
 		return nil, errors.ErrStripeError.Withf("plan with lookup key %s not found: %v", lookupKey, err)
 	}
 
 	org, err := s.db.Organization(orgAddress)
+	if stderrors.Is(err, db.ErrNotFound) {
+		return nil, errors.ErrOrganizationNotFound
+	}
 	if err != nil {
-		return nil, errors.ErrStripeError.Withf("organization %s not found: %v", orgAddress, err)
+		return nil, errors.ErrStripeError.Withf("could not get organization %s: %v", orgAddress, err)
+	}
+
+	// a private plan (a custom contract, the integrator tier) is only for the organizations
+	// put on it; to anyone else it answers like a plan that does not exist
+	if !plan.Public && org.Subscription.PlanID != plan.ID {
+		return nil, errors.ErrPlanNotFound
+	}
+	// the webhooks set the subscription id while the organization is on a paid subscription
+	// and clear it when that subscription ends
+	if org.Subscription.StripeSubscriptionID != "" {
+		return nil, errors.ErrOrganizationAlreadySubscribed
 	}
 
 	// Determine if the organization is eligible for a free trial based on
@@ -84,7 +105,7 @@ func (s *Service) CreateCheckoutSessionWithLookupKey(
 	} else if billingPeriod == string(db.BillingPeriodAnnual) && plan.StripeYearlyPriceID != "" {
 		params.PriceID = plan.StripeYearlyPriceID
 	} else {
-		return nil, errors.ErrStripeError.Withf("invalid billing period %s for plan %s", billingPeriod, plan.ID)
+		return nil, errors.ErrInvalidData.Withf("invalid billing period %s for plan %s", billingPeriod, plan.ID)
 	}
 
 	return s.client.CreateCheckoutSession(params)
@@ -95,14 +116,51 @@ func (s *Service) CreateCheckoutSession(params *CheckoutSessionParams) (*stripea
 	return s.client.CreateCheckoutSession(params)
 }
 
-// GetCheckoutSession retrieves a checkout session status
+// GetCheckoutSession retrieves a checkout session status. A session Stripe does not know
+// answers errors.ErrCheckoutSessionNotFound.
 func (s *Service) GetCheckoutSession(sessionID string) (*CheckoutSessionStatus, error) {
 	return s.client.GetCheckoutSession(sessionID)
 }
 
-// CreatePortalSession creates a billing portal session
-func (s *Service) CreatePortalSession(customerEmail string) (*stripeapi.BillingPortalSession, error) {
-	return s.client.CreatePortalSession(customerEmail)
+// CreatePortalSession creates a billing portal session for the organization's own Stripe
+// customer. The customer is resolved from the organization itself — the customer holding
+// its current subscription, or the one stamped with its address metadata — and never by
+// email: the creator's email is shared by every organization they create, so an email
+// match could hand an admin another organization's billing portal.
+func (s *Service) CreatePortalSession(org *db.Organization) (*stripeapi.BillingPortalSession, error) {
+	customerID, err := s.portalCustomerID(org)
+	if err != nil {
+		return nil, err
+	}
+	return s.client.CreatePortalSession(customerID)
+}
+
+// portalCustomerID resolves the Stripe customer that belongs to the organization itself.
+func (s *Service) portalCustomerID(org *db.Organization) (string, error) {
+	if org == nil {
+		return "", fmt.Errorf("organization is required")
+	}
+	if subID := org.Subscription.StripeSubscriptionID; subID != "" {
+		subscription, err := s.client.GetSubscription(subID)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve the customer of subscription %s: %w", subID, err)
+		}
+		// the stored id is only a pointer: the subscription must still be this organization's,
+		// or its customer (and portal) is another organization's
+		if stamped := subscription.Metadata["address"]; common.HexToAddress(stamped) != org.Address {
+			return "", fmt.Errorf("subscription %s belongs to organization %q, not %s", subID, stamped, org.Address)
+		}
+		if subscription.Customer == nil || subscription.Customer.ID == "" {
+			return "", fmt.Errorf("subscription %s has no customer", subID)
+		}
+		return subscription.Customer.ID, nil
+	}
+	// the subscription webhook stamps the organization address on its customer's metadata
+	customer, err := s.client.GetCustomerByAddress(org.Address.String())
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve the customer of organization %s: %w", org.Address, err)
+	}
+	return customer.ID, nil
 }
 
 // planProductMarkerKeys are the metadata keys every vocdoni plan product carries. A Stripe

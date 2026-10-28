@@ -409,7 +409,7 @@ process metadata (a subscription's) is ignored.
 | 40177 | 409 | a payment is already processing or completed, or a session is completing |
 | 40178 | 402 | census growth beyond the paid price (`ProcessCensusGrowthQuote` in data) |
 
-## Storage summary (migration 0026)
+## Storage summary (migration 0034)
 
 - `processPayments` — one document per process payment (`_id` = process id).
 - `wallets` — one document per integrator (`_id` = org address).
