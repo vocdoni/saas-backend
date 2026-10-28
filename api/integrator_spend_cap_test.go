@@ -98,4 +98,15 @@ func TestManagedOrgSpendCap(t *testing.T) {
 		"integrator", "organizations", managedAddr.String())
 	requestAndAssertCode(http.StatusNotFound, t, http.MethodPut, token,
 		&apicommon.UpdateManagedOrganizationRequest{}, "integrator", "organizations", integratorAddr.String())
+	// the key is required, so an empty body or a typo never lifts the cap
+	capCents = integratorProcessCents
+	setCap(&capCents)
+	for _, body := range []any{map[string]any{}, map[string]any{"spend_cap_cents": nil},
+		map[string]any{"spendCapCents": nil, "extra": 1}} {
+		requestAndAssertCode(http.StatusBadRequest, t, http.MethodPut, token, body,
+			"integrator", "organizations", managedAddr.String())
+	}
+	wallet, err = testDB.Wallet(integratorAddr)
+	c.Assert(err, qt.IsNil)
+	c.Assert(*wallet.ManagedOrgSpend(managedAddr).CapCents, qt.Equals, capCents)
 }

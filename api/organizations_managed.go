@@ -556,7 +556,8 @@ func (a *API) managedOrgFromPath(
 //	@Summary		Set a managed organization's spend cap
 //	@Description	Caps what the managed organization at {orgAddress} may spend from the caller's integrator
 //	@Description	wallet: the most its processes may hold debited at once, in EUR cents (VAT excluded).
-//	@Description	`null` lifts the cap; organizations start unlimited. The cap is checked in the same write
+//	@Description	The body must hold exactly `spendCapCents`: `null` lifts the cap, and a missing key or
+//	@Description	any other key is a 400, so a typo never lifts it. Organizations start unlimited. The cap is checked in the same write
 //	@Description	as the wallet balance, so a publish or census top-up that would pass it is refused with 402
 //	@Description	(40183, data: capCents, spentCents, requiredCents) without charging anything. Refunds of
 //	@Description	deleted drafts and credit-backs of failed publishes free their amount again. A cap below
@@ -571,7 +572,7 @@ func (a *API) managedOrgFromPath(
 //	@Param			orgAddress	path		string										true	"Managed organization address"
 //	@Param			request		body		apicommon.UpdateManagedOrganizationRequest	true	"Spend cap"
 //	@Success		200			{object}	apicommon.ManagedOrganizationInfo
-//	@Failure		400			{object}	errors.Error	"Invalid address or negative cap"
+//	@Failure		400			{object}	errors.Error	"Invalid address, negative cap, or a body without exactly spendCapCents"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		403			{object}	errors.Error	"Not an integrator"
 //	@Failure		404			{object}	errors.Error	"Managed organization not found"
@@ -595,9 +596,21 @@ func (a *API) updateManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	req := &apicommon.UpdateManagedOrganizationRequest{}
-	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
+	// a money control: the key must be there (null is the only way to lift the cap), so neither
+	// {} nor a misspelt key silently lifts it
+	var fields map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
 		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	raw, ok := fields["spendCapCents"]
+	if !ok || len(fields) != 1 {
+		errors.ErrMalformedBody.Withf("the body must hold exactly spendCapCents (null lifts the cap)").Write(w)
+		return
+	}
+	req := &apicommon.UpdateManagedOrganizationRequest{}
+	if err := json.Unmarshal(raw, &req.SpendCapCents); err != nil {
+		errors.ErrMalformedBody.Withf("spendCapCents must be a number of cents or null").Write(w)
 		return
 	}
 	if req.SpendCapCents != nil && *req.SpendCapCents < 0 {

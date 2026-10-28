@@ -679,7 +679,8 @@ func ManagedOrganizationFromDB(org *db.Organization, spend db.ManagedOrgSpend) *
 // UpdateManagedOrganizationRequest is the body of PUT /integrator/organizations/{orgAddress}.
 type UpdateManagedOrganizationRequest struct {
 	// SpendCapCents caps what the organization's processes may hold debited from the
-	// integrator's wallet, in EUR cents; null (or absent) lifts the cap.
+	// integrator's wallet, in EUR cents; null lifts the cap. Required: a body without it (or
+	// with any other key) is refused.
 	SpendCapCents *pricing.Cents `json:"spendCapCents" extensions:"x-nullable"`
 }
 
