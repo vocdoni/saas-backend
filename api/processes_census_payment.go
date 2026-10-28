@@ -175,7 +175,7 @@ func (a *API) censusGrowthPaymentError(g censusGrowth) error {
 	// a managed organization has no checkout: census/checkout debits its integrator's wallet, and
 	// when that falls short refuses with 40175, so the refusal here is that same 40175
 	if p.org.ManagedBy != (common.Address{}) && wallet.BalanceCents < dueCents {
-		return walletShortError(p.org, quote, dueCents, wallet.BalanceCents)
+		return walletShortError(walletShort{org: p.org, quote: quote, dueCents: dueCents, balanceCents: wallet.BalanceCents})
 	}
 	return errors.ErrPaymentRequired.
 		Withf("the census of process %s cannot grow beyond the size it was paid for; "+
