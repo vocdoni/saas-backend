@@ -440,6 +440,16 @@ func (a *API) updatePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 		errors.ErrInvalidData.Withf("invitation is not for this organization").Write(w)
 		return
 	}
+	// an expired invitation holds no write seat, so reviving one to a write role takes a seat again;
+	// the check and the update below are one step (writerLocks)
+	writerLock := a.writerLocks.lock(org.Address)
+	defer writerLock.Unlock()
+	if (invitation.Role == db.AdminRole || invitation.Role == db.ManagerRole) && !invitation.Expiration.After(time.Now()) {
+		if err := a.subscriptions.OrgCanAddWriter(org.Address); err != nil {
+			writeSubscriptionError(w, err)
+			return
+		}
+	}
 
 	// create the updated invitation
 	orgInvite := &db.OrganizationInvite{
@@ -463,6 +473,7 @@ func (a *API) updatePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 		errors.ErrGenericInternalServerError.Withf("could not update invitation: %v", err).Write(w)
 		return
 	}
+	writerLock.Unlock()
 
 	// send the invitation mail to invited user email with the invite code and
 	// the invite link
