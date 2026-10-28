@@ -608,10 +608,7 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 	}
 	if !confirmed {
 		pw.abandon()
-		if lastErr != nil {
-			return nil, fmt.Errorf("publish did not confirm all questions after %d rounds: %w", maxPublishRounds, lastErr)
-		}
-		return nil, fmt.Errorf("publish did not confirm all questions after %d rounds", maxPublishRounds)
+		return nil, fmt.Errorf("publish did not confirm all questions after %d rounds: %w", maxPublishRounds, lastErr)
 	}
 	if e := a.db.SetVotingProcessPublished(pw.vp.ID, pw.owner, pw.resolveStartDate()); e != nil {
 		// every election is already on-chain and its question persisted; clear the marker so a
@@ -728,6 +725,21 @@ func anyMined(questions []db.VotingProcessQuestion) bool {
 	return false
 }
 
+// publishDenial is the job error for a failed HasTxPermission check: a plan or role refusal keeps
+// its message, while an internal (5xx) error only says the check failed, since its detail can carry
+// internal state and stays in the log.
+func publishDenial(err error) error {
+	var apiErr errors.Error
+	switch {
+	case err == nil:
+		return fmt.Errorf("voting process publish not permitted")
+	case errors.As(err, &apiErr) && apiErr.HTTPstatus >= http.StatusInternalServerError:
+		return fmt.Errorf("could not check the voting process publish permission")
+	default:
+		return fmt.Errorf("voting process publish not permitted: %s", err.Error())
+	}
+}
+
 // buildBatch builds, funds, permission-checks and signs a NEW_PROCESS tx per pending
 // question with contiguous nonces starting at startNonce. A question that is not permitted
 // fails the whole attempt with an error (nothing is partially submitted).
@@ -778,11 +790,11 @@ func (pw *publishWorker) buildBatch(
 		hasPerm, err := a.subscriptions.HasTxPermission(fundedTx, *txType, pw.org, pw.user)
 		if err != nil {
 			log.Warnw("voting process publish not permitted", "error", err)
-			return nil, fmt.Errorf("voting process publish not permitted: %w", err)
+			return nil, publishDenial(err)
 		}
 		if !hasPerm {
 			log.Warnw("voting process publish not permitted")
-			return nil, fmt.Errorf("voting process publish not permitted")
+			return nil, publishDenial(nil)
 		}
 		stx, err := a.account.SignTransaction(fundedTx, pw.orgSigner)
 		if err != nil {

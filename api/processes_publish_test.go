@@ -197,3 +197,32 @@ func TestConfirmBatchCause(t *testing.T) {
 		c.Assert(err.Error(), qt.Contains, "0 batch results for 1 transactions")
 	})
 }
+
+// TestPublishDenial checks that a permission failure reaches the job error without internal
+// detail: a plan refusal keeps its message, while an internal failure only says the check failed.
+func TestPublishDenial(t *testing.T) {
+	c := qt.New(t)
+
+	c.Run("plan refusal keeps its message", func(c *qt.C) {
+		err := publishDenial(errors.ErrMaxProcessesReached)
+		c.Assert(err.Error(), qt.Contains, "not permitted")
+		c.Assert(err.Error(), qt.Contains, "max processes reached")
+	})
+
+	c.Run("internal error hides its detail", func(c *qt.C) {
+		err := publishDenial(errors.ErrGenericInternalServerError.WithErr(fmt.Errorf("dial tcp 10.1.2.3:27017")))
+		c.Assert(err.Error(), qt.Not(qt.Contains), "10.1.2.3")
+		c.Assert(err.Error(), qt.Contains, "could not check")
+	})
+
+	c.Run("plain plan refusal keeps its message", func(c *qt.C) {
+		err := publishDenial(fmt.Errorf("vote overwrites are not allowed"))
+		c.Assert(err.Error(), qt.Contains, "not permitted")
+		c.Assert(err.Error(), qt.Contains, "vote overwrites are not allowed")
+	})
+
+	c.Run("denied without error", func(c *qt.C) {
+		err := publishDenial(nil)
+		c.Assert(err.Error(), qt.Contains, "not permitted")
+	})
+}
