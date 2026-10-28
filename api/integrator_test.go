@@ -104,10 +104,17 @@ func TestIntegratorTopLevelOrgCannotOwnProcesses(t *testing.T) {
 
 	token := testCreateUser(t, "integratorpass123")
 	integratorAddr := testCreateOrganization(t, token)
+	// a draft saved before the organization became an integrator
+	members := postOrgMembers(t, token, integratorAddr, newOrgMembers(1)...)
+	earlier := requestAndParse[apicommon.CreateVotingProcessResponse](t, http.MethodPost, token,
+		newVotingProcessRequest(integratorAddr, memberIDs(members)), processesCreateEndpoint)
 	integratorOrg, err := testDB.Organization(integratorAddr)
 	c.Assert(err, qt.IsNil)
 	integratorOrg.Integrator = true
 	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
+	// publish refuses it with the typed 403, as draft creation does, not a 400
+	requestAndAssertError(errors.ErrIntegratorTopLevelOrgCannotOwnProcess,
+		t, http.MethodPost, token, nil, "processes", earlier.ProcessID, "publish")
 
 	draft := func(org common.Address) *apicommon.CreateVotingProcessRequest {
 		return &apicommon.CreateVotingProcessRequest{

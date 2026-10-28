@@ -84,10 +84,11 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // A POST /votes call is bounded by db.MaxBallotsPerBatch, used directly rather than through a
-// local alias so the api package names the cap one way. A voter casts one vote per question, and a
-// process cannot hold more questions than that, so the cap is expressed as what it actually
-// depends on rather than a duplicated literal: raising it means raising db.MaxBallotsPerBatch
-// first, and the vochain batch transaction endpoint above that. It is deliberately NOT tied to
+// local alias so the api package names the cap one way. A voter casts one vote per question, and new
+// processes hold at most db.MaxQuestionsPerProcess (15) of them; the cap stays at 100, the former
+// question limit, only so processes published before that limit was lowered remain votable in one
+// batch (see db.MaxBallotsPerBatch). Raising it means raising the vochain batch transaction
+// endpoint's limit first. It is deliberately NOT tied to
 // relayTxQueueSize — the queue is sized to hold several full batches (see api/jobqueue.go), because
 // a batch rejected for lack of queue room sends the client back to relaying one vote at a time,
 // which is the half-voted window this endpoint exists to close.

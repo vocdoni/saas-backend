@@ -228,3 +228,28 @@ func TestDeleteManagedOrgDropsPartiallyPublishedDraft(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPaid)
 }
+
+// TestManagedOrgTeardownBlocksDraftsAndPublish: while a managed organization is being torn down,
+// no draft can be created or published in it (nothing created or debited after the teardown's
+// draft sweep goes unrefunded in the bulk delete), and a second teardown is refused.
+func TestManagedOrgTeardownBlocksDraftsAndPublish(t *testing.T) {
+	c := qt.New(t)
+	installFakePaymentGW(t)
+	token := testCreateUser(t, "teardownblock123")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_teardown_block")
+	fundWallet(t, integratorAddr, 100_000)
+	draft := newManagedDraft(t, token, managedAddr)
+
+	testAPI.teardowns.Store(managedAddr, struct{}{})
+	c.Cleanup(func() { testAPI.teardowns.Delete(managedAddr) })
+	requestAndAssertError(errors.ErrDuplicateConflict, t, http.MethodPost, token,
+		newVotingProcessRequest(managedAddr, postNewOrgMembers(t, token, managedAddr, 1)), processesCreateEndpoint)
+	requestAndAssertError(errors.ErrDuplicateConflict, t, http.MethodPost, token, nil,
+		"processes", draft.Hex(), "publish")
+	requestAndAssertError(errors.ErrDuplicateConflict, t, http.MethodDelete, token, nil,
+		"integrator", "organizations", managedAddr.String())
+	c.Assert(walletBalance(c, integratorAddr), qt.Equals, pricing.Cents(100_000))
+	vp, err := testDB.VotingProcess(draft)
+	c.Assert(err, qt.IsNil)
+	c.Assert(vp.PublishInProgress(), qt.IsFalse)
+}

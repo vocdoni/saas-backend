@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func TestOrganizationUsers(t *testing.T) {
@@ -1047,6 +1049,24 @@ func TestOrganizationWriterCap(t *testing.T) {
 		append(usersPath, fmt.Sprint(viewer))...)
 	// a swap between write roles takes no new seat
 	setRole(secondAdmin, db.ManagerRole)()
+
+	// an expired write invitation frees its seat, and reviving it must take one again
+	pending, err := testDB.PendingInvitations(orgAddress)
+	c.Assert(err, qt.IsNil)
+	var expired *db.OrganizationInvite
+	for i := range pending {
+		if pending[i].Role == db.ManagerRole {
+			expired = &pending[i]
+			break
+		}
+	}
+	c.Assert(expired, qt.Not(qt.IsNil))
+	_, err = testDB.DBClient.Database(testDBName).Collection("organizationInvites").UpdateOne(context.Background(),
+		bson.M{"_id": expired.ID}, bson.M{"$set": bson.M{"expiration": time.Now().Add(-time.Minute)}})
+	c.Assert(err, qt.IsNil)
+	invite(randomEmail(), db.ManagerRole) // the freed seat: 5 writers again
+	requestAndAssertError(errors.ErrMaxWritersReached, t, http.MethodPut, adminToken, nil,
+		append(usersPath, "pending", expired.ID.Hex())...)
 }
 
 // invitedOrg is an organization owned by a fresh user; no plan is needed, seats are bounded only by the writer cap.

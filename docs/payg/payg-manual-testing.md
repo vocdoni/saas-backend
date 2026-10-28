@@ -281,7 +281,9 @@ rose, it was deleted) stays in the wallet for a manual publish; nothing goes bac
 - **Refund a top-up in the dashboard**: refund a top-up's payment from the Stripe dashboard
   (with `stripe listen` forwarding `refund.created`/`refund.updated`): the wallet history gains
   a `refund` row for the refunded amount net of VAT, debited even below zero — a negative
-  balance refuses every publish until a top-up covers it.
+  balance refuses every publish until a top-up covers it. A dispute on a top-up
+  (`stripe trigger charge.dispute.funds_withdrawn` does not name a top-up; use a test card that
+  disputes, e.g. `4000000000000259`) debits it the same way, and a won dispute credits it back.
 - **Integrator wallet**: create an integrator org (`POST /organizations` with
   `"integrator": true`; an existing org cannot be switched, there is no command for it), then
   `POST /organizations/$ORG/wallet/topup -d '{"amountCents":10000,"returnURL":"http://localhost:8000/checkout.html"}'`,

@@ -171,26 +171,55 @@ func (ms *MongoStorage) CreditWallet(c WalletCredit) error {
 	}, c.SpentBy)
 }
 
-// WalletRefund is a Stripe refund of a top-up, debited from the wallet the top-up credited.
+// WalletRefund is money a top-up's payer got back through Stripe — a refund made in the
+// dashboard, or a dispute's withdrawn funds — debited from the wallet the top-up credited.
 type WalletRefund struct {
 	OrgAddress  common.Address
 	AmountCents pricing.Cents // net of VAT, positive
-	RefundID    string        // the Stripe refund id
+	// Key is the idempotency key: "striperefund:<refund id>" or "dispute:<dispute id>"
+	Key string
 }
 
-// DebitWalletForRefund takes a refunded top-up back out of the wallet, in full even below zero:
-// the money already left through Stripe, so this only records it. A negative balance refuses
-// every DebitWalletForProcess until a top-up covers it. Keyed "striperefund:<refund id>", so a
-// replay or a later update of the same refund debits nothing.
+// DebitWalletForRefund takes a refunded or disputed top-up back out of the wallet, in full even
+// below zero: the money already left through Stripe, so this only records it. A negative balance
+// refuses every DebitWalletForProcess until a top-up covers it. Keyed by r.Key, so a replay or a
+// later update of the same refund or dispute debits nothing.
 func (ms *MongoStorage) DebitWalletForRefund(r WalletRefund) error {
-	if r.AmountCents <= 0 || r.RefundID == "" {
+	if r.AmountCents <= 0 || r.Key == "" {
 		return ErrInvalidData
 	}
 	return ms.applyWalletEntry(&WalletLedgerEntry{
 		OrgAddress:     r.OrgAddress,
 		AmountCents:    -r.AmountCents,
 		Kind:           WalletEntryRefund,
-		IdempotencyKey: "striperefund:" + r.RefundID,
+		IdempotencyKey: r.Key,
+	}, common.Address{})
+}
+
+// ReverseWalletRefund credits back a refund debit that Stripe undid afterwards — a refund that
+// failed or was canceled once debited, a dispute whose funds were reinstated. It credits exactly
+// the ledger row keyed debitKey, as a positive refund row keyed creditKey, so the history shows
+// the debit and its reversal as two refund rows netting to zero; a replay credits nothing. It
+// reports false, changing nothing, when no such debit was recorded.
+func (ms *MongoStorage) ReverseWalletRefund(debitKey, creditKey string) (bool, error) {
+	if debitKey == "" || creditKey == "" {
+		return false, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	var debit WalletLedgerEntry
+	err := ms.walletLedger.FindOne(ctx, bson.M{"idempotencyKey": debitKey, "kind": WalletEntryRefund}).Decode(&debit)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to look up refund debit %s: %w", debitKey, err)
+	}
+	return true, ms.applyWalletEntry(&WalletLedgerEntry{
+		OrgAddress:     debit.OrgAddress,
+		AmountCents:    -debit.AmountCents,
+		Kind:           WalletEntryRefund,
+		IdempotencyKey: creditKey,
 	}, common.Address{})
 }
 

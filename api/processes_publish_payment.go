@@ -28,18 +28,27 @@ func walletPayer(org *db.Organization) common.Address {
 // walletShortError is the 402 of a payer whose balance does not cover dueCents of quote: 40175
 // with requiredCents/availableCents for a managed organization (its integrator pays), 40178 with
 // the quote, the balance and the shortfall a top-up checkout covers for any other.
-func walletShortError(org *db.Organization, quote pricing.Quote, dueCents, balanceCents pricing.Cents) error {
-	if org.ManagedBy != (common.Address{}) {
+func walletShortError(s walletShort) error {
+	if s.org.ManagedBy != (common.Address{}) {
 		return errors.ErrInsufficientWalletBalance.WithData(map[string]pricing.Cents{
-			"requiredCents":  dueCents,
-			"availableCents": balanceCents,
+			"requiredCents":  s.dueCents,
+			"availableCents": s.balanceCents,
 		})
 	}
 	return errors.ErrPaymentRequired.WithData(&apicommon.ProcessPaymentRequired{
-		Quote:          quote,
-		BalanceCents:   balanceCents,
-		ShortfallCents: dueCents - balanceCents,
+		Quote:          s.quote,
+		BalanceCents:   s.balanceCents,
+		ShortfallCents: s.dueCents - s.balanceCents,
 	})
+}
+
+// walletShort is what walletShortError reports: dueCents of quote, against the payer's
+// balanceCents.
+type walletShort struct {
+	org          *db.Organization
+	quote        pricing.Quote
+	dueCents     pricing.Cents
+	balanceCents pricing.Cents
 }
 
 // paymentDueForPublish is the publish gate: it refuses, before the publish is claimed, what the
@@ -92,7 +101,7 @@ func (a *API) paymentDueForPublish(vp *db.VotingProcess) error {
 	if wallet.BalanceCents >= dueCents {
 		return nil
 	}
-	return walletShortError(org, quote, dueCents, wallet.BalanceCents)
+	return walletShortError(walletShort{org: org, quote: quote, dueCents: dueCents, balanceCents: wallet.BalanceCents})
 }
 
 // debitProcessWallet charges a draft's publish to its payer's wallet: atomic, and priced against
@@ -242,7 +251,9 @@ func (a *API) chargeProcessWallet(c processCharge) (pricing.Cents, error) {
 			if werr != nil {
 				return 0, fmt.Errorf("wallet short, and its balance could not be read: %w", werr)
 			}
-			return 0, walletShortError(c.org, c.quote, dueCents, wallet.BalanceCents)
+			return 0, walletShortError(walletShort{
+				org: c.org, quote: c.quote, dueCents: dueCents, balanceCents: wallet.BalanceCents,
+			})
 		}
 		return 0, fmt.Errorf("failed to debit wallet: %w", err)
 	}
@@ -300,7 +311,8 @@ func (a *API) chargeProcessWallet(c processCharge) (pricing.Cents, error) {
 // publish would take as paid for free — and the owed credit is applied by whatever touches the
 // payment next: another reversal, the next publish's debit, a checkout, or the draft's delete.
 // Once-per-organization add-ons another process already relies on are withheld and stay the
-// organization's, as a delete's credit-back withholds them; the others are released with the money.
+// organization's, as a delete's credit-back withholds them; the others are released first, before
+// the payment is reverted, so a failed release leaves the draft paid rather than an add-on stranded.
 //
 // Anything but an unrefunded wallet payment (none, an open checkout, a refund in progress) is
 // left alone and reports nil.
@@ -337,6 +349,14 @@ func (a *API) reversePublishDebit(processID bson.ObjectID) error {
 		if err != nil {
 			return err
 		}
+		// the add-ons go back before the payment is reverted, as refundPaidProcess releases them
+		// before marking the refund: a failure leaves the draft paid with its add-ons claimed — a
+		// consistent state the caller logs — instead of a reverted payment whose add-ons nothing
+		// would ever release (the next reversal skips a failed payment). The release is
+		// idempotent, so a reversal tried again releases nothing twice.
+		if err := a.releaseOrgAddOnsNotWithheld(vp, payment, withheld.AddOns); err != nil {
+			return fmt.Errorf("failed to release the add-ons of the reverted payment: %w", err)
+		}
 		owed := payment.AmountCents - withheld.Cents
 		reverted, err := a.db.RevertWalletProcessPayment(db.WalletPaymentRevert{
 			ProcessID: processID, AmountCents: payment.AmountCents, Attempt: payment.WalletAttempt, CreditBackCents: owed,
@@ -346,9 +366,6 @@ func (a *API) reversePublishDebit(processID bson.ObjectID) error {
 		}
 		if !reverted {
 			return fmt.Errorf("the payment of process %s moved while it was being reverted", processID.Hex())
-		}
-		if err := a.releaseOrgAddOnsNotWithheld(vp, payment, withheld.AddOns); err != nil {
-			log.Errorw(err, fmt.Sprintf("add-ons of credited-back process %s not released", processID.Hex()))
 		}
 		payment.Status, payment.CreditBackCents = db.ProcessPaymentFailed, owed
 		payment.WalletAttempt++
@@ -602,7 +619,7 @@ func (a *API) publishPaidProcess(t stripe.ProcessTopUp) error {
 		return fmt.Errorf("failed to re-check payment of topped-up process: %w", err)
 	}
 	target := publishTarget{vp: vp, questions: questions, census: census, user: user}
-	if problems, _ := a.publishPreflightProblems(target); len(problems) > 0 {
+	if problems, _, _ := a.publishPreflightProblems(target); len(problems) > 0 {
 		log.Warnw("topped-up process failed publish preflight, the credit stays for a manual publish",
 			"processId", processID.Hex(), "problems", strings.Join(problems, "; "))
 		return nil

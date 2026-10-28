@@ -502,7 +502,7 @@ func TestVotingProcessAPIKeyAuth(t *testing.T) {
 
 // TestVotingProcessPublishPreflight verifies the publish-readiness dry-run now catches plan
 // denials that used to only surface as an async job failure: a process whose duration exceeds
-// the plan limit is reported invalid by GET .../check AND rejected 400 by publish (synchronously,
+// the 90-day duration cap is reported invalid by GET .../check AND rejected 400 by publish (synchronously,
 // never enqueued).
 func TestVotingProcessPublishPreflight(t *testing.T) {
 	c := qt.New(t)
@@ -526,8 +526,9 @@ func TestVotingProcessPublishPreflight(t *testing.T) {
 	c.Assert(val.Valid, qt.IsFalse)
 	c.Assert(len(val.Errors) > 0, qt.IsTrue)
 
-	// publish rejects it synchronously with 400 (not a 202 that later fails as an opaque job)
-	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, token, nil, "processes", pid, "publish")
+	// publish rejects it synchronously with the cap's typed 400 (not a 202 that later fails as an
+	// opaque job)
+	requestAndAssertError(errors.ErrInvalidData, t, http.MethodPost, token, nil, "processes", pid, "publish")
 }
 
 // TestVotingProcessUpdateNoCensusOrphan verifies that editing a draft does not accumulate

@@ -297,7 +297,7 @@ func TestWalletRefundDebit(t *testing.T) {
 
 	// a partial refund, then the rest: each debited once, the second below zero
 	refund := func(id string, cents pricing.Cents) error {
-		return testDB.DebitWalletForRefund(WalletRefund{OrgAddress: testOrgAddress, AmountCents: cents, RefundID: id})
+		return testDB.DebitWalletForRefund(WalletRefund{OrgAddress: testOrgAddress, AmountCents: cents, Key: id})
 	}
 	c.Assert(refund("re_partial", 1_500), qt.IsNil)
 	c.Assert(refund("re_partial", 1_500), qt.IsNil) // replay
@@ -332,4 +332,25 @@ func TestWalletRefundDebit(t *testing.T) {
 
 	c.Assert(refund("", 100), qt.ErrorIs, ErrInvalidData)
 	c.Assert(refund("re_zero", 0), qt.ErrorIs, ErrInvalidData)
+
+	// a debited refund Stripe undoes is credited back once, as a refund row; one never debited
+	// changes nothing
+	before, err := testDB.Wallet(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	reversed, err := testDB.ReverseWalletRefund("re_partial", "refundfail:re_partial")
+	c.Assert(err, qt.IsNil)
+	c.Assert(reversed, qt.IsTrue)
+	reversed, err = testDB.ReverseWalletRefund("re_partial", "refundfail:re_partial") // replay
+	c.Assert(err, qt.IsNil)
+	c.Assert(reversed, qt.IsTrue)
+	reversed, err = testDB.ReverseWalletRefund("re_never", "refundfail:re_never")
+	c.Assert(err, qt.IsNil)
+	c.Assert(reversed, qt.IsFalse)
+	after, err := testDB.Wallet(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(after.BalanceCents, qt.Equals, before.BalanceCents+1_500)
+	_, entries, err = testDB.WalletLedger(testOrgAddress, 1, 1)
+	c.Assert(err, qt.IsNil)
+	c.Assert(entries[0].Kind, qt.Equals, WalletEntryRefund)
+	c.Assert(entries[0].AmountCents, qt.Equals, pricing.Cents(1_500))
 }

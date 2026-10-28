@@ -135,7 +135,8 @@ Component packages (each is a focused service composed in `main.go`):
   90-day processes). Subscription plans no longer limit anything; integrators are an `integrator`
   flag on the organization and are bounded only by their wallet balance and the optional spend
   cap they set per managed organization. The flag is set when the organization is created with
-  `integrator: true` (`POST /organizations`); migration 0035 flagged the existing integrators.
+  `integrator: true` (`POST /organizations`); migration 0035 flagged the existing integrators (an
+  `integratorLimits` override or an active non-default integrator plan; API keys alone do not count).
   There is no command to switch it later.
 - **`stripe/`** — Stripe client, checkout/portal sessions, and webhook handling for billing.
 - **`objectstorage/`** — S3-like object storage (images) backed by Mongo, with upload/download handlers.

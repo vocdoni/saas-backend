@@ -33,6 +33,12 @@ const publishRetryAttempts = 5
 // publishRetryBackoff is the delay before the first retry; each further retry doubles it (5s, 10s,
 // 20s, 40s, 80s: about 2.5 minutes in all). The job stays pending meanwhile. A var so tests can
 // shorten it.
+//
+// The backoff is not the job's whole duration: each of the 6 attempts runs up to maxPublishRounds
+// rounds, and a round waits up to 40 s per question (account.WaitTxMined) on a chain that does not
+// mine. The worst case is 6 × 3 × 40 s × questions + the backoff: ~15 minutes for one question, over
+// 3 hours for MaxQuestionsPerProcess. Not bounded on purpose: the claim is renewed throughout, and
+// cutting it short would only turn a slow publish into a failed one.
 var publishRetryBackoff = 5 * time.Second
 
 // transientPublishError marks a publish failure that a later attempt may get past: the chain did
@@ -97,32 +103,28 @@ func (a *API) reconcileStalePublishing() {
 	}
 	for _, claim := range claims {
 		id := claim.ID
-		// release only the claim the scan found, and only while it is still stale: a sibling
-		// replica may have reclaimed the process since, and its fresh claim must survive
-		released, e := a.db.ReleaseStalePublishClaim(claim)
+		// take over only the claim the scan found, and only while it is still stale: a sibling
+		// replica or a publish may have reclaimed the process since, and its fresh claim must
+		// survive. Holding the claim, no publish can start on the process while its questions are
+		// reset and its payment reverted.
+		owner, reclaimed, e := a.db.ReclaimStalePublishClaim(claim)
 		if e != nil {
-			log.Warnw("could not clear stale publishing marker", "processId", id.Hex(), "error", e)
+			log.Warnw("could not reclaim stale publishing marker", "processId", id.Hex(), "error", e)
 			continue
 		}
-		if !released {
+		if !reclaimed {
 			continue
 		}
 		// mined questions keep their election ids: this only resets the unmined ones
 		if e := a.db.ResetQuestionsPublish(id); e != nil {
 			log.Warnw("could not reset questions of stale publishing process", "processId", id.Hex(), "error", e)
 		}
-		// the publish it held died with the worker: a final failure, so the wallet debit goes back,
-		// under a claim of its own so no publish can start on the payment while it is reverted. A
-		// publish that claimed the process since keeps it, and the payment with it.
-		if owner, claimed, e := a.db.ClaimVotingProcessForPublish(id, time.Time{}); e != nil || !claimed {
-			log.Warnw("stale publishing process claimed meanwhile, its wallet debit stays", "processId", id.Hex(), "error", e)
-		} else {
-			if e := a.reversePublishDebit(id); e != nil {
-				log.Errorw(e, "could not credit back the wallet debit of a stale publish; it stays a paid draft")
-			}
-			if e := a.db.ClearVotingProcessPublishing(id, owner); e != nil {
-				log.Warnw("could not release the stale publish reconcile claim", "processId", id.Hex(), "error", e)
-			}
+		// the publish it held died with the worker: a final failure, so the wallet debit goes back
+		if e := a.reversePublishDebit(id); e != nil {
+			log.Errorw(e, "could not credit back the wallet debit of a stale publish; it stays a paid draft")
+		}
+		if e := a.db.ClearVotingProcessPublishing(id, owner); e != nil {
+			log.Warnw("could not release the stale publish reconcile claim", "processId", id.Hex(), "error", e)
 		}
 		log.Infow("reconciled stale publishing process", "processId", id.Hex())
 	}
@@ -146,7 +148,11 @@ type publishTarget struct {
 // questionsMismatch singles out the one problem that is not the caller's request but the server's
 // own data state — a stored question set that does not match the process. Publish answers that with
 // a 409 rather than a 400; the dry-run ignores the flag and just reports the problem.
-func (a *API) publishPreflightProblems(t publishTarget) (problems []string, questionsMismatch bool) {
+//
+// denied is the organization's typed refusal (OrgCanPublishProcess: the integrator's own org,
+// 40174, or the 90-day duration cap), also listed in problems. Publish answers it as that error,
+// as draft creation does, rather than folding it into a 400.
+func (a *API) publishPreflightProblems(t publishTarget) (problems []string, questionsMismatch bool, denied error) {
 	vp, questions, census, user := t.vp, t.questions, t.census, t.user
 	problems = validateVotingProcessForPublish(vp, questions, census)
 	if p := questionSetProblem(vp, questions); p != "" {
@@ -154,11 +160,11 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 		questionsMismatch = true
 	}
 	if census == nil {
-		return problems, questionsMismatch // the checks below need the census
+		return problems, questionsMismatch, nil // the checks below need the census
 	}
 	orgDoc, err := a.db.Organization(vp.OrgAddress)
 	if err != nil {
-		return append(problems, "organization not found"), questionsMismatch
+		return append(problems, "organization not found"), questionsMismatch, nil
 	}
 	if !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
 		problems = append(problems, "publishing requires the admin role")
@@ -174,7 +180,7 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	// the checks below but fail in the worker (electionParamsForQuestion). Reject it here.
 	if maxSize == 0 {
 		problems = append(problems, "census has no members")
-		return problems, questionsMismatch
+		return problems, questionsMismatch, nil
 	}
 	start := vp.StartDate
 	if start.IsZero() || start.Before(time.Now()) {
@@ -186,8 +192,9 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	}
 	if err := a.subscriptions.OrgCanPublishProcess(orgDoc, durationSeconds); err != nil {
 		problems = append(problems, err.Error())
+		denied = err
 	}
-	return problems, questionsMismatch
+	return problems, questionsMismatch, denied
 }
 
 // publishVotingProcessHandler godoc
@@ -197,8 +204,11 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 //	@Description	Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
 //	@Description	GET /jobs/{jobId}. Idempotent once published.
 //	@Description	Transient failures (the chain not answering or confirming, a full tx queue) are retried
-//	@Description	by the service up to 5 times over about 2.5 minutes; the job stays pending meanwhile,
-//	@Description	so poll GET /jobs/{jobId} for at least 3 minutes before treating a publish as stuck.
+//	@Description	by the service up to 5 times, with about 2.5 minutes of backoff between attempts; the job
+//	@Description	stays pending meanwhile. Each attempt runs up to 3 rounds, each waiting up to 40 s per
+//	@Description	question for its election to be mined, so on a stalled chain the job can stay pending for
+//	@Description	6 attempts × 3 rounds × 40 s × questions + 2.5 minutes: about 15 minutes for one question,
+//	@Description	over 3 hours for 15. Poll GET /jobs/{jobId} until it is completed or failed.
 //	@Description	If the publish finally fails before any election is mined, a failed publish credits the
 //	@Description	payer's wallet back (a `creditBack` history row) and publishing again charges again.
 //	@Description	409 (40172) means the stored questions do not match the process and the draft has to be
@@ -220,6 +230,7 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 //	@Failure		400			{object}	errors.Error							"Not ready to publish"
 //	@Failure		401			{object}	errors.Error
 //	@Failure		402			{object}	errors.Error	"Wallet short (quote, balance, shortfall in data), or spend cap reached"
+//	@Failure		403			{object}	errors.Error	"An integrator's own organization cannot own processes (40174)"
 //	@Failure		404			{object}	errors.Error
 //	@Failure		409			{object}	errors.Error	"Publish in progress, questions out of sync, or a top-up checkout is open"
 //	@Failure		422			{object}	errors.Error	"Census size requires a custom quote"
@@ -261,13 +272,21 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 	// predictable is rejected here rather than as an opaque async job failure;
 	// only funding and chain submission are left to the worker.
 	target := publishTarget{vp: vp, questions: questions, census: census, user: user}
-	if problems, questionsMismatch := a.publishPreflightProblems(target); len(problems) > 0 {
+	if problems, questionsMismatch, denied := a.publishPreflightProblems(target); len(problems) > 0 {
 		// a stored question set that does not match the process is server-side state, not a bad
 		// request, so it answers 409. It wins over any other problem present: it has to be repaired
 		// (by saving the draft again) before the rest of the draft is even worth looking at.
-		apiErr := errors.ErrMalformedBody
-		if questionsMismatch {
+		// Next comes the organization's typed refusal (403 40174, or the duration cap), as at draft
+		// creation; anything else is a 400.
+		var apiErr errors.Error
+		switch {
+		case questionsMismatch:
 			apiErr = errors.ErrProcessQuestionsMismatch
+		case denied != nil:
+			writeSubscriptionError(w, denied)
+			return
+		default:
+			apiErr = errors.ErrMalformedBody
 		}
 		apiErr.Withf("process is not ready to publish: %s", strings.Join(problems, "; ")).Write(w)
 		return
@@ -344,6 +363,11 @@ func (a *API) startProcessPublish(ctx context.Context, t publishTarget) (string,
 			log.Warnw("could not clear voting process publishing state", "error", e)
 		}
 	}()
+	// under the claim: a teardown that started before it refuses the publish here, and one that
+	// starts after finds the draft claimed and stops (see deleteManagedOrganizationHandler)
+	if err := a.refuseTearingDown(vp.OrgAddress); err != nil {
+		return "", err
+	}
 	// again under the claim, which a delete takes too: one that refunded and failed between
 	// the payment gate and here would otherwise go on chain unpaid
 	if err := a.refuseRefundedDraft(oid); err != nil {

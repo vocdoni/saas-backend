@@ -219,6 +219,16 @@ func TestProcessPaymentPendingPinsReplacedSession(t *testing.T) {
 	payment, err = testDB.ProcessPayment(processID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.CheckoutSessionID, qt.Equals, "cs_c")
+
+	// a replacement whose row a late expiry dropped meanwhile does not insert a claimless row
+	deleted, err := testDB.DeleteProcessPaymentCheckout(processID, "cs_c")
+	c.Assert(err, qt.IsNil)
+	c.Assert(deleted, qt.IsTrue)
+	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_d"), "cs_c")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+	_, err = testDB.ProcessPayment(processID)
+	c.Assert(err, qt.ErrorIs, ErrNotFound)
 }
 
 // TestProcessPaymentRefund: only a paid payment is marked credited back, once, and the row

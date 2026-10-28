@@ -111,6 +111,10 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		writeSubscriptionError(w, err)
 		return
 	}
+	if err := a.refuseTearingDown(orgAddr); err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
 	start, end, err := parseProcessDates(req)
 	if err != nil {
 		errors.ErrMalformedBody.WithErr(err).Write(w)
@@ -777,7 +781,7 @@ func (a *API) validateVotingProcessHandler(w http.ResponseWriter, r *http.Reques
 	census, _ := a.db.Census(vp.CensusID.Hex())
 	// the dry-run reports every problem the same way: a mismatched question set is just one more
 	// entry in errors, so the mismatch flag publish acts on is irrelevant here.
-	problems, _ := a.publishPreflightProblems(publishTarget{vp: vp, questions: questions, census: census, user: user})
+	problems, _, _ := a.publishPreflightProblems(publishTarget{vp: vp, questions: questions, census: census, user: user})
 	// a wallet that does not cover the price is one more reason a publish would be refused; a
 	// quote error is not reported here (a broken census already surfaces above)
 	if !vp.Published {

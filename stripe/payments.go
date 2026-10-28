@@ -349,48 +349,96 @@ func sessionProcessTopUp(session *stripeapi.CheckoutSession) (*ProcessTopUp, err
 
 // handleRefund mirrors in the wallet a refund made by hand in the Stripe dashboard (the service
 // never refunds): on refund.created and refund.updated, a succeeded refund of a payment intent
-// that credited a wallet top-up is debited from that wallet, net of VAT at the top-up's own
-// ratio (rounded down), in full even below zero. Keyed by the refund id, so replays, and the
-// updated event of a refund already counted when created, debit nothing. A refund of anything
-// else — a subscription invoice, a payment intent with no top-up — is ignored.
+// that credited a wallet top-up is debited from that wallet (debitTopUpRefund). Keyed by the refund
+// id, so replays, and the updated event of a refund already counted when created, debit nothing.
+// A refund that later fails or is canceled once debited is credited back, keyed
+// "refundfail:<refund id>"; one never debited changes nothing. A refund of anything else — a
+// subscription invoice, a payment intent with no top-up — is ignored.
+//
+// ponytail: trusts delivery order; a failed update delivered before the succeeded one it follows
+// would leave the debit standing. Re-fetch the refund from Stripe if that is ever seen.
 func (s *Service) handleRefund(event *stripeapi.Event) error {
 	var refund stripeapi.Refund
 	if err := json.Unmarshal(event.Data.Raw, &refund); err != nil {
 		return fmt.Errorf("failed to parse refund from event %s: %w", event.ID, err)
 	}
-	if refund.Status != stripeapi.RefundStatusSucceeded || refund.Amount <= 0 {
-		return nil // pending, failed or canceled: no money left
+	switch refund.Status {
+	case stripeapi.RefundStatusSucceeded:
+		return s.debitTopUpRefund(refund.PaymentIntent, refund.Amount, "striperefund:"+refund.ID)
+	case stripeapi.RefundStatusFailed, stripeapi.RefundStatusCanceled:
+		return s.reverseTopUpRefund("striperefund:"+refund.ID, "refundfail:"+refund.ID)
+	default:
+		return nil // pending or requires_action: no money moved yet
 	}
-	if refund.PaymentIntent == nil || refund.PaymentIntent.ID == "" {
-		log.Infow("ignoring refund without a payment intent", "refundId", refund.ID)
+}
+
+// handleDispute mirrors in the wallet a dispute (chargeback) on a top-up: the withdrawn funds are
+// debited like a refund (debitTopUpRefund), keyed "dispute:<dispute id>", even below zero; funds
+// reinstated after a won dispute credit that debit back, keyed "disputereinstated:<dispute id>".
+// The dispute fee Stripe charges is not the payer's money and is not mirrored.
+func (s *Service) handleDispute(event *stripeapi.Event) error {
+	var dispute stripeapi.Dispute
+	if err := json.Unmarshal(event.Data.Raw, &dispute); err != nil {
+		return fmt.Errorf("failed to parse dispute from event %s: %w", event.ID, err)
+	}
+	if event.Type == stripeapi.EventTypeChargeDisputeFundsReinstated {
+		return s.reverseTopUpRefund("dispute:"+dispute.ID, "disputereinstated:"+dispute.ID)
+	}
+	return s.debitTopUpRefund(dispute.PaymentIntent, dispute.Amount, "dispute:"+dispute.ID)
+}
+
+// debitTopUpRefund debits from a wallet amount (VAT included) that Stripe returned to the payer of
+// the top-up paid through paymentIntent — found through the top-up's ledger row — net of VAT at
+// the top-up's own ratio (rounded down), in full even below zero. Money returned on a payment
+// that credited no top-up is ignored.
+func (s *Service) debitTopUpRefund(paymentIntent *stripeapi.PaymentIntent, amount int64, key string) error {
+	if amount <= 0 {
 		return nil
 	}
-	topUp, err := s.db.WalletTopUpByPaymentIntent(refund.PaymentIntent.ID)
+	if paymentIntent == nil || paymentIntent.ID == "" {
+		log.Infow("ignoring returned funds without a payment intent", "key", key)
+		return nil
+	}
+	topUp, err := s.db.WalletTopUpByPaymentIntent(paymentIntent.ID)
 	if errors.Is(err, db.ErrNotFound) {
 		// not a wallet top-up. ponytail: also a top-up refunded before its completed event was
 		// credited, which a human in the dashboard cannot realistically do; read the payment
 		// intent's wallet_topup_org metadata from Stripe if it ever happens.
-		log.Infow("ignoring refund of a payment that is not a credited wallet top-up",
-			"refundId", refund.ID, "paymentIntentId", refund.PaymentIntent.ID)
+		log.Infow("ignoring returned funds of a payment that is not a credited wallet top-up",
+			"key", key, "paymentIntentId", paymentIntent.ID)
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("failed to find the top-up of refund %s: %w", refund.ID, err)
+		return fmt.Errorf("failed to find the top-up of %s: %w", key, err)
 	}
-	netCents := pricing.Cents(refund.Amount)
+	netCents := pricing.Cents(amount)
 	if topUp.GrossCents > 0 {
-		netCents = pricing.Cents(refund.Amount) * topUp.AmountCents / topUp.GrossCents
+		netCents = pricing.Cents(amount) * topUp.AmountCents / topUp.GrossCents
 	}
 	if netCents <= 0 {
 		return nil
 	}
 	if err := s.db.DebitWalletForRefund(db.WalletRefund{
-		OrgAddress: topUp.OrgAddress, AmountCents: netCents, RefundID: refund.ID,
+		OrgAddress: topUp.OrgAddress, AmountCents: netCents, Key: key,
 	}); err != nil {
-		return fmt.Errorf("failed to debit refund %s: %w", refund.ID, err)
+		return fmt.Errorf("failed to debit %s: %w", key, err)
 	}
-	log.Warnw("wallet top-up refunded in stripe, debited from the wallet", "orgAddress", topUp.OrgAddress.String(),
-		"refundId", refund.ID, "refundedCents", refund.Amount, "debitedCents", netCents)
+	log.Warnw("wallet top-up returned through stripe, debited from the wallet", "orgAddress", topUp.OrgAddress.String(),
+		"key", key, "returnedCents", amount, "debitedCents", netCents)
+	return nil
+}
+
+// reverseTopUpRefund credits back the debit keyed debitKey, if one was recorded.
+func (s *Service) reverseTopUpRefund(debitKey, creditKey string) error {
+	reversed, err := s.db.ReverseWalletRefund(debitKey, creditKey)
+	if err != nil {
+		return fmt.Errorf("failed to credit back %s: %w", debitKey, err)
+	}
+	if !reversed {
+		log.Infow("stripe undid returned funds that were never debited, nothing to credit back", "key", debitKey)
+		return nil
+	}
+	log.Warnw("stripe undid returned funds, credited back to the wallet", "debitKey", debitKey, "creditKey", creditKey)
 	return nil
 }
 

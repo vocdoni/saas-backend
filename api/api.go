@@ -59,6 +59,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -184,7 +185,15 @@ type API struct {
 	censusGrowthLocks *orgTxMutex
 	// publishFault, when set, runs at the start of every publish attempt and fails it with what it
 	// returns. A test seam for the retry and credit-back paths; nil in production.
-	publishFault  func() error
+	publishFault func() error
+	// writerLocks makes the write-seat cap check (OrgCanAddWriter) and the invitation or role
+	// write it allows one step per organization, so parallel invites cannot pass the same check.
+	// ponytail: in-memory, like orgTxLocks — one API instance; a DB-side conditional write if that changes
+	writerLocks *orgTxMutex
+	// teardowns holds the managed organizations being deleted: draft creation and publish refuse
+	// them, so nothing is created or debited behind the teardown's draft sweep.
+	// ponytail: in-memory, like orgTxLocks — one API instance; a DB marker if that changes
+	teardowns     sync.Map
 	otpExpiry     time.Duration
 	otpCooldown   time.Duration
 	notifySync    bool
@@ -291,6 +300,7 @@ func New(ctx context.Context, conf *Config) *API {
 		orgTxLocks:            newOrgTxMutex(),
 		walletLocks:           newOrgTxMutex(),
 		censusGrowthLocks:     newOrgTxMutex(),
+		writerLocks:           newOrgTxMutex(),
 		otpExpiry:             otpExpiry,
 		otpCooldown:           otpCooldown,
 		notifySync:            conf.NotificationsSyncDelivery,

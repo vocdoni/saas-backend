@@ -192,8 +192,11 @@ Free processes (net €0) publish directly and record a €0 `paid` envelope.
 A publish answers **202** with its job even when the tx queue is full. A transient failure — the
 queue full, the chain not answering or not confirming a batch — is retried by the service
 itself, up to 5 times with a 5 s → 80 s backoff (about 2.5 minutes in all). The job stays
-`pending` meanwhile, so clients polling `GET /jobs/{jobId}` should wait at least 3 minutes
-before treating a publish as stuck. The publish claim is held and refreshed throughout, while
+`pending` meanwhile, and the backoff is not its whole duration: each of the 6 attempts runs up
+to 3 rounds, and each round waits up to 40 s per question for its election to be mined. On a
+stalled chain the worst case is 6 × 3 × 40 s × questions + 2.5 minutes — about 15 minutes for a
+one-question process, over 3 hours for one with 15 — so clients poll `GET /jobs/{jobId}` until it
+is `completed` or `failed` rather than giving up after a fixed time. The publish claim is held and refreshed throughout, while
 the organization's tx lock is released between publish attempts, not held across the backoff.
 
 A publish that then fails for good — retries exhausted, a permanent failure (the draft cannot be
@@ -267,7 +270,10 @@ ever refunded to the card.
 - `checkout.session.async_payment_failed` / `checkout.session.expired`: nothing was credited;
   a top-up opened for a process drops its pending row.
 - `refund.created` / `refund.updated`: [Stripe refunds of top-ups](#stripe-refunds-of-top-ups).
-  The webhook endpoint must be subscribed to them.
+- `charge.dispute.funds_withdrawn` / `charge.dispute.funds_reinstated`: disputes on top-ups, in
+  the same section.
+
+The webhook endpoint must be subscribed to these four refund and dispute events on deploy.
 
 There is **no durable event store**. Idempotency is a property of every side effect:
 
@@ -291,8 +297,10 @@ quota of its own: what it spends is bounded by its wallet balance and, optionall
 sets on each managed organization (below). Its own organization holds no processes (403, 40174); to
 run its own votes it creates a managed organization of itself.
 
-The migration that introduced the flag (0035) also flagged organizations on an active non-default
-integrator plan. Subscribing to an integrator plan in Stripe no longer grants integrator status:
+The migration that introduced the flag (0035) flagged the existing integrators: the unmanaged
+organizations with an `integratorLimits` override granting managed organizations, or with an
+active subscription to a non-default plan that granted them. Holding API keys or managing
+organizations was not enough on its own, since the default plan allowed both. Subscribing to an integrator plan in Stripe no longer grants integrator status:
 the organization has to be created with `integrator: true`. There is no command to flag an
 existing organization later.
 
@@ -496,7 +504,22 @@ a refund already counted when created, debits nothing; a partial refund and a la
 debit once. It is debited in full even below zero: the money already left through Stripe, so
 this only records it, and it is the only debit that skips the balance check. A refund of
 anything else (a subscription invoice, a payment intent that credited no top-up) is ignored
-with a log line. Every payment session copies its metadata onto the payment intent
+with a log line.
+
+A refund already debited that Stripe later moves to `failed` or `canceled` is credited back:
+the exact amount of its `striperefund:` row, as a positive `refund` row keyed
+`refundfail:<refund id>`, so the history shows the debit and its reversal as two `refund` rows
+netting to zero (`creditBack` stays reserved for payments of processes). A failed refund never
+debited changes nothing but a log line. The handler trusts delivery order: a `failed` update
+delivered before the `succeeded` one would leave the debit standing.
+
+A dispute (chargeback) on a top-up is mirrored the same way: `charge.dispute.funds_withdrawn`
+debits the disputed amount net of VAT, found through the top-up's payment intent, as a `refund`
+row keyed `dispute:<dispute id>`, even below zero; `charge.dispute.funds_reinstated` (a won
+dispute) credits that debit back keyed `disputereinstated:<dispute id>`. Stripe's dispute fee is
+not the payer's money and is not mirrored.
+
+Every payment session copies its metadata onto the payment intent
 (`payment_intent_data.metadata`), so a human in the dashboard sees which wallet a charge topped
 up.
 
