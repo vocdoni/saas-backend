@@ -33,6 +33,12 @@ const publishRetryAttempts = 5
 // publishRetryBackoff is the delay before the first retry; each further retry doubles it (5s, 10s,
 // 20s, 40s, 80s: about 2.5 minutes in all). The job stays pending meanwhile. A var so tests can
 // shorten it.
+//
+// The backoff is not the job's whole duration: each of the 6 attempts runs up to maxPublishRounds
+// rounds, and a round waits up to 40 s per question (account.WaitTxMined) on a chain that does not
+// mine. The worst case is 6 × 3 × 40 s × questions + the backoff: ~15 minutes for one question, over
+// 3 hours for MaxQuestionsPerProcess. Not bounded on purpose: the claim is renewed throughout, and
+// cutting it short would only turn a slow publish into a failed one.
 var publishRetryBackoff = 5 * time.Second
 
 // transientPublishError marks a publish failure that a later attempt may get past: the chain did
@@ -198,8 +204,11 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 //	@Description	Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
 //	@Description	GET /jobs/{jobId}. Idempotent once published.
 //	@Description	Transient failures (the chain not answering or confirming, a full tx queue) are retried
-//	@Description	by the service up to 5 times over about 2.5 minutes; the job stays pending meanwhile,
-//	@Description	so poll GET /jobs/{jobId} for at least 3 minutes before treating a publish as stuck.
+//	@Description	by the service up to 5 times, with about 2.5 minutes of backoff between attempts; the job
+//	@Description	stays pending meanwhile. Each attempt runs up to 3 rounds, each waiting up to 40 s per
+//	@Description	question for its election to be mined, so on a stalled chain the job can stay pending for
+//	@Description	6 attempts × 3 rounds × 40 s × questions + 2.5 minutes: about 15 minutes for one question,
+//	@Description	over 3 hours for 15. Poll GET /jobs/{jobId} until it is completed or failed.
 //	@Description	If the publish finally fails before any election is mined, a failed publish credits the
 //	@Description	payer's wallet back (a `creditBack` history row) and publishing again charges again.
 //	@Description	409 (40172) means the stored questions do not match the process and the draft has to be

@@ -192,8 +192,11 @@ Free processes (net €0) publish directly and record a €0 `paid` envelope.
 A publish answers **202** with its job even when the tx queue is full. A transient failure — the
 queue full, the chain not answering or not confirming a batch — is retried by the service
 itself, up to 5 times with a 5 s → 80 s backoff (about 2.5 minutes in all). The job stays
-`pending` meanwhile, so clients polling `GET /jobs/{jobId}` should wait at least 3 minutes
-before treating a publish as stuck. The publish claim is held and refreshed throughout, while
+`pending` meanwhile, and the backoff is not its whole duration: each of the 6 attempts runs up
+to 3 rounds, and each round waits up to 40 s per question for its election to be mined. On a
+stalled chain the worst case is 6 × 3 × 40 s × questions + 2.5 minutes — about 15 minutes for a
+one-question process, over 3 hours for one with 15 — so clients poll `GET /jobs/{jobId}` until it
+is `completed` or `failed` rather than giving up after a fixed time. The publish claim is held and refreshed throughout, while
 the organization's tx lock is released between publish attempts, not held across the backoff.
 
 A publish that then fails for good — retries exhausted, a permanent failure (the draft cannot be
