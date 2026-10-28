@@ -54,8 +54,7 @@ var MaxMembersPerOrg int64 = 50_000
 type DBInterface interface {
 	UserByEmail(email string) (*db.User, error)
 	Organization(address common.Address) (*db.Organization, error)
-	OrganizationUsers(address common.Address) ([]db.User, error)
-	PendingInvitations(organizationAddress common.Address) ([]db.OrganizationInvite, error)
+	CountOrgWriters(orgAddress common.Address) (int64, error)
 	CountOrgMembers(orgAddress common.Address) (int64, error)
 	CountVotingProcesses(orgAddress common.Address, draft db.DraftFilter) (int64, error)
 }
@@ -143,35 +142,14 @@ func (p *Subscriptions) HasDBPermission(userEmail string, orgAddress common.Addr
 	}
 }
 
-// writeRole reports whether role grants write access to an organization.
-func writeRole(role db.UserRole) bool {
-	return role == db.AdminRole || role == db.ManagerRole
-}
-
 // OrgCanAddWriter checks that one more user may hold a write role (admin or manager) in the
-// organization: the users holding one plus the pending invitations to one stay within
-// MaxWritersPerOrg. Callers check it only when the role they grant is a write role.
+// organization: the users holding one plus the non-expired pending invitations to one stay within
+// MaxWritersPerOrg. Callers check it only when the role they grant is a write role, and hold the
+// organization's writer lock from this check through the write it allows.
 func (p *Subscriptions) OrgCanAddWriter(orgAddress common.Address) error {
-	users, err := p.db.OrganizationUsers(orgAddress)
+	writers, err := p.db.CountOrgWriters(orgAddress)
 	if err != nil {
 		return errors.ErrGenericInternalServerError.WithErr(err)
-	}
-	invitations, err := p.db.PendingInvitations(orgAddress)
-	if err != nil {
-		return errors.ErrGenericInternalServerError.WithErr(err)
-	}
-	writers := 0
-	for i := range users {
-		if role, ok := users[i].RoleFor(orgAddress); ok && writeRole(role) {
-			writers++
-		}
-	}
-	now := time.Now()
-	for i := range invitations {
-		// an expired invitation can no longer be accepted, so it holds no seat
-		if writeRole(invitations[i].Role) && invitations[i].Expiration.After(now) {
-			writers++
-		}
 	}
 	if writers >= MaxWritersPerOrg {
 		return errors.ErrMaxWritersReached.Withf("(%d)", MaxWritersPerOrg)

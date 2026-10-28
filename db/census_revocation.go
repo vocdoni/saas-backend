@@ -108,6 +108,12 @@ func (ms *MongoStorage) OngoingQuestionsByCensuses(censusIDs []string) ([]Voting
 	if err != nil {
 		return nil, err
 	}
+	return ms.OngoingQuestionsOfProcesses(processes)
+}
+
+// OngoingQuestionsOfProcesses is OngoingQuestionsByCensuses for callers that already loaded the
+// censuses' processes.
+func (ms *MongoStorage) OngoingQuestionsOfProcesses(processes []VotingProcess) ([]VotingProcessQuestion, error) {
 	if len(processes) == 0 {
 		return nil, nil
 	}

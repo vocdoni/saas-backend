@@ -260,8 +260,10 @@ An integrator is an organization flagged `integrator`, opted in at creation
 what it spends is its wallet balance. Its own organization holds no processes (403, 40174); to
 run its own votes it creates a managed organization of itself.
 
-The migration that introduced the flag (0035) also flagged organizations on an active non-default
-integrator plan. Subscribing to an integrator plan in Stripe no longer grants integrator status:
+The migration that introduced the flag (0035) flagged the existing integrators: the unmanaged
+organizations with an `integratorLimits` override granting managed organizations, or with an
+active subscription to a non-default plan that granted them. Holding API keys or managing
+organizations was not enough on its own, since the default plan allowed both. Subscribing to an integrator plan in Stripe no longer grants integrator status:
 the organization has to be created with `integrator: true`. There is no command to flag an
 existing organization later.
 

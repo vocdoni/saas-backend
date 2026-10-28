@@ -458,7 +458,7 @@ func (a *API) publishPaidProcess(t stripe.ProcessTopUp) error {
 		return fmt.Errorf("failed to re-check payment of topped-up process: %w", err)
 	}
 	target := publishTarget{vp: vp, questions: questions, census: census, user: user}
-	if problems, _ := a.publishPreflightProblems(target); len(problems) > 0 {
+	if problems, _, _ := a.publishPreflightProblems(target); len(problems) > 0 {
 		log.Warnw("topped-up process failed publish preflight, the credit stays for a manual publish",
 			"processId", processID.Hex(), "problems", strings.Join(problems, "; "))
 		return nil
