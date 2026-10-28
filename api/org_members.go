@@ -445,9 +445,12 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 			isUpdate = true
 		}
 	}
-	// the growth check and the census write it allows are one step (censusGrowthLocks)
-	growthLock := a.censusGrowthLocks.lock(org.Address)
-	defer growthLock.Unlock()
+	// the growth check and the census write it allows are one step (censusGrowthLocks). Only a
+	// creation runs that check, so an edit does not queue behind a bulk import holding the lock.
+	if !isUpdate {
+		growthLock := a.censusGrowthLocks.lock(org.Address)
+		defer growthLock.Unlock()
+	}
 	// resolved before the write: a failure here is a real lookup error, and creating the member
 	// anyway would leave a silent non-voter — no quota consumed, no propagation — behind a 200.
 	autoCensuses, err := a.autoGroupCensuses(org.Address)
