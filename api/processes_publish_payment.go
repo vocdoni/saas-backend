@@ -293,7 +293,8 @@ func (a *API) chargeProcessWallet(c processCharge) (pricing.Cents, error) {
 // publish would take as paid for free — and the owed credit is applied by whatever touches the
 // payment next: another reversal, the next publish's debit, a checkout, or the draft's delete.
 // Once-per-organization add-ons another process already relies on are withheld and stay the
-// organization's, as a delete's credit-back withholds them; the others are released with the money.
+// organization's, as a delete's credit-back withholds them; the others are released first, before
+// the payment is reverted, so a failed release leaves the draft paid rather than an add-on stranded.
 //
 // Anything but an unrefunded wallet payment (none, an open checkout, a refund in progress) is
 // left alone and reports nil.
@@ -330,6 +331,14 @@ func (a *API) reversePublishDebit(processID bson.ObjectID) error {
 		if err != nil {
 			return err
 		}
+		// the add-ons go back before the payment is reverted, as refundPaidProcess releases them
+		// before marking the refund: a failure leaves the draft paid with its add-ons claimed — a
+		// consistent state the caller logs — instead of a reverted payment whose add-ons nothing
+		// would ever release (the next reversal skips a failed payment). The release is
+		// idempotent, so a reversal tried again releases nothing twice.
+		if err := a.releaseOrgAddOnsNotWithheld(vp, payment, withheld.AddOns); err != nil {
+			return fmt.Errorf("failed to release the add-ons of the reverted payment: %w", err)
+		}
 		owed := payment.AmountCents - withheld.Cents
 		reverted, err := a.db.RevertWalletProcessPayment(db.WalletPaymentRevert{
 			ProcessID: processID, AmountCents: payment.AmountCents, Attempt: payment.WalletAttempt, CreditBackCents: owed,
@@ -339,9 +348,6 @@ func (a *API) reversePublishDebit(processID bson.ObjectID) error {
 		}
 		if !reverted {
 			return fmt.Errorf("the payment of process %s moved while it was being reverted", processID.Hex())
-		}
-		if err := a.releaseOrgAddOnsNotWithheld(vp, payment, withheld.AddOns); err != nil {
-			log.Errorw(err, fmt.Sprintf("add-ons of credited-back process %s not released", processID.Hex()))
 		}
 		payment.Status, payment.CreditBackCents = db.ProcessPaymentFailed, owed
 		payment.WalletAttempt++
