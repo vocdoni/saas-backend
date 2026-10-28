@@ -39,6 +39,11 @@ func TestManagedOrgSpendCap(t *testing.T) {
 	requestAndAssertError(errors.ErrManagedOrgSpendCapReached, t, http.MethodPost, token, nil,
 		"processes", first.Hex(), "publish")
 	c.Assert(walletBalance(c, integratorAddr), qt.Equals, pricing.Cents(100_000))
+	// the dry-run reports the same refusal, though the wallet covers the price
+	val := requestAndParse[apicommon.VotingProcessValidateResponse](t, http.MethodGet, token, nil,
+		"processes", first.Hex(), "validation")
+	c.Assert(val.Valid, qt.IsFalse)
+	c.Assert(val.Errors, qt.Contains, errors.ErrManagedOrgSpendCapReached.Error())
 
 	// raised to fit: publishes, and the listing shows what it spent
 	capCents = integratorProcessCents

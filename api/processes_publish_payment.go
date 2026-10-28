@@ -55,7 +55,8 @@ type walletShort struct {
 // debit inside startProcessPublish would refuse anyway, with the answer the client needs. Nil
 // means clear to publish: the process is free, already paid, or its payer's wallet covers what is
 // due. Otherwise: ErrQuoteRequired (422) for a quote-only census, 409 while a top-up checkout opened
-// for the process is still open, and walletShortError (402) when the wallet falls short. Only a
+// for the process is still open, spendCapError (402, 40183) when a managed organization's debit
+// would pass its spend cap, and walletShortError (402) when the wallet falls short. Only a
 // courtesy: the balance can move before the debit, whose own refusal is the authoritative answer.
 func (a *API) paymentDueForPublish(vp *db.VotingProcess) error {
 	if err := a.refuseRefundedDraft(vp.ID); err != nil {
@@ -98,10 +99,30 @@ func (a *API) paymentDueForPublish(vp *db.VotingProcess) error {
 	if err != nil {
 		return fmt.Errorf("failed to get wallet: %w", err)
 	}
+	// the debit checks the managed organization's spend cap before the balance, and so does this
+	if org.ManagedBy != (common.Address{}) {
+		if err := spendCapError(wallet.ManagedOrgSpend(org.Address), dueCents); err != nil {
+			return err
+		}
+	}
 	if wallet.BalanceCents >= dueCents {
 		return nil
 	}
 	return walletShortError(walletShort{org: org, quote: quote, dueCents: dueCents, balanceCents: wallet.BalanceCents})
+}
+
+// spendCapError is the 402 (40183) of a debit of dueCents that would take a managed organization
+// past the spend cap its integrator set, with capCents, spentCents and requiredCents; nil when the
+// debit stays within it, or there is no cap.
+func spendCapError(spend db.ManagedOrgSpend, dueCents pricing.Cents) error {
+	if spend.CapCents == nil || spend.SpentCents+dueCents <= *spend.CapCents {
+		return nil
+	}
+	return errors.ErrManagedOrgSpendCapReached.WithData(map[string]pricing.Cents{
+		"capCents":      *spend.CapCents,
+		"spentCents":    spend.SpentCents,
+		"requiredCents": dueCents,
+	})
 }
 
 // debitProcessWallet charges a draft's publish to its payer's wallet: atomic, and priced against
@@ -235,16 +256,12 @@ func (a *API) chargeProcessWallet(c processCharge) (pricing.Cents, error) {
 		ManagedOrg:        managedOrg,
 	}); err != nil {
 		if errors.Is(err, db.ErrManagedOrgSpendCapReached) {
-			wallet, werr := a.db.Wallet(payer)
-			if werr != nil || wallet.ManagedOrgSpend(c.vp.OrgAddress).CapCents == nil {
-				return 0, errors.ErrManagedOrgSpendCapReached
+			if wallet, werr := a.db.Wallet(payer); werr == nil {
+				if capErr := spendCapError(wallet.ManagedOrgSpend(c.vp.OrgAddress), dueCents); capErr != nil {
+					return 0, capErr
+				}
 			}
-			spend := wallet.ManagedOrgSpend(c.vp.OrgAddress)
-			return 0, errors.ErrManagedOrgSpendCapReached.WithData(map[string]pricing.Cents{
-				"capCents":      *spend.CapCents,
-				"spentCents":    spend.SpentCents,
-				"requiredCents": dueCents,
-			})
+			return 0, errors.ErrManagedOrgSpendCapReached
 		}
 		if errors.Is(err, db.ErrInsufficientWalletBalance) {
 			wallet, werr := a.db.Wallet(payer)
