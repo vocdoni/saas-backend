@@ -210,7 +210,7 @@ func (a *API) censusGrowthPaymentError(g censusGrowth) error {
 //	@Param			request		body		apicommon.ProcessCensusCheckoutRequest	true	"Census headroom to buy"
 //	@Success		200			{object}	apicommon.ProcessCheckoutResponse
 //	@Failure		400			{object}	errors.Error	"No completed payment, or nothing left to buy"
-//	@Failure		402			{object}	errors.Error	"Integrator wallet does not cover the difference (40175), or spend cap reached (40180)"
+//	@Failure		402			{object}	errors.Error	"Integrator wallet does not cover the difference (40175), or spend cap reached (40183)"
 //	@Failure		401			{object}	errors.Error
 //	@Failure		403			{object}	errors.Error	"API key used to open a top-up checkout"
 //	@Failure		404			{object}	errors.Error

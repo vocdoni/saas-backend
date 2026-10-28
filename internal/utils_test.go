@@ -2,6 +2,7 @@ package internal
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/frankban/quicktest"
@@ -325,4 +326,15 @@ func TestHashLoginFields(t *testing.T) {
 		HashLoginFields(map[string]string{"name": "a", "surname": "b c"}))
 	// no plaintext in the digest
 	c.Assert(string(hash), quicktest.Not(quicktest.Contains), "john")
+}
+
+func TestValidMemberPasswordHash(t *testing.T) {
+	c := quicktest.New(t)
+	valid := strings.Repeat("0123456789abcdef", 4)
+	c.Assert(ValidMemberPasswordHash(valid), quicktest.IsTrue)
+	for _, s := range []string{
+		"", "s3cret", strings.ToUpper(valid), valid[:63], valid + "0", strings.Repeat("g", 64), " " + valid[1:], valid + "\n",
+	} {
+		c.Assert(ValidMemberPasswordHash(s), quicktest.IsFalse, quicktest.Commentf("%q", s))
+	}
 }

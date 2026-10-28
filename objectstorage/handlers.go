@@ -4,6 +4,7 @@
 package objectstorage
 
 import (
+	stderrors "errors"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -13,6 +14,8 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/internal"
+	"go.vocdoni.io/dvote/log"
 )
 
 // isObjectNameRgx is a regular expression to match object names.
@@ -30,8 +33,16 @@ func validateUser(w http.ResponseWriter, r *http.Request) (*db.User, bool) {
 
 // parseMultipartForm parses the multipart form from the request
 func parseMultipartForm(w http.ResponseWriter, r *http.Request) bool {
-	// 32 MB is the default used by FormFile() function
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
+	// ParseMultipartForm's argument only sets how much is kept in memory before spilling to disk,
+	// it does not limit the body, so cap it first
+	r.Body = http.MaxBytesReader(w, r.Body, MaxUploadBodySize)
+	// 32 MiB is the default used by FormFile() function
+	if err := r.ParseMultipartForm(32 * internal.MiB); err != nil {
+		var tooLarge *http.MaxBytesError
+		if stderrors.As(err, &tooLarge) {
+			errors.ErrRequestBodyTooLarge.Withf("the limit is %d bytes", MaxUploadBodySize).Write(w)
+			return false
+		}
 		errors.ErrStorageInvalidObject.Withf("could not parse form: %v", err).Write(w)
 		return false
 	}
@@ -43,19 +54,27 @@ func (osc *Client) processFile(w http.ResponseWriter, fileHeader *multipart.File
 	// Open the file
 	file, err := fileHeader.Open()
 	if err != nil {
-		errors.ErrStorageInvalidObject.Withf("cannot open file %s %v", fileHeader.Filename, err).Write(w)
+		errors.ErrInternalStorageError.WithErr(err).Write(w)
 		return "", false
 	}
 	defer func() {
+		// the response is already decided by now, so a close failure is only logged
 		if err := file.Close(); err != nil {
-			errors.ErrStorageInvalidObject.Withf("cannot close file %s %v", fileHeader.Filename, err).Write(w)
-			return
+			log.Warnw("cannot close uploaded file", "file", fileHeader.Filename, "error", err)
 		}
 	}()
 
 	// Upload the file using the object storage client
 	storedFileID, err := osc.Put(file, fileHeader.Size, userEmail)
 	if err != nil {
+		if stderrors.Is(err, ErrorObjectTooLarge) {
+			errors.ErrRequestBodyTooLarge.Withf("%s: %v", fileHeader.Filename, err).Write(w)
+			return "", false
+		}
+		if stderrors.Is(err, ErrorObjectEmpty) || stderrors.Is(err, ErrorFileTypeNotSupported) {
+			errors.ErrStorageInvalidObject.Withf("%s: %v", fileHeader.Filename, err).Write(w)
+			return "", false
+		}
 		errors.ErrInternalStorageError.Withf("%s %v", fileHeader.Filename, err).Write(w)
 		return "", false
 	}

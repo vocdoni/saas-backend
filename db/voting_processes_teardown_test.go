@@ -2,43 +2,11 @@ package db
 
 import (
 	"testing"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
-
-// TestRefreshVotingProcessPublishing: a held marker is moved forward; with none held the caller
-// learns it no longer owns the process.
-func TestRefreshVotingProcessPublishing(t *testing.T) {
-	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
-	org := common.Address{0x21}
-	setupVotingProcessOrg(c, org)
-	id, err := testDB.SetVotingProcess(&VotingProcess{OrgAddress: org})
-	c.Assert(err, qt.IsNil)
-
-	refreshed, err := testDB.RefreshVotingProcessPublishing(id)
-	c.Assert(err, qt.IsNil)
-	c.Assert(refreshed, qt.IsFalse)
-
-	claimed, err := testDB.ClaimVotingProcessForPublish(id)
-	c.Assert(err, qt.IsNil)
-	c.Assert(claimed, qt.IsTrue)
-	vp, err := testDB.VotingProcess(id)
-	c.Assert(err, qt.IsNil)
-	vp.Publishing = time.Now().Add(-PublishStaleAfter - time.Minute)
-	_, err = testDB.SetVotingProcess(vp)
-	c.Assert(err, qt.IsNil)
-
-	refreshed, err = testDB.RefreshVotingProcessPublishing(id)
-	c.Assert(err, qt.IsNil)
-	c.Assert(refreshed, qt.IsTrue)
-	vp, err = testDB.VotingProcess(id)
-	c.Assert(err, qt.IsNil)
-	c.Assert(vp.PublishInProgress(), qt.IsTrue)
-}
 
 // TestDeleteVotingProcessesByOrg removes an organization's processes and questions and nothing
 // of any other organization.

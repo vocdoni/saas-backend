@@ -1,0 +1,5 @@
+subject: "Confirma tu nuevo correo de Vocdoni"
+body: |
+  Tu código de verificación de Vocdoni es: {{.Code}}
+
+  También puedes usar este enlace para confirmar tu nueva dirección de correo: {{.Link}}

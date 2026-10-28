@@ -34,6 +34,8 @@ const (
 	// GET /users/me to get the current user information
 	// PUT /users/me to update the current user information
 	usersMeEndpoint = "/users/me"
+	// POST /users/me/email/verify to confirm a pending email change with the code sent to the new address
+	usersMeEmailVerifyEndpoint = "/users/me/email/verify"
 	// PUT /users/me/password to update the current user password
 	usersPasswordEndpoint = "/users/password"
 	// POST /users/password/recovery to recover the user password

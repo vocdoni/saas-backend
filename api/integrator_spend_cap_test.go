@@ -13,7 +13,7 @@ import (
 )
 
 // TestManagedOrgSpendCap: an integrator caps what a managed organization may spend from its
-// wallet. A publish past the cap is refused with 402 (40180) and charges nothing, the listing
+// wallet. A publish past the cap is refused with 402 (40183) and charges nothing, the listing
 // shows cap and spending, a deleted draft's refund frees its amount, a census top-up is capped
 // like a publish, and null lifts the cap.
 func TestManagedOrgSpendCap(t *testing.T) {

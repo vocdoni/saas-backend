@@ -3,6 +3,8 @@ package csp
 
 import (
 	"crypto/subtle"
+	"fmt"
+	"math"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -56,6 +58,20 @@ func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 			return nil, errors.ErrAttemptCoolDownTime.WithData(map[string]any{"coolDownTime": remainingTime.Milliseconds()})
 		}
 	}
+	// cap the challenges (new tokens + resends) this member can be sent for this process today:
+	// the cooldown only spaces sends, so without a cap a member's contact could be flooded with
+	// one email/SMS per cooldown period all day long
+	sendClaim, err := c.claimDailyChallengeSend(uID, anchorID)
+	if err != nil {
+		return nil, err
+	}
+	// give the unit back unless a challenge reached the notification queue
+	queued := false
+	defer func() {
+		if !queued {
+			c.releaseChallengeSend(sendClaim)
+		}
+	}()
 	// generate a new token, secret and code
 	token, secret, code := c.generateToken()
 	// create the new token
@@ -89,7 +105,9 @@ func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 	}
 	ch.ExpiresAt = time.Now().Add(c.notificationTTL)
 	// push the challenge to the queue to be sent
-	if err := c.pushChallenge(ch); err != nil {
+	err = c.pushChallenge(ch)
+	queued = err == nil || errors.Is(err, errChallengeStillQueued)
+	if err != nil {
 		log.Warnw("error pushing notification challenge",
 			"userID", uID,
 			"anchorID", anchorID,
@@ -100,6 +118,32 @@ func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 	return token, nil
 }
 
+// ClaimChallengeResend atomically spends one of the at most MaxChallengeResends resends of an
+// authentication token, returning ErrVerificationMaxAttempts once they are all spent. Each resend
+// sends an email or an SMS paid by the platform, and the token creation cooldown does not apply to
+// them. A resend request must claim before it checks the submitted contact, so a wrong contact
+// spends one too: otherwise a token holder could probe a member's other contact (say, the phone
+// once they know the email) with unlimited resends.
+func (c *CSP) ClaimChallengeResend(token internal.HexBytes) error {
+	if len(token) == 0 {
+		return ErrInvalidAuthToken
+	}
+	claimed, err := c.Storage.ClaimCSPAuthResend(token, MaxChallengeResends)
+	if err != nil {
+		log.Warnw("error recording challenge resend",
+			"token", token,
+			"error", err)
+		return ErrStorageFailure
+	}
+	if !claimed {
+		return errors.ErrVerificationMaxAttempts.Withf("challenge resend limit reached, request a new token")
+	}
+	return nil
+}
+
+// ResendChallenge sends the challenge of an unverified, unexpired authentication token again,
+// counting it against the member's daily challenge budget. The caller must have spent one of the
+// token's resends with ClaimChallengeResend first.
 func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 	ctype notifications.ChallengeType, lang string,
 	orgName, orgLogo string, orgAddress common.Address,
@@ -149,6 +193,18 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 			"token", token)
 		return ErrTokenExpired
 	}
+	// resends count against the same daily per-member budget as new tokens
+	sendClaim, err := c.claimDailyChallengeSend(authTokenData.UserID, authTokenData.AnchorID)
+	if err != nil {
+		return err
+	}
+	// give the unit back unless a challenge reached the notification queue
+	queued := false
+	defer func() {
+		if !queued {
+			c.releaseChallengeSend(sendClaim)
+		}
+	}()
 	// compose the notification challenge
 	orgInfo := notifications.OrganizationInfo{
 		Address: orgAddress,
@@ -184,7 +240,9 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 	}
 	ch.ExpiresAt = time.Now().Add(c.notificationTTL)
 	// push the challenge to the queue to be sent
-	if err := c.pushChallenge(ch); err != nil {
+	err = c.pushChallenge(ch)
+	queued = err == nil || errors.Is(err, errChallengeStillQueued)
+	if err != nil {
 		log.Warnw("error pushing notification challenge",
 			"userID", authTokenData.UserID,
 			"anchorID", authTokenData.AnchorID,
@@ -193,6 +251,107 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 		return ErrNotificationFailure
 	}
 	return nil
+}
+
+// claimDailyChallengeSend claims one unit of the member's daily challenge-send budget for the
+// anchor process, counting new tokens and resends together. The counter is Mongo-backed, so it
+// survives service restarts. Fails closed on storage errors.
+func (c *CSP) claimDailyChallengeSend(uID, anchorID internal.HexBytes) (db.CSPCounterClaim, error) {
+	res, err := c.Storage.ClaimCSPCounter(db.CSPCounterChallengeSends,
+		counterKey(uID, anchorID), c.maxDailyChallengeSends)
+	if err != nil {
+		log.Warnw("error claiming daily challenge send",
+			"userID", uID,
+			"anchorID", anchorID,
+			"error", err)
+		return nil, ErrStorageFailure
+	}
+	if !res.Granted {
+		return nil, counterLimitError(res, "daily challenge limit reached, try again tomorrow")
+	}
+	return res.Claim, nil
+}
+
+// releaseChallengeSend gives back a claimDailyChallengeSend unit when no challenge was queued, so
+// a storage or composition failure does not spend the member's daily budget. Storage errors are
+// logged: at worst the member loses one unit of today's budget.
+func (c *CSP) releaseChallengeSend(claim db.CSPCounterClaim) {
+	if err := c.Storage.ReleaseCSPCounter(claim); err != nil {
+		log.Warnw("error releasing daily challenge send", "error", err)
+	}
+}
+
+// counterLimitError is the 40017 a refused counter claim answers, carrying in its data the
+// seconds until the counter's window resets as retryAfter.
+func counterLimitError(res db.CSPCounterResult, msg string) errors.Error {
+	retryAfter := int64(math.Ceil(time.Until(res.ResetAt).Seconds()))
+	if retryAfter < 1 {
+		retryAfter = 1
+	}
+	return errors.ErrVerificationMaxAttempts.With(msg).WithData(map[string]any{"retryAfter": retryAfter})
+}
+
+// counterKey joins an identity (a member id, or a login-fields hash) and an anchor (process) id
+// into the key of a per-identity-per-process counter.
+func counterKey(uID, anchorID internal.HexBytes) []byte {
+	key := make([]byte, 0, len(uID)+len(anchorID))
+	key = append(key, uID...)
+	key = append(key, anchorID...)
+	return key
+}
+
+// AuthAttemptClaim holds the failed-attempt units one step-0 attempt reserved with
+// ClaimAuthAttempt.
+type AuthAttemptClaim []db.CSPCounterClaim
+
+// ClaimAuthAttempt reserves, before a step-0 attempt is checked, one unit of the current hour's
+// failed-authentication budgets on the anchor process: the submission's (login plus contact
+// fields), capped at maxHourlyAuthFailures, and, when voter is not empty, the claimed voter's
+// (login fields alone), capped at VoterAuthFailuresFactor times that. Spending a voter's coarse
+// budget takes that many failed submissions, so whoever merely knows a voter's login fields can no
+// longer lock them out with a handful of junk-contact requests, while guessing one voter's contact
+// stays bounded. Reserving up front, rather than counting failures afterwards, keeps concurrent
+// attempts from all passing a not-yet-reached check. The caller must hand the claim to
+// ReleaseAuthAttempt unless the attempt fails on the submitted login or contact data. The counters
+// are Mongo-backed, so they survive service restarts.
+//
+// It returns an ErrVerificationMaxAttempts carrying retryAfter (seconds until the hour resets)
+// once either budget is spent, and an ErrInternalStorageError if a counter cannot be claimed.
+func (c *CSP) ClaimAuthAttempt(anchorID internal.HexBytes, submission, voter []byte) (AuthAttemptClaim, error) {
+	res, err := c.Storage.ClaimCSPCounter(db.CSPCounterAuthFailures,
+		counterKey(submission, anchorID), c.maxHourlyAuthFailures)
+	if err != nil {
+		return nil, errors.ErrInternalStorageError.WithErr(fmt.Errorf("claiming auth attempt: %w", err))
+	}
+	if !res.Granted {
+		return nil, counterLimitError(res, "too many failed authentication attempts, try again later")
+	}
+	claim := AuthAttemptClaim{res.Claim}
+	if len(voter) == 0 {
+		return claim, nil
+	}
+	res, err = c.Storage.ClaimCSPCounter(db.CSPCounterVoterAuthFailures,
+		counterKey(voter, anchorID), c.maxHourlyAuthFailures*VoterAuthFailuresFactor)
+	if err != nil {
+		c.ReleaseAuthAttempt(claim)
+		return nil, errors.ErrInternalStorageError.WithErr(fmt.Errorf("claiming voter auth attempt: %w", err))
+	}
+	if !res.Granted {
+		c.ReleaseAuthAttempt(claim)
+		return nil, counterLimitError(res, "too many failed authentication attempts, try again later")
+	}
+	return append(claim, res.Claim), nil
+}
+
+// ReleaseAuthAttempt gives back a ClaimAuthAttempt reservation for an attempt that did not fail on
+// the submitted data. Storage errors are logged but not returned: at worst the identity loses one
+// unit of the current hour's budget.
+func (c *CSP) ReleaseAuthAttempt(claim AuthAttemptClaim) {
+	for _, cl := range claim {
+		if err := c.Storage.ReleaseCSPCounter(cl); err != nil {
+			log.Warnw("error releasing auth attempt", "error", err)
+		}
+	}
 }
 
 // VerifyAuthToken method verifies the authentication token for a user. It gets the user data from the token and checks
@@ -238,36 +397,32 @@ func (c *CSP) VerifyAuthToken(token internal.HexBytes, solution string) error {
 			"token", token)
 		return ErrTokenExpired
 	}
-	// reject tokens that exhausted the maximum number of attempts
-	if authTokenData.Attempts >= MaxChallengeAttempts {
+	// claim one attempt before comparing the code: the conditional increment only
+	// succeeds while attempts are below the cap, so concurrent requests cannot all
+	// evaluate a guess against the same stale count
+	recorded, err := c.Storage.IncrementCSPAuthAttempts(token, MaxChallengeAttempts)
+	if err != nil {
+		// fail closed: if we cannot persist the attempt, do not allow the
+		// verification to proceed, otherwise attempt limiting could be
+		// bypassed while the database is unhealthy
+		log.Warnw("error claiming challenge attempt",
+			"token", token,
+			"error", err)
+		return ErrStorageFailure
+	}
+	if !recorded {
 		log.Warnw("too many challenge attempts",
 			"userID", authTokenData.UserID,
 			"anchorID", authTokenData.AnchorID,
 			"token", token,
-			"attempts", authTokenData.Attempts)
+			"attempts", MaxChallengeAttempts) // the conditional increment never exceeds the cap
 		return ErrTooManyAttempts
 	}
-	// verify the solution, and if the solution is not correct, atomically record
-	// the failed attempt while enforcing the cap
 	if !c.verifySolution(authTokenData.Secret, solution) {
 		log.Warnw("challenge code does not match",
 			"userID", authTokenData.UserID,
 			"anchorID", authTokenData.AnchorID,
 			"token", token)
-		recorded, err := c.Storage.IncrementCSPAuthAttempts(token, MaxChallengeAttempts)
-		if err != nil {
-			// fail closed: if we cannot persist the attempt, do not allow the
-			// verification to proceed, otherwise attempt limiting could be
-			// bypassed while the database is unhealthy
-			log.Warnw("error incrementing challenge attempts",
-				"token", token,
-				"error", err)
-			return ErrStorageFailure
-		}
-		if !recorded {
-			// a concurrent request already pushed attempts to the cap
-			return ErrTooManyAttempts
-		}
 		return ErrChallengeCodeFailure
 	}
 	// set the token as verified

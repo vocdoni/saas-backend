@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -625,4 +626,46 @@ func TestCensus(t *testing.T) {
 		_, err = testDB.CensusesByOrg(common.Address{})
 		c.Assert(err, qt.Equals, ErrInvalidData)
 	})
+}
+
+// TestSetCensusPasswordNeedsLookupField pins that the member password is only accepted next to a field
+// the login hash uses: alone, every member of the census would get the same login hash.
+func TestSetCensusPasswordNeedsLookupField(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+	c.Assert(testDB.SetOrganization(&Organization{Address: testOrgAddress, CreatedAt: time.Now()}), qt.IsNil)
+
+	password := OrgMemberAuthFields{OrgMemberAuthFieldsPassword}
+	for _, tc := range []struct {
+		auth  OrgMemberAuthFields
+		twoFa OrgMemberTwoFaFields
+		ok    bool
+	}{
+		{auth: password},
+		{auth: OrgMemberAuthFields{OrgMemberAuthFieldsPassword, OrgMemberAuthFieldsPassword}},
+		{auth: password, twoFa: OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail}, ok: true},
+		{auth: OrgMemberAuthFields{OrgMemberAuthFieldsMemberNumber, OrgMemberAuthFieldsPassword}, ok: true},
+		{auth: OrgMemberAuthFields{OrgMemberAuthFieldsMemberNumber}, ok: true},
+	} {
+		comment := qt.Commentf("auth=%v twoFa=%v", tc.auth, tc.twoFa)
+		_, err := testDB.SetCensus(&Census{OrgAddress: testOrgAddress, AuthFields: tc.auth, TwoFaFields: tc.twoFa})
+		if tc.ok {
+			c.Assert(ValidateCensusFields(tc.auth, tc.twoFa), qt.IsNil, comment)
+			c.Assert(err, qt.IsNil, comment)
+			continue
+		}
+		c.Assert(ValidateCensusFields(tc.auth, tc.twoFa), qt.ErrorIs, ErrPasswordNeedsLookupField, comment)
+		c.Assert(err, qt.ErrorIs, ErrPasswordNeedsLookupField, comment)
+		c.Assert(err, qt.ErrorIs, ErrInvalidData, comment)
+	}
+}
+
+// TestOrgMemberAuthFieldPasswordJSON pins that the census auth fields accept "password" over the API.
+func TestOrgMemberAuthFieldPasswordJSON(t *testing.T) {
+	c := qt.New(t)
+	var fields OrgMemberAuthFields
+	c.Assert(json.Unmarshal([]byte(`["memberNumber","password"]`), &fields), qt.IsNil)
+	c.Assert(fields, qt.DeepEquals, OrgMemberAuthFields{OrgMemberAuthFieldsMemberNumber, OrgMemberAuthFieldsPassword})
+	c.Assert(json.Unmarshal([]byte(`["passcode"]`), &fields), qt.ErrorMatches, "invalid OrgMemberAuthField: passcode")
 }

@@ -17,6 +17,7 @@ import (
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/types"
+	"go.vocdoni.io/dvote/vochain/state"
 	"go.vocdoni.io/proto/build/go/models"
 	"google.golang.org/protobuf/proto"
 )
@@ -379,4 +380,60 @@ func TestRelayVotesRejectsBatch(t *testing.T) {
 				&apicommon.RelayVotesRequest{Votes: tc.votes}, "votes")
 		})
 	}
+}
+
+// TestRelayVoteReRelay relays the same signed envelope twice: the second relay must not fail
+// (the vote is already on chain under its nullifier) and must not be metered again.
+func TestRelayVoteReRelay(t *testing.T) {
+	c := qt.New(t)
+	f := setupRelayVoting(t, 1)
+	processID := f.processIDs[0]
+	stx := testSignVoteTx(t, f.voter, processID, f.proofFor(t, processID), []byte("[\"1\"]"), nil)
+	relay := func() apicommon.JobResponse {
+		return enqueueAndPollJob(t, http.MethodPost, "", &apicommon.RelayVoteRequest{TxPayload: stx}, "vote")
+	}
+
+	first := relay()
+	c.Assert(first.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", first.Errors))
+	votes, err := f.client.ElectionVoteCount(processID.Bytes())
+	c.Assert(err, qt.IsNil)
+
+	again := relay()
+	c.Assert(again.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", again.Errors))
+	c.Assert(again.Result.VoteID, qt.DeepEquals, first.Result.VoteID)
+	votesAfter, err := f.client.ElectionVoteCount(processID.Bytes())
+	c.Assert(err, qt.IsNil)
+	c.Assert(votesAfter, qt.Equals, votes)
+
+	org, err := testDB.Organization(f.orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(org.Counters.SentVotes, qt.Equals, 1)
+}
+
+// TestVoteNullifierIgnoresClientNullifier pins that a signed vote is identified by the nullifier the
+// chain computes, hash(voter address + process id), whatever its envelope's Nullifier field says:
+// the client controls that field and the chain ignores it for signed votes, so trusting it would let
+// distinct voters share one metering key. Only an unsigned (anonymous) vote uses the field.
+func TestVoteNullifierIgnoresClientNullifier(t *testing.T) {
+	c := qt.New(t)
+	const chainID = "test-chain"
+	signer := ethereum.NewSignKeys()
+	c.Assert(signer.Generate(), qt.IsNil)
+	pid := internal.HexBytes(internal.RandomBytes(32))
+	clientNullifier := internal.RandomBytes(32)
+
+	vote := &models.VoteEnvelope{ProcessId: pid.Bytes(), Nonce: internal.RandomBytes(16), Nullifier: clientNullifier}
+	txBytes, err := proto.Marshal(&models.Tx{Payload: &models.Tx_Vote{Vote: vote}})
+	c.Assert(err, qt.IsNil)
+	signature, err := signer.SignVocdoniTx(txBytes, chainID)
+	c.Assert(err, qt.IsNil)
+
+	nullifier, voter := voteNullifier(&models.SignedTx{Tx: txBytes, Signature: signature}, vote, pid, chainID)
+	c.Assert([]byte(nullifier), qt.DeepEquals, state.GenerateNullifier(signer.Address(), pid))
+	c.Assert([]byte(voter), qt.DeepEquals, signer.Address().Bytes())
+
+	// an unsigned envelope is anonymous: its own nullifier is all there is
+	nullifier, voter = voteNullifier(&models.SignedTx{Tx: txBytes}, vote, pid, chainID)
+	c.Assert([]byte(nullifier), qt.DeepEquals, clientNullifier)
+	c.Assert(voter, qt.IsNil)
 }

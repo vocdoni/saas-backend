@@ -48,7 +48,7 @@ func (ms *MongoStorage) CensusesForMembers(memberIDs []string) ([]string, error)
 		return nil, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	var values []any
@@ -80,7 +80,7 @@ func (ms *MongoStorage) VotingProcessesByCensus(censusIDs []string) ([]VotingPro
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	cursor, err := ms.votingProcesses.Find(ctx, bson.M{"censusId": bson.M{"$in": oids}})
@@ -117,7 +117,7 @@ func (ms *MongoStorage) OngoingQuestionsByCensuses(censusIDs []string) ([]Voting
 		processIDs = append(processIDs, p.ID)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	filter := bson.M{
@@ -150,8 +150,7 @@ func (ms *MongoStorage) OngoingQuestionsByCensuses(censusIDs []string) ([]Voting
 // direction for a guard, but it means the answer must never be reported to a user as "already
 // voted".
 //
-// MembersWithUsedCSPProcess answers the same question one round trip per id and is kept for the
-// participants endpoint.
+// CSPProcessesByMembers returns the rows themselves, for callers that need more than the flag.
 func (ms *MongoStorage) MembersWithUsedCSPProcesses(
 	processIDs []internal.HexBytes,
 	memberIDs []string,
@@ -164,7 +163,7 @@ func (ms *MongoStorage) MembersWithUsedCSPProcesses(
 		return nil, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	// covered by the userid+processid index on cspTokensStatus
@@ -215,7 +214,7 @@ func (ms *MongoStorage) SignedVotersForElections(processIDs []internal.HexBytes)
 		return nil, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	filter := bson.M{"processid": bson.M{"$in": processIDs}, "consumed": true}
@@ -263,7 +262,7 @@ func (ms *MongoStorage) RevokeMembersFromCensuses(
 		processIDs = append(processIDs, p.ID)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	// The published questions that currently name one of these members. Whichever of them has no

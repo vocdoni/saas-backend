@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -74,7 +75,7 @@ func (ms *MongoStorage) SetVotingProcessDraft(vp *VotingProcess, seen time.Time)
 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	filter := bson.M{"_id": vp.ID, "published": false, "$or": bson.A{
+	filter := bson.M{"_id": vp.ID, "published": false, "hasMinedElections": bson.M{"$ne": true}, "$or": bson.A{
 		bson.M{"publishing": bson.M{"$exists": false}},
 		bson.M{"publishing": bson.M{"$lt": time.Now().Add(-PublishStaleAfter)}},
 	}}
@@ -124,6 +125,24 @@ func (ms *MongoStorage) SetVotingProcessQuestionIDs(id bson.ObjectID, questionID
 	res, err := ms.votingProcesses.UpdateOne(ctx, bson.M{"_id": id}, update)
 	if err != nil {
 		return fmt.Errorf("failed to set voting process question ids: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// MarkVotingProcessMined records that at least one question of the process has an on-chain
+// election (see VotingProcess.HasMinedElections). It is idempotent.
+func (ms *MongoStorage) MarkVotingProcessMined(id bson.ObjectID) error {
+	if id == bson.NilObjectID {
+		return ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.votingProcesses.UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": bson.M{"hasMinedElections": true}})
+	if err != nil {
+		return fmt.Errorf("failed to mark voting process mined: %w", err)
 	}
 	if res.MatchedCount == 0 {
 		return ErrNotFound
@@ -195,7 +214,7 @@ func (ms *MongoStorage) DeleteVotingProcess(id bson.ObjectID) error {
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 	if _, err := ms.processesQuestions.DeleteMany(ctx, bson.M{"processId": id}); err != nil { //nolint:goconst
 		return fmt.Errorf("failed to delete voting process questions: %w", err)
@@ -267,14 +286,19 @@ func (ms *MongoStorage) CountVotingProcesses(orgAddress common.Address, draft Dr
 var PublishStaleAfter = 15 * time.Minute
 
 // ClaimVotingProcessForPublish atomically transitions an unpublished process into the
-// publishing state (published stays false, but a "publishing" timestamp marker is set) so two
-// concurrent publish requests cannot both proceed. It returns true when this call won the
-// claim. A marker older than PublishStaleAfter is treated as stale and reclaimable, so a
-// crash/restart mid-publish cannot leave a process permanently unclaimable. It is the
-// authoritative duplicate-publish guard for voting processes.
-func (ms *MongoStorage) ClaimVotingProcessForPublish(id bson.ObjectID) (bool, error) {
+// publishing state (published stays false, but a "publishing" timestamp marker and a random
+// owner token are set) so two concurrent publish requests cannot both proceed. It returns the
+// owner token and true when this call won the claim; the token is what later owner-conditional
+// operations (renew, clear, publish) use to prove the claim is still theirs. A marker older
+// than PublishStaleAfter is treated as stale and reclaimable, so a crash/restart mid-publish
+// cannot leave a process permanently unclaimable. A non-zero seen timestamp adds a revision
+// precondition: the claim only succeeds if the process has not been updated since seen (same
+// updatedAt token as SetVotingProcessDraft), so a publish cannot proceed on a snapshot made
+// stale by a concurrent draft edit. It is the authoritative duplicate-publish guard for voting
+// processes.
+func (ms *MongoStorage) ClaimVotingProcessForPublish(id bson.ObjectID, seen time.Time) (string, bool, error) {
 	if id == bson.NilObjectID {
-		return false, ErrInvalidData
+		return "", false, ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
@@ -288,59 +312,102 @@ func (ms *MongoStorage) ClaimVotingProcessForPublish(id bson.ObjectID) (bool, er
 			bson.M{"publishing": bson.M{"$lt": cutoff}},    //nolint:goconst
 		},
 	}
-	res, err := ms.votingProcesses.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"publishing": now}}) //nolint:goconst
+	if !seen.IsZero() {
+		// Mongo stores dates to the millisecond; compare at the precision it stores.
+		filter["updatedAt"] = seen.UTC().Truncate(time.Millisecond)
+	}
+	owner := internal.RandomHex(16)
+	update := bson.M{"$set": bson.M{"publishing": now, "publishingOwner": owner}} //nolint:goconst
+	res, err := ms.votingProcesses.UpdateOne(ctx, filter, update)
 	if err != nil {
-		return false, fmt.Errorf("failed to claim voting process for publish: %w", err)
+		return "", false, fmt.Errorf("failed to claim voting process for publish: %w", err)
 	}
 	// The filter is what decides the claim, so matching it is winning it. ModifiedCount would not
 	// be: Mongo stores dates to the millisecond, so reclaiming a stale marker inside the same
-	// millisecond writes the value already there and the server reports nothing modified — a won
-	// claim reported as lost.
-	return res.MatchedCount == 1, nil
+	// millisecond could write values already there and the server would report nothing modified —
+	// a won claim reported as lost.
+	if res.MatchedCount != 1 {
+		return "", false, nil
+	}
+	return owner, true, nil
 }
 
-// StaleVotingProcesses returns the ids of processes whose publishing marker is stale (older
-// than PublishStaleAfter): a worker crashed or the service restarted mid-publish. The caller
-// clears the marker and resets their questions (see the startup reconciliation).
-func (ms *MongoStorage) StaleVotingProcesses() ([]bson.ObjectID, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-	cutoff := time.Now().Add(-PublishStaleAfter)
-	cur, err := ms.votingProcesses.Find(ctx,
-		bson.M{"published": false, "publishing": bson.M{"$exists": true, "$lt": cutoff}},
-		options.Find().SetProjection(bson.M{"_id": 1}))
-	if err != nil {
-		return nil, fmt.Errorf("failed to query stale publishing processes: %w", err)
-	}
-	defer func() { _ = cur.Close(ctx) }()
-	var out []bson.ObjectID
-	for cur.Next(ctx) {
-		var doc struct {
-			ID bson.ObjectID `bson:"_id"`
-		}
-		if err := cur.Decode(&doc); err != nil {
-			return nil, fmt.Errorf("failed to decode stale process id: %w", err)
-		}
-		out = append(out, doc.ID)
-	}
-	return out, cur.Err()
-}
-
-// RefreshVotingProcessPublishing moves a held publishing marker to now, so a publish that keeps
-// working on a process — retrying a transient failure, confirming a long batch — is not mistaken
-// for a crashed one and reclaimed after PublishStaleAfter. It reports false when there is no marker
-// to refresh: the claim was released or reclaimed, and the caller no longer owns the process.
-func (ms *MongoStorage) RefreshVotingProcessPublishing(id bson.ObjectID) (bool, error) {
-	if id == bson.NilObjectID {
+// RenewVotingProcessPublishClaim refreshes the publishing marker of a claim still held by
+// owner, so a legitimately long-running publish worker is not treated as stale and reclaimed
+// from under it. It returns false when the claim is no longer owned (reclaimed by someone
+// else, cleared, or the process got published), which tells the worker to stand down.
+func (ms *MongoStorage) RenewVotingProcessPublishClaim(id bson.ObjectID, owner string) (bool, error) {
+	if id == bson.NilObjectID || owner == "" {
 		return false, ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	res, err := ms.votingProcesses.UpdateOne(ctx,
-		bson.M{"_id": id, "published": false, "publishing": bson.M{"$exists": true}},
-		bson.M{"$set": bson.M{"publishing": time.Now()}})
+	filter := bson.M{"_id": id, "published": false, "publishingOwner": owner}
+	res, err := ms.votingProcesses.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"publishing": time.Now()}})
 	if err != nil {
-		return false, fmt.Errorf("failed to refresh voting process publishing state: %w", err)
+		return false, fmt.Errorf("failed to renew voting process publish claim: %w", err)
+	}
+	return res.MatchedCount == 1, nil
+}
+
+// StalePublishClaim identifies a stale publish claim: the process and the owner token of the
+// claim as it was found (empty for a marker written before claims carried an owner).
+type StalePublishClaim struct {
+	ID    bson.ObjectID `bson:"_id"`
+	Owner string        `bson:"publishingOwner,omitempty"`
+}
+
+// StaleVotingProcesses returns the processes whose publishing marker is stale (older than
+// PublishStaleAfter): a worker crashed or the service restarted mid-publish. The caller releases
+// each claim with ReleaseStalePublishClaim and resets the questions (see the startup
+// reconciliation).
+func (ms *MongoStorage) StaleVotingProcesses() ([]StalePublishClaim, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
+	defer cancel()
+	cutoff := time.Now().Add(-PublishStaleAfter)
+	cur, err := ms.votingProcesses.Find(ctx,
+		bson.M{"published": false, "publishing": bson.M{"$exists": true, "$lt": cutoff}},
+		options.Find().SetProjection(bson.M{"_id": 1, "publishingOwner": 1}))
+	if err != nil {
+		return nil, fmt.Errorf("failed to query stale publishing processes: %w", err)
+	}
+	defer func() { _ = cur.Close(ctx) }()
+	var out []StalePublishClaim
+	for cur.Next(ctx) {
+		var claim StalePublishClaim
+		if err := cur.Decode(&claim); err != nil {
+			return nil, fmt.Errorf("failed to decode stale process claim: %w", err)
+		}
+		out = append(out, claim)
+	}
+	return out, cur.Err()
+}
+
+// ReleaseStalePublishClaim clears a claim found by StaleVotingProcesses, only if it is still that
+// same claim and still stale. Between the scan and this write another replica may have reclaimed
+// the process (a new owner and a fresh marker), or the worker may have renewed it; neither must be
+// wiped, or a third publish could claim the process while that one is minting. It reports whether
+// the claim was released.
+func (ms *MongoStorage) ReleaseStalePublishClaim(claim StalePublishClaim) (bool, error) {
+	if claim.ID == bson.NilObjectID {
+		return false, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	filter := bson.M{
+		"_id":        claim.ID,
+		"published":  false,
+		"publishing": bson.M{"$lt": time.Now().Add(-PublishStaleAfter)},
+	}
+	if claim.Owner != "" {
+		filter["publishingOwner"] = claim.Owner
+	} else {
+		filter["publishingOwner"] = bson.M{"$exists": false}
+	}
+	update := bson.M{"$unset": bson.M{"publishing": "", "publishingOwner": ""}} //nolint:goconst
+	res, err := ms.votingProcesses.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return false, fmt.Errorf("failed to release stale publish claim: %w", err)
 	}
 	return res.MatchedCount == 1, nil
 }
@@ -369,15 +436,23 @@ func (ms *MongoStorage) DeleteVotingProcessesByOrg(orgAddress common.Address) (i
 
 // ClearVotingProcessPublishing clears the transient publishing marker set by
 // ClaimVotingProcessForPublish, so a publish that fails after claiming does not leave the
-// process permanently unclaimable. No-op once the process is published.
-func (ms *MongoStorage) ClearVotingProcessPublishing(id bson.ObjectID) error {
+// process permanently unclaimable. With a non-empty owner it only clears a claim that owner
+// still holds, so a worker whose stale claim was reclaimed cannot wipe the new claimant's
+// marker; an empty owner clears unconditionally. Stale markers found at startup go through
+// ReleaseStalePublishClaim instead.
+// No-op once the process is published.
+func (ms *MongoStorage) ClearVotingProcessPublishing(id bson.ObjectID, owner string) error {
 	if id == bson.NilObjectID {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	filter := bson.M{"_id": id, "published": false}
-	if _, err := ms.votingProcesses.UpdateOne(ctx, filter, bson.M{"$unset": bson.M{"publishing": ""}}); err != nil { //nolint:goconst
+	if owner != "" {
+		filter["publishingOwner"] = owner
+	}
+	update := bson.M{"$unset": bson.M{"publishing": "", "publishingOwner": ""}} //nolint:goconst
+	if _, err := ms.votingProcesses.UpdateOne(ctx, filter, update); err != nil {
 		return fmt.Errorf("failed to clear voting process publishing state: %w", err)
 	}
 	return nil
@@ -385,11 +460,14 @@ func (ms *MongoStorage) ClearVotingProcessPublishing(id bson.ObjectID) error {
 
 // SetVotingProcessPublished marks a process as published and clears the publishing marker.
 // Called once, atomically, after every question of the process has been confirmed on-chain.
-// startDate is the actual start of the on-chain elections (the chain assigns one when the
-// process was created without a start date, meaning "start immediately"); a non-zero value
-// replaces the stored date so reads expose when the process really started, while a zero
-// value leaves the stored date untouched.
-func (ms *MongoStorage) SetVotingProcessPublished(id bson.ObjectID, startDate time.Time) error {
+// A non-empty owner makes the write conditional on the publish claim still being held by that
+// owner (ErrConflict otherwise), so a worker whose claim was reclaimed cannot flip the flag; an
+// empty owner writes unconditionally (ErrNotFound when the process does not exist). startDate
+// is the actual start of the on-chain elections (the chain assigns one when the process was
+// created without a start date, meaning "start immediately"); a non-zero value replaces the
+// stored date so reads expose when the process really started, while a zero value leaves the
+// stored date untouched.
+func (ms *MongoStorage) SetVotingProcessPublished(id bson.ObjectID, owner string, startDate time.Time) error {
 	if id == bson.NilObjectID {
 		return ErrInvalidData
 	}
@@ -399,12 +477,19 @@ func (ms *MongoStorage) SetVotingProcessPublished(id bson.ObjectID, startDate ti
 	if !startDate.IsZero() {
 		set["startDate"] = startDate
 	}
-	update := bson.M{"$set": set, "$unset": bson.M{"publishing": ""}} //nolint:goconst
-	res, err := ms.votingProcesses.UpdateOne(ctx, bson.M{"_id": id}, update)
+	filter := bson.M{"_id": id}
+	if owner != "" {
+		filter["publishingOwner"] = owner
+	}
+	update := bson.M{"$set": set, "$unset": bson.M{"publishing": "", "publishingOwner": ""}} //nolint:goconst
+	res, err := ms.votingProcesses.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("failed to mark voting process published: %w", err)
 	}
 	if res.MatchedCount == 0 {
+		if owner != "" {
+			return ErrConflict
+		}
 		return ErrNotFound
 	}
 	return nil

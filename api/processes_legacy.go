@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -353,7 +354,7 @@ func (a *API) projectLegacyProcess(
 	// chain miss must not be frozen into the cached record.
 	cacheable := true
 	for _, electionID := range src.elections {
-		election, err := a.legacyElection(electionID)
+		election, err := a.legacyElection(ctx, electionID)
 		if err != nil {
 			return nil, err
 		}
@@ -406,8 +407,10 @@ func (src *legacyProcessSource) cacheKey() string {
 
 // legacyElection returns an on-chain election, cached so the public list does not fan out to the
 // Vochain on every anonymous hit: final ones for good, the rest for legacyLiveElectionTTL. ENDED is
-// not final — it still moves to RESULTS when the tally is published — so it only gets the TTL.
-func (a *API) legacyElection(electionID internal.HexBytes) (*dvoteapi.Election, error) {
+// not final — it still moves to RESULTS when the tally is published — so it only gets the TTL. A
+// miss is fetched through a.electionReads, so concurrent misses share one chain read and take a
+// service-wide read slot.
+func (a *API) legacyElection(ctx context.Context, electionID internal.HexBytes) (*dvoteapi.Election, error) {
 	key := electionID.String()
 	if cached, ok := a.electionCache.Get(key); ok {
 		return cached, nil
@@ -415,7 +418,7 @@ func (a *API) legacyElection(electionID internal.HexBytes) (*dvoteapi.Election, 
 	if cached, ok := a.liveElectionCache.Get(key); ok {
 		return cached, nil
 	}
-	election, err := a.account.Election(electionID)
+	election, err := a.electionReads.election(ctx, electionID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s: %w", errLegacyChainUnavailable, key, err)
 	}
@@ -825,16 +828,22 @@ func isVotingProcessIDShape(raw string) bool {
 
 // fetchExternalMetadata best-effort downloads and JSON-decodes a metadata document from
 // an external http(s) reference (one that does not point at our own object storage).
-// Returns nil on any failure.
-func fetchExternalMetadata(ctx context.Context, url string) map[string]any {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+// The reference is untrusted, so it is fetched with metadataHTTPClient: public addresses only,
+// no redirects, bounded in time and size. Returns nil on any failure.
+func fetchExternalMetadata(ctx context.Context, rawURL string) map[string]any {
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, metadataFetchTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := metadataHTTPClient.Do(req)
 	if err != nil {
+		log.Debugw("legacy processes: external metadata fetch failed", "url", rawURL, "error", err)
 		return nil
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -842,7 +851,7 @@ func fetchExternalMetadata(ctx context.Context, url string) map[string]any {
 		return nil
 	}
 	var m map[string]any
-	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&m) != nil { // 1 MiB cap
+	if json.NewDecoder(io.LimitReader(resp.Body, metadataMaxBytes)).Decode(&m) != nil {
 		return nil
 	}
 	return m

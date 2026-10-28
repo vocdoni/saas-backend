@@ -285,15 +285,16 @@ three days would only bury the events that can still succeed.
 
 ## Integrators (managed organizations)
 
-An integrator is an organization flagged `integrator` (`cmd/cli --setIntegrator`, or opted in at
-creation). It manages any number of organizations and has no quota of its own: what it spends is
-bounded by its wallet balance and, optionally, the spend cap it sets on each managed organization
-(below). Its own organization holds no processes (403, 40174); to
+An integrator is an organization flagged `integrator`, opted in at creation
+(`POST /organizations` with `integrator: true`). It manages any number of organizations and has no
+quota of its own: what it spends is bounded by its wallet balance and, optionally, the spend cap it
+sets on each managed organization (below). Its own organization holds no processes (403, 40174); to
 run its own votes it creates a managed organization of itself.
 
-The migration that introduced the flag also flagged organizations on an active non-default
+The migration that introduced the flag (0035) also flagged organizations on an active non-default
 integrator plan. Subscribing to an integrator plan in Stripe no longer grants integrator status:
-an operator runs `cmd/cli --setIntegrator`, or the organization is created with `integrator: true`.
+the organization has to be created with `integrator: true`. There is no command to flag an
+existing organization later.
 
 Integrators publish on behalf of managed organizations, so the payer is not present at publish
 time: a managed organization's process is debited from the integrator's wallet by the same
@@ -319,7 +320,7 @@ wallet has none, and its debits and credit-backs never touch `orgSpend`.
   `orgSpend.<lowercase managed address>.capCents`, so it is one more condition in the debit's
   filter (`$expr`) next to the balance and the idempotency key: concurrent debits cannot pass it,
   and the check and the charge are one atomic write. A debit past the cap is refused before
-  anything is charged with **402 (40180)**, data `{capCents, spentCents, requiredCents}`; as for
+  anything is charged with **402 (40183)**, data `{capCents, spentCents, requiredCents}`; as for
   40175, the once-per-organization add-on claims taken for that attempt are released. The same
   applies to census headroom bought from the wallet. A cap below what is already spent only
   refuses further debits; it does not claw anything back.
@@ -508,12 +509,12 @@ up.
 | 40175 | 402 | the integrator wallet does not cover a managed organization's debit (`requiredCents`/`availableCents` in data) |
 | 40176 | 422 | census above 50 000 — custom quote only, refused on every payment path |
 | 40177 | 409 | a top-up checkout is open (publish), the draft is already paid (`/checkout`), a checkout is completing, or the payment changed or is being refunded |
-| 40180 | 402 | a managed organization's spend cap would be passed (`capCents`, `spentCents`, `requiredCents` in data) |
+| 40183 | 402 | a managed organization's spend cap would be passed (`capCents`, `spentCents`, `requiredCents` in data) |
 | 40181 | 403 | a managed organization has no wallet (wallet routes, `/checkout`) |
 | 40174 | 403 | an integrator's own organization cannot own processes |
-| 40179 | 400 | the organization already has 5 admins/managers (pending invitations included) |
+| 40182 | 400 | the organization already has 5 admins/managers (pending invitations included) |
 
-## Storage summary (migration 0026)
+## Storage summary (migration 0034)
 
 - `processPayments` — one document per process payment (`_id` = process id): `status`,
   `payer` (the wallet debited), `amountCents` (the envelope), `checkoutSessionId` (the open

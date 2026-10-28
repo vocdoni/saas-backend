@@ -323,8 +323,9 @@ func TestCensusGrowthIgnoresUnknownMembers(t *testing.T) {
 	c.Assert(strings.Join(added.Errors, "; "), qt.Contains, typo)
 }
 
-// markProcessPaid pays a priced draft from its payer's wallet, as the publish debit would but
-// without publishing: the wallet is funded with the price first. It returns the price.
+// markProcessPaid pays a priced draft from its payer's wallet, as the publish debit
+// (debitProcessWallet) would but without publishing: it claims the once-per-organization add-ons
+// first, funds the wallet with the claimed price, then charges it. It returns the price.
 func markProcessPaid(t *testing.T, pid string) pricing.Cents {
 	t.Helper()
 	c := qt.New(t)
@@ -332,12 +333,20 @@ func markProcessPaid(t *testing.T, pid string) pricing.Cents {
 	c.Assert(err, qt.IsNil)
 	org, err := testDB.Organization(vp.OrgAddress)
 	c.Assert(err, qt.IsNil)
-	quote, input, err := testAPI.processQuote(vp)
+	_, input, err := testAPI.processQuote(vp)
+	c.Assert(err, qt.IsNil)
+	quote, claims, err := testAPI.claimOrgAddOnsForPayment(vp, org, &input)
+	if err != nil {
+		testAPI.releaseRefusedOrgAddOnClaims(vp, claims)
+	}
 	c.Assert(err, qt.IsNil)
 	fundWallet(t, walletPayer(org), quote.TotalCents)
 	_, err = testAPI.chargeProcessWallet(processCharge{
 		vp: vp, org: org, quote: quote, branding: input.Branding, customURL: input.CustomURL,
 	})
+	if err != nil {
+		testAPI.releaseRefusedOrgAddOnClaims(vp, claims)
+	}
 	c.Assert(err, qt.IsNil)
 	return quote.TotalCents
 }
