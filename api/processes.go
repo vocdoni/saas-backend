@@ -111,6 +111,10 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		writeSubscriptionError(w, err)
 		return
 	}
+	if err := a.refuseTearingDown(orgAddr); err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
 	start, end, err := parseProcessDates(req)
 	if err != nil {
 		errors.ErrMalformedBody.WithErr(err).Write(w)

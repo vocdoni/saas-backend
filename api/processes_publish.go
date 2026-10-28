@@ -353,6 +353,11 @@ func (a *API) startProcessPublish(ctx context.Context, t publishTarget) (string,
 			log.Warnw("could not clear voting process publishing state", "error", e)
 		}
 	}()
+	// under the claim: a teardown that started before it refuses the publish here, and one that
+	// starts after finds the draft claimed and stops (see deleteManagedOrganizationHandler)
+	if err := a.refuseTearingDown(vp.OrgAddress); err != nil {
+		return "", err
+	}
 	// again under the claim, which a delete takes too: one that refunded and failed between
 	// the payment gate and here would otherwise go on chain unpaid
 	if err := a.refuseRefundedDraft(oid); err != nil {

@@ -435,6 +435,15 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		}
 	}
 
+	// from here on no draft may be created or published in the organization: one created and paid
+	// after the draft sweep below would go in the bulk delete with no refund. A publish that claimed
+	// a draft earlier holds it, and the sweep stops on it.
+	if _, busy := a.teardowns.LoadOrStore(managedAddr, struct{}{}); busy {
+		errors.ErrDuplicateConflict.Withf("the managed organization is already being deleted").Write(w)
+		return
+	}
+	defer a.teardowns.Delete(managedAddr)
+
 	// drafts first, each the way DELETE /processes/{processId} deletes it, so a paid one is
 	// credited back before it goes. Unlike the cascade below this aborts on the first failure, with
 	// nothing else deleted: money must never be left behind in a deleted organization, and a
@@ -524,4 +533,12 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 
 	log.Infow("deleted managed organization", "integrator", integratorAddr.Hex(), "org", managedAddr.Hex())
 	apicommon.HTTPWriteJSON(w, &apicommon.DeleteManagedOrganizationResponse{Address: managedAddr.Hex()})
+}
+
+// refuseTearingDown refuses with 409 work in an organization whose teardown is running.
+func (a *API) refuseTearingDown(org common.Address) error {
+	if _, ok := a.teardowns.Load(org); ok {
+		return errors.ErrDuplicateConflict.Withf("the organization is being deleted")
+	}
+	return nil
 }
