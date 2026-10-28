@@ -11,9 +11,9 @@ import (
 )
 
 // TestIntegratorFlagMigration asserts migration 0035 flags as integrators exactly the
-// organizations that were one under integrator limits (override, non-default integrator plan,
-// managing orgs, holding API keys), never one only on the default plan or a managed one, and
-// strips the limits and their counters.
+// organizations that were one under integrator limits (override, non-default integrator plan),
+// never one only on the default plan — even holding an API key or managing an org — nor a
+// managed one, and strips the limits and their counters.
 func TestIntegratorFlagMigration(t *testing.T) {
 	c := qt.New(t)
 	ctx := context.Background()
@@ -46,6 +46,9 @@ func TestIntegratorFlagMigration(t *testing.T) {
 	set(zeroManaged, bson.M{"integratorLimits": bson.M{"maxManagedOrgs": 2}, "managedBy": common.Address{}})
 	set(onPlan, bson.M{"subscription.planID": "prod_mig_integrator", "subscription.active": true})
 	set(onDefault, bson.M{"subscription.planID": "prod_mig_default", "subscription.active": true})
+	// the default plan let any organization mint keys and create managed orgs: neither flags it
+	set(managing, bson.M{"subscription.planID": "prod_mig_default", "subscription.active": true})
+	set(keyHolder, bson.M{"subscription.planID": "prod_mig_default", "subscription.active": true})
 	set(managed, bson.M{"subscription.planID": "prod_mig_integrator", "subscription.active": true})
 	_, err = testDB.apiKeys.InsertOne(ctx, bson.M{"_id": bson.NewObjectID(), "orgAddress": keyHolder})
 	c.Assert(err, qt.IsNil)
@@ -55,7 +58,7 @@ func TestIntegratorFlagMigration(t *testing.T) {
 	c.Assert(mig.Up(ctx, database), qt.IsNil) // idempotent
 
 	for addr, want := range map[common.Address]bool{
-		override: true, onPlan: true, managing: true, keyHolder: true, onDefault: false, managed: false, zeroManaged: true,
+		override: true, onPlan: true, managing: false, keyHolder: false, onDefault: false, managed: false, zeroManaged: true,
 	} {
 		org, err := testDB.Organization(addr)
 		c.Assert(err, qt.IsNil)
@@ -71,3 +74,4 @@ func TestIntegratorFlagMigration(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(n, qt.Equals, int64(0))
 }
+
