@@ -1635,7 +1635,8 @@ definitions:
       spendCapCents:
         description: |-
           SpendCapCents caps what the organization's processes may hold debited from the
-          integrator's wallet, in EUR cents; null (or absent) lifts the cap.
+          integrator's wallet, in EUR cents; null lifts the cap. Required: a body without it (or
+          with any other key) is refused.
         type: integer
         x-nullable: true
     type: object
@@ -3193,8 +3194,10 @@ paths:
       description: |-
         Caps what the managed organization at {orgAddress} may spend from the caller's integrator
         wallet: the most its processes may hold debited at once, in EUR cents (VAT excluded).
-        `null` lifts the cap; organizations start unlimited. The cap is checked in the same write
-        as the wallet balance, so a publish or census top-up that would pass it is refused with 402
+        The body must hold exactly `spendCapCents`: `null` lifts the cap, and a missing key or
+        any other key is a 400, so a typo never lifts it. Organizations start unlimited.
+        The cap is checked in the same write as the wallet balance, so a publish or census
+        top-up that would pass it is refused with 402
         (40183, data: capCents, spentCents, requiredCents) without charging anything. Refunds of
         deleted drafts and credit-backs of failed publishes free their amount again. A cap below
         what is already spent only refuses further debits. The caller must be an admin of their
@@ -3221,7 +3224,7 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.ManagedOrganizationInfo'
         "400":
-          description: Invalid address or negative cap
+          description: Invalid address, negative cap, or a body without exactly spendCapCents
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
