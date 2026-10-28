@@ -836,6 +836,7 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 	go pw.renewClaim(stopRenew)
 	defer close(stopRenew)
 	confirmed := false
+	var lastErr error
 	for round := 0; round < maxPublishRounds && !confirmed; round++ {
 		// a worker that no longer owns the publish claim must stop before submitting anything:
 		// someone else has taken the process over, and both submitting would mint duplicate
@@ -866,6 +867,7 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 			if confirmed {
 				break
 			}
+			lastErr = fmt.Errorf("could not persist %d mined elections", len(pw.minedUnpersisted))
 			continue
 		}
 		// the nonce the resolution read is reused when it adopted nothing: nothing else submits for
@@ -878,12 +880,9 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 				return nil, transient(fmt.Errorf("could not read account nonce: %w", err))
 			}
 		}
-		stxs, ok, err := pw.buildBatch(pending, startNonce)
+		stxs, err := pw.buildBatch(pending, startNonce)
 		if err != nil {
 			return nil, err
-		}
-		if !ok {
-			return nil, fmt.Errorf("voting process publish not permitted")
 		}
 		// what is about to be submitted is recorded first, so a crash or a lost answer from here on
 		// can never let it be credited back or submitted twice while it may still mine. Each record
@@ -903,6 +902,8 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 			// the request may have reached the node: every record stays, and the next round
 			// resubmits each question at the same nonce
 			log.Warnw("voting process batch submit failed, will retry", "error", err)
+			// the transport error stays in the log: it can name internal node addresses
+			lastErr = fmt.Errorf("could not submit the election batch to the node")
 			continue
 		}
 		pw.recordBatchOutcome(pending, records, results)
@@ -917,7 +918,11 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 		if err := pw.refreshClaim(); err != nil {
 			return nil, err
 		}
-		confirmed = pw.confirmBatch(pending, results)
+		var confirmErr error
+		confirmed, confirmErr = pw.confirmBatch(pending, results)
+		if confirmErr != nil {
+			lastErr = confirmErr
+		}
 		if a.publishMinedFault != nil {
 			if err := a.publishMinedFault(); err != nil {
 				return nil, err
@@ -925,7 +930,8 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 		}
 	}
 	if !confirmed {
-		return nil, transient(fmt.Errorf("publish did not confirm all questions after %d rounds", maxPublishRounds))
+		return nil, transient(fmt.Errorf("publish did not confirm all questions after %d rounds: %w",
+			maxPublishRounds, lastErr))
 	}
 	if e := a.db.SetVotingProcessPublished(pw.vp.ID, pw.owner, pw.resolveStartDate()); e != nil {
 		// every election is already on-chain and its question persisted: the next attempt finds
@@ -1155,16 +1161,16 @@ func anyMined(questions []db.VotingProcessQuestion) bool {
 }
 
 // buildBatch builds, funds, permission-checks and signs a NEW_PROCESS tx per pending
-// question with contiguous nonces starting at startNonce. ok is false when a question is
-// not permitted (the attempt is abandoned rather than partially submitted).
+// question with contiguous nonces starting at startNonce. A question that is not permitted
+// fails the whole attempt with an error (nothing is partially submitted).
 func (pw *publishWorker) buildBatch(
 	pending []*db.VotingProcessQuestion, startNonce uint32,
-) (stxs [][]byte, ok bool, err error) {
+) (stxs [][]byte, err error) {
 	a := pw.a
 	stxs = make([][]byte, 0, len(pending))
 	initialStatus, err := account.ParseInitialStatus(pw.vp.InitialStatus)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	for i, q := range pending {
 		nonce := startNonce + uint32(i)
@@ -1172,20 +1178,20 @@ func (pw *publishWorker) buildBatch(
 		// those nonces are contiguous from the account's. A mismatch means the chain moved since
 		// it was resolved; the next attempt resolves again.
 		if len(q.PublishTxs) > 0 && q.PublishTxs[0].Nonce != nonce {
-			return nil, false, transient(fmt.Errorf("question %s holds a submitted tx at nonce %d, not %d",
+			return nil, transient(fmt.Errorf("question %s holds a submitted tx at nonce %d, not %d",
 				q.ID.Hex(), q.PublishTxs[0].Nonce, nonce))
 		}
 		ep, err := electionParamsForQuestion(pw.vp, q, pw.census)
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		metaBytes, err := account.BuildElectionMetadata(ep)
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		objectName, err := a.objectStorage.PutJSON(metaBytes, pw.user.Email)
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		q.MetadataURL = a.objectStorage.LocalURL(objectName)
 		tx, err := a.account.BuildNewProcessTx(&account.NewProcessParams{
@@ -1199,31 +1205,38 @@ func (pw *publishWorker) buildBatch(
 			InitialStatus: initialStatus,
 		})
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		fundedTx, txType, err := a.account.FundTransaction(tx, pw.orgSigner.Address())
 		if err != nil {
-			return nil, false, transient(err) // funding reads the chain and the faucet
+			return nil, transient(err) // funding reads the chain and the faucet
 		}
 		if txType == nil || *txType != models.TxType_NEW_PROCESS {
-			return nil, false, fmt.Errorf("unexpected tx type for publish")
+			return nil, fmt.Errorf("unexpected tx type for publish")
 		}
-		if hasPerm, err := a.subscriptions.HasTxPermission(fundedTx, *txType, pw.org, pw.user); err != nil || !hasPerm {
+		hasPerm, err := a.subscriptions.HasTxPermission(fundedTx, *txType, pw.org, pw.user)
+		if err != nil {
 			log.Warnw("voting process publish not permitted", "error", err)
-			return nil, false, nil
+			return nil, fmt.Errorf("voting process publish not permitted: %w", err)
+		}
+		if !hasPerm {
+			log.Warnw("voting process publish not permitted")
+			return nil, fmt.Errorf("voting process publish not permitted")
 		}
 		stx, err := a.account.SignTransaction(fundedTx, pw.orgSigner)
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		stxs = append(stxs, stx)
 	}
-	return stxs, true, nil
+	return stxs, nil
 }
 
 // confirmBatch waits for each submitted item to mine and persists the question's on-chain
-// id. It returns true only when every pending question is confirmed.
-func (pw *publishWorker) confirmBatch(pending []*db.VotingProcessQuestion, results []account.BatchItemResult) bool {
+// id. It returns true only when every pending question is confirmed. Otherwise the error is
+// the cause of the round's last failure; items left unsent keep the cause of the failure before
+// them (nil when all were confirmed).
+func (pw *publishWorker) confirmBatch(pending []*db.VotingProcessQuestion, results []account.BatchItemResult) (bool, error) {
 	a := pw.a
 	// results are aligned to pending by position (SubmitSignedTxBatch's fail-fast ordering). If the
 	// node ever returns a differently-sized batch, that positional binding is unsafe (it could
@@ -1231,21 +1244,32 @@ func (pw *publishWorker) confirmBatch(pending []*db.VotingProcessQuestion, resul
 	if len(results) != len(pending) {
 		log.Warnw("unexpected batch result count, will retry",
 			"pending", len(pending), "results", len(results))
-		return false
+		return false, fmt.Errorf("node returned %d batch results for %d transactions", len(results), len(pending))
 	}
+	var cause error
 	allConfirmed := true
 	for i := range pending {
-		if i >= len(results) {
+		res := results[i]
+		id := pending[i].ID.Hex()
+		switch res.Status {
+		case account.BatchSubmitted:
+		case account.BatchFailed:
+			log.Warnw("voting process election rejected by the node, will retry",
+				"questionId", id, "error", res.Err)
+			cause = fmt.Errorf("election for question %s rejected by the node: %s", id, res.Err)
 			allConfirmed = false
 			continue
-		}
-		res := results[i]
-		if res.Status != account.BatchSubmitted {
+		default:
+			// not sent because an earlier item failed: keep the cause of that failure
+			if cause == nil {
+				cause = fmt.Errorf("election for question %s was not submitted", id)
+			}
 			allConfirmed = false
 			continue
 		}
 		if err := a.account.WaitTxMined(res.Hash); err != nil {
 			log.Warnw("voting process election not confirmed, will retry", "error", err)
+			cause = fmt.Errorf("election for question %s not confirmed on chain", id)
 			allConfirmed = false
 			continue
 		}
@@ -1254,11 +1278,12 @@ func (pw *publishWorker) confirmBatch(pending []*db.VotingProcessQuestion, resul
 		// submission — the next rounds only retry the write — or every DB hiccup after a
 		// mined tx would mint a duplicate election.
 		if !pw.persistPublished(pending[i], res.UpstreamID) {
+			cause = fmt.Errorf("could not persist election for question %s", id)
 			allConfirmed = false
 			continue
 		}
 	}
-	return allConfirmed
+	return allConfirmed, cause
 }
 
 // setVotingProcessQuestionsStatusHandler changes the on-chain status of many questions.
