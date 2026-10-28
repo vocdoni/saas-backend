@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"net/http"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/pricing"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -183,4 +185,46 @@ func TestDeleteDraftAppliesOwedCreditBack(t *testing.T) {
 	c.Assert(err, qt.Equals, db.ErrNotFound)
 	_, err = testDB.ProcessPayment(draft)
 	c.Assert(err, qt.Equals, db.ErrNotFound)
+}
+
+// TestDeleteManagedOrgDropsPartiallyPublishedDraft: a draft some of whose elections mined cannot
+// be deleted on its own (40904, so a publish can resume it), but a teardown drops it: its mined
+// elections stay on chain like a published process's, nothing is credited back and its payment
+// row stays as their audit trail. The mined question is stored CANCELED so the teardown's
+// active-election guard does not read the chain for it.
+func TestDeleteManagedOrgDropsPartiallyPublishedDraft(t *testing.T) {
+	c := qt.New(t)
+	installFakePaymentGW(t)
+	token := testCreateUser(t, "teardownpartial1")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_teardown_partial")
+	fundWallet(t, integratorAddr, 100_000)
+	draft := newManagedDraft(t, token, managedAddr)
+	debitManagedDraft(c, draft)
+	paidBalance := pricing.Cents(100_000 - integratorProcessCents)
+
+	questions, err := testDB.QuestionsByProcess(draft)
+	c.Assert(err, qt.IsNil)
+	c.Assert(questions, qt.Not(qt.HasLen), 0)
+	mined := questions[0]
+	mined.UpstreamID = internal.HexBytes(bytes.Repeat([]byte{0x0d}, 32))
+	mined.Status = db.QuestionStatusCanceled
+	_, err = testDB.SetQuestion(&mined)
+	c.Assert(err, qt.IsNil)
+	c.Assert(testDB.MarkVotingProcessMined(draft), qt.IsNil)
+
+	requestAndAssertError(errors.ErrProcessPartiallyPublished, t, http.MethodDelete, token, nil,
+		"processes", draft.Hex())
+	_, err = testDB.VotingProcess(draft)
+	c.Assert(err, qt.IsNil)
+
+	requestAndAssertCode(http.StatusOK, t, http.MethodDelete, token, nil,
+		"integrator", "organizations", managedAddr.String())
+	_, err = testDB.VotingProcess(draft)
+	c.Assert(err, qt.Equals, db.ErrNotFound)
+	_, err = testDB.Organization(managedAddr)
+	c.Assert(err, qt.Equals, db.ErrNotFound)
+	c.Assert(walletBalance(c, integratorAddr), qt.Equals, paidBalance)
+	payment, err := testDB.ProcessPayment(draft)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPaid)
 }
