@@ -29,8 +29,17 @@ func TestMigrationPaygBilling(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(names, qt.HasLen, 3)
 
-	// the unique index on idempotencyKey rejects a duplicate audit row
+	// the ledger page sort (createdAt, then _id) is fully covered by an index
 	ledger := database.Collection("walletLedger")
+	specs, err := ledger.Indexes().ListSpecifications(ctx)
+	c.Assert(err, qt.IsNil)
+	var keys []string
+	for _, spec := range specs {
+		keys = append(keys, spec.KeysDocument.String())
+	}
+	c.Assert(keys, qt.Contains, `{"orgAddress": {"$numberInt":"1"},"createdAt": {"$numberInt":"-1"},"_id": {"$numberInt":"-1"}}`)
+
+	// the unique index on idempotencyKey rejects a duplicate audit row
 	entry := bson.M{
 		"_id": bson.NewObjectID(), "orgAddress": testOrgAddress,
 		"amountCents": int64(100), "kind": "topup",
