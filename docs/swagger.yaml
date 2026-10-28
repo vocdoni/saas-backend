@@ -5057,8 +5057,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Process already published, partially published (40904), being
-            published, or its payment is in flight
+          description: Already published, partially published (40904), being published,
+            or payment in flight
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
