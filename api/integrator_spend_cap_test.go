@@ -101,8 +101,9 @@ func TestManagedOrgSpendCap(t *testing.T) {
 	// the key is required, so an empty body or a typo never lifts the cap
 	capCents = integratorProcessCents
 	setCap(&capCents)
-	for _, body := range []any{map[string]any{}, map[string]any{"spend_cap_cents": nil},
-		map[string]any{"spendCapCents": nil, "extra": 1}} {
+	for _, body := range []any{
+		map[string]any{}, map[string]any{"spend_cap_cents": nil}, map[string]any{"spendCapCents": nil, "extra": 1},
+	} {
 		requestAndAssertCode(http.StatusBadRequest, t, http.MethodPut, token, body,
 			"integrator", "organizations", managedAddr.String())
 	}

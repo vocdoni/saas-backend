@@ -562,8 +562,9 @@ func (a *API) managedOrgFromPath(
 //	@Description	Caps what the managed organization at {orgAddress} may spend from the caller's integrator
 //	@Description	wallet: the most its processes may hold debited at once, in EUR cents (VAT excluded).
 //	@Description	The body must hold exactly `spendCapCents`: `null` lifts the cap, and a missing key or
-//	@Description	any other key is a 400, so a typo never lifts it. Organizations start unlimited. The cap is checked in the same write
-//	@Description	as the wallet balance, so a publish or census top-up that would pass it is refused with 402
+//	@Description	any other key is a 400, so a typo never lifts it. Organizations start unlimited.
+//	@Description	The cap is checked in the same write as the wallet balance, so a publish or census
+//	@Description	top-up that would pass it is refused with 402
 //	@Description	(40183, data: capCents, spentCents, requiredCents) without charging anything. Refunds of
 //	@Description	deleted drafts and credit-backs of failed publishes free their amount again. A cap below
 //	@Description	what is already spent only refuses further debits. The caller must be an admin of their
