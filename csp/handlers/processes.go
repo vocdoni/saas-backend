@@ -3,8 +3,10 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -64,6 +66,17 @@ func memberEligibleForQuestion(q *db.VotingProcessQuestion, memberID string) boo
 // it has to err toward letting a real voter through.
 const startGrace = time.Minute
 
+// endGrace keeps signing open a little past the stored EndDate. The chain closes later than it:
+// an immediate-start election's duration is computed when its tx is built, so it ends EndDate plus
+// the time that tx took to be mined. A signature issued in that window can still be cast, and one
+// issued after the chain closed is only wasted: it carries no right the chain would honour.
+const endGrace = time.Minute
+
+// processEnded reports whether the process is past its end (plus endGrace), when it has one.
+func processEnded(vp *db.VotingProcess) bool {
+	return !vp.EndDate.IsZero() && !time.Now().Before(vp.EndDate.Add(endGrace))
+}
+
 // unvotableElection returns the 401 to write when the question's election does not currently
 // accept a signature, or nil when it does.
 //
@@ -74,9 +87,12 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 	if q.Status != db.QuestionStatusReady {
 		return errors.Ptr(errors.ErrUnauthorized.Withf("question is not open for voting"))
 	}
-	// only StartDate is checked: publish always persists one, while EndDate is optional.
+	// publish always persists a StartDate, while EndDate is optional.
 	if !vp.StartDate.IsZero() && time.Now().Add(startGrace).Before(vp.StartDate) {
 		return errors.Ptr(errors.ErrUnauthorized.Withf("process has not started yet"))
+	}
+	if processEnded(vp) {
+		return errors.Ptr(errors.ErrUnauthorized.Withf("process has ended"))
 	}
 	return nil
 }
@@ -935,6 +951,11 @@ func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Reques
 //	@Description	question eligibility and vote status. The voter is identified solely by the auth token
 //	@Description	(the only voter data the client stores); the token must be verified and issued for this
 //	@Description	process. Ineligibility is reported as belongsToProcess=false with HTTP 200, not an error.
+//	@Description	Per question, hasSigned reports that the CSP signed the voter's ballot (the vote may not be
+//	@Description	on chain), and hasVoted that the vote is on chain. In an anonymous (blind) census hasVoted
+//	@Description	is always false, since the CSP never learns the voting address: hasSigned is the only
+//	@Description	signal. When the chain cannot be asked about a signed question the call fails with 500
+//	@Description	rather than report the vote as missing.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -944,7 +965,7 @@ func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Reques
 //	@Failure		400			{object}	errors.Error	"Malformed body or missing auth token"
 //	@Failure		401			{object}	errors.Error	"Auth token not verified or not issued for this process"
 //	@Failure		404			{object}	errors.Error	"Process or census not found"
-//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		500			{object}	errors.Error	"Internal server error or blockchain request failed"
 //	@Router			/processes/{processId}/check [post]
 func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request) {
 	oid, anchor, ok := parseProcessID(w, r)
@@ -995,21 +1016,60 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+	resp.Questions = make([]ProcessQuestionStatus, len(questions))
+	rows := make([]*db.CSPProcess, len(questions))
 	for i := range questions {
 		q := &questions[i]
-		status := ProcessQuestionStatus{
+		resp.Questions[i] = ProcessQuestionStatus{
 			QuestionID: q.ID.Hex(),
 			UpstreamID: q.UpstreamID,
 			// a voter can only vote a question if they are a participant of the process
-			// census AND fall within the question's eligibility subset
-			CanVote: resp.BelongsToProcess && memberEligibleForQuestion(q, memberID),
+			// census AND fall within the question's eligibility subset, and not once the process
+			// has ended (the CSP no longer signs then)
+			CanVote: resp.BelongsToProcess && memberEligibleForQuestion(q, memberID) && !processEnded(vp),
 		}
-		if len(q.UpstreamID) > 0 {
-			if cspProc, err := c.mainDB.CSPProcessByUserAndProcess(auth.UserID, q.UpstreamID); err == nil {
-				status.HasVoted = cspProc.Used
-			}
+		if len(q.UpstreamID) == 0 {
+			continue // question not yet on chain
 		}
-		resp.Questions = append(resp.Questions, status)
+		row, err := c.mainDB.CSPProcessByUserAndProcess(auth.UserID, q.UpstreamID)
+		switch {
+		case err == nil:
+			rows[i] = row
+		case errors.Is(err, db.ErrTokenNotFound):
+			// the CSP never signed this question for the voter
+		default:
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+	}
+	// one goroutine per signed question (at most db.MaxQuestionsPerProcess); only uncached,
+	// non-blind rows reach the chain, and the lookup bounds node reads across requests. Each
+	// goroutine writes only its own index.
+	resolver := VoteStatusResolver{Store: c.mainDB, Lookup: c.voteOnChain}
+	errs := make([]error, len(rows))
+	var wg sync.WaitGroup
+	for i, row := range rows {
+		if row == nil {
+			continue
+		}
+		wg.Go(func() {
+			var st VoteStatus
+			st, errs[i] = resolver.Resolve(r.Context(), row)
+			resp.Questions[i].HasSigned, resp.Questions[i].HasVoted = st.Signed, st.Voted
+		})
+	}
+	wg.Wait()
+	// a vote the chain could not be asked about is not a hasVoted=false (same policy as
+	// POST /votes/verify): a voter told "not voted" by mistake would vote again. The raw node
+	// error goes to the log, not to the voter.
+	if err := stderrors.Join(errs...); err != nil {
+		// the voter gave up waiting: nobody is left to read an answer, and it is no node failure
+		if r.Context().Err() != nil {
+			return
+		}
+		log.Warnw("vote status lookup failed", "processId", oid.Hex(), "error", err)
+		errors.ErrVochainRequestFailed.Write(w)
+		return
 	}
 	apicommon.HTTPWriteJSON(w, resp)
 }

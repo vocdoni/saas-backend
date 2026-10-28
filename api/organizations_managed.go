@@ -556,6 +556,9 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 	if _, err := a.db.DeleteJobsByOrg(managedAddr); err != nil {
 		log.Warnw("could not delete jobs", "org", managedAddr.Hex(), "error", err)
 	}
+	if _, err := a.db.DeleteMeteredVotesByOrg(managedAddr); err != nil {
+		log.Warnw("could not delete metered votes", "org", managedAddr.Hex(), "error", err)
+	}
 	if _, err := a.db.DeleteInvitationsByOrg(managedAddr); err != nil {
 		log.Warnw("could not delete invitations", "org", managedAddr.Hex(), "error", err)
 	}

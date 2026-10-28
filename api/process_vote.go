@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	stderrors "errors"
 	"net/http"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/vochain/state"
@@ -233,13 +235,39 @@ const (
 	maxVerifyVotesBodyBytes = db.MaxQuestionsPerProcess*80 + 4*internal.KiB
 )
 
-// verifyLookupSem bounds concurrent node reads across every POST /votes/verify request.
-// Each request fans out through its own 8-worker parallelForEach pool, so without a shared
-// ceiling the node load scales with request concurrency on a public endpoint (the global
-// middleware.Throttle admits 100 requests → up to 800 concurrent reads). 32 lets four
-// fully-fanned batches run against the node; the typical single-nullifier request never
-// notices it.
+// verifyLookupSem bounds concurrent node reads across every POST /votes/verify request, and
+// every vote lookup of POST /processes/{id}/check and the admin participants list (see
+// lookupVoteOnChain). Each request fans out on its own, so without a shared ceiling the node
+// load scales with request concurrency on a public endpoint (the global middleware.Throttle
+// admits 100 requests → up to 800 concurrent reads). 32 lets four fully-fanned batches run
+// against the node; the typical single-nullifier request never notices it.
 var verifyLookupSem = make(chan struct{}, 32)
+
+// chainVote reads the vote with this nullifier from the node, holding a verifyLookupSem slot for
+// the read: account.ErrVoteNotFound when the chain has none, ctx.Err() if the caller gives up
+// waiting for a slot. Every vote lookup of a request handler goes through it, so the slot policy
+// lives in one place.
+func (a *API) chainVote(ctx context.Context, nullifier []byte) (*api.Vote, error) {
+	select {
+	case verifyLookupSem <- struct{}{}:
+		defer func() { <-verifyLookupSem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return a.account.VoteByNullifier(nullifier)
+}
+
+// lookupVoteOnChain is the production handlers.VoteOnChainLookup (see chainVote).
+func (a *API) lookupVoteOnChain(ctx context.Context, nullifier []byte) (bool, error) {
+	_, err := a.chainVote(ctx, nullifier)
+	if stderrors.Is(err, account.ErrVoteNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
 
 // verifyVotesHandler godoc
 //
@@ -308,15 +336,7 @@ func (a *API) verifyVotesHandler(w http.ResponseWriter, r *http.Request) {
 	parallelForEach(len(distinct), func(d int) {
 		i := distinct[d]
 		votes[i].Nullifier = req.Nullifiers[i]
-		// wait for a cross-request lookup slot, unless nobody is left to read the answer.
-		select {
-		case verifyLookupSem <- struct{}{}:
-			defer func() { <-verifyLookupSem }()
-		case <-r.Context().Done():
-			errs[d] = r.Context().Err()
-			return
-		}
-		vote, err := a.account.VoteByNullifier(req.Nullifiers[i])
+		vote, err := a.chainVote(r.Context(), req.Nullifiers[i])
 		if stderrors.Is(err, account.ErrVoteNotFound) {
 			return
 		}
@@ -354,6 +374,9 @@ type parsedVote struct {
 	processID internal.HexBytes
 	org       common.Address
 	nullifier internal.HexBytes
+	// voter is the address that signed the envelope, when it could be recovered (not for an
+	// anonymous vote, which carries its own nullifier)
+	voter internal.HexBytes
 }
 
 // parseRelayVote runs the synchronous checks of a vote relay: the payload must decode to
@@ -406,51 +429,77 @@ func (a *API) parseRelayVote(payload internal.HexBytes) (*parsedVote, *errors.Er
 		return nil, errors.Ptr(errors.ErrGenericInternalServerError.WithErr(err))
 	}
 
+	nullifier, voter := voteNullifier(signedTx, vote, pid, a.account.ChainID())
 	return &parsedVote{
 		payload:   payload,
 		processID: pid,
 		org:       orgAddress,
-		nullifier: voteNullifier(signedTx, vote, pid, a.account.ChainID()),
+		nullifier: nullifier,
+		voter:     voter,
 	}, nil
 }
 
 // voteNullifier works out the nullifier of an envelope without submitting it, so a vote
-// can be identified while its job is still pending and after it failed. An anonymous vote
-// carries its own; otherwise it is hash(voter address + process id), the same value the
-// chain returns as the voteID once it accepts the vote. Best effort: an envelope we
-// cannot recover a signer from yields no nullifier and is relayed anyway — the chain, not
-// this backend, decides whether a signature is valid.
+// can be identified while its job is still pending and after it failed, along with the voter
+// address it derives from. A signed vote (every CSP origin) is hash(voter address + process id):
+// the chain recomputes it from the signature and ignores the envelope's Nullifier field, which
+// the client controls, so that field is never trusted for one. Only an unsigned (anonymous, ZK)
+// vote is identified by the nullifier it carries, with no address. Best effort: an envelope we
+// cannot recover a signer from yields neither and is relayed anyway — the chain, not this
+// backend, decides whether a signature is valid.
 func voteNullifier(signedTx *models.SignedTx, vote *models.VoteEnvelope, pid internal.HexBytes,
 	chainID string,
-) internal.HexBytes {
-	if len(vote.Nullifier) > 0 {
-		return internal.HexBytes(vote.Nullifier)
+) (nullifier, voter internal.HexBytes) {
+	if len(signedTx.Signature) == 0 {
+		if len(vote.Nullifier) > 0 {
+			return internal.HexBytes(vote.Nullifier), nil
+		}
+		return nil, nil
 	}
 	msg, _, err := ethereum.BuildVocdoniTransaction(signedTx.Tx, chainID)
 	if err != nil {
 		log.Debugw("could not build vote tx message to derive its nullifier", "error", err)
-		return nil
+		return nil, nil
 	}
 	addr, err := ethereum.AddrFromSignature(msg, signedTx.Signature)
 	if err != nil {
 		log.Debugw("could not recover the voter address to derive its nullifier", "error", err)
-		return nil
+		return nil, nil
 	}
-	return internal.HexBytes(state.GenerateNullifier(addr, pid))
+	return internal.HexBytes(state.GenerateNullifier(addr, pid)), internal.HexBytes(addr.Bytes())
 }
 
-// submitRelayVote builds the worker closure that relays one envelope: submit, wait for it
-// to be mined, and meter it. The returned voteID is the vote nullifier as assigned on chain.
+// submitRelayVote builds the worker closure that relays one envelope: submit (retrying
+// transient transport errors), wait for it to be mined, and meter it. The returned voteID is
+// the vote nullifier as assigned on chain.
 func (a *API) submitRelayVote(vote *parsedVote) func() (*db.JobResult, error) {
 	return func() (*db.JobResult, error) {
-		voteID, err := a.account.SubmitSignedTx(vote.payload)
+		voteID, err := a.account.SubmitVote(context.Background(), vote.payload, vote.nullifier)
 		if err != nil {
 			return nil, err
 		}
 		// meter the relayed vote for billing/quota; best-effort, never fail the relay on a
-		// counter error. The quota itself is enforced at election publish, not here.
-		if err := a.db.IncrementOrganizationSentVotesCounter(vote.org); err != nil {
-			log.Errorw(err, "failed to increment org sent votes counter")
+		// counter error. The quota itself is enforced at election publish, not here. A vote is
+		// metered once per nullifier, i.e. once per voter and election, whoever relays it: neither
+		// an overwrite nor a re-relay of a vote already cast (its bytes are public on chain) is
+		// metered again. The node's vote id is the nullifier, for an envelope we could not derive
+		// it from.
+		meterKey := vote.nullifier
+		if len(meterKey) == 0 {
+			meterKey = internal.HexBytes(voteID)
+		}
+		if len(meterKey) > 0 {
+			if _, err := a.db.MeterRelayedVote(vote.org, meterKey); err != nil {
+				log.Errorw(err, "failed to meter relayed vote")
+			}
+		}
+		// the vote is on chain: cache it on the voter's CSP row, so /check and the participants
+		// list need no node read for it. Best-effort, as a miss only costs that read; a blind
+		// census row carries no address and matches nothing.
+		if len(vote.voter) > 0 {
+			if err := a.db.MarkCSPProcessVotedOnChainByAddress(vote.processID, vote.voter); err != nil {
+				log.Warnw("could not cache relayed vote on chain", "processId", vote.processID.String(), "error", err)
+			}
 		}
 		return &db.JobResult{
 			ProcessID: vote.processID,

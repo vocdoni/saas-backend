@@ -56,7 +56,7 @@ func TestAuthFirstStepUnknownParticipantPasswordWork(t *testing.T) {
 	withPassword := newCensus(db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber, db.OrgMemberAuthFieldsPassword})
 	withoutPassword := newCensus(db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber})
 
-	h := New(&csp.CSP{PasswordSalt: salt, Storage: mainDB}, mainDB)
+	h := New(&csp.CSP{PasswordSalt: salt, Storage: mainDB}, mainDB, nil)
 	checks := 0
 	h.hashPassword = func(ctx context.Context, salt string, memberID bson.ObjectID, clientHash string) ([]byte, error) {
 		checks++

@@ -43,6 +43,10 @@ type CSPProcess struct {
 	UsedAt      time.Time         `json:"usedAt" bson:"consumedat"`
 	UsedAddress internal.HexBytes `json:"usedAddress" bson:"consumedaddress"`
 	TimesVoted  int               `json:"timesVoted" bson:"timesVoted"`
+	// VotedOnChain caches that the chain has a vote under this row's nullifier. It is set once a
+	// lookup finds the vote and never cleared (a vote cannot leave the chain), so a row that has
+	// it needs no further chain read. A missing field reads false: there is no migration.
+	VotedOnChain bool `json:"votedOnChain" bson:"votedonchain,omitempty"`
 	// BlindSecret holds the CSP's one-time blind-signature nonce k between the two rounds of a
 	// blind (OFF_CHAIN_CA_V2) signature: armed in round 1 and atomically claimed in round 2.
 	// Never leaves the server; absent for the non-anonymous ECDSA flow and once claimed.
@@ -473,43 +477,63 @@ func (ms *MongoStorage) CSPProcessByUserAndProcess(userID, processID internal.He
 	return ms.fetchCSPProcessFromDB(ctx, userID, processID)
 }
 
-// MembersWithUsedCSPProcess returns the subset of the given memberIDs (each the
-// hex of an OrgMember ObjectID) that have already cast a ballot in the given
-// process. The returned map is keyed by the memberID hex string and only
-// contains entries set to true; members without a CSP process for the given
-// process, or with one that has not been used, are simply absent from the map.
-//
-// A member is considered to have voted when a CSPProcess exists for
-// (memberID, processID) and its Used field is true — i.e. the member consumed
-// the process to cast a ballot.
-func (ms *MongoStorage) MembersWithUsedCSPProcess(
-	processID internal.HexBytes,
-	memberIDs []string,
-) (map[string]bool, error) {
-	if processID == nil {
-		return nil, ErrBadInputs
+// CSPProcessesByMembers returns, in one query, every CSP process row of the given members
+// (memberIDs are OrgMember ObjectID hex strings; ids that are not hex are skipped) on any of the
+// given elections. Rows exist only for (member, election) pairs the CSP has touched, so a missing
+// pair means "not signed".
+func (ms *MongoStorage) CSPProcessesByMembers(processIDs []internal.HexBytes, memberIDs []string) ([]CSPProcess, error) {
+	userIDs := normalizeCSPUserIDs(memberIDs)
+	if len(processIDs) == 0 || len(userIDs) == 0 {
+		return nil, nil
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
+	defer cancel()
+	// covered by the userid+processid index on cspTokensStatus
+	cursor, err := ms.cspTokensStatus.Find(ctx, bson.M{
+		"processid": bson.M{"$in": processIDs},
+		"userid":    bson.M{"$in": userIDs},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to query CSP processes of members: %w", err)
+	}
+	var rows []CSPProcess
+	if err := cursor.All(ctx, &rows); err != nil {
+		return nil, fmt.Errorf("failed to decode CSP processes of members: %w", err)
+	}
+	return rows, nil
+}
 
-	result := make(map[string]bool, len(memberIDs))
-	for _, id := range memberIDs {
-		// parsed rather than HexBytesFromString, which panics by design: an id that is not hex
-		// cannot have a CSP process, so it is skipped like one that simply has none
-		userID := internal.HexBytes{}
-		if err := userID.ParseString(id); err != nil {
-			continue
-		}
-		proc, err := ms.CSPProcessByUserAndProcess(userID, processID)
-		if err != nil {
-			if errors.Is(err, ErrTokenNotFound) {
-				continue
-			}
-			return nil, fmt.Errorf("failed to query CSP process status: %w", err)
-		}
-		if proc.Used {
-			result[id] = true
-		}
+// MarkCSPProcessVotedOnChain sets the VotedOnChain cache flag on the CSP process row of
+// (userID, processID), and on nothing else. A missing row is not an error: there is nothing to
+// cache on.
+func (ms *MongoStorage) MarkCSPProcessVotedOnChain(userID, processID internal.HexBytes) error {
+	if userID == nil || processID == nil {
+		return ErrBadInputs
 	}
-	return result, nil
+	return ms.markVotedOnChain(bson.M{"_id": cspAuthTokenStatusID(userID, processID)})
+}
+
+// MarkCSPProcessVotedOnChainByAddress caches that the vote cast by address on processID is on
+// chain, on the CSP process row that consumed that address: the relay knows the voter's address
+// and the election, not the member. No row matches a blind-census vote (its row holds no address),
+// which is not an error. The lookup is served by the cspTokensStatus processid+consumedaddress
+// index (migration 32).
+func (ms *MongoStorage) MarkCSPProcessVotedOnChainByAddress(processID, address internal.HexBytes) error {
+	if len(processID) == 0 || len(address) == 0 {
+		return ErrBadInputs
+	}
+	return ms.markVotedOnChain(bson.M{"processid": processID, "consumedaddress": address})
+}
+
+// markVotedOnChain sets the votedonchain cache on the CSP process row filter matches. A filter that
+// matches no row has nothing to cache on, which is not an error.
+func (ms *MongoStorage) markVotedOnChain(filter bson.M) error {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	if _, err := ms.cspTokensStatus.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"votedonchain": true}}); err != nil {
+		return fmt.Errorf("failed to mark CSP process voted on chain: %w", err)
+	}
+	return nil
 }
 
 // DeleteCSPAuthByAnchor removes every CSP authentication token tied to the given bundle.

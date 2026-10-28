@@ -275,13 +275,24 @@ func TestCSPVoting(t *testing.T) {
 		c.Assert(bytes.Equal(resp.Weight, big.NewInt(1).Bytes()), qt.IsTrue,
 			qt.Commentf("unexpected weight %x", resp.Weight))
 
-		// Once the member consumes the election, hasVoted flips to true.
+		c.Assert(resp.Questions[0].HasSigned, qt.IsFalse)
+
+		// Once the CSP signs the member's ballot, hasSigned flips to true, but hasVoted stays
+		// false: nothing is on chain yet.
 		voter := ethereum.SignKeys{}
 		c.Assert(voter.Generate(), qt.IsNil)
-		c.Assert(testDB.ConsumeCSPProcess(authToken, processID,
-			internal.HexBytes(voter.Address().Bytes())), qt.IsNil)
+		voterAddr := internal.HexBytes(voter.Address().Bytes())
+		signature := testCSPSign(t, pid, authToken, processID, voterAddr)
 		resp = check(checkReq)
 		c.Assert(resp.BelongsToProcess, qt.IsTrue)
+		c.Assert(resp.Questions[0].HasSigned, qt.IsTrue)
+		c.Assert(resp.Questions[0].HasVoted, qt.IsFalse)
+
+		// hasVoted flips to true only once the vote is mined.
+		testCastVote(t, vocdoniClient, &voter, processID,
+			testGenerateVoteProof(processID, voterAddr, signature, 1), []byte("[\"1\"]"))
+		resp = check(checkReq)
+		c.Assert(resp.Questions[0].HasSigned, qt.IsTrue)
 		c.Assert(resp.Questions[0].HasVoted, qt.IsTrue)
 
 		// The normal auth flow cannot mint a verified token for a non-participant, so seed one

@@ -103,12 +103,27 @@ func TestHandlePhoneContact(t *testing.T) {
 	t.Run(org.Country, func(*testing.T) { test(org, "+34612345601", "+34612345601") })
 }
 
+func TestUnvotableElectionEndDate(t *testing.T) {
+	c := qt.New(t)
+	q := &db.VotingProcessQuestion{Status: db.QuestionStatusReady}
+	// qt.IsNil rejects a typed-nil *errors.Error (it implements error), so compare the pointer.
+	c.Assert(unvotableElection(&db.VotingProcess{}, q), qt.Equals, (*errors.Error)(nil))
+	c.Assert(unvotableElection(&db.VotingProcess{EndDate: time.Now().Add(time.Hour)}, q),
+		qt.Equals, (*errors.Error)(nil))
+	// within endGrace of the stored end the chain may still be open: signing goes on
+	c.Assert(unvotableElection(&db.VotingProcess{EndDate: time.Now().Add(-time.Second)}, q),
+		qt.Equals, (*errors.Error)(nil))
+	ended := unvotableElection(&db.VotingProcess{EndDate: time.Now().Add(-endGrace - time.Second)}, q)
+	c.Assert(ended, qt.Not(qt.Equals), (*errors.Error)(nil))
+	c.Assert(ended.Error(), qt.Contains, "process has ended")
+}
+
 // TestMemberPasswordMatches covers the password check behind auth step 0: it matches the stored
 // argon2 hash of the client hash and nothing else, and a check that finds no free argon2 slot gives
 // up and answers ErrServerBusy instead of blocking.
 func TestMemberPasswordMatches(t *testing.T) {
 	c := qt.New(t)
-	h := New(&csp.CSP{PasswordSalt: "salt"}, nil)
+	h := New(&csp.CSP{PasswordSalt: "salt"}, nil, nil)
 	clientHash := strings.Repeat("ab", 32)
 	stored := &db.OrgMember{ID: bson.NewObjectID()}
 	stored.HashedPass = db.HashMemberPassword("salt", stored.ID, clientHash)

@@ -128,6 +128,10 @@ type Config struct {
 	// StatusSyncer enqueues question status reconciliations with the background
 	// syncer. Nil only when left unwired (e.g. tests) — enqueues become no-ops.
 	StatusSyncer StatusEnqueuer
+	// VoteOnChainLookup overrides how /processes/{id}/check and the admin participants list
+	// ask the chain whether a vote is on chain. Nil (production) uses Account, bounded by the
+	// lookup slots shared with POST /votes/verify. Tests set it to inject lookup failures.
+	VoteOnChainLookup handlers.VoteOnChainLookup
 }
 
 // StatusEnqueuer hands question status reconciliations to the background syncer. It is satisfied by
@@ -181,6 +185,8 @@ type API struct {
 	legacyProjectionCache *lru.Cache[string, *apicommon.VotingProcessResponse]
 	// electionReads coalesces, caches and bounds the public read paths' election fetches.
 	electionReads *electionReads
+	// voteOnChain tells whether a vote is on chain (see Config.VoteOnChainLookup).
+	voteOnChain handlers.VoteOnChainLookup
 }
 
 // enqueueConfirm asks the status syncer to confirm a status change landed on-chain; a no-op when
@@ -283,6 +289,10 @@ func New(ctx context.Context, conf *Config) *API {
 	a.electionReads = newElectionReads(func(id internal.HexBytes) (*dvoteapi.Election, error) {
 		return a.account.Election(id)
 	})
+	a.voteOnChain = conf.VoteOnChainLookup
+	if a.voteOnChain == nil {
+		a.voteOnChain = a.lookupVoteOnChain
+	}
 	a.startTxQueues()
 	// heartbeat this process's pending tx jobs and close those stranded by a process that died
 	// (see superviseTxJobs).
@@ -359,7 +369,7 @@ func (a *API) initRouter() http.Handler {
 	r.Use(a.setLang)
 
 	a.csp.PasswordSalt = passwordSalt
-	cspHandlers := handlers.New(a.csp, a.db)
+	cspHandlers := handlers.New(a.csp, a.db, a.voteOnChain)
 
 	// Initialize Stripe service
 	if err := a.InitializeStripeService(); err != nil {

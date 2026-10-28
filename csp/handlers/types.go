@@ -175,10 +175,15 @@ type ProcessCheckResponse struct {
 }
 
 // ProcessQuestionStatus is the per-question voter status within a ProcessCheckResponse.
+// HasSigned is true once the CSP signed the voter's ballot for the question; the vote may still
+// not be on chain, and in an anonymous (blind) census it is the only signal the backend has.
+// HasVoted is true only when the vote is on chain; it is always false in a blind census, where
+// the CSP never learns the voting address.
 type ProcessQuestionStatus struct {
 	QuestionID string            `json:"questionId"`
 	UpstreamID internal.HexBytes `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	CanVote    bool              `json:"canVote"`
+	HasSigned  bool              `json:"hasSigned"`
 	HasVoted   bool              `json:"hasVoted"`
 }
 
