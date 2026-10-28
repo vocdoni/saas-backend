@@ -324,7 +324,10 @@ wallet has none, and its debits and credit-backs never touch `orgSpend`.
 - **Cap**: `PUT /integrator/organizations/{orgAddress}` with `{"spendCapCents": n}` (EUR cents,
   VAT excluded; `null` = unlimited, the default). Callable with an integrator Admin JWT or a
   `managed:write` API key. The target must be managed by the caller's integrator (404
-  otherwise), and a negative cap is 400. The cap is stored on the integrator's wallet document as
+  otherwise), and a negative cap is 400. The key is required and must be the only one: `{}` or a
+  misspelt key is 400 rather than a silently lifted cap. The publish gate and
+  `GET /processes/{processId}/validation` check the cap too, so they answer 40183 before the
+  debit would. The cap is stored on the integrator's wallet document as
   `orgSpend.<lowercase managed address>.capCents`, so it is one more condition in the debit's
   filter (`$expr`) next to the balance and the idempotency key: concurrent debits cannot pass it,
   and the check and the charge are one atomic write. A debit past the cap is refused before
