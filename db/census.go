@@ -6,6 +6,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -14,6 +15,25 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.vocdoni.io/dvote/log"
 )
+
+// ValidateCensusFields checks that the login fields of a census can tell its members apart. The
+// member password is checked after the participant lookup and never hashed, so a census using it
+// needs at least one other auth field or a 2FA field; otherwise it returns ErrPasswordNeedsLookupField.
+func ValidateCensusFields(authFields OrgMemberAuthFields, twoFaFields OrgMemberTwoFaFields) error {
+	if !slices.Contains(authFields, OrgMemberAuthFieldsPassword) {
+		return nil
+	}
+	lookupFields := len(twoFaFields)
+	for _, f := range authFields {
+		if f != OrgMemberAuthFieldsPassword {
+			lookupFields++
+		}
+	}
+	if lookupFields == 0 {
+		return ErrPasswordNeedsLookupField
+	}
+	return nil
+}
 
 // SetCensus creates a new census for an organization
 // Returns the hex representation of the census
@@ -24,6 +44,9 @@ func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
 
 	if census.OrgAddress.Cmp(common.Address{}) == 0 {
 		return "", ErrInvalidData
+	}
+	if err := ValidateCensusFields(census.AuthFields, census.TwoFaFields); err != nil {
+		return "", err
 	}
 	// check that the org exists
 	_, err := ms.Organization(census.OrgAddress)
@@ -102,11 +125,11 @@ func (ms *MongoStorage) populateCensus(
 	membersFilter bson.D,
 	group *OrganizationMemberGroup,
 ) (int64, []bson.ObjectID, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
+	// the whole read phase (org check, existing participants, member scan and classification) runs
+	// without keysLock: a large census build must not block every other storage operation
 	// check that the org exists
 	if _, err := ms.Organization(census.OrgAddress); err != nil {
 		if err == ErrNotFound {
@@ -151,12 +174,16 @@ func (ms *MongoStorage) populateCensus(
 
 	if group != nil {
 		census.GroupID = group.ID
-		if err := ms.addOrganizationMemberGroupCensus(ctx, group.ID.Hex(), census.OrgAddress, census.ID.Hex()); err != nil {
+		if err := ms.lockedPointWrite(func(wctx context.Context) error {
+			return ms.addOrganizationMemberGroupCensus(wctx, group.ID.Hex(), census.OrgAddress, census.ID.Hex())
+		}); err != nil {
 			return 0, nil, fmt.Errorf("error updating group with census ID: %w", err)
 		}
 	}
 
-	insertedCount, err := ms.setBulkCensusParticipant(ctx, census, members.complete)
+	// participants are written in batches, each under its own short lock, so concurrent storage
+	// operations interleave with the build instead of waiting for all of it
+	insertedCount, err := ms.setBulkCensusParticipant(census, members.complete)
 	if err != nil {
 		return 0, nil, fmt.Errorf("error setting census participants: %w", err)
 	}
@@ -166,12 +193,26 @@ func (ms *MongoStorage) populateCensus(
 	if err != nil {
 		return 0, nil, err
 	}
-	filter := bson.M{"_id": census.ID}
-	opts := options.UpdateOne().SetUpsert(true)
-	if _, err := ms.censuses.UpdateOne(ctx, filter, updateDoc, opts); err != nil {
+	if err := ms.lockedPointWrite(func(wctx context.Context) error {
+		filter := bson.M{"_id": census.ID}
+		opts := options.UpdateOne().SetUpsert(true)
+		_, err := ms.censuses.UpdateOne(wctx, filter, updateDoc, opts)
+		return err
+	}); err != nil {
 		return 0, nil, err
 	}
 	return census.Size, members.missing, nil
+}
+
+// lockedPointWrite runs a single point write under keysLock with its own short timeout. It is the
+// write-side companion of the lock-free census build read phase: each write holds the lock only for
+// as long as that one operation takes.
+func (ms *MongoStorage) lockedPointWrite(write func(ctx context.Context) error) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	return write(ctx)
 }
 
 // DeleteCensus removes a census and all its members
@@ -184,7 +225,7 @@ func (ms *MongoStorage) DelCensus(censusID string) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	// delete the census participants first so removing a census does not orphan them (this
@@ -230,7 +271,7 @@ func (ms *MongoStorage) CensusesByOrg(orgAddress common.Address) ([]*Census, err
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	if _, err := ms.fetchOrganizationFromDB(ctx, orgAddress); err != nil {

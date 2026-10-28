@@ -4,10 +4,12 @@ package twilio
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
 	t "github.com/twilio/twilio-go"
+	"github.com/twilio/twilio-go/client"
 	api "github.com/twilio/twilio-go/rest/api/v2010"
 	"github.com/vocdoni/saas-backend/notifications"
 )
@@ -85,6 +87,31 @@ func (tsms *SMS) SendNotification(ctx context.Context, notification *notificatio
 	case <-ctx.Done():
 		return ctx.Err()
 	case err := <-errCh:
+		return classifySendError(err)
+	}
+}
+
+// permanentTwilioCodes are the Twilio error codes that name a recipient which can
+// never be reached, so retrying the same message cannot succeed.
+var permanentTwilioCodes = map[int]struct{}{
+	21211: {}, // invalid 'To' phone number
+	21217: {}, // phone number does not appear to be valid
+	21408: {}, // no permission to send to that region
+	21610: {}, // recipient has unsubscribed (replied STOP)
+	21612: {}, // 'To' phone number is not reachable via SMS
+	21614: {}, // 'To' number is not a mobile number
+}
+
+// classifySendError marks a Twilio REST error whose code names an unreachable
+// recipient as permanent. Any other error, including auth failures and rate
+// limits, stays transient so retries can trip the circuit breaker.
+func classifySendError(err error) error {
+	var restErr *client.TwilioRestError
+	if !errors.As(err, &restErr) {
 		return err
 	}
+	if _, ok := permanentTwilioCodes[restErr.Code]; !ok {
+		return err
+	}
+	return &notifications.PermanentError{Err: err}
 }

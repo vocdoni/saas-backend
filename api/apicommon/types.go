@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -48,11 +49,11 @@ func (m *MultilingualText) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// multilingualFromAny extracts a MultilingualText from a meta map value. It handles:
+// MultilingualFromAny extracts a MultilingualText from a meta map value. It handles:
 //   - plain string (legacy storage): normalised to {"default": "<string>"}
 //   - MultilingualText / map[string]string (in-memory, set at creation time)
 //   - map[string]any (BSON-decoded form; plain, not bson.M — see db/mongo.go)
-func multilingualFromAny(v any) *MultilingualText {
+func MultilingualFromAny(v any) *MultilingualText {
 	switch m := v.(type) {
 	case string:
 		r := MultilingualText{"default": m}
@@ -79,7 +80,7 @@ func multilingualFromAny(v any) *MultilingualText {
 // OrgDisplayName returns the "default" value of meta["name"] as a plain string, falling
 // back to fallback (typically the org's hex address) when the field is absent or empty.
 func OrgDisplayName(meta map[string]any, fallback string) string {
-	if mt := multilingualFromAny(meta["name"]); mt != nil {
+	if mt := MultilingualFromAny(meta["name"]); mt != nil {
 		if def := (*mt)["default"]; def != "" {
 			return def
 		}
@@ -106,6 +107,72 @@ func BuildOrgMeta(base map[string]any, name, logo, description *MultilingualText
 	}
 	maps.Copy(meta, explicit)
 	return meta
+}
+
+// ValidateMetaKeys rejects meta keys MongoDB cannot store and address as written: empty keys,
+// keys containing a dot and keys starting with "$", at every nesting level.
+func ValidateMetaKeys(meta map[string]any) error {
+	for key, value := range meta {
+		if err := ValidateMetaKey(key); err != nil {
+			return err
+		}
+		if err := ValidateMetaValue(value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateMetaPath validates a dot-notation meta path, as used by PUT and DELETE /meta: no
+// segment may be empty or start with "$".
+func ValidateMetaPath(path string) error {
+	for _, segment := range strings.Split(path, ".") {
+		if err := ValidateMetaKey(segment); err != nil {
+			return fmt.Errorf("invalid meta path %q: %w", path, err)
+		}
+	}
+	return nil
+}
+
+// ValidateMetaValue applies ValidateMetaKeys to every object nested in value.
+func ValidateMetaValue(value any) error {
+	switch v := value.(type) {
+	case map[string]any:
+		return ValidateMetaKeys(v)
+	case []any:
+		for _, item := range v {
+			if err := ValidateMetaValue(item); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+// ValidateMetaShorthands applies ValidateMetaKey to the locale keys of the name, logo and description
+// shorthands, which BuildOrgMeta copies into meta without going through ValidateMetaKeys.
+func ValidateMetaShorthands(name, logo, description *MultilingualText) error {
+	for _, text := range []*MultilingualText{name, logo, description} {
+		if text == nil {
+			continue
+		}
+		for locale := range *text {
+			if err := ValidateMetaKey(locale); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// ValidateMetaKey rejects a single key or path segment that MongoDB would reject or misread.
+func ValidateMetaKey(key string) error {
+	if key == "" || strings.Contains(key, ".") || strings.HasPrefix(key, "$") {
+		return fmt.Errorf("invalid meta key %q: keys cannot be empty, contain dots or start with $", key)
+	}
+	return nil
 }
 
 // Pagination contains all the values needed for the UI to easily organize the returned data
@@ -499,6 +566,10 @@ type LoginResponse struct {
 	Expirity time.Time `json:"expirity"`
 }
 
+// IdentityMetaKeys are the organization meta keys that carry the organization identity shown to
+// voters. Each one holds a MultilingualText.
+var IdentityMetaKeys = []string{"name", "logo", "description"}
+
 // OrganizationFromDB converts a db.Organization to an OrganizationInfo, if the parent
 // organization is provided it will be included in the response.
 func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
@@ -521,7 +592,7 @@ func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 	maps.Copy(meta, dbOrg.Meta)
 	// Upgrade any plain-string values for the well-known keys to the object
 	// form so that meta.name and the top-level name field always agree.
-	for _, key := range []string{"name", "logo", "description"} {
+	for _, key := range IdentityMetaKeys {
 		if s, ok := meta[key].(string); ok {
 			meta[key] = MultilingualText{"default": s}
 		}
@@ -546,9 +617,9 @@ func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 		DefaultLang:    dbOrg.DefaultLang,
 		Communications: dbOrg.Communications,
 		Meta:           meta,
-		Name:           multilingualFromAny(meta["name"]),
-		Logo:           multilingualFromAny(meta["logo"]),
-		Description:    multilingualFromAny(meta["description"]),
+		Name:           MultilingualFromAny(meta["name"]),
+		Logo:           MultilingualFromAny(meta["logo"]),
+		Description:    MultilingualFromAny(meta["description"]),
 		Parent:         parentOrg,
 		ManagedBy:      managedBy,
 		Subscription:   &details,
@@ -1011,8 +1082,14 @@ type OrgMember struct {
 	// Member's phone number
 	Phone string `json:"phone,omitempty"`
 
-	// Member's password (for authentication)
+	// Member's password, write-only: the client hash of the plaintext, 64 lowercase hex characters,
+	// lowercase_hex(SHA-256(UTF-8("vocdoni-member-password:" + org address as 0x + 40 lowercase hex +
+	// ":" + trim(password).normalize("NFC")))). Stored as an argon2 hash salted per member (with the
+	// member id) and never returned: reads report hasPassword.
 	Password string `json:"password,omitempty"`
+
+	// HasPassword is true on reads when the member has a password. Read-only: ignored on writes.
+	HasPassword bool `json:"hasPassword,omitempty"`
 
 	// Member's census weight
 	Weight string `json:"weight,omitempty"`
@@ -1037,6 +1114,9 @@ func (p *OrgMember) ToDB() (*db.OrgMember, error) {
 	// we are performing the conversion here to avoid having a parsedweight field in the db
 	weight, err := parseMemberWeight(p.Weight)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateMemberPassword(p.Password); err != nil {
 		return nil, err
 	}
 
@@ -1066,6 +1146,16 @@ func parseMemberWeight(s string) (uint64, error) {
 		return 0, fmt.Errorf("invalid weight %q", s)
 	}
 	return weight, nil
+}
+
+// validateMemberPassword checks that a member password is a client hash (see OrgMember.Password),
+// or empty for none, so a plaintext password is refused before it reaches the database. The error
+// never echoes the value.
+func validateMemberPassword(password string) error {
+	if password != "" && !internal.ValidMemberPasswordHash(password) {
+		return fmt.Errorf("invalid password: expected the client hash, 64 lowercase hex characters")
+	}
+	return nil
 }
 
 // UpsertOrgMemberRequest creates or updates an organization member. On an update a field left
@@ -1098,7 +1188,8 @@ type UpsertOrgMemberRequest struct {
 	// Member's phone number
 	Phone *string `json:"phone,omitempty"`
 
-	// Member's password (for authentication)
+	// Member's password as its client hash (see OrgMember.Password). Empty clears it; leave it out
+	// to keep it.
 	Password *string `json:"password,omitempty"`
 
 	// Member's census weight. Empty sets the default 1, as does leaving it out of a new member.
@@ -1135,6 +1226,11 @@ func (r *UpsertOrgMemberRequest) ToDB() (*db.OrgMemberUpdate, error) {
 		}
 		update.Weight = &weight
 	}
+	if r.Password != nil {
+		if err := validateMemberPassword(*r.Password); err != nil {
+			return nil, err
+		}
+	}
 	return update, nil
 }
 
@@ -1148,6 +1244,7 @@ func OrgMemberFromDb(p db.OrgMember) OrgMember {
 		BirthDate:    p.BirthDate,
 		Email:        p.Email,
 		Phone:        p.Phone.String(), // This returns either "" or the masked hash
+		HasPassword:  len(p.HashedPass) > 0,
 		Other:        p.Other,
 		Weight:       fmt.Sprintf("%d", p.Weight),
 	}
@@ -1355,15 +1452,18 @@ type UnifiedJobResult struct {
 	Nullifier internal.HexBytes `json:"nullifier,omitempty" swaggertype:"string" example:"deadbeef"`
 	VoteID    internal.HexBytes `json:"voteID,omitempty" swaggertype:"string" example:"deadbeef"`
 	// Votes is the per-envelope outcome of a batch vote relay, in request order
-	Votes    []db.VoteJobResult `json:"votes,omitempty"`
-	Added    int                `json:"added,omitempty"`
-	Progress int                `json:"progress,omitempty"`
-	Total    int                `json:"total,omitempty"`
+	Votes []db.VoteJobResult `json:"votes,omitempty"`
+	// Questions is the per-question outcome of a status-change or census-update job, in target order
+	Questions []db.QuestionJobResult `json:"questions,omitempty"`
+	Added     int                    `json:"added,omitempty"`
+	Progress  int                    `json:"progress,omitempty"`
+	Total     int                    `json:"total,omitempty"`
 }
 
 func (r *UnifiedJobResult) isEmpty() bool {
 	return len(r.Address) == 0 && r.Status == "" && len(r.ProcessID) == 0 && len(r.Nullifier) == 0 &&
-		len(r.VoteID) == 0 && len(r.Votes) == 0 && r.Added == 0 && r.Progress == 0 && r.Total == 0
+		len(r.VoteID) == 0 && len(r.Votes) == 0 && len(r.Questions) == 0 &&
+		r.Added == 0 && r.Progress == 0 && r.Total == 0
 }
 
 // JobResponse is one job in the GET /jobs list: the unified shape across import and tx jobs.
@@ -1416,6 +1516,7 @@ func JobResponseFromDB(job *db.Job) JobResponse {
 		res.Nullifier = job.Result.Nullifier
 		res.VoteID = job.Result.VoteID
 		res.Votes = job.Result.Votes
+		res.Questions = job.Result.Questions
 	}
 	if job.Total > 0 {
 		res.Progress = job.Added * 100 / job.Total

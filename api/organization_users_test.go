@@ -481,9 +481,8 @@ func TestOrganizationUsers(t *testing.T) {
 		)
 		c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
-		// Test 4: Try to remove a non-existent user
-		// Note: The current implementation returns 200 OK even for non-existent users
-		// because the MongoDB UpdateOne operation doesn't return an error if no documents match
+		// Test 4: Try to remove a non-existent user: nothing is removed, so it is refused
+		// rather than decrementing the users counter
 		resp, code = testRequest(
 			t,
 			http.MethodDelete,
@@ -494,7 +493,7 @@ func TestOrganizationUsers(t *testing.T) {
 			"users",
 			"999999",
 		)
-		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+		c.Assert(code, qt.Equals, http.StatusBadRequest, qt.Commentf("response: %s", resp))
 
 		// Test 5: Try to remove yourself (which should fail)
 		// Get the admin's user ID
@@ -933,6 +932,7 @@ func TestOrganizationUsers(t *testing.T) {
 
 		// Set the user counter to the free plan's former users limit: no plan caps invites anymore.
 		org.Subscription.PlanID = mockFreePlan.ID
+		c.Assert(testDB.SetOrganizationSubscription(orgAddress, &org.Subscription), qt.IsNil)
 		org.Counters.Users = 10
 		err = testDB.SetOrganization(org)
 		c.Assert(err, qt.IsNil)

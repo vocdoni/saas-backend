@@ -36,9 +36,12 @@ func (ms *MongoStorage) SetOrgMember(salt string, orgMember *OrgMember) (string,
 		return "", fmt.Errorf("organization not found: %w", err)
 	}
 
-	member, errs := prepareOrgMember(org, orgMember, salt, time.Now())
+	member, errs, err := prepareOrgMember(org, orgMember, salt, time.Now(), backgroundHasher)
+	if err != nil {
+		return "", err
+	}
 	if len(errs) != 0 {
-		return "", fmt.Errorf("%s", strings.Join(errorsAsStrings(errs), ", "))
+		return "", fmt.Errorf("%w: %s", ErrInvalidData, strings.Join(errorsAsStrings(errs), ", "))
 	}
 
 	updateDoc, err := dynamicUpdateDocument(member, nil)
@@ -122,6 +125,9 @@ func (ms *MongoStorage) OrgMember(orgAddress common.Address, id string) (*OrgMem
 
 	orgMember := &OrgMember{}
 	if err = ms.orgMembers.FindOne(ctx, bson.M{"_id": objID, "orgAddress": orgAddress}).Decode(orgMember); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("failed to get orgMember: %w", err)
 	}
 
@@ -197,15 +203,69 @@ func (p *bulkOrgMembersProgress) snapshot() *BulkOrgMembersJob {
 	return &snap
 }
 
+// HashMemberPassword returns the stored form of a member password: the argon2 hash of the client
+// hash the member's password arrives as, salted with the service password salt followed by the
+// member ID in hex. The member ID makes the salt unique per member, so members sharing a password
+// (say, an initial one an organizer handed out) store different hashes, and one guess cannot be
+// tried against all of them at once. Both the write path (prepareOrgMember) and the CSP check use
+// it, so they cannot drift apart.
+func HashMemberPassword(salt string, memberID bson.ObjectID, clientHash string) []byte {
+	return internal.HashPassword(salt+memberID.Hex(), clientHash)
+}
+
+// memberHasher computes the argon2 hashes a member write stores: its phone and its password. Bulk
+// writes use backgroundHasher, which never fails and holds at most one shared hashing slot for all
+// of them; a write a request handler waits on uses requestHasher, which gives up with
+// internal.ErrHashingBusy instead of waiting behind running imports.
+type memberHasher struct {
+	phone    func(phone string, org *Organization) (HashedPhone, error)
+	password func(salt string, memberID bson.ObjectID, clientHash string) ([]byte, error)
+}
+
+// backgroundHasher is the memberHasher of bulk member writes (imports, census population).
+var backgroundHasher = memberHasher{
+	phone: func(phone string, org *Organization) (HashedPhone, error) {
+		return hashPhoneWith(phone, org, func(addr common.Address, normalized string) ([]byte, error) {
+			return internal.HashOrgDataBackground(addr, normalized), nil
+		})
+	},
+	password: func(salt string, memberID bson.ObjectID, clientHash string) ([]byte, error) {
+		return internal.HashPasswordBackground(salt+memberID.Hex(), clientHash), nil
+	},
+}
+
+// requestHasher is the memberHasher of a member write a request handler waits on.
+func requestHasher(ctx context.Context) memberHasher {
+	return memberHasher{
+		phone: func(phone string, org *Organization) (HashedPhone, error) {
+			return NewHashedPhoneContext(ctx, phone, org)
+		},
+		password: func(salt string, memberID bson.ObjectID, clientHash string) ([]byte, error) {
+			return HashMemberPasswordContext(ctx, salt, memberID, clientHash)
+		},
+	}
+}
+
+// HashMemberPasswordContext is HashMemberPassword for a request handler: the hash runs in the
+// service-wide argon2 slots, and it gives up with internal.ErrHashingBusy when none frees up within
+// internal.HashSlotWait or ctx ends first (see internal.HashPasswordContext).
+func HashMemberPasswordContext(ctx context.Context, salt string, memberID bson.ObjectID, clientHash string) ([]byte, error) {
+	return internal.HashPasswordContext(ctx, salt+memberID.Hex(), clientHash)
+}
+
 // prepareOrgMember processes a member for storage by:
 //   - Normalizing the fields that feed the CSP login hash (OrgMember.Normalized)
 //   - Setting the organization address
 //   - Setting the creation timestamp
 //   - Validating what Normalized only canonicalized (email, birthdate)
-//   - Hashing sensitive data (email, phone, password)
+//   - Hashing sensitive data (email, phone, password) with hasher
 //   - Not including original sensitive data
-func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime time.Time) (
-	*OrgMember, []error,
+//
+// The []error are the member's validation errors, which leave the offending field empty. The error
+// is a hash that could not be computed (only a requestHasher's internal.ErrHashingBusy): then the
+// member must not be stored at all.
+func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime time.Time, hasher memberHasher) (
+	*OrgMember, []error, error,
 ) {
 	// Normalize every field that can feed the login hash, so what is stored is
 	// byte-identical to what the CSP recomputes from a login request. Whitespace
@@ -235,19 +295,26 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 
 	// Hash phone if present
 	if member.PlaintextPhone != "" {
-		phone, err := NewHashedPhone(member.PlaintextPhone, org)
-		if err != nil {
+		phone, err := hasher.phone(member.PlaintextPhone, org)
+		switch {
+		case errors.Is(err, internal.ErrHashingBusy):
+			return nil, nil, err
+		case err != nil:
 			// the error already identifies the offending phone number
 			errs = append(errs, err)
-		} else {
+		default:
 			member.Phone = phone
 		}
 		member.PlaintextPhone = ""
 	}
 
-	// Hash password if present
+	// Hash password if present, with the member ID assigned above as part of its salt
 	if member.Password != "" {
-		member.HashedPass = internal.HashPassword(salt, member.Password)
+		hashed, err := hasher.password(salt, member.ID, member.Password)
+		if err != nil {
+			return nil, nil, err
+		}
+		member.HashedPass = hashed
 		member.Password = ""
 	}
 
@@ -261,7 +328,7 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 			member.ParsedBirthDate = time.Time{}
 		}
 	}
-	return &member, errs
+	return &member, errs, nil
 }
 
 // createOrgMemberBulkOperations creates a batch of members using bulk write operations,
@@ -281,7 +348,8 @@ func (ms *MongoStorage) createOrgMemberBulkOperations(
 
 	for i, m := range members {
 		// Prepare the member
-		member, validationErrors := prepareOrgMember(org, m, salt, currentTime)
+		// a backgroundHasher never fails, so only validation errors can come back
+		member, validationErrors, _ := prepareOrgMember(org, m, salt, currentTime, backgroundHasher)
 		for _, err := range validationErrors {
 			errs = append(errs, fmt.Errorf("line %d: %w", firstLine+i, err))
 		}
@@ -438,8 +506,11 @@ func (ms *MongoStorage) AddBulkOrgMembers(org *Organization, members []*OrgMembe
 // participate in. The update is applied over the stored member under the keys lock and the result
 // is written whole, so every census hash is computed from the member as it is actually stored.
 // The returned bool reports whether the member was created rather than updated, so callers can
-// propagate a brand new member to the censuses of the organization's auto group.
-func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, update *OrgMemberUpdate, salt string,
+// propagate a brand new member to the censuses of the organization's auto group. The member's phone
+// and password are hashed for reqCtx, the waiting request (see requestHasher): when no hashing slot
+// frees up in time it returns internal.ErrHashingBusy and writes nothing.
+func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(reqCtx context.Context, org *Organization,
+	update *OrgMemberUpdate, salt string,
 ) (bson.ObjectID, bool, error) {
 	if org.Address.Cmp(common.Address{}) == 0 {
 		return bson.NilObjectID, false, ErrInvalidData
@@ -458,7 +529,7 @@ func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, 
 	switch err := ms.orgMembers.FindOne(ctx, bson.M{"_id": update.ID}).Decode(&stored); {
 	case err == nil:
 		if stored.OrgAddress != org.Address {
-			return bson.NilObjectID, false, fmt.Errorf("modifying orgAddress is not allowed")
+			return bson.NilObjectID, false, fmt.Errorf("%w: modifying orgAddress is not allowed", ErrInvalidData)
 		}
 	case errors.Is(err, mongo.ErrNoDocuments):
 		created = true
@@ -467,9 +538,13 @@ func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, 
 	}
 
 	now := time.Now()
-	preparedMember, validationErrors := prepareOrgMember(org, update.applyTo(stored), salt, now)
+	preparedMember, validationErrors, err := prepareOrgMember(org, update.applyTo(stored), salt, now, requestHasher(reqCtx))
+	if err != nil {
+		return bson.NilObjectID, false, err
+	}
 	if len(validationErrors) > 0 {
-		return bson.NilObjectID, false, fmt.Errorf("errors: %s", errorsAsStrings(validationErrors))
+		return bson.NilObjectID, false, fmt.Errorf("%w: %s", ErrInvalidData,
+			strings.Join(errorsAsStrings(validationErrors), ", "))
 	}
 	// prepareOrgMember only stamps CreatedAt when it assigns the ID, not for a client-chosen one
 	if created {
@@ -513,7 +588,15 @@ func (ms *MongoStorage) updateCensusParticipantsForMember(ctx context.Context, m
 		return fmt.Errorf("failed to decode census participants: %w", err)
 	}
 
-	// Process each census participant
+	// Two phases: validate every census first, collecting the planned writes, and only then
+	// apply them. Writing as we validate would leave the participants of the already-processed
+	// censuses changed when a later census reports a duplicate conflict, so the member's hashes
+	// would no longer match its stored data in some censuses but not others.
+	type plannedWrite struct {
+		filter bson.M
+		update bson.M
+	}
+	writes := make([]plannedWrite, 0, len(participants))
 	for _, participant := range participants {
 		// Get the census to find AuthFields and TwoFaFields
 		census, err := ms.Census(participant.CensusID)
@@ -528,14 +611,13 @@ func (ms *MongoStorage) updateCensusParticipantsForMember(ctx context.Context, m
 		// the edit left the member without the data to log in: drop its login hashes rather than
 		// re-hash it, so it can neither log in nor clash with another participant
 		if member.MissingLoginData(census.AuthFields, census.TwoFaFields) {
-			unset := bson.M{
-				"$unset": bson.M{"loginHash": "", "loginHashEmail": "", "loginHashPhone": ""},
-				"$set":   bson.M{"updatedAt": time.Now()},
-			}
-			if _, err := ms.censusParticipants.UpdateOne(ctx, participantFilter, unset); err != nil {
-				return fmt.Errorf("failed to update census participant %s in census %s: %w",
-					participant.ParticipantID, participant.CensusID, err)
-			}
+			writes = append(writes, plannedWrite{
+				filter: participantFilter,
+				update: bson.M{
+					"$unset": bson.M{"loginHash": "", "loginHashEmail": "", "loginHashPhone": ""},
+					"$set":   bson.M{"updatedAt": time.Now()},
+				},
+			})
 			continue
 		}
 
@@ -564,16 +646,16 @@ func (ms *MongoStorage) updateCensusParticipantsForMember(ctx context.Context, m
 				participant.ParticipantID, participant.CensusID, ErrUpdateWouldCreateDuplicates)
 		}
 
-		// Update the census participant
 		// Prepare update document for census participant
 		set := maps.Clone(hashes)
 		set["updatedAt"] = time.Now()
-		participantUpdate := bson.M{"$set": set}
+		writes = append(writes, plannedWrite{filter: participantFilter, update: bson.M{"$set": set}})
+	}
 
-		_, err = ms.censusParticipants.UpdateOne(ctx, participantFilter, participantUpdate)
-		if err != nil {
-			return fmt.Errorf("failed to update census participant %s in census %s: %w",
-				participant.ParticipantID, participant.CensusID, err)
+	// every census validated: apply the writes
+	for _, w := range writes {
+		if _, err := ms.censusParticipants.UpdateOne(ctx, w.filter, w.update); err != nil {
+			return fmt.Errorf("failed to update census participant %v: %w", w.filter["participantID"], err)
 		}
 	}
 
@@ -716,12 +798,27 @@ func (ms *MongoStorage) DeleteOrgMembers(
 		},
 	}
 
+	deleted, err := ms.deleteOrgMembersLocked(ctx, orgAddress, filter, oids)
+	if err != nil {
+		return 0, nil, err
+	}
+	// the members are gone: revoke them once more to drop any participant a concurrent census
+	// build wrote back between the first revocation and the delete
+	emptied = append(emptied, ms.sweepRevokedMembers(scoped)...)
+	return deleted, emptied, nil
+}
+
+// deleteOrgMembersLocked deletes the org members matching filter and unlinks the given ids from
+// the organization's groups, under keysLock. It reports how many members were deleted.
+func (ms *MongoStorage) deleteOrgMembersLocked(
+	ctx context.Context, orgAddress common.Address, filter bson.M, oids []bson.ObjectID,
+) (int, error) {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
 	result, err := ms.orgMembers.DeleteMany(ctx, filter)
 	if err != nil {
-		return 0, nil, fmt.Errorf("failed to delete orgMembers: %w", err)
+		return 0, fmt.Errorf("failed to delete orgMembers: %w", err)
 	}
 
 	// Convert ObjectIDs to string IDs for group updates (groups store member IDs as strings)
@@ -752,7 +849,7 @@ func (ms *MongoStorage) DeleteOrgMembers(
 
 	_, err = ms.orgMemberGroups.UpdateMany(ctx, groupFilter, groupUpdate)
 	if err != nil {
-		return 0, nil, fmt.Errorf("failed to update groups after deleting orgMembers: %w", err)
+		return 0, fmt.Errorf("failed to update groups after deleting orgMembers: %w", err)
 	}
 
 	// Clean up the auto group if the org now has no members.
@@ -760,8 +857,30 @@ func (ms *MongoStorage) DeleteOrgMembers(
 		log.Warnw("could not clean up auto member group after DeleteOrgMembers", "error", err)
 	}
 
-	return int(result.DeletedCount), emptied, nil
+	return int(result.DeletedCount), nil
 }
+
+// sweepRevokedMembers revokes already deleted members from every census once more. Member deletion
+// revokes before deleting, so a failed revocation leaves everything retryable; but a census build
+// that read a member before that revocation can still write its participant afterwards, leaving a
+// row for a member that no longer exists (counted in the census size and weight). The sweep drops
+// those. It is best-effort: the members are already deleted, so a failure is only logged. It
+// returns the questions the sweep emptied, if any.
+func (ms *MongoStorage) sweepRevokedMembers(memberIDs []string) []VotingProcessQuestion {
+	if afterMemberDeleteHook != nil {
+		afterMemberDeleteHook(memberIDs)
+	}
+	_, emptied, err := ms.RevokeMembersEverywhere(memberIDs)
+	if err != nil {
+		log.Warnw("could not sweep census participants of deleted members", "members", len(memberIDs), "error", err)
+		return nil
+	}
+	return emptied
+}
+
+// afterMemberDeleteHook, when set (tests only), runs between a member deletion and its revocation
+// sweep, to simulate a concurrent census build writing a participant back.
+var afterMemberDeleteHook func(memberIDs []string)
 
 // DeleteAllOrgMembers removes all members from an organization, revoking them from every census
 // they were part of. The returned questions are those whose eligibility list became empty.
@@ -789,12 +908,24 @@ func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, []V
 		"orgAddress": orgAddress,
 	}
 
+	deleted, err := ms.deleteAllOrgMembersLocked(ctx, orgAddress, filter)
+	if err != nil {
+		return 0, nil, err
+	}
+	// see DeleteOrgMembers: drop participants a concurrent census build wrote back meanwhile
+	emptied = append(emptied, ms.sweepRevokedMembers(memberIDs)...)
+	return deleted, emptied, nil
+}
+
+// deleteAllOrgMembersLocked deletes the org members matching filter and empties the
+// organization's groups, under keysLock. It reports how many members were deleted.
+func (ms *MongoStorage) deleteAllOrgMembersLocked(ctx context.Context, orgAddress common.Address, filter bson.M) (int, error) {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
 	result, err := ms.orgMembers.DeleteMany(ctx, filter)
 	if err != nil {
-		return 0, nil, fmt.Errorf("failed to delete all orgMembers: %w", err)
+		return 0, fmt.Errorf("failed to delete all orgMembers: %w", err)
 	}
 
 	// Update all groups to remove the deleted member IDs
@@ -810,7 +941,7 @@ func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, []V
 
 	_, err = ms.orgMemberGroups.UpdateMany(ctx, groupFilter, groupUpdate)
 	if err != nil {
-		return 0, nil, fmt.Errorf("failed to update groups after deleting all orgMembers: %w", err)
+		return 0, fmt.Errorf("failed to update groups after deleting all orgMembers: %w", err)
 	}
 
 	// All members are gone — remove the auto group too.
@@ -818,7 +949,7 @@ func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, []V
 		log.Warnw("could not delete auto member group after DeleteAllOrgMembers", "error", err)
 	}
 
-	return int(result.DeletedCount), emptied, nil
+	return int(result.DeletedCount), nil
 }
 
 // GetAllOrgMemberIDs retrieves all member IDs for an organization
@@ -828,7 +959,7 @@ func (ms *MongoStorage) GetAllOrgMemberIDs(orgAddress common.Address) ([]string,
 	}
 
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	// Create filter for the organization
@@ -965,7 +1096,7 @@ func (ms *MongoStorage) FilterOrgMemberIDs(orgAddress common.Address, ids []stri
 		return nil, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	cursor, err := ms.orgMembers.Find(ctx,
@@ -1107,7 +1238,7 @@ func (ms *MongoStorage) OrgMembersByField(
 		return nil, ErrInvalidData
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
 	filter := bson.M{

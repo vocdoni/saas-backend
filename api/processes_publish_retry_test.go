@@ -176,7 +176,7 @@ func TestStalePublishReconcileCreditsBack(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	org, err := testDB.Organization(vp.OrgAddress)
 	c.Assert(err, qt.IsNil)
-	claimed, err := testDB.ClaimVotingProcessForPublish(oid)
+	_, claimed, err := testDB.ClaimVotingProcessForPublish(oid, time.Time{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(claimed, qt.IsTrue)
 	c.Assert(testAPI.debitProcessWallet(vp, org), qt.IsNil)

@@ -10,7 +10,7 @@ import (
 )
 
 func init() {
-	AddMigration(27, "integrator_flag", upIntegratorFlag, downIntegratorFlag)
+	AddMigration(35, "integrator_flag", upIntegratorFlag, downIntegratorFlag)
 }
 
 // upIntegratorFlag replaces integrator limits with a plain `integrator` flag: an integrator's

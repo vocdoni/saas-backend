@@ -282,9 +282,9 @@ rose, it was deleted) stays in the wallet for a manual publish; nothing goes bac
   (with `stripe listen` forwarding `refund.created`/`refund.updated`): the wallet history gains
   a `refund` row for the refunded amount net of VAT, debited even below zero — a negative
   balance refuses every publish until a top-up covers it.
-- **Integrator wallet**: make your org an integrator
-  (`go run ./cmd/cli --setIntegrator --orgAddress $ORG --mongoURL mongodb://root:vocdoni@localhost:27017/saasdb`),
-  then `POST /organizations/$ORG/wallet/topup -d '{"amountCents":10000,"returnURL":"http://localhost:8000/checkout.html"}'`,
+- **Integrator wallet**: create an integrator org (`POST /organizations` with
+  `"integrator": true`; an existing org cannot be switched, there is no command for it), then
+  `POST /organizations/$ORG/wallet/topup -d '{"amountCents":10000,"returnURL":"http://localhost:8000/checkout.html"}'`,
   pay it with a test card, and `GET /organizations/$ORG/wallet` shows the credited balance and
   history; a managed organization's process then publishes by debiting it (no checkout
   involved), and its `payment` row names the managed organization in `processOrgAddress`.

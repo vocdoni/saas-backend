@@ -79,7 +79,7 @@ func testNotification() *Notification {
 func TestIsPermanentSendError(t *testing.T) {
 	c := qt.New(t)
 
-	perm := &textproto.Error{Code: 550, Msg: "no such user"}
+	perm := &PermanentError{Err: &textproto.Error{Code: 550, Msg: "no such user"}}
 	transientProto := &textproto.Error{Code: 451, Msg: "try later"}
 	netErr := fmt.Errorf("dial tcp: connection refused")
 
@@ -89,11 +89,8 @@ func TestIsPermanentSendError(t *testing.T) {
 	c.Assert(IsPermanentSendError(netErr), qt.IsFalse)
 	// wrapped permanent stays permanent
 	c.Assert(IsPermanentSendError(fmt.Errorf("provider: %w", perm)), qt.IsTrue)
-	// 5xx boundary
-	c.Assert(IsPermanentSendError(&textproto.Error{Code: 500}), qt.IsTrue)
-	c.Assert(IsPermanentSendError(&textproto.Error{Code: 599}), qt.IsTrue)
-	c.Assert(IsPermanentSendError(&textproto.Error{Code: 499}), qt.IsFalse)
-	c.Assert(IsPermanentSendError(&textproto.Error{Code: 600}), qt.IsFalse)
+	// bare SMTP 5xx replies are only permanent once a provider wraps them
+	c.Assert(IsPermanentSendError(&textproto.Error{Code: 550}), qt.IsFalse)
 
 	// failover-style joined errors: permanent only when every branch is permanent
 	c.Assert(IsPermanentSendError(errors.Join(
@@ -107,6 +104,19 @@ func TestIsPermanentSendError(t *testing.T) {
 	c.Assert(IsPermanentSendError(errors.Join(
 		fmt.Errorf("p0: %w", perm),
 		fmt.Errorf("p1: %w", transientProto),
+	)), qt.IsFalse)
+
+	// provider errors marked permanent by a PermanentError
+	marked := &PermanentError{Err: fmt.Errorf("provider rejected the number")}
+	c.Assert(IsPermanentSendError(marked), qt.IsTrue)
+	c.Assert(IsPermanentSendError(fmt.Errorf("sms: %w", marked)), qt.IsTrue)
+	c.Assert(IsPermanentSendError(errors.Join(
+		fmt.Errorf("p0: %w", marked),
+		fmt.Errorf("p1: %w", perm),
+	)), qt.IsTrue)
+	c.Assert(IsPermanentSendError(errors.Join(
+		fmt.Errorf("p0: %w", marked),
+		netErr,
 	)), qt.IsFalse)
 }
 
@@ -240,7 +250,7 @@ func TestQueuePermanentFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	svc := &configurableSvc{sendErr: &textproto.Error{Code: 550, Msg: "no such user"}}
+	svc := &configurableSvc{sendErr: &PermanentError{Err: &textproto.Error{Code: 550, Msg: "no such user"}}}
 	q := NewQueue(ctx, QueueConfig{Workers: 1, MailService: svc})
 	q.Start()
 
@@ -257,6 +267,52 @@ func TestQueuePermanentFailure(t *testing.T) {
 	}
 }
 
+// A PermanentError must not count against the breaker: with a threshold of one,
+// a counted failure would open it and block the next item for the cooldown.
+func TestQueuePermanentErrorDoesNotTripBreaker(t *testing.T) {
+	c := qt.New(t)
+	c.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	svc := &configurableSvc{
+		sendErr: &PermanentError{Err: fmt.Errorf("provider rejected the number")},
+		failFor: 1, // only the first send is rejected
+	}
+	q := NewQueue(ctx, QueueConfig{
+		Workers:            1,
+		MailService:        svc,
+		BreakerMaxFailures: 1,
+		BreakerCooldown:    time.Minute,
+	})
+	q.Start()
+
+	first := &QueueItem{Notification: testNotification(), Type: Email, Label: "first"}
+	second := &QueueItem{Notification: testNotification(), Type: Email, Label: "second"}
+	c.Assert(q.Push(first), qt.IsNil)
+	c.Assert(q.Push(second), qt.IsNil)
+
+	select {
+	case res := <-q.Done:
+		c.Assert(res.Label, qt.Equals, "first")
+		c.Assert(res.Success, qt.IsFalse)
+		c.Assert(res.Retries, qt.Equals, 0)
+	case <-time.After(5 * time.Second):
+		c.Fatal("timed out waiting for permanent failure")
+	}
+
+	// the breaker stayed closed, so the second item is attempted and delivered
+	select {
+	case res := <-q.Done:
+		c.Assert(res.Label, qt.Equals, "second")
+		c.Assert(res.Success, qt.IsTrue)
+	case <-time.After(5 * time.Second):
+		c.Fatal("second item blocked: breaker opened on a permanent error")
+	}
+	c.Assert(svc.callCount(), qt.Equals, 2)
+	c.Assert(q.mailBreaker.Allow(), qt.IsTrue)
+}
+
 func TestQueuePushWait(t *testing.T) {
 	c := qt.New(t)
 	c.Parallel()
@@ -267,7 +323,7 @@ func TestQueuePushWait(t *testing.T) {
 		Workers:     1,
 		MailService: &configurableSvc{},
 		// a permanent error makes the failing item give up immediately
-		SMSService: &configurableSvc{sendErr: &textproto.Error{Code: 550, Msg: "mailbox unavailable"}},
+		SMSService: &configurableSvc{sendErr: &PermanentError{Err: &textproto.Error{Code: 550, Msg: "mailbox unavailable"}}},
 	})
 	q.Start()
 

@@ -1,11 +1,14 @@
 package api
 
 import (
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
@@ -93,7 +96,7 @@ func (a *API) organizationUsersHandler(w http.ResponseWriter, r *http.Request) {
 //	@Param			orgAddress	path		string							true	"Organization address"
 //	@Param			request		body		apicommon.OrganizationInvite	true	"Invitation information"
 //	@Success		200			{string}	string							"OK"
-//	@Failure		400			{object}	errors.Error					"Invalid input data"
+//	@Failure		400			{object}	errors.Error					"Invalid input data, or the organization's plan allows no more users"
 //	@Failure		401			{object}	errors.Error					"Unauthorized"
 //	@Failure		409			{object}	errors.Error					"User already has a role in the organization"
 //	@Failure		500			{object}	errors.Error					"Internal server error"
@@ -114,8 +117,18 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 
 	// check if the user/org has permission to invite new users
 	hasPermission, err := a.subscriptions.HasDBPermission(user.Email, org.Address, subscriptions.InviteUser)
-	if !hasPermission || err != nil {
-		errors.ErrUnauthorized.Withf("user does not have permission to sign transactions: %v", err).Write(w)
+	// a refusal (the user is not an admin) is an API error the caller is allowed to see as is
+	var apiErr errors.Error
+	if errors.As(err, &apiErr) && apiErr.HTTPstatus < http.StatusInternalServerError {
+		apiErr.Write(w)
+		return
+	}
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if !hasPermission {
+		errors.ErrUnauthorized.With("user does not have permission to invite users to the organization").Write(w)
 		return
 	}
 	// get new admin info from the request body
@@ -136,7 +149,7 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 	}
 	// check if the new user already has a role in the organization
 	if hasAnyRole, err := a.db.UserHasAnyRoleInOrg(invite.Email, org.Address); err != nil && err != db.ErrNotFound {
-		errors.ErrInvalidUserData.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	} else if hasAnyRole {
 		errors.ErrDuplicateConflict.With("user already has a role in the organization").Write(w)
@@ -180,7 +193,8 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 	}
 	// send the invitation mail to invited user email with the invite code and
 	// the invite link
-	if err := a.sendMail(r.Context(), org, invite.Email, mailtemplates.InviteNotification,
+	if err := a.sendMail(
+		r.Context(), org, invite.Email, mailtemplates.InviteNotification,
 		struct {
 			Organization string
 			Code         string
@@ -214,6 +228,7 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 //	@Failure		409			{object}	errors.Error							"User already has a role in the organization"
 //	@Failure		410			{object}	errors.Error							"Invitation expired"
 //	@Failure		500			{object}	errors.Error							"Internal server error"
+//	@Failure		503			{object}	errors.Error							"Server busy, retry after the Retry-After delay"
 //	@Router			/organizations/{orgAddress}/users/accept [post]
 func (a *API) acceptOrganizationUserInvitationHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
@@ -226,6 +241,13 @@ func (a *API) acceptOrganizationUserInvitationHandler(w http.ResponseWriter, r *
 	invitationReq := &apicommon.AcceptOrganizationInvitation{}
 	if err := json.NewDecoder(r.Body).Decode(invitationReq); err != nil {
 		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	// validate the invitation code format: must be exactly 2*InvitationCodeLength hex chars.
+	// This rejects empty codes (which can match stored "" codes when no mail service is
+	// configured) and short codes left over from older deployments.
+	if decoded, err := hex.DecodeString(invitationReq.Code); err != nil || len(decoded) != apicommon.InvitationCodeLength {
+		errors.ErrMalformedBody.With("invalid invitation code").Write(w)
 		return
 	}
 	// get the invitation from the database
@@ -252,6 +274,29 @@ func (a *API) acceptOrganizationUserInvitationHandler(w http.ResponseWriter, r *
 		errors.ErrInvitationExpired.Write(w)
 		return
 	}
+	// check the inviter still holds the admin role, so an invitation issued by someone who was
+	// removed, demoted or erased cannot grant a role. The invitation is dropped and its slot released.
+	// This check and the grant below are not atomic: an inviter removed in between can still get a
+	// role granted, so this check plus the cleanup on removal is best-effort for that race.
+	inviter, err := a.db.User(invitation.CurrentUserID)
+	if err != nil && err != db.ErrNotFound {
+		errors.ErrGenericInternalServerError.Withf("could not get inviter: %v", err).Write(w)
+		return
+	}
+	if err == db.ErrNotFound || !inviter.HasRoleFor(org.Address, db.AdminRole) {
+		// only the call that actually deletes the invitation releases its slot, so concurrent accepts
+		// of the same code cannot drop the counter more than once
+		revoked, revokeErr := a.db.RevokeInvitationByCode(invitationReq.Code)
+		if revokeErr != nil {
+			log.Warnw("could not revoke invitation of a removed inviter", "error", revokeErr)
+		} else if revoked {
+			if err := a.db.DecrementOrganizationUsersCounter(org.Address); err != nil {
+				log.Errorf("decrement users: %v", err)
+			}
+		}
+		errors.ErrUnauthorized.With("invitation issuer is no longer an admin of the organization").Write(w)
+		return
+	}
 	// try to get the user from the database
 	dbUser, err := a.db.UserByEmail(invitation.NewUserEmail)
 	if err != nil {
@@ -272,7 +317,10 @@ func (a *API) acceptOrganizationUserInvitationHandler(w http.ResponseWriter, r *
 		// is verified because it is an invitation and the email is already
 		// checked in the invitation so just hash the password and create the
 		// user with the first name and last name provided
-		hPassword := internal.HexHashPassword(passwordSalt, invitationReq.User.Password)
+		hPassword, ok := hashPassword(w, r, invitationReq.User.Password)
+		if !ok {
+			return
+		}
 		dbUser = &db.User{
 			Email:     invitation.NewUserEmail,
 			Password:  hPassword,
@@ -280,27 +328,50 @@ func (a *API) acceptOrganizationUserInvitationHandler(w http.ResponseWriter, r *
 			LastName:  invitationReq.User.LastName,
 			Verified:  true,
 		}
+		// create the user first and grant the membership below through the same atomic path as
+		// an existing user
+		if _, err := a.db.SetUser(dbUser); err != nil {
+			if err != db.ErrAlreadyExists {
+				errors.ErrGenericInternalServerError.Withf("could not set user: %v", err).Write(w)
+				return
+			}
+			// the account was created concurrently (another acceptance or a signup). Reuse it only
+			// under the same rule as an existing user: an unverified account may belong to someone
+			// who signed up with an email they do not own, so it must not receive the invited role
+			existing, err := a.db.UserByEmail(invitation.NewUserEmail)
+			if err != nil {
+				errors.ErrGenericInternalServerError.Withf("could not get user: %v", err).Write(w)
+				return
+			}
+			if !existing.Verified {
+				errors.ErrUserNoVerified.With("user already exists but is not verified").Write(w)
+				return
+			}
+		}
 	} else {
 		// if it does, check if the user is already verified
 		if !dbUser.Verified {
 			errors.ErrUserNoVerified.With("user already exists but is not verified").Write(w)
 			return
 		}
-		// check if the user already has the role in the organization
-		if _, err := a.db.UserHasRoleInOrg(invitation.NewUserEmail, org.Address, invitation.Role); err == nil {
+		// check if the user already has any role in the organization: granting the invited role
+		// on top of a different existing one would leave the user with two entries for the org
+		if hasAnyRole, err := a.db.UserHasAnyRoleInOrg(invitation.NewUserEmail, org.Address); err == nil && hasAnyRole {
 			go removeInvitation()
-			errors.ErrDuplicateConflict.With("user already has the role in the organization").Write(w)
+			errors.ErrDuplicateConflict.With("user already has a role in the organization").Write(w)
 			return
 		}
 	}
-	// include the new organization in the user
-	dbUser.Organizations = append(dbUser.Organizations, db.OrganizationUser{
-		Address: org.Address,
-		Role:    invitation.Role,
-	})
-	// set the user in the database
-	if _, err := a.db.SetUser(dbUser); err != nil {
-		errors.ErrGenericInternalServerError.Withf("could not set user: %v", err).Write(w)
+	// grant the membership atomically, keyed on the organization address, so two concurrent
+	// acceptances (or any concurrent membership write) cannot lose or duplicate an entry the way
+	// the previous read-append-write of the whole organizations array could
+	if err := a.db.AddUserToOrganization(invitation.NewUserEmail, org.Address, invitation.Role); err != nil {
+		if err == db.ErrAlreadyExists {
+			go removeInvitation()
+			errors.ErrDuplicateConflict.With("user already has a role in the organization").Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.Withf("could not add user to organization: %v", err).Write(w)
 		return
 	}
 	// delete the invitation
@@ -390,7 +461,8 @@ func (a *API) updatePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 
 	// send the invitation mail to invited user email with the invite code and
 	// the invite link
-	if err := a.sendMail(r.Context(), org, orgInvite.NewUserEmail, mailtemplates.InviteNotification,
+	if err := a.sendMail(
+		r.Context(), org, orgInvite.NewUserEmail, mailtemplates.InviteNotification,
 		struct {
 			Organization string
 			Code         string
@@ -647,7 +719,29 @@ func (a *API) updateOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		errors.ErrInvalidUserData.Withf("user not found: %v", err).Write(w)
 		return
 	}
+	// a user who is no longer an admin must not keep invitations that could still be accepted. The accept-time
+	// check is the real guard, so a failure here is logged rather than failing the demotion
+	if db.UserRole(update.Role) != db.AdminRole {
+		if err := a.revokeInvitationsIssuedBy(org.Address, uint64(userIDInt)); err != nil {
+			log.Warnw("could not revoke invitations of a demoted user", "error", err)
+		}
+	}
 	apicommon.HTTPWriteOK(w)
+}
+
+// revokeInvitationsIssuedBy deletes the pending invitations of the organization issued by the given user,
+// releasing the user slot each of them reserved, as deletePendingUserInvitationHandler does.
+func (a *API) revokeInvitationsIssuedBy(orgAddress common.Address, userID uint64) error {
+	deleted, err := a.db.DeleteInvitationsByInviter(orgAddress, userID)
+	if err != nil {
+		return err
+	}
+	for range deleted {
+		if err := a.db.DecrementOrganizationUsersCounter(orgAddress); err != nil {
+			return fmt.Errorf("decrement users: %w", err)
+		}
+	}
+	return nil
 }
 
 // removeOrganizationUserHandler godoc
@@ -703,16 +797,27 @@ func (a *API) removeOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		errors.ErrInvalidUserData.With("user cannot remove itself from the organization").Write(w)
 		return
 	}
-	if err := a.db.RemoveOrganizationUser(org.Address, uint64(userIDInt)); err != nil {
+	removed, err := a.db.RemoveOrganizationUser(org.Address, uint64(userIDInt))
+	if err != nil {
 		errors.ErrInvalidUserData.Withf("user not found: %v", err).Write(w)
 		return
 	}
-
+	// removing a user who is not a member must not decrement the users counter, or repeating the
+	// request would push it below the real number of users and lift the plan's user limit
+	if !removed {
+		errors.ErrInvalidUserData.With("user is not a member of the organization").Write(w)
+		return
+	}
 	// update the org users counter
 	if err := a.db.DecrementOrganizationUsersCounter(org.Address); err != nil {
 		log.Errorf("decrement users: %v", err)
 		errors.ErrGenericInternalServerError.Withf("could not update organization users counter: %v", err).Write(w)
 		return
+	}
+	// the removed user must not keep invitations that could still be accepted. The accept-time check is the
+	// real guard, so a failure here is logged rather than failing the removal that already happened
+	if err := a.revokeInvitationsIssuedBy(org.Address, uint64(userIDInt)); err != nil {
+		log.Warnw("could not revoke invitations of a removed user", "error", err)
 	}
 	apicommon.HTTPWriteOK(w)
 }

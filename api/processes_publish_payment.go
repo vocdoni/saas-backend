@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -290,7 +291,8 @@ func (a *API) reversePublishDebit(processID bson.ObjectID) error {
 	if err != nil {
 		return fmt.Errorf("failed to get process: %w", err)
 	}
-	if vp.Published || anyMined(questions) {
+	// HasMinedElections also covers an election that mined but whose id never reached its question
+	if vp.Published || anyMined(questions) || vp.HasMinedElections {
 		return nil
 	}
 	// the payment names the wallet to lock; it is read again under that lock
@@ -580,7 +582,9 @@ func (a *API) publishPaidProcess(t stripe.ProcessTopUp) error {
 			"processId", processID.Hex(), "problems", strings.Join(problems, "; "))
 		return nil
 	}
-	jobID, err := a.startProcessPublish(target)
+	// no request context to bound the org tx lock wait: it is bounded by orgTxLockTimeout, and
+	// a busy lock (503) is returned like any other retryable failure
+	jobID, err := a.startProcessPublish(context.Background(), target)
 	switch {
 	case errors.Is(err, errProcessAlreadyPublished):
 		return nil

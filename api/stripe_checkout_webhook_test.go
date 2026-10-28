@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
@@ -401,7 +402,7 @@ func TestStripeCheckoutWebhookRetriesTransientPublishFailure(t *testing.T) {
 	_, paid := openProcessTopUp(t, fake, token, pid)
 
 	// another publish holds the claim when the payment lands
-	claimed, err := testDB.ClaimVotingProcessForPublish(oid)
+	owner, claimed, err := testDB.ClaimVotingProcessForPublish(oid, time.Time{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(claimed, qt.IsTrue)
 	eventID := "evt_" + util.RandomHex(8)
@@ -414,7 +415,7 @@ func TestStripeCheckoutWebhookRetriesTransientPublishFailure(t *testing.T) {
 	assertWallet(t, orgAddress, pricedProcessCents, db.WalletEntryPayment, 0)
 
 	// that publish gave up; Stripe redelivers the same event, and this time it publishes
-	c.Assert(testDB.ClearVotingProcessPublishing(oid), qt.IsNil)
+	c.Assert(testDB.ClearVotingProcessPublishing(oid, owner), qt.IsNil)
 	code = postSignedStripeEvent(t, testWebhookSecret, eventID, "checkout.session.completed", paid)
 	c.Assert(code, qt.Equals, http.StatusOK)
 	pollProcessPublished(t, token, pid)
@@ -437,12 +438,12 @@ func TestTopUpWebhookReplayAfterCreditBackDoesNotDebit(t *testing.T) {
 	_, paid := openProcessTopUp(t, fake, token, pid)
 
 	// the first delivery credits and consumes, but the publish cannot start (claim held)
-	claimed, err := testDB.ClaimVotingProcessForPublish(oid)
+	owner, claimed, err := testDB.ClaimVotingProcessForPublish(oid, time.Time{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(claimed, qt.IsTrue)
 	code := postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8), "checkout.session.completed", paid)
 	c.Assert(code, qt.Equals, http.StatusInternalServerError)
-	c.Assert(testDB.ClearVotingProcessPublishing(oid), qt.IsNil)
+	c.Assert(testDB.ClearVotingProcessPublishing(oid, owner), qt.IsNil)
 	// the draft is paid from the wallet (the debit a manual publish makes), then deleted
 	vp, err := testDB.VotingProcess(oid)
 	c.Assert(err, qt.IsNil)

@@ -11,6 +11,8 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/subscriptions"
 )
 
 func TestCreateOrganizationHandler(t *testing.T) {
@@ -62,7 +64,7 @@ func TestCreateSubOrganizationHandler(t *testing.T) {
 	// Create a parent organization
 	parentOrgAddress := testCreateOrganization(t, token)
 
-	// Test creating a suborganization - should fail because free plan doesn't allow suborganizations (SubOrgs: 0)
+	// Test creating a suborganization - no plan caps suborganizations anymore, so it is created
 	subOrgInfo := &apicommon.OrganizationInfo{
 		Type:    string(db.CompanyType),
 		Website: "https://suborganization.com",
@@ -70,8 +72,9 @@ func TestCreateSubOrganizationHandler(t *testing.T) {
 			Address: parentOrgAddress,
 		},
 	}
-	_, code := testRequest(t, http.MethodPost, token, subOrgInfo, organizationsEndpoint)
-	c.Assert(code, qt.Equals, http.StatusBadRequest)
+	subOrg := requestAndParse[apicommon.OrganizationInfo](t, http.MethodPost, token, subOrgInfo, organizationsEndpoint)
+	c.Assert(subOrg.Parent, qt.Not(qt.IsNil))
+	c.Assert(subOrg.Parent.Address, qt.Equals, parentOrgAddress)
 
 	// Test creating suborganization with non-existent parent
 	nonExistentParent := common.HexToAddress("0x0000000000000000000000000000000000000001")
@@ -82,11 +85,10 @@ func TestCreateSubOrganizationHandler(t *testing.T) {
 			Address: nonExistentParent,
 		},
 	}
-	_, code = testRequest(t, http.MethodPost, token, invalidSubOrgInfo, organizationsEndpoint)
+	_, code := testRequest(t, http.MethodPost, token, invalidSubOrgInfo, organizationsEndpoint)
 	c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
-	// Test creating suborganization when user is not admin of parent
-	// (same error as above - permission check happens first)
+	// an admin of the parent creates a suborganization of it; no plan caps them
 	anotherUserToken := testCreateUser(t, "anotherpassword")
 	anotherUserOrgAddress := testCreateOrganization(t, anotherUserToken)
 	subOrgByNonAdmin := &apicommon.OrganizationInfo{
@@ -97,7 +99,33 @@ func TestCreateSubOrganizationHandler(t *testing.T) {
 		},
 	}
 	_, code = testRequest(t, http.MethodPost, anotherUserToken, subOrgByNonAdmin, organizationsEndpoint)
-	c.Assert(code, qt.Equals, http.StatusBadRequest)
+	c.Assert(code, qt.Equals, http.StatusOK)
+
+	// a user who is not an admin of the parent is refused by the permission check itself
+	subOrgByOutsider := &apicommon.OrganizationInfo{
+		Type:    string(db.CompanyType),
+		Website: "https://outsider.com",
+		Parent: &apicommon.OrganizationInfo{
+			Address: anotherUserOrgAddress,
+		},
+	}
+	requestAndAssertError(errors.ErrUserHasNoAdminRole, t, http.MethodPost, token, subOrgByOutsider, organizationsEndpoint)
+}
+
+func TestCreateOrganizationMaxOrgsReached(t *testing.T) {
+	token := testCreateUser(t, testPass)
+	me := requestAndParse[apicommon.UserInfo](t, http.MethodGet, token, nil, usersMeEndpoint)
+	// the user already belongs to the maximum number of organizations
+	for i := range subscriptions.MaxOrgsPerUser {
+		addr := common.HexToAddress(fmt.Sprintf("0x%040d", i+1))
+		qt.Assert(t, testDB.AddUserToOrganization(me.Email, addr, db.AdminRole), qt.IsNil)
+	}
+
+	orgInfo := &apicommon.OrganizationInfo{
+		Type:    string(db.CompanyType),
+		Website: "https://example.com",
+	}
+	requestAndAssertError(errors.ErrMaxOrganizationsReached, t, http.MethodPost, token, orgInfo, organizationsEndpoint)
 }
 
 func TestOrganizationInfoHandler(t *testing.T) {

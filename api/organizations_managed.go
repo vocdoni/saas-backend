@@ -119,6 +119,14 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 	if !validateDefaultLang(w, req.DefaultLang) {
 		return
 	}
+	if err := apicommon.ValidateMetaKeys(req.Meta); err != nil {
+		errors.ErrInvalidUserData.WithErr(err).Write(w)
+		return
+	}
+	if err := apicommon.ValidateMetaShorthands(req.Name, req.Logo, req.Description); err != nil {
+		errors.ErrInvalidUserData.WithErr(err).Write(w)
+		return
+	}
 	creatorEmail := user.Email
 	if req.OwnerEmail != "" {
 		// validate the owner exists up front, before provisioning an on-chain account, so a
@@ -147,6 +155,7 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		Address:        signer.Address(),
 		Website:        req.Website,
 		Creator:        creatorEmail,
+		SignerSeed:     creatorEmail,
 		CreatedAt:      time.Now(),
 		Nonce:          nonce,
 		Type:           db.OrganizationType(req.Type),
@@ -185,7 +194,9 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	apicommon.HTTPWriteJSON(w, apicommon.OrganizationFromDB(dbOrg, nil))
+	info := apicommon.OrganizationFromDB(dbOrg, nil)
+	redactBillingEmails(info, user)
+	apicommon.HTTPWriteJSON(w, info)
 }
 
 // managedOrganizationsHandler godoc
@@ -237,7 +248,9 @@ func (a *API) managedOrganizationsHandler(w http.ResponseWriter, r *http.Request
 	}
 	list := make([]*apicommon.OrganizationInfo, 0, len(orgs))
 	for i := range orgs {
-		list = append(list, apicommon.OrganizationFromDB(&orgs[i], nil))
+		info := apicommon.OrganizationFromDB(&orgs[i], nil)
+		redactBillingEmails(info, user)
+		list = append(list, info)
 	}
 	apicommon.HTTPWriteJSON(w, &apicommon.ListManagedOrganizations{
 		Pagination:    pagination,
@@ -494,6 +507,9 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 	}
 	if _, err := a.db.DeleteJobsByOrg(managedAddr); err != nil {
 		log.Warnw("could not delete jobs", "org", managedAddr.Hex(), "error", err)
+	}
+	if _, err := a.db.DeleteMeteredVotesByOrg(managedAddr); err != nil {
+		log.Warnw("could not delete metered votes", "org", managedAddr.Hex(), "error", err)
 	}
 	if _, err := a.db.DeleteInvitationsByOrg(managedAddr); err != nil {
 		log.Warnw("could not delete invitations", "org", managedAddr.Hex(), "error", err)

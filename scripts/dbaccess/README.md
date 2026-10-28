@@ -18,7 +18,9 @@ firewall rule.
 
   A legacy Personal Access Token with `Write` checked works too. Create at
   <https://cloud.digitalocean.com/account/api/tokens>, then `doctl auth init`.
-- `mongosh`, `curl`, `awk` on `PATH`.
+- `curl`, `awk`, `jq` on `PATH`.
+- A client: `mongosh` on `PATH` (default), or MongoDB Compass installed
+  for `DB_CLIENT=compass`.
 
 ## Usage
 
@@ -38,6 +40,68 @@ Or set env vars to skip the prompts:
 DB_CLUSTER=my-mongo-cluster DB_USER=readonly-user ./dbaccess.sh analytics
 ```
 
+To browse the data in **MongoDB Compass** instead of `mongosh`:
+
+```sh
+DB_CLIENT=compass DB_CLUSTER=my-mongo-cluster DB_USER=readonly-user \
+  ./dbaccess.sh analytics
+```
+
+Compass registers `mongodb://` and `mongodb+srv://` as URL schemes, so the
+tool hands it the connection URI directly and Compass opens with it
+pre-filled. By default the URI is **password-less** — type your password into
+Compass's connection form once it opens. The grant stays open until you press
+enter at:
+
+```
+press enter when done to revoke access:
+```
+
+#### Embedding the password in the URI (opt-in: `DB_EMBED_PASS=1`)
+
+Unlike `mongosh`, **Compass has no password prompt of its own** in the URI —
+you type it into the connection form. If you would rather have the tool embed
+the password in the URI so Compass connects without further typing, set
+`DB_EMBED_PASS=1`:
+
+```sh
+DB_CLIENT=compass DB_EMBED_PASS=1 DB_CLUSTER=my-mongo-cluster \
+  DB_USER=readonly-user ./dbaccess.sh analytics
+```
+
+The tool then asks for the password (or reads `DB_PASS`), percent-encodes it,
+and embeds it. The terminal shows only the redacted form (`lucas:***@…`) — the
+exception is the no-handler path below, where the full URI is printed because
+you have to paste it somewhere.
+
+That is a real exposure, so know where it lands:
+
+- in the argument to `open`, briefly visible in `ps` while the call runs
+- in macOS LaunchServices, which records opened URLs
+- in Compass's saved-connections store, until you delete the connection there
+- in your terminal scrollback, when no handler is registered for the scheme
+  and the tool prints the URI for you to paste
+
+On Linux the hand-off only happens when a handler is actually registered for
+the URI's scheme (`xdg-mime query default x-scheme-handler/<scheme>` is
+non-empty). Without one, `xdg-open`'s fallback for an unknown scheme is the
+**default browser** — which would put a password-bearing URI in the URL bar,
+browser history, and possibly a search engine. The tool prints the URI to
+paste instead.
+
+The `mongosh` path never embeds a password: `DB_PASS`/`DB_EMBED_PASS` are
+ignored there, the URI it builds is byte-identical to previous versions, and
+mongosh prompts for the credential as it always did.
+
+If you supply your own `MONGO_URI`, a `{PASS}` placeholder is substituted
+when embedding is on (`DB_EMBED_PASS=1`); if the template has no `{PASS}`, the
+tool splices one in after `{USER}` — but only when the template literally
+contains `{USER}@`. A template with a hardcoded username
+(`mongodb://lucas@{HOST}/{DB}`) or no userinfo at all has nowhere to splice, so
+rather than dropping the credential silently the tool refuses to start and
+tells you to add `{PASS}` yourself. When not embedding, the whole `:{PASS}`
+segment is dropped.
+
 Configuration:
 
 | Var          | Meaning                                            |
@@ -45,6 +109,9 @@ Configuration:
 | `DB_CLUSTER` | cluster name (as shown by `doctl databases list`)  |
 | `DB_USER`    | mongo user                                         |
 | `DB_NAME`    | mongo database (also accepted as positional arg)   |
+| `DB_CLIENT`  | `mongosh` (default), or `compass`/`gui`            |
+| `DB_EMBED_PASS` | set to embed the password in the Compass URI (compass only; off by default) |
+| `DB_PASS`    | mongo password — only used with `DB_EMBED_PASS`; prompted if unset |
 | `MONGO_URI`  | full connection URI template (see below)           |
 
 ### Pre-existing rule for your IP
@@ -84,6 +151,14 @@ any of:
 **Not Ctrl-C** — inside `mongosh` that just cancels the current query
 and drops you back at the prompt; the shell stays open and no rule is
 revoked.
+
+With `DB_CLIENT=compass` the session is the `press enter when done to
+revoke access:` prompt, not the app — `open` returns immediately and
+quitting Compass would take unrelated connections with it. Here Ctrl-C
+**does** revoke (the opposite of the `mongosh` case above): it kills the
+script at the read, which fires the trap. Compass keeps the connection in
+its saved list afterwards; reconnecting without a live rule just times
+out, so re-run the tool.
 
 Closing the terminal window or sending `SIGTERM` / `SIGINT` to the
 script still fires the trap. Only a hard kill (`kill -9`, power loss,
