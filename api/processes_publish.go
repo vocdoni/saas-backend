@@ -674,7 +674,11 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 	if e := a.db.SetVotingProcessPublished(pw.vp.ID, pw.owner, pw.resolveStartDate()); e != nil {
 		// every election is already on-chain and its question persisted: the next attempt finds
 		// nothing pending and only marks the process published again. The write is conditional
-		// on still owning the claim, so a dispossessed worker never touches the new claimant's state.
+		// on still owning the claim, so a dispossessed worker never touches the new claimant's state;
+		// a conflict means the claim is gone, which no retry can win back.
+		if errors.Is(e, db.ErrConflict) {
+			return nil, errPublishClaimLost
+		}
 		return nil, transient(e)
 	}
 	// the debit lets a process through without a paid payment only when it priced at zero,
