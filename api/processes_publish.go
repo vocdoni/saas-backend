@@ -777,8 +777,11 @@ func (pw *publishWorker) abandon() {
 		if e := a.db.ResetQuestionsPublish(pw.vp.ID); e != nil {
 			log.Warnw("could not reset questions after failed publish", "error", e)
 		}
-		if e := a.reversePublishDebit(pw.vp.ID); e != nil {
-			log.Errorw(e, "could not credit back the wallet debit of a failed publish; it stays a paid draft")
+		// an election that mined but could not be recorded is still an election: never credit it back
+		if len(pw.minedUnpersisted) == 0 {
+			if e := a.reversePublishDebit(pw.vp.ID); e != nil {
+				log.Errorw(e, "could not credit back the wallet debit of a failed publish; it stays a paid draft")
+			}
 		}
 		if e := a.db.ClearVotingProcessPublishing(pw.vp.ID, pw.owner); e != nil {
 			log.Warnw("could not clear publishing state after failed publish", "error", e)
