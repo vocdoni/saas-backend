@@ -226,9 +226,14 @@ func (a *API) debitProcessWalletUpTo(d publishDebit) error {
 		return err
 	}
 	defer walletLock.Unlock()
-	// read once for the whole lock hold: quoting and the charge below reuse it
+	// a release an earlier attempt's credit-back still owes lands before this attempt is priced:
+	// priced over the stale stamp, the draft would publish the add-on without paying for it. Read
+	// once for the whole lock hold: quoting and the charge below reuse it
 	paid, err := a.processPaidState(vp.ID, payer)
 	if err != nil {
+		return err
+	}
+	if err := a.healOwedRelease(vp, paid); err != nil {
 		return err
 	}
 	org, err = a.db.Organization(vp.OrgAddress)
@@ -265,7 +270,7 @@ func (a *API) debitProcessWalletUpTo(d publishDebit) error {
 	// refused before the debit, nothing backs the claims; any later failure keeps them, since
 	// the debit it follows may already be applied
 	if errors.Is(err, errors.ErrInsufficientWalletBalance) || errors.Is(err, errors.ErrPaymentRequired) ||
-		errors.Is(err, errors.ErrQuoteRequired) {
+		errors.Is(err, errors.ErrQuoteRequired) || errors.Is(err, errors.ErrDuplicateConflict) {
 		a.releaseRefusedOrgAddOnClaims(vp, claims)
 	}
 	return err
@@ -353,6 +358,11 @@ func (a *API) chargeProcessWallet(c processCharge) (pricing.Cents, error) {
 		}
 		defer walletLock.Unlock()
 	}
+	// checked under the wallet lock the teardown's credits take: a debit landing between its draft
+	// sweep and the bulk delete would go with the process, never credited back
+	if err := a.refuseTearingDown(c.vp.OrgAddress); err != nil {
+		return 0, err
+	}
 	var paid processPaid
 	var err error
 	if c.walletLocked && c.paid != nil {
@@ -361,6 +371,10 @@ func (a *API) chargeProcessWallet(c processCharge) (pricing.Cents, error) {
 		paid, err = a.processPaidState(c.vp.ID, payer)
 	}
 	if err != nil {
+		return 0, err
+	}
+	// a census headroom purchase can race a failed publish's reversal: what it owes lands first
+	if err := a.healOwedRelease(c.vp, paid); err != nil {
 		return 0, err
 	}
 	if paid.Refunded {
@@ -479,6 +493,80 @@ func atMoneyStep(step moneyStep, processID bson.ObjectID) error {
 		return nil
 	}
 	return moneyStepHook(step, processID)
+}
+
+// reversePublishDebit gives a draft's wallet payment back to its payer when its publish failed
+// for good before any election was mined: the publish worker's abandon, the publish request
+// failing after the debit, and the stale-marker sweep after a restart. The caller holds the
+// publish claim. A draft with mined elections keeps the debit — they exist and were paid for, and
+// publishing again resumes them for free.
+//
+// Under the payer's wallet lock it reads what the process paid off the ledger and credits it back
+// under the attempt's key (db.PublishFailCreditKey), the credit-back row carrying the add-ons it
+// gives back; that one write makes the draft unpaid, moves its attempt on (the next publish debits
+// under keys no earlier attempt applied) and records the release it owes. The release, pinned to
+// claims taken before the credit-back, follows (healOwedRelease), and so does the payment row's
+// display cache; whatever a crash leaves undone of them is redone by whatever touches the process
+// next: another reversal, the next publish's debit, a checkout, or the draft's delete. A retry
+// finds nothing paid and credits nothing. Once-per-organization add-ons another process already
+// relies on are withheld and stay the organization's, as a delete's credit-back withholds them; a
+// payment those add-ons account for entirely gives nothing back and is left paid.
+func (a *API) reversePublishDebit(processID bson.ObjectID) error {
+	vp, questions, err := a.db.ProcessWithQuestions(processID)
+	if err != nil {
+		return fmt.Errorf("failed to get process: %w", err)
+	}
+	// HasMinedElections also covers an election that mined but whose id never reached its question
+	if vp.Published || anyMined(questions) || vp.HasMinedElections {
+		return nil
+	}
+	org, err := a.db.Organization(vp.OrgAddress)
+	if err != nil {
+		return fmt.Errorf("failed to get organization: %w", err)
+	}
+	payer := walletPayer(org)
+	// unbounded, unlike the request paths: a credit-back is never given up, and holders only
+	// touch Mongo
+	walletLock := a.walletLocks.lock(payer)
+	defer walletLock.Unlock()
+	paid, err := a.processPaidState(processID, payer)
+	if err != nil {
+		return err
+	}
+	if paidCents := paid.PaidCents; paidCents > 0 && !paid.Refunded {
+		withheld, err := a.reliedOnOrgAddOns(vp, paid.ProcessLedgerState, nil)
+		if err != nil {
+			return err
+		}
+		owed := paidCents - withheld.Cents
+		if owed <= 0 {
+			// nothing to give back: the payment stays, and so do the add-ons it bought, which a
+			// publish again finds paid
+			log.Infow("failed publish paid only for add-ons in use, kept paid", "processId", processID.Hex(),
+				"amountCents", paidCents, "withheldAddOns", withheld.AddOns)
+			return nil
+		}
+		if err := a.creditProcessBack(processCreditBack{
+			vp: vp, payer: payer, key: db.PublishFailCreditKey(processID, paid.Attempt),
+			amountCents: owed, withheld: withheld, addOns: paid.AddOns,
+		}); err != nil {
+			return err
+		}
+		log.Infow("failed publish credited back to the payer's wallet", "processId", processID.Hex(),
+			"payer", payer.String(), "amountCents", owed, "attempt", paid.Attempt)
+		if paid, err = a.processPaidState(processID, payer); err != nil {
+			return err
+		}
+		if err := a.healOwedRelease(vp, paid); err != nil {
+			return err
+		}
+		if err := atMoneyStep(moneyStepCache, processID); err != nil {
+			return err
+		}
+		a.refreshPaymentCache(vp, db.ProcessPaymentFailed, paidCents)
+		return nil
+	}
+	return a.healOwedRelease(vp, paid)
 }
 
 // applyProcessTopUp is the webhook's follow-up of a credited top-up opened for a process
@@ -619,7 +707,8 @@ func (a *API) dropProcessCheckout(processID bson.ObjectID, sessionID string) err
 // agreed to. Every refusal that needs the user — price rose, wallet short, draft changed, deleted
 // or already published, preflight — leaves the credit in the wallet and returns nil. A failure a
 // retry can clear (a publish already in flight, a read error) is returned instead, so the
-// webhook answers 500 and Stripe redelivers the event.
+// webhook answers 500 and Stripe redelivers the event. A full tx queue is not one: the publish is
+// accepted and retried by the service itself.
 func (a *API) publishPaidProcess(t stripe.ProcessTopUp) error {
 	processID := t.ProcessID
 	vp, questions, err := a.db.ProcessWithQuestions(processID)
@@ -782,6 +871,10 @@ func topUpRefusal(refusal error) db.TopUpRefusal {
 // own guard against a concurrent publish) for a refusal. ErrOrgTxBusy, server errors and plain
 // errors are retried.
 func refusedForUser(err error) bool {
+	// the payment was credited back: Stripe redelivering would publish nothing
+	if afterDebit := (errPublishFailedAfterDebit{}); errors.As(err, &afterDebit) {
+		return true
+	}
 	// the draft, its census or the organization has to change before a publish can pass these
 	if errors.Is(err, errors.ErrMalformedBody) || errors.Is(err, errors.ErrProcessQuestionsMismatch) ||
 		errors.Is(err, errors.ErrStaleUpdate) || errors.Is(err, errors.ErrDuplicateConflict) {

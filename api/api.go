@@ -59,6 +59,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -182,10 +183,26 @@ type API struct {
 	// censusGrowthLocks makes the pay-per-process growth check and the census write it
 	// allows one step per organization, so parallel growth cannot pass the same check
 	censusGrowthLocks *orgTxMutex
+	// publishFault, when set, runs at the start of every publish attempt and fails it with what it
+	// returns. A test seam for the retry and credit-back paths; nil in production.
+	publishFault func() error
+	// publishPreJobFault, when set, runs in a publish request between the wallet debit and the
+	// job's creation and fails the request with what it returns; publishMinedFault runs in a
+	// publish attempt once a submitted batch is mined and recorded. Test seams for a failure after
+	// the payment and a failure after mining; nil in production. publishSubmittedHook runs right
+	// after a batch is submitted, before the claim is checked again: a seam for a claim that goes
+	// stale once something is on its way to the chain.
+	publishPreJobFault   func() error
+	publishMinedFault    func() error
+	publishSubmittedHook func()
 	// writerLocks makes the write-seat cap check (OrgCanAddWriter) and the invitation or role
 	// write it allows one step per organization, so parallel invites cannot pass the same check.
 	// ponytail: in-memory, like orgTxLocks — one API instance; a DB-side conditional write if that changes
-	writerLocks   *orgTxMutex
+	writerLocks *orgTxMutex
+	// teardowns holds the managed organizations being deleted: draft creation, publish and every
+	// wallet debit refuse them, so nothing is created or debited behind the teardown's draft sweep.
+	// ponytail: in-memory, like orgTxLocks — one API instance; a DB marker if that changes
+	teardowns     sync.Map
 	otpExpiry     time.Duration
 	otpCooldown   time.Duration
 	notifySync    bool
@@ -330,6 +347,10 @@ func New(ctx context.Context, conf *Config) *API {
 	// clear any publishing markers stranded by a previous crash/restart so those processes are
 	// publishable again (see reconcileStalePublishing).
 	a.reconcileStalePublishing()
+	// markers a restart found still fresh belonged to workers that died with it too; sweep again
+	// once they are stale. Only stale markers are touched, so a live publish (whose worker keeps
+	// its marker fresh) is never swept.
+	time.AfterFunc(db.PublishStaleAfter, a.reconcileStalePublishing)
 	return a
 }
 

@@ -271,6 +271,19 @@ func PublishFailCreditKey(processID bson.ObjectID, attempt int) string {
 	return fmt.Sprintf("publishfail:%s:%d", processID.Hex(), attempt)
 }
 
+// teardownAddOnKeyPrefix starts TeardownAddOnCreditKey.
+const teardownAddOnKeyPrefix = "teardownaddon:"
+
+// TeardownAddOnCreditKey is the idempotency key of an organization teardown's credit-back of a
+// once-per-organization add-on an earlier credit-back of processID withheld and no process
+// received: once per withholding, since each withheld price is withheld by one row (an add-on
+// sold again after a teardown cut cleared the stamp, and withheld again, is a second price). Its
+// row names the withholding process, but is not part of that process's ledger
+// (ProcessLedgerState): the process's envelope settled the withheld price already.
+func TeardownAddOnCreditKey(orgAddress common.Address, addOn OrgAddOn, processID bson.ObjectID) string {
+	return teardownAddOnKeyPrefix + strings.ToLower(orgAddress.Hex()) + ":" + string(addOn) + ":" + processID.Hex()
+}
+
 // CreditWallet adds a credit (Kind defaults to WalletEntryTopUp), creating the wallet on first
 // use. An already applied key is a successful no-op. A credit-back of 0 is valid when it withholds
 // something: it settles a payment its withheld add-ons account for entirely.
@@ -577,6 +590,9 @@ func foldProcessLedger(rows []WalletLedgerEntry) *ProcessLedgerState {
 			}
 			state.OwedRelease, state.OwedSince = nil, time.Time{}
 		case WalletEntryCreditBack:
+			if strings.HasPrefix(row.IdempotencyKey, teardownAddOnKeyPrefix) {
+				continue // settled by the withholding row already (TeardownAddOnCreditKey)
+			}
 			state.PaidCents -= row.AmountCents + row.WithheldCents
 			switch {
 			case strings.HasPrefix(row.IdempotencyKey, "publishfail:"):

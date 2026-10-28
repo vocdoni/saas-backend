@@ -271,13 +271,44 @@ func (ms *MongoStorage) transitionProcessPayment(
 }
 
 // processMovementsMatch selects payer's payment and creditBack rows of processIDs: what
-// ProcessLedgerState folds, on the {orgAddress, processId} index.
+// ProcessLedgerState folds (a teardown's add-on credit is not one), on the {orgAddress, processId}
+// index.
 func processMovementsMatch(payer common.Address, processIDs bson.A) bson.M {
 	return bson.M{
-		"orgAddress": payer,
-		"processId":  bson.M{"$in": processIDs},
-		"kind":       bson.M{"$in": bson.A{WalletEntryPayment, WalletEntryCreditBack}},
+		"orgAddress":     payer,
+		"processId":      bson.M{"$in": processIDs},
+		"kind":           bson.M{"$in": bson.A{WalletEntryPayment, WalletEntryCreditBack}},
+		"idempotencyKey": bson.M{"$not": bson.Regex{Pattern: "^" + teardownAddOnKeyPrefix}},
 	}
+}
+
+// OrganizationAddOnWithholdings returns the credit-backs in payer's wallet ledger that withheld a
+// once-per-organization add-on of orgAddress's processes, oldest first: each add-on kept back
+// because another process relied on it, whose price stayed the organization's stamp. An
+// organization teardown credits back the ones no process received. It drains the wallet first.
+func (ms *MongoStorage) OrganizationAddOnWithholdings(payer, orgAddress common.Address) ([]WalletLedgerEntry, error) {
+	if (payer.Cmp(common.Address{}) == 0) || (orgAddress.Cmp(common.Address{}) == 0) {
+		return nil, ErrInvalidData
+	}
+	if err := ms.drainWallet(payer); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	cursor, err := ms.walletLedger.Find(ctx, bson.M{
+		"orgAddress":        payer,
+		"processOrgAddress": orgAddress,
+		"kind":              WalletEntryCreditBack,
+		"withheldAddOns.0":  bson.M{"$exists": true},
+	}, options.Find().SetSort(bson.D{{Key: "createdAt", Value: 1}, {Key: "_id", Value: 1}}))
+	if err != nil {
+		return nil, fmt.Errorf("failed to find add-on withholdings: %w", err)
+	}
+	var rows []WalletLedgerEntry
+	if err := cursor.All(ctx, &rows); err != nil {
+		return nil, fmt.Errorf("failed to decode add-on withholdings: %w", err)
+	}
+	return rows, nil
 }
 
 // brandedProcessesFilter matches the organization's processes other than exceptProcessID that

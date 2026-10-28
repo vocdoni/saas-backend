@@ -80,6 +80,7 @@ func parseProcessDates(req *apicommon.CreateVotingProcessRequest) (start, end ti
 //	@Failure		400		{object}	errors.Error
 //	@Failure		401		{object}	errors.Error
 //	@Failure		403		{object}	errors.Error
+//	@Failure		409		{object}	errors.Error	"The organization is being deleted (40901)"
 //	@Failure		503		{object}	errors.Error	"Busy (50302), retry after Retry-After"
 //	@Router			/processes [post]
 func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +119,10 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	}
 	defer draftLock.Unlock()
 	if err := a.subscriptions.OrgCanCreateVotingProcessDraft(orgAddr); err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+	if err := a.refuseTearingDown(orgAddr); err != nil {
 		writeSubscriptionError(w, err)
 		return
 	}

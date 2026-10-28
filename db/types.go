@@ -135,6 +135,18 @@ type Organization struct {
 	// Integrator enables the organization to create and pay for managed organizations
 	// (ignored on a managed organization itself).
 	Integrator bool `json:"integrator,omitempty" bson:"integrator,omitempty"`
+	// AddOnsDelivered are the once-per-organization add-ons a published process of the
+	// organization, or one with elections mined, received: what an organization teardown records
+	// before it drops any draft (RecordOrganizationAddOnsDelivered), so a retry after the drafts
+	// or published processes are gone still knows them. Only ever grows; never written by
+	// SetOrganization.
+	AddOnsDelivered []OrgAddOn `json:"-" bson:"addOnsDelivered,omitempty"`
+	// AddOnsOwedCredit are the credit keys (TeardownAddOnCreditKey: one per withholding row) of
+	// the withheld once-per-organization add-on prices an organization teardown owes back:
+	// recorded with the removal of the stamp (OweOrganizationAddOnCredit), so a teardown cut
+	// before its credit applies it on retry, and removed once credited
+	// (SettleOrganizationAddOnCredit). Never written by SetOrganization.
+	AddOnsOwedCredit []string `json:"-" bson:"addOnsOwedCredit,omitempty"`
 }
 
 // metaDefaultString extracts the "default" locale value from a meta entry, stored

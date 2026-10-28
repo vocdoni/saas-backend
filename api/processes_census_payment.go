@@ -224,7 +224,7 @@ func (a *API) censusGrowthPaymentError(g censusGrowth) error {
 //	@Failure		402			{object}	errors.Error	"Integrator wallet does not cover the difference (40175)"
 //	@Failure		401			{object}	errors.Error
 //	@Failure		404			{object}	errors.Error
-//	@Failure		409			{object}	errors.Error	"Payment changed or is being refunded"
+//	@Failure		409			{object}	errors.Error	"Payment changed or being refunded (40177), or organization being deleted (40901)"
 //	@Failure		422			{object}	errors.Error	"Census size requires a custom quote"
 //	@Failure		500			{object}	errors.Error
 //	@Failure		503			{object}	errors.Error	"Busy (50302), retry after Retry-After"

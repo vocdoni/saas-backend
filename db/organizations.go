@@ -111,6 +111,10 @@ func (ms *MongoStorage) SetOrganization(org *Organization) error {
 			setOnInsert["subscription"] = subscription
 		}
 		delete(set, "signerSeed")
+		// grows only through RecordOrganizationAddOnsDelivered
+		delete(set, "addOnsDelivered")
+		// written only by OweOrganizationAddOnCredit and SettleOrganizationAddOnCredit
+		delete(set, "addOnsOwedCredit")
 		// the once-per-organization add-on fields are written only by their conditional methods: a
 		// stale read written back would resurrect a released claim or a refunded add-on
 		for _, addOn := range OrgAddOns {
@@ -506,6 +510,97 @@ func (ms *MongoStorage) ReleaseOrganizationAddOn(c OrgAddOnClaim) error {
 		return fmt.Errorf("failed to release organization %s: %w", addOn, err)
 	}
 	return nil
+}
+
+// OweOrganizationAddOnCredit records, in one write, that an organization teardown owes the
+// credit-back of the addOn price the withholding credit-back row withheld (its
+// TeardownAddOnCreditKey in AddOnsOwedCredit), and removes the organization's stamp and claim on
+// addOn when the stamp is that withheld price: set no later than the row. A stamp set since was
+// paid by a process of its own and stays. The
+// write is pinned to the stamp it read, so a stamp set in between is never cleared (an error: the
+// teardown is retried). Once it lands, no process can ride the withheld price, and the credit it
+// records is owed whatever the organization's processes receive afterwards.
+func (ms *MongoStorage) OweOrganizationAddOnCredit(orgAddress common.Address, addOn OrgAddOn,
+	withholding *WalletLedgerEntry,
+) error {
+	if (orgAddress.Cmp(common.Address{}) == 0) || !addOn.IsValid() || withholding == nil || withholding.ProcessID.IsZero() {
+		return ErrInvalidData
+	}
+	withheldAt := withholding.CreatedAt
+	org, err := ms.Organization(orgAddress)
+	if err != nil {
+		return err
+	}
+	filter := bson.M{"_id": orgAddress}
+	update := bson.M{"$addToSet": bson.M{"addOnsOwedCredit": TeardownAddOnCreditKey(orgAddress, addOn, withholding.ProcessID)}}
+	if paidAt := org.AddOnPaidAt(addOn); paidAt.IsZero() {
+		filter[addOn.paidAtField()] = bson.M{"$exists": false}
+	} else {
+		filter[addOn.paidAtField()] = paidAt
+		if !paidAt.After(withheldAt) {
+			update["$unset"] = bson.M{addOn.claimedByField(): "", addOn.claimedAtField(): "", addOn.paidAtField(): ""}
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.organizations.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to record the organization's owed %s credit: %w", addOn, err)
+	}
+	if res.MatchedCount == 0 {
+		return fmt.Errorf("the organization's %s stamp changed while recording its owed credit; retry", addOn)
+	}
+	return nil
+}
+
+// SettleOrganizationAddOnCredit removes the owed credit of the addOn price processID's
+// credit-back withheld from the organization's AddOnsOwedCredit once it is applied. Idempotent.
+func (ms *MongoStorage) SettleOrganizationAddOnCredit(orgAddress common.Address, addOn OrgAddOn, processID bson.ObjectID) error {
+	if (orgAddress.Cmp(common.Address{}) == 0) || !addOn.IsValid() || processID.IsZero() {
+		return ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	if _, err := ms.organizations.UpdateOne(ctx, bson.M{"_id": orgAddress},
+		bson.M{"$pull": bson.M{"addOnsOwedCredit": TeardownAddOnCreditKey(orgAddress, addOn, processID)}}); err != nil {
+		return fmt.Errorf("failed to settle the organization's owed %s credit: %w", addOn, err)
+	}
+	return nil
+}
+
+// RecordOrganizationAddOnsDelivered adds to the organization's AddOnsDelivered every
+// once-per-organization add-on a published or mined process of it carries now
+// (OrganizationAddOnDelivered), and returns them all, those recorded earlier included. An
+// organization teardown calls it before it drops anything, so what it decides from the result
+// does not depend on which drafts or published processes a crashed attempt already removed.
+func (ms *MongoStorage) RecordOrganizationAddOnsDelivered(orgAddress common.Address) ([]OrgAddOn, error) {
+	if (orgAddress.Cmp(common.Address{}) == 0) {
+		return nil, ErrInvalidData
+	}
+	delivered := bson.A{}
+	for _, addOn := range OrgAddOns {
+		ok, err := ms.OrganizationAddOnDelivered(orgAddress, addOn, bson.NilObjectID)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			delivered = append(delivered, addOn)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	org := &Organization{}
+	err := ms.organizations.FindOneAndUpdate(ctx, bson.M{"_id": orgAddress},
+		bson.M{"$addToSet": bson.M{"addOnsDelivered": bson.M{"$each": delivered}}},
+		options.FindOneAndUpdate().SetReturnDocument(options.After).
+			SetProjection(bson.M{"addOnsDelivered": 1})).Decode(org)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to record the organization's delivered add-ons: %w", err)
+	}
+	return org.AddOnsDelivered, nil
 }
 
 // SetOrganizationAddOnPaid stamps a once-per-organization add-on as paid once, reporting

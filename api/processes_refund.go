@@ -33,15 +33,14 @@ var errRefundedDraft = errors.ErrPaymentSessionConflict.
 // entirely (a credit of 0). A retry after any failure reads the ledger again: credited, the
 // process paid nothing more and only the owed release is left to apply (healOwedRelease).
 //
-// In an organization teardown (teardown) the add-on is withheld only for a process that actually
-// received it, published or with elections mined: the other drafts relying on the stamp go in the
-// same sweep, so withholding for them would strand the price with the deleted organization.
+// In an organization teardown (non-nil teardown) the add-on is withheld only when a process
+// actually received it, published or with elections mined, as the teardown recorded before it
+// dropped anything: the other drafts relying on the stamp go in the same sweep, so withholding for
+// them would strand the price with the deleted organization.
 //
 // Returns why the money could not be credited, as an errors.Error or a plain error meaning 500.
 // The draft stays then, delete-only once credited, so the delete can be retried.
-//
-//nolint:revive // flag-parameter: teardown selects the teardown mode, set only by deleteOrgDrafts
-func (a *API) refundPaidProcess(vp *db.VotingProcess, teardown bool) error {
+func (a *API) refundPaidProcess(vp *db.VotingProcess, teardown *orgTeardown) error {
 	org, err := a.db.Organization(vp.OrgAddress)
 	if err != nil {
 		return fmt.Errorf("failed to get organization: %w", err)
@@ -60,7 +59,7 @@ func (a *API) refundPaidProcess(vp *db.VotingProcess, teardown bool) error {
 		return err
 	}
 	if paidCents := paid.PaidCents; paidCents > 0 {
-		withheld, err := a.reliedOnOrgAddOns(vp, payer, paid.AddOns, teardown)
+		withheld, err := a.reliedOnOrgAddOns(vp, paid.ProcessLedgerState, teardown)
 		if err != nil {
 			return err
 		}
@@ -169,28 +168,24 @@ func (a *API) healOwedRelease(vp *db.VotingProcess, paid processPaid) error {
 }
 
 // reliedOnOrgAddOns is what giving vp's payment back must withhold: each once-per-organization
-// add-on of addOns (those its payment charged) that another process of the organization relies
-// on, at its list price. A delete's refund and a failed publish's credit-back both withhold it. In
-// an organization teardown (teardown) only a process the add-on was delivered to relies on it
-// (db.OrganizationAddOnDelivered), so the result does not depend on the order drafts go in.
-//
-//nolint:revive // flag-parameter: teardown selects the teardown mode, set only by deleteOrgDrafts
+// add-on its payment charged (paid, its ledger state read from its payer's wallet) that another
+// process of the organization relies on, at its list price. A delete's refund and a failed
+// publish's credit-back both withhold it. In an organization teardown (non-nil teardown) only an
+// add-on the teardown found delivered is relied on, so the result does not depend on the order
+// drafts go in.
 func (a *API) reliedOnOrgAddOns(
-	vp *db.VotingProcess, payer common.Address, addOns []db.OrgAddOn, teardown bool,
+	vp *db.VotingProcess, paid *db.ProcessLedgerState, teardown *orgTeardown,
 ) (db.RefundWithholding, error) {
 	var withheld db.RefundWithholding
-	for _, addOn := range addOns {
-		var reliedOn bool
-		var err error
-		if teardown {
-			reliedOn, err = a.db.OrganizationAddOnDelivered(vp.OrgAddress, addOn, vp.ID)
-		} else {
-			reliedOn, err = a.db.OrganizationAddOnReliedOn(db.OrganizationAddOnReliedOnParams{
-				Payer: payer, OrgAddress: vp.OrgAddress, AddOn: addOn, ExceptProcessID: vp.ID,
-			})
-		}
-		if err != nil {
-			return db.RefundWithholding{}, fmt.Errorf("failed to check %s reliance: %w", addOn, err)
+	for _, addOn := range paid.AddOns {
+		reliedOn := teardown != nil && slices.Contains(teardown.delivered, addOn)
+		if teardown == nil {
+			var err error
+			if reliedOn, err = a.db.OrganizationAddOnReliedOn(db.OrganizationAddOnReliedOnParams{
+				Payer: paid.Payer, OrgAddress: vp.OrgAddress, AddOn: addOn, ExceptProcessID: vp.ID,
+			}); err != nil {
+				return db.RefundWithholding{}, fmt.Errorf("failed to check %s reliance: %w", addOn, err)
+			}
 		}
 		if reliedOn {
 			withheld.Cents += orgAddOnCents(addOn)

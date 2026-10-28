@@ -516,6 +516,7 @@ func TestRefusedForUser(t *testing.T) {
 		errors.ErrProcessQuestionsMismatch,
 		errors.ErrStaleUpdate,
 		errors.ErrDuplicateConflict,
+		errPublishFailedAfterDebit{err: errors.ErrGenericInternalServerError},
 		fmt.Errorf("failed to re-price: %w", errors.ErrMalformedBody),
 	} {
 		c.Assert(refusedForUser(err), qt.IsTrue, qt.Commentf("%v", err))

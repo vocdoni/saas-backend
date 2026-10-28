@@ -484,3 +484,360 @@ func TestDeleteDraftCreditsBackDebitWithOpenCheckout(t *testing.T) {
 	_, err = testDB.ProcessPayment(oid)
 	c.Assert(err, qt.ErrorIs, db.ErrNotFound)
 }
+
+// TestFailedPublishCreditsBackHeadroom: a failed publish's reversal credits back everything the
+// draft paid, its census headroom included, read off the ledger, and moves the attempt on.
+func TestFailedPublishCreditsBackHeadroom(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "lostheadroomrevert1")
+	orgAddress := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	pid := newPricedVotingProcess(t, token, orgAddress)
+	oid := objectID(c, pid)
+	const headroomCents pricing.Cents = 500
+	total := pricedProcessCents + headroomCents
+	fundWallet(t, orgAddress, total)
+	// the publish's debit, and a headroom debit up to the new total
+	c.Assert(testDB.DebitWalletForProcess(db.WalletDebit{
+		OrgAddress: orgAddress, ProcessID: oid, ProcessOrgAddress: orgAddress,
+		AmountCents: pricedProcessCents, PriceCents: pricedProcessCents,
+	}), qt.IsNil)
+	c.Assert(testDB.DebitWalletForProcess(db.WalletDebit{
+		OrgAddress: orgAddress, ProcessID: oid, ProcessOrgAddress: orgAddress,
+		AmountCents: headroomCents, PriceCents: total,
+	}), qt.IsNil)
+
+	c.Assert(testAPI.reversePublishDebit(oid), qt.IsNil)
+	c.Assert(testAPI.reversePublishDebit(oid), qt.IsNil) // the stale sweep runs it again
+	assertWallet(t, orgAddress, total, db.WalletEntryCreditBack, 1)
+	state, err := testDB.ProcessLedgerState(orgAddress, oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(state.PaidCents, qt.Equals, pricing.Cents(0))
+	c.Assert(state.Attempt, qt.Equals, 1)
+	payment, err := testDB.ProcessPayment(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentFailed)
+	c.Assert(payment.AmountCents, qt.Equals, total)
+}
+
+// TestRetriedDeleteCreditsCreditedBackDebitOnce: a delete of a draft whose publish was credited
+// back, whose first attempt dropped the payment row and then failed to drop the draft, credits
+// nothing on its retry: the ledger shows the debit settled.
+func TestRetriedDeleteCreditsCreditedBackDebitOnce(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "retrieddelete1234")
+	orgAddress := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	pid := newPricedVotingProcess(t, token, orgAddress)
+	oid := objectID(c, pid)
+	paidCents := markProcessPaid(t, pid)
+	c.Assert(testAPI.reversePublishDebit(oid), qt.IsNil)
+	assertWallet(t, orgAddress, paidCents, db.WalletEntryCreditBack, 1)
+
+	failMoneyStepOnce(t, moneyStepDraftDelete, oid)
+	requestAndAssertCode(http.StatusInternalServerError, t, http.MethodDelete, token, nil, "processes", pid)
+	_, err := testDB.ProcessPayment(oid)
+	c.Assert(err, qt.ErrorIs, db.ErrNotFound)
+
+	requestAndAssertCode(http.StatusOK, t, http.MethodDelete, token, nil, "processes", pid)
+	assertWallet(t, orgAddress, paidCents, db.WalletEntryCreditBack, 1)
+}
+
+// TestReversalOwesAddOnRelease: a failed publish's credit-back row records the add-ons it gives
+// back. A release that fails after it stays owed on the ledger, the next touch of the draft applies
+// it, and it is pinned to claims taken before the credit-back, so it never undoes the next
+// attempt's own claim.
+func TestReversalOwesAddOnRelease(t *testing.T) {
+	c := qt.New(t)
+	installFakePaymentGW(t)
+	token := testCreateUser(t, "releasefails1234")
+	orgAddress := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	brandingPaid := func() bool {
+		o, err := testDB.Organization(orgAddress)
+		c.Assert(err, qt.IsNil)
+		return !o.BrandingPaidAt.IsZero()
+	}
+	pid := newBrandedVotingProcess(t, token, orgAddress)
+	oid := objectID(c, pid)
+	paidCents := markProcessPaid(t, pid)
+	c.Assert(brandingPaid(), qt.IsTrue)
+
+	failMoneyStepOnce(t, moneyStepRelease, oid)
+	c.Assert(testAPI.reversePublishDebit(oid), qt.ErrorMatches, "simulated crash.*")
+	assertWallet(t, orgAddress, paidCents, db.WalletEntryCreditBack, 1)
+	c.Assert(brandingPaid(), qt.IsTrue)
+	state, err := testDB.ProcessLedgerState(orgAddress, oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(state.OwedRelease, qt.DeepEquals, []db.OrgAddOn{db.OrgAddOnBranding})
+
+	// the next touch applies it, once
+	c.Assert(testAPI.reversePublishDebit(oid), qt.IsNil)
+	c.Assert(brandingPaid(), qt.IsFalse)
+	assertWallet(t, orgAddress, paidCents, db.WalletEntryCreditBack, 1)
+
+	// the next attempt claims and pays branding again; a late release of the old one leaves it
+	c.Assert(markProcessPaid(t, pid), qt.Equals, paidCents)
+	c.Assert(brandingPaid(), qt.IsTrue)
+	vp, err := testDB.VotingProcess(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(testAPI.healOwedRelease(vp, processPaid{ProcessLedgerState: state}), qt.IsNil)
+	c.Assert(brandingPaid(), qt.IsTrue)
+}
+
+// TestOwedReleaseSiblingPaysAddOn: a failed publish is credited back with its branding but the
+// release is cut short, leaving the organization stamped for an add-on it got back. A sibling's
+// quote reads the claimant's ledger, applies the owed release and pays for branding instead of
+// riding on the stamp; the owing draft's late release then leaves the sibling's stamp alone.
+func TestOwedReleaseSiblingPaysAddOn(t *testing.T) {
+	c := qt.New(t)
+	installFakePaymentGW(t)
+	token := testCreateUser(t, "owedsibling12345")
+	orgAddress := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	brandingClaimant := func() bson.ObjectID {
+		o, err := testDB.Organization(orgAddress)
+		c.Assert(err, qt.IsNil)
+		c.Assert(o.BrandingPaidAt.IsZero(), qt.IsFalse)
+		claimant, _ := o.AddOnClaim(db.OrgAddOnBranding)
+		return claimant
+	}
+	pid := newBrandedVotingProcess(t, token, orgAddress)
+	oid := objectID(c, pid)
+	c.Assert(markProcessPaid(t, pid), qt.Equals, pricedProcessCents+pricing.BrandingCents)
+	failMoneyStepOnce(t, moneyStepRelease, oid)
+	c.Assert(testAPI.reversePublishDebit(oid), qt.ErrorMatches, "simulated crash.*")
+	c.Assert(brandingClaimant(), qt.Equals, oid)
+
+	sibling := newBrandedVotingProcess(t, token, orgAddress)
+	c.Assert(markProcessPaid(t, sibling), qt.Equals, pricedProcessCents+pricing.BrandingCents)
+	c.Assert(brandingClaimant(), qt.Equals, objectID(c, sibling))
+
+	c.Assert(testAPI.reversePublishDebit(oid), qt.IsNil)
+	c.Assert(brandingClaimant(), qt.Equals, objectID(c, sibling))
+}
+
+// TestOwedReleaseRefusesAddOnOnPaidDraft: the draft update applies an owed release before it
+// trusts the organization's stamp, so a draft paid without branding cannot turn it on for free on
+// a stamp whose claimant got its price back.
+func TestOwedReleaseRefusesAddOnOnPaidDraft(t *testing.T) {
+	c := qt.New(t)
+	installFakePaymentGW(t)
+	token := testCreateUser(t, "owedreleaseupdate")
+	orgAddress := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	ids := postNewOrgMembers(t, token, orgAddress, pricedProcessVoters)
+	plain := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, newVotingProcessRequest(orgAddress, ids), processesCreateEndpoint).ProcessID
+	c.Assert(markProcessPaid(t, plain), qt.Equals, pricedProcessCents)
+	oid := objectID(c, newBrandedVotingProcess(t, token, orgAddress))
+	c.Assert(markProcessPaid(t, oid.Hex()), qt.Equals, pricedProcessCents+pricing.BrandingCents)
+	failMoneyStepOnce(t, moneyStepRelease, oid)
+	c.Assert(testAPI.reversePublishDebit(oid), qt.ErrorMatches, "simulated crash.*")
+	org, err := testDB.Organization(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(org.BrandingPaidAt.IsZero(), qt.IsFalse) // the release was cut short
+
+	branded := newVotingProcessRequest(orgAddress, ids)
+	branded.AddOns = db.ProcessAddOns{Branding: true}
+	requestAndAssertError(errors.ErrPaymentSessionConflict, t, http.MethodPut, token, branded, "processes", plain)
+	org, err = testDB.Organization(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(org.BrandingPaidAt.IsZero(), qt.IsTrue)
+}
+
+// TestReversalWithheldBrandingRepublishPaysBase: a failed publish whose branding a sibling relies
+// on is credited back less the branding, which stays the organization's stamp; the draft is then
+// unpaid, so publishing it again pays its base price, under the next attempt's key.
+func TestReversalWithheldBrandingRepublishPaysBase(t *testing.T) {
+	c := qt.New(t)
+	installFakePaymentGW(t)
+	token := testCreateUser(t, "withheldrepublish")
+	orgAddress := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	pid := newBrandedVotingProcess(t, token, orgAddress)
+	oid := objectID(c, pid)
+	paidCents := markProcessPaid(t, pid)
+	c.Assert(paidCents, qt.Equals, pricedProcessCents+pricing.BrandingCents)
+	sibling := objectID(c, newBrandedVotingProcess(t, token, orgAddress))
+	owner, claimed, err := testDB.ClaimVotingProcessForPublish(sibling, time.Time{})
+	c.Assert(err, qt.IsNil)
+	c.Assert(claimed, qt.IsTrue)
+
+	c.Assert(testAPI.reversePublishDebit(oid), qt.IsNil)
+	c.Assert(testDB.ClearVotingProcessPublishing(sibling, owner), qt.IsNil)
+	assertWallet(t, orgAddress, pricedProcessCents, db.WalletEntryCreditBack, 1)
+	state, err := testDB.ProcessLedgerState(orgAddress, oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(state.PaidCents, qt.Equals, pricing.Cents(0))
+	c.Assert(state.Attempt, qt.Equals, 1)
+
+	vp, err := testDB.VotingProcess(oid)
+	c.Assert(err, qt.IsNil)
+	org, err := testDB.Organization(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(org.BrandingPaidAt.IsZero(), qt.IsFalse)
+	c.Assert(testAPI.debitProcessWallet(vp, org, nil), qt.IsNil)
+	assertWallet(t, orgAddress, 0, db.WalletEntryPayment, 2)
+	_, entries, err := testDB.WalletLedger(orgAddress, 1, 1)
+	c.Assert(err, qt.IsNil)
+	c.Assert(entries[0].IdempotencyKey, qt.Equals, fmt.Sprintf("%s:1:%d", oid.Hex(), pricedProcessCents))
+	c.Assert(entries[0].AmountCents, qt.Equals, -pricedProcessCents)
+}
+
+// TestReversalAllWithheldKeptPaid: a failed publish that paid only for add-ons another process
+// relies on gives nothing back and stays paid; deleting the draft then settles that payment with a
+// credit-back of 0 that withholds it all, so the deleted draft nets to nothing on the ledger.
+func TestReversalAllWithheldKeptPaid(t *testing.T) {
+	c := qt.New(t)
+	installFakePaymentGW(t)
+	token := testCreateUser(t, "keptpaidwithheld")
+	orgAddress := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	pid := newBrandedVotingProcess(t, token, orgAddress)
+	oid := objectID(c, pid)
+	vp, err := testDB.VotingProcess(oid)
+	c.Assert(err, qt.IsNil)
+	org, err := testDB.Organization(orgAddress)
+	c.Assert(err, qt.IsNil)
+	fundWallet(t, orgAddress, pricing.BrandingCents)
+	// a payment that is all branding
+	_, err = testAPI.chargeProcessWallet(processCharge{
+		vp: vp, org: org, quote: pricing.Quote{TotalCents: pricing.BrandingCents},
+		addOns: []db.OrgAddOn{db.OrgAddOnBranding},
+	})
+	c.Assert(err, qt.IsNil)
+	sibling := objectID(c, newBrandedVotingProcess(t, token, orgAddress))
+	_, claimed, err := testDB.ClaimVotingProcessForPublish(sibling, time.Time{})
+	c.Assert(err, qt.IsNil)
+	c.Assert(claimed, qt.IsTrue)
+
+	c.Assert(testAPI.reversePublishDebit(oid), qt.IsNil)
+	assertWallet(t, orgAddress, 0, db.WalletEntryCreditBack, 0)
+	state, err := testDB.ProcessLedgerState(orgAddress, oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(state.PaidCents, qt.Equals, pricing.BrandingCents)
+
+	requestAndAssertCode(http.StatusOK, t, http.MethodDelete, token, nil, "processes", pid)
+	assertWallet(t, orgAddress, 0, db.WalletEntryCreditBack, 1)
+	state, err = testDB.ProcessLedgerState(orgAddress, oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(state.PaidCents, qt.Equals, pricing.Cents(0))
+	_, entries, err := testDB.WalletLedger(orgAddress, 1, 1)
+	c.Assert(err, qt.IsNil)
+	c.Assert(entries[0].AmountCents, qt.Equals, pricing.Cents(0))
+	c.Assert(entries[0].WithheldCents, qt.Equals, pricing.BrandingCents)
+}
+
+// TestPaidDraftAddOnUnstampedAtPublishRefused: the end state of a paid draft's edit turning
+// branding on while the stamp it relied on is credited back in full by a sibling's delete (the edit
+// checked the stamp before the delete, and wrote after it). The publish does not trust the edit:
+// with the organization unstamped, the gate and the debit refuse the add-on the draft did not pay
+// (409, nothing debited, nothing stamped); once another process pays for it, the draft publishes.
+func TestPaidDraftAddOnUnstampedAtPublishRefused(t *testing.T) {
+	c := qt.New(t)
+	installFakePaymentGW(t)
+	token := testCreateUser(t, "unstampededit123")
+	orgAddress := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	brandingPaid := func() bool {
+		o, err := testDB.Organization(orgAddress)
+		c.Assert(err, qt.IsNil)
+		return !o.BrandingPaidAt.IsZero()
+	}
+	stamped := newBrandedVotingProcess(t, token, orgAddress)
+	c.Assert(markProcessPaid(t, stamped), qt.Equals, pricedProcessCents+pricing.BrandingCents)
+	plain := newPricedVotingProcess(t, token, orgAddress)
+	oid := objectID(c, plain)
+	c.Assert(markProcessPaid(t, plain), qt.Equals, pricedProcessCents)
+
+	// nothing relies on the branding yet: the delete credits it back in full and releases it
+	requestAndAssertCode(http.StatusOK, t, http.MethodDelete, token, nil, "processes", stamped)
+	_, entries, err := testDB.WalletLedger(orgAddress, 1, 1)
+	c.Assert(err, qt.IsNil)
+	c.Assert(entries[0].Kind, qt.Equals, db.WalletEntryCreditBack)
+	c.Assert(entries[0].WithheldCents, qt.Equals, pricing.Cents(0))
+	c.Assert(brandingPaid(), qt.IsFalse)
+	// the edit lands after the release
+	vp, err := testDB.VotingProcess(oid)
+	c.Assert(err, qt.IsNil)
+	vp.AddOns.Branding = true
+	_, err = testDB.SetVotingProcess(vp)
+	c.Assert(err, qt.IsNil)
+	fundWallet(t, orgAddress, pricing.BrandingCents)
+	before, err := testDB.Wallet(orgAddress)
+	c.Assert(err, qt.IsNil)
+	org, err := testDB.Organization(orgAddress)
+	c.Assert(err, qt.IsNil)
+
+	c.Assert(testAPI.paymentDueForPublish(vp), qt.ErrorIs, errors.ErrPaymentSessionConflict)
+	c.Assert(testAPI.debitProcessWallet(vp, org, nil), qt.ErrorIs, errors.ErrPaymentSessionConflict)
+	c.Assert(brandingPaid(), qt.IsFalse)
+	after, err := testDB.Wallet(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(after.BalanceCents, qt.Equals, before.BalanceCents)
+	state, err := testDB.ProcessLedgerState(orgAddress, oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(state.PaidCents, qt.Equals, pricedProcessCents)
+
+	// a sibling pays for the branding: the stamp is the organization's, and the draft rides on it
+	c.Assert(markProcessPaid(t, newBrandedVotingProcess(t, token, orgAddress)),
+		qt.Equals, pricedProcessCents+pricing.BrandingCents)
+	c.Assert(brandingPaid(), qt.IsTrue)
+	before, err = testDB.Wallet(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(testAPI.paymentDueForPublish(vp), qt.IsNil)
+	c.Assert(testAPI.debitProcessWallet(vp, org, nil), qt.IsNil)
+	after, err = testDB.Wallet(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(after.BalanceCents, qt.Equals, before.BalanceCents)
+}
+
+// TestWithheldAddOnStampedWhenChargeLostIt: a branded draft's charge stops before its stamp, its
+// publish then fails while a branded sibling holds the publish claim, so the reversal withholds the
+// branding for that sibling. The withholding writes the stamp the charge never did, so the sibling
+// rides on it (pays its base only) instead of paying the branding a second time.
+func TestWithheldAddOnStampedWhenChargeLostIt(t *testing.T) {
+	c := qt.New(t)
+	installFakePaymentGW(t)
+	token := testCreateUser(t, "withheldnostamp1")
+	orgAddress := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	brandingPaid := func() bool {
+		o, err := testDB.Organization(orgAddress)
+		c.Assert(err, qt.IsNil)
+		return !o.BrandingPaidAt.IsZero()
+	}
+	oid := objectID(c, newBrandedVotingProcess(t, token, orgAddress))
+	vp, err := testDB.VotingProcess(oid)
+	c.Assert(err, qt.IsNil)
+	org, err := testDB.Organization(orgAddress)
+	c.Assert(err, qt.IsNil)
+	fundWallet(t, orgAddress, pricedProcessCents+pricing.BrandingCents)
+	failMoneyStepOnce(t, moneyStepStamp, oid)
+	c.Assert(testAPI.debitProcessWallet(vp, org, nil), qt.ErrorMatches, "simulated crash.*")
+	c.Assert(brandingPaid(), qt.IsFalse)
+	assertWallet(t, orgAddress, 0, db.WalletEntryPayment, 1)
+
+	sibling := objectID(c, newBrandedVotingProcess(t, token, orgAddress))
+	owner, claimed, err := testDB.ClaimVotingProcessForPublish(sibling, time.Time{})
+	c.Assert(err, qt.IsNil)
+	c.Assert(claimed, qt.IsTrue)
+	c.Assert(testAPI.reversePublishDebit(oid), qt.IsNil)
+	_, entries, err := testDB.WalletLedger(orgAddress, 1, 1)
+	c.Assert(err, qt.IsNil)
+	c.Assert(entries[0].Kind, qt.Equals, db.WalletEntryCreditBack)
+	c.Assert(entries[0].WithheldAddOns, qt.DeepEquals, []db.OrgAddOn{db.OrgAddOnBranding})
+	c.Assert(brandingPaid(), qt.IsTrue)
+	assertWallet(t, orgAddress, pricedProcessCents, db.WalletEntryCreditBack, 1)
+
+	c.Assert(testDB.ClearVotingProcessPublishing(sibling, owner), qt.IsNil)
+	siblingVP, err := testDB.VotingProcess(sibling)
+	c.Assert(err, qt.IsNil)
+	c.Assert(testAPI.debitProcessWallet(siblingVP, org, nil), qt.IsNil)
+	assertWallet(t, orgAddress, 0, db.WalletEntryPayment, 2)
+	state, err := testDB.ProcessLedgerState(orgAddress, sibling)
+	c.Assert(err, qt.IsNil)
+	c.Assert(state.PaidCents, qt.Equals, pricedProcessCents)
+	c.Assert(state.Charged(db.OrgAddOnBranding), qt.IsFalse)
+}

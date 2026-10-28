@@ -90,7 +90,8 @@ func (a *API) walletOrganization(w http.ResponseWriter, r *http.Request, roles .
 //	@Description	of an organization's wallet — a standard organization's or an integrator's. History
 //	@Description	kinds: topup (Stripe checkout credit), payment (a process publish or census
 //	@Description	headroom; processOrgAddress names the managed organization that spent it),
-//	@Description	creditBack (a paid draft deleted, or a publish that failed for good) and refund (a
+//	@Description	creditBack (a paid draft deleted, a publish that failed for good, or an organization
+//	@Description	teardown returning an add-on price no process received) and refund (a
 //	@Description	top-up refunded through Stripe). amountCents is signed. The balance is negative only
 //	@Description	after a refund of credit already spent; the next top-up pays that first. 403 (40181)
 //	@Description	for a managed organization, which has no wallet. Requires Admin or Manager.

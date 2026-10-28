@@ -638,6 +638,16 @@ func TestManagedCensusGrowthChargesIntegratorWallet(t *testing.T) {
 		OrgAddress: integratorAddr, AmountCents: drain, IdempotencyKey: "cs_managed_growth_refill",
 	}), qt.IsNil)
 
+	// while the organization is being torn down no debit lands: it would go with the process
+	testAPI.teardowns.Store(managedAddr, struct{}{})
+	requestAndAssertError(errors.ErrDuplicateConflict, t, http.MethodPost, token,
+		&apicommon.ProcessCensusCheckoutRequest{CensusSize: growthTotalVoters, ReturnURL: "https://example.com/r"},
+		"processes", pid, "census", "checkout")
+	testAPI.teardowns.Delete(managedAddr)
+	wallet, err = testDB.Wallet(integratorAddr)
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.BalanceCents, qt.Equals, 100_000-paidCents)
+
 	// the integrator buys the headroom from its wallet — no checkout session, effective at once
 	headroom := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, token,
 		&apicommon.ProcessCensusCheckoutRequest{CensusSize: growthTotalVoters, ReturnURL: "https://example.com/r"},

@@ -201,6 +201,11 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 			"with POST /processes/{processId}/census/checkout").Write(w)
 		return
 	}
+	// a release an earlier attempt's credit-back still owes lands before the draft is priced
+	if err := a.healOwedRelease(vp, paid); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
 	payment := paid.row
 	previousSessionID := ""
 	if payment != nil {
@@ -347,10 +352,13 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 // processCheckoutStatusHandler godoc
 //
 //	@Summary		Get the payment status of a voting process
-//	@Description	The stored payment state (pending while a top-up checkout is open, paid, refunded)
+//	@Description	The payment state (pending while a top-up checkout is open, paid, failed, refunded)
 //	@Description	combined with the live Stripe state of the top-up checkout opened for the process, if
-//	@Description	any. Payment truth comes from webhooks — this endpoint is for polling the outcome, it
-//	@Description	never fulfills. consumed is true while a top-up credited to the wallet waits for the
+//	@Description	any. What a process paid is its payer's wallet ledger (GET
+//	@Description	/organizations/{orgAddress}/wallet); status here is refreshed from it by every payment path
+//	@Description	and can lag it briefly after a failure, while the amountCents of a paid process is read off
+//	@Description	it (its wallet payments plus what it paid outside the wallet). This endpoint is for polling
+//	@Description	the outcome, it never fulfills. consumed is true while a top-up credited to the wallet waits for the
 //	@Description	publish the webhook then runs. refusal is set when it could not (price rose,
 //	@Description	wallet short, the draft cannot publish, the requester is no longer an admin...): the
 //	@Description	credit stays in the wallet and the process is published by hand. consumed with no
@@ -359,7 +367,19 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 //	@Description	instead of waiting, and the retry then finds the process published. status paid means
 //	@Description	the process is published or its publish job is running; jobId names the latest publish
 //	@Description	job (the webhook's included): poll GET /jobs/{jobId}. status failed means the publish
-//	@Description	failed after the payment and was credited back; that job's errors say why.
+//	@Description	failed after the payment and was credited back; that job's errors say why, and a failed
+//	@Description	payment may carry no jobId when the failure came before the job existed (the publish
+//	@Description	response said why). status paid with a failed job means the publish failed but the
+//	@Description	payment was kept: either some of its elections were mined (the draft can then only be
+//	@Description	published again, which resumes the rest; it cannot be edited or deleted, 40904; the job's
+//	@Description	errors and the questions' upstreamId in GET /processes/{processId} show it) or its add-ons
+//	@Description	are in use by another process. Either way publish again: it charges nothing. The one
+//	@Description	exception is a job failed as interrupted by a service restart (its error says so): the
+//	@Description	dead worker's publish claim is reclaimed only once it is PublishStaleAfter (15 minutes,
+//	@Description	from its last renewal) old, so until then publish answers 409 (40903). After that,
+//	@Description	whichever comes first wins: the stale sweep credits the debit back, status turns failed
+//	@Description	and publishing again charges again; or a publish takes the claim first, charges nothing
+//	@Description	and resumes the publish.
 //	@Description	404 with 40179 means the draft exists but has no payment: none was opened, or a top-up
 //	@Description	checkout that expired or whose delayed payment failed was dropped (open a new one); 404
 //	@Description	with 40038 means the process itself is gone.

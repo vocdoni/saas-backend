@@ -3061,8 +3061,16 @@ paths:
     delete:
       description: |-
         Delete the managed organization at {orgAddress} together with every piece of data
-        tied to it (memberbase, censuses + participants, processes, bundles, CSP tokens,
-        jobs, pending invites), and unlink it from its members. The caller must be an admin
+        tied to it (memberbase, censuses + participants, processes and their questions,
+        bundles, CSP tokens, jobs, pending invites), and unlink it from its members. Drafts
+        are deleted first, exactly as DELETE /processes/{processId} does: a paid draft is
+        credited back to the payer's wallet before it goes, and its payment record goes with
+        it (the credit-back row in the payer's wallet history is the audit trail). Every
+        once-per-organization add-on price (branding, custom URL) an earlier credit-back
+        withheld that no published or mined process of the organization received is
+        credited back too, once. If any draft cannot be deleted (a publish holds it, or its
+        credit-back failed), the deletion stops with that draft's error (its message names the draft) and nothing else is
+        removed; retry once it settles. The caller must be an admin
         of their integrator organization (resolved from the API key's org or the user session
         — no address in the URL), and the target must be managed by it.
 
@@ -3102,11 +3110,16 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Managed organization has active elections
+          description: Managed organization has active elections, or a draft cannot
+            be deleted yet
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Busy (50302), retry after Retry-After
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -4826,7 +4839,8 @@ paths:
         of an organization's wallet — a standard organization's or an integrator's. History
         kinds: topup (Stripe checkout credit), payment (a process publish or census
         headroom; processOrgAddress names the managed organization that spent it),
-        creditBack (a paid draft deleted, or a publish that failed for good) and refund (a
+        creditBack (a paid draft deleted, a publish that failed for good, or an organization
+        teardown returning an add-on price no process received) and refund (a
         top-up refunded through Stripe). amountCents is signed. The balance is negative only
         after a refund of credit already spent; the next top-up pays that first. 403 (40181)
         for a managed organization, which has no wallet. Requires Admin or Manager.
@@ -5166,6 +5180,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "403":
           description: Forbidden
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: The organization is being deleted (40901)
           schema:
             $ref: '#/definitions/errors.Error'
         "503":
@@ -5763,7 +5781,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Payment changed or is being refunded
+          description: Payment changed or being refunded (40177), or organization
+            being deleted (40901)
           schema:
             $ref: '#/definitions/errors.Error'
         "422":
@@ -5884,10 +5903,13 @@ paths:
       - processes
     get:
       description: |-
-        The stored payment state (pending while a top-up checkout is open, paid, refunded)
+        The payment state (pending while a top-up checkout is open, paid, failed, refunded)
         combined with the live Stripe state of the top-up checkout opened for the process, if
-        any. Payment truth comes from webhooks — this endpoint is for polling the outcome, it
-        never fulfills. consumed is true while a top-up credited to the wallet waits for the
+        any. What a process paid is its payer's wallet ledger (GET
+        /organizations/{orgAddress}/wallet); status here is refreshed from it by every payment path
+        and can lag it briefly after a failure, while the amountCents of a paid process is read off
+        it (its wallet payments plus what it paid outside the wallet). This endpoint is for polling
+        the outcome, it never fulfills. consumed is true while a top-up credited to the wallet waits for the
         publish the webhook then runs. refusal is set when it could not (price rose,
         wallet short, the draft cannot publish, the requester is no longer an admin...): the
         credit stays in the wallet and the process is published by hand. consumed with no
@@ -5896,7 +5918,19 @@ paths:
         instead of waiting, and the retry then finds the process published. status paid means
         the process is published or its publish job is running; jobId names the latest publish
         job (the webhook's included): poll GET /jobs/{jobId}. status failed means the publish
-        failed after the payment and was credited back; that job's errors say why.
+        failed after the payment and was credited back; that job's errors say why, and a failed
+        payment may carry no jobId when the failure came before the job existed (the publish
+        response said why). status paid with a failed job means the publish failed but the
+        payment was kept: either some of its elections were mined (the draft can then only be
+        published again, which resumes the rest; it cannot be edited or deleted, 40904; the job's
+        errors and the questions' upstreamId in GET /processes/{processId} show it) or its add-ons
+        are in use by another process. Either way publish again: it charges nothing. The one
+        exception is a job failed as interrupted by a service restart (its error says so): the
+        dead worker's publish claim is reclaimed only once it is PublishStaleAfter (15 minutes,
+        from its last renewal) old, so until then publish answers 409 (40903). After that,
+        whichever comes first wins: the stale sweep credits the debit back, status turns failed
+        and publishing again charges again; or a publish takes the claim first, charges nothing
+        and resumes the publish.
         404 with 40179 means the draft exists but has no payment: none was opened, or a top-up
         checkout that expired or whose delayed payment failed was dropped (open a new one); 404
         with 40038 means the process itself is gone.
@@ -6155,6 +6189,14 @@ paths:
         Publish a voting process: one on-chain election per question, submitted as a batch.
         Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
         GET /jobs/{jobId}. Idempotent once published.
+        Transient failures (the chain not answering or confirming, a full tx queue) are retried
+        by the service up to 5 times, with about 2.5 minutes of backoff between attempts; the job
+        stays pending meanwhile. Each attempt runs up to 3 rounds, each waiting up to 40 s per
+        question for its election to be mined, so on a stalled chain the job can stay pending for
+        6 attempts × 3 rounds × 40 s × questions + 2.5 minutes: about 15 minutes for one question,
+        over 3 hours for 15. Poll GET /jobs/{jobId} until it is completed or failed.
+        If the publish finally fails before any election is mined, a failed publish credits the
+        payer's wallet back (a `creditBack` history row) and publishing again charges again.
         409 (40172) means the stored questions do not match the process and the draft has to be
         saved again before it can be published.
         409 (40177) while a top-up checkout opened for the draft is still open: pay it, or, when
@@ -6204,8 +6246,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Publish in progress, questions out of sync, or a top-up checkout
-            is open
+          description: Publish in progress, out of sync, top-up checkout open, or
+            org being deleted (40901)
           schema:
             $ref: '#/definitions/errors.Error'
         "422":
