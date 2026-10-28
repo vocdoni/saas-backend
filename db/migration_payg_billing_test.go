@@ -17,7 +17,7 @@ func TestMigrationPaygBilling(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	mig := migrationByVersion(c, 26)
+	mig := migrationByVersion(c, 34)
 	database := testDB.DBClient.Database(testDB.database)
 
 	// already applied by RunMigrationsUp at startup; a re-run must be a no-op

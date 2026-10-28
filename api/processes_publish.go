@@ -675,7 +675,11 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 	if e := a.db.SetVotingProcessPublished(pw.vp.ID, pw.owner, pw.resolveStartDate()); e != nil {
 		// every election is already on-chain and its question persisted: the next attempt finds
 		// nothing pending and only marks the process published again. The write is conditional
-		// on still owning the claim, so a dispossessed worker never touches the new claimant's state.
+		// on still owning the claim, so a dispossessed worker never touches the new claimant's state;
+		// a conflict means the claim is gone, which no retry can win back.
+		if errors.Is(e, db.ErrConflict) {
+			return nil, errPublishClaimLost
+		}
 		return nil, transient(e)
 	}
 	// the debit lets a process through without a paid payment only when it priced at zero,
@@ -778,8 +782,11 @@ func (pw *publishWorker) abandon() {
 		if e := a.db.ResetQuestionsPublish(pw.vp.ID); e != nil {
 			log.Warnw("could not reset questions after failed publish", "error", e)
 		}
-		if e := a.reversePublishDebit(pw.vp.ID); e != nil {
-			log.Errorw(e, "could not credit back the wallet debit of a failed publish; it stays a paid draft")
+		// an election that mined but could not be recorded is still an election: never credit it back
+		if len(pw.minedUnpersisted) == 0 {
+			if e := a.reversePublishDebit(pw.vp.ID); e != nil {
+				log.Errorw(e, "could not credit back the wallet debit of a failed publish; it stays a paid draft")
+			}
 		}
 		if e := a.db.ClearVotingProcessPublishing(pw.vp.ID, pw.owner); e != nil {
 			log.Warnw("could not clear publishing state after failed publish", "error", e)

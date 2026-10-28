@@ -60,7 +60,7 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	if err := a.deleteDraftProcess(vp); err != nil {
+	if err := a.deleteDraftProcess(vp, false); err != nil {
 		writeSubscriptionError(w, err)
 		return
 	}
@@ -73,8 +73,14 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 // draft stays as the audit record. It is what DELETE /processes/{processId} does after
 // authorization, and what an organization teardown does to each of its drafts. Errors are
 // errors.Error values carrying their HTTP semantics (write with writeSubscriptionError) or plain
-// errors meaning 500; the draft is then kept and the delete can be retried.
-func (a *API) deleteDraftProcess(vp *db.VotingProcess) error {
+// errors meaning 500; the draft is then kept and the delete can be retried. orphanMined lets an
+// organization teardown drop a partially published draft: its mined elections stay on chain like a
+// published process's, nothing is credited back (they were delivered) and the payment row stays as
+// their audit trail. DELETE /processes/{processId} passes false and refuses it with 40904 so a
+// publish can resume it.
+//
+//nolint:revive // flag-parameter: orphanMined selects the teardown mode, set only by deleteOrgDrafts
+func (a *API) deleteDraftProcess(vp *db.VotingProcess, orphanMined bool) error {
 	oid := vp.ID
 	// only a draft can be deleted; a published process lives on-chain and is immutable.
 	if vp.Published {
@@ -101,9 +107,10 @@ func (a *API) deleteDraftProcess(vp *db.VotingProcess) error {
 		}
 	}()
 	// a partially published draft (an earlier publish mined some elections before failing) is
-	// not deletable: dropping it would erase the on-chain ids and orphan the mined elections.
-	// Publishing again resumes the remaining questions instead. Reloaded under the claim, so
-	// no publish worker can be minting elections concurrently.
+	// not deletable on its own: dropping it would erase the on-chain ids and orphan the mined
+	// elections, while publishing again resumes the remaining questions. Only a teardown
+	// (orphanMined) drops it. Reloaded under the claim, so no publish worker can be minting
+	// elections concurrently.
 	questions, err := a.db.QuestionsByProcess(oid)
 	if err != nil {
 		return fmt.Errorf("failed to get process questions: %w", err)
@@ -115,7 +122,17 @@ func (a *API) deleteDraftProcess(vp *db.VotingProcess) error {
 	// the flag is set before a mined election id is stored, so it also covers an election whose
 	// id never reached its question
 	if anyMined(questions) || current.HasMinedElections {
-		return errors.ErrProcessPartiallyPublished
+		if !orphanMined {
+			return errors.ErrProcessPartiallyPublished
+		}
+		if err := a.db.DeleteVotingProcess(oid); err != nil {
+			return fmt.Errorf("failed to delete the draft: %w", err)
+		}
+		deleted = true
+		if !vp.CensusID.IsZero() {
+			_ = a.db.DelCensus(vp.CensusID.Hex())
+		}
+		return nil
 	}
 	// a paid draft is credited back below; a pending one is released by expiring its open
 	// session so it can no longer be paid, and its payment record goes with the draft.
@@ -199,7 +216,7 @@ func (a *API) deleteOrgDrafts(org common.Address) error {
 			return nil
 		}
 		for i := range drafts {
-			if err := a.deleteDraftProcess(&drafts[i]); err != nil {
+			if err := a.deleteDraftProcess(&drafts[i], true); err != nil {
 				log.Warnw("could not delete a draft of an organization being torn down",
 					"org", org.Hex(), "processId", drafts[i].ID.Hex(), "error", err)
 				return fmt.Errorf("draft %s: %w", drafts[i].ID.Hex(), err)
