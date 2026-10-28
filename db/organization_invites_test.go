@@ -1,6 +1,8 @@
 package db
 
 import (
+	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -442,4 +444,37 @@ func TestRevokeInvitationByCode(t *testing.T) {
 	revoked, err = testDB.RevokeInvitationByCode("unknownCode")
 	c.Assert(err, qt.IsNil)
 	c.Assert(revoked, qt.IsFalse)
+}
+
+// TestCountOrgWriters: users holding admin or manager in the org plus the non-expired invitations
+// to one; viewers, expired invitations and other organizations hold no seat.
+func TestCountOrgWriters(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	other := common.Address{0x42}
+	for i, ou := range []OrganizationUser{
+		{Address: testOrgAddress, Role: AdminRole},
+		{Address: testOrgAddress, Role: ManagerRole},
+		{Address: testOrgAddress, Role: ViewerRole},
+		{Address: other, Role: AdminRole},
+	} {
+		_, err := testDB.SetUser(&User{
+			Email: fmt.Sprintf("writer%d@example.com", i), Password: testUserPass, Organizations: []OrganizationUser{ou},
+		})
+		c.Assert(err, qt.IsNil)
+	}
+	for _, inv := range []OrganizationInvite{
+		{OrganizationAddress: testOrgAddress, Role: ManagerRole, Expiration: time.Now().Add(time.Hour)},
+		{OrganizationAddress: testOrgAddress, Role: ViewerRole, Expiration: time.Now().Add(time.Hour)},
+		{OrganizationAddress: testOrgAddress, Role: AdminRole, Expiration: time.Now().Add(-time.Hour)},
+		{OrganizationAddress: other, Role: AdminRole, Expiration: time.Now().Add(time.Hour)},
+	} {
+		inv.ID, inv.CurrentUserID = bson.NewObjectID(), currentUserID
+		inv.NewUserEmail, inv.InvitationCode = fmt.Sprintf("inv%s@example.com", inv.ID.Hex()), "code"+inv.ID.Hex()
+		_, err := testDB.organizationInvites.InsertOne(context.Background(), inv)
+		c.Assert(err, qt.IsNil)
+	}
+	n, err := testDB.CountOrgWriters(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(n, qt.Equals, int64(3))
 }

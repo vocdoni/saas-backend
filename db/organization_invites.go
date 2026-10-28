@@ -260,3 +260,27 @@ func (ms *MongoStorage) DeleteInvitationsByUser(userID uint64, email string) (in
 	}
 	return res.DeletedCount, nil
 }
+
+// CountOrgWriters counts the seats holding a write role (admin or manager) in the organization:
+// the users holding one plus the pending invitations to one that have not expired yet (an expired
+// invitation can no longer be accepted, so it holds no seat).
+func (ms *MongoStorage) CountOrgWriters(orgAddress common.Address) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	writeRoles := bson.A{AdminRole, ManagerRole}
+	users, err := ms.users.CountDocuments(ctx, bson.M{
+		"organizations": bson.M{"$elemMatch": bson.M{"_id": orgAddress, "role": bson.M{"$in": writeRoles}}},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to count organization writers: %w", err)
+	}
+	invitations, err := ms.organizationInvites.CountDocuments(ctx, bson.M{
+		"organizationAddress": orgAddress,
+		"role":                bson.M{"$in": writeRoles},
+		"expiration":          bson.M{"$gt": time.Now()},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to count pending writer invitations: %w", err)
+	}
+	return users + invitations, nil
+}

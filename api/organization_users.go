@@ -156,7 +156,10 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// a write role is capped per organization, pending invitations included
+	// a write role is capped per organization, pending invitations included; the check and the
+	// invitation insert below are one step (writerLocks)
+	writerLock := a.writerLocks.lock(org.Address)
+	defer writerLock.Unlock()
 	if invite.Role == db.AdminRole || invite.Role == db.ManagerRole {
 		if err := a.subscriptions.OrgCanAddWriter(org.Address); err != nil {
 			writeSubscriptionError(w, err)
@@ -191,6 +194,8 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		errors.ErrGenericInternalServerError.Withf("could not create the invite: %v", err).Write(w)
 		return
 	}
+	// the invitation now holds its seat: the mail below need not hold the lock
+	writerLock.Unlock()
 	// send the invitation mail to invited user email with the invite code and
 	// the invite link
 	if err := a.sendMail(
@@ -683,7 +688,10 @@ func (a *API) updateOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		errors.ErrInvalidUserData.Withf("invalid role").Write(w)
 		return
 	}
-	// promoting a viewer to a write role takes one of the organization's capped write seats
+	// promoting a viewer to a write role takes one of the organization's capped write seats; the
+	// check and the role update are one step (writerLocks)
+	writerLock := a.writerLocks.lock(org.Address)
+	defer writerLock.Unlock()
 	if newRole := db.UserRole(update.Role); newRole == db.AdminRole || newRole == db.ManagerRole {
 		target, err := a.db.User(uint64(userIDInt))
 		if err != nil {
