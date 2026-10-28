@@ -5912,6 +5912,10 @@ paths:
             wallet balance
           schema:
             $ref: '#/definitions/errors.Error'
+        "403":
+          description: An integrator's own organization cannot own processes (40174)
+          schema:
+            $ref: '#/definitions/errors.Error'
         "404":
           description: Not Found
           schema:
