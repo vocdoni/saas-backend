@@ -519,6 +519,11 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+	// its drafts were credited back above; what is left of its spend entry describes an
+	// organization that no longer exists
+	if err := a.db.DropManagedOrgSpend(integratorAddr, managedAddr); err != nil {
+		log.Warnw("could not drop the spend entry of a deleted managed org", "org", managedAddr.Hex(), "error", err)
+	}
 
 	log.Infow("deleted managed organization", "integrator", integratorAddr.Hex(), "org", managedAddr.Hex())
 	apicommon.HTTPWriteJSON(w, &apicommon.DeleteManagedOrganizationResponse{Address: managedAddr.Hex()})

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"strings"
 	"sync"
 	"testing"
 
@@ -76,4 +77,12 @@ func TestManagedOrgSpendCap(t *testing.T) {
 
 	negative := pricing.Cents(-1)
 	c.Assert(testDB.SetManagedOrgSpendCap(testOrgAddress, managed, &negative), qt.Equals, ErrInvalidData)
+
+	// a torn-down organization's whole entry goes; the others stay
+	c.Assert(testDB.DropManagedOrgSpend(testOrgAddress, managed), qt.IsNil)
+	wallet, err = testDB.Wallet(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	_, kept := wallet.OrgSpend[strings.ToLower(managed.Hex())]
+	c.Assert(kept, qt.IsFalse)
+	c.Assert(spend(other).SpentCents, qt.Equals, pricing.Cents(50_000))
 }

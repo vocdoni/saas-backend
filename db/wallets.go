@@ -76,6 +76,22 @@ func (ms *MongoStorage) SetManagedOrgSpendCap(integrator, managedOrg common.Addr
 	return nil
 }
 
+// DropManagedOrgSpend removes the managed organization's whole spend entry (cap and spending)
+// from the integrator's wallet, once the organization is torn down: every wallet read loads the
+// document, so entries of deleted organizations must not pile up on it.
+func (ms *MongoStorage) DropManagedOrgSpend(integrator, managedOrg common.Address) error {
+	if (integrator.Cmp(common.Address{}) == 0) || (managedOrg.Cmp(common.Address{}) == 0) {
+		return ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	if _, err := ms.wallets.UpdateOne(ctx, bson.M{"_id": integrator},
+		bson.M{"$unset": bson.M{orgSpendField(managedOrg): ""}}); err != nil {
+		return fmt.Errorf("failed to drop managed organization spend: %w", err)
+	}
+	return nil
+}
+
 // Credits and debits are single conditional writes on the wallet document (balance and
 // idempotency key in one filter), so each applies at most once across replicas and replays.
 // The ledger row that follows is the audit trail.

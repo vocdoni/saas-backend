@@ -65,6 +65,10 @@ func TestDeleteManagedOrgRefundsDrafts(t *testing.T) {
 		"integrator", "organizations", managedAddr.String())
 
 	c.Assert(walletBalance(c, integratorAddr), qt.Equals, pricing.Cents(100_000))
+	// the deleted organization's spend entry leaves the integrator's wallet with it
+	torn, err := testDB.Wallet(integratorAddr)
+	c.Assert(err, qt.IsNil)
+	c.Assert(torn.OrgSpend, qt.HasLen, 0)
 	_, entries, err := testDB.WalletLedger(integratorAddr, 1, 10)
 	c.Assert(err, qt.IsNil)
 	c.Assert(entries[0].Kind, qt.Equals, db.WalletEntryCreditBack)
