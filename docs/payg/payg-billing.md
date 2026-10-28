@@ -267,7 +267,10 @@ ever refunded to the card.
 - `checkout.session.async_payment_failed` / `checkout.session.expired`: nothing was credited;
   a top-up opened for a process drops its pending row.
 - `refund.created` / `refund.updated`: [Stripe refunds of top-ups](#stripe-refunds-of-top-ups).
-  The webhook endpoint must be subscribed to them.
+- `charge.dispute.funds_withdrawn` / `charge.dispute.funds_reinstated`: disputes on top-ups, in
+  the same section.
+
+The webhook endpoint must be subscribed to these four refund and dispute events on deploy.
 
 There is **no durable event store**. Idempotency is a property of every side effect:
 
@@ -290,8 +293,10 @@ An integrator is an organization flagged `integrator`, opted in at creation
 what it spends is its wallet balance. Its own organization holds no processes (403, 40174); to
 run its own votes it creates a managed organization of itself.
 
-The migration that introduced the flag (0035) also flagged organizations on an active non-default
-integrator plan. Subscribing to an integrator plan in Stripe no longer grants integrator status:
+The migration that introduced the flag (0035) flagged the existing integrators: the unmanaged
+organizations with an `integratorLimits` override granting managed organizations, or with an
+active subscription to a non-default plan that granted them. Holding API keys or managing
+organizations was not enough on its own, since the default plan allowed both. Subscribing to an integrator plan in Stripe no longer grants integrator status:
 the organization has to be created with `integrator: true`. There is no command to flag an
 existing organization later.
 
@@ -470,7 +475,22 @@ a refund already counted when created, debits nothing; a partial refund and a la
 debit once. It is debited in full even below zero: the money already left through Stripe, so
 this only records it, and it is the only debit that skips the balance check. A refund of
 anything else (a subscription invoice, a payment intent that credited no top-up) is ignored
-with a log line. Every payment session copies its metadata onto the payment intent
+with a log line.
+
+A refund already debited that Stripe later moves to `failed` or `canceled` is credited back:
+the exact amount of its `striperefund:` row, as a positive `refund` row keyed
+`refundfail:<refund id>`, so the history shows the debit and its reversal as two `refund` rows
+netting to zero (`creditBack` stays reserved for payments of processes). A failed refund never
+debited changes nothing but a log line. The handler trusts delivery order: a `failed` update
+delivered before the `succeeded` one would leave the debit standing.
+
+A dispute (chargeback) on a top-up is mirrored the same way: `charge.dispute.funds_withdrawn`
+debits the disputed amount net of VAT, found through the top-up's payment intent, as a `refund`
+row keyed `dispute:<dispute id>`, even below zero; `charge.dispute.funds_reinstated` (a won
+dispute) credits that debit back keyed `disputereinstated:<dispute id>`. Stripe's dispute fee is
+not the payer's money and is not mirrored.
+
+Every payment session copies its metadata onto the payment intent
 (`payment_intent_data.metadata`), so a human in the dashboard sees which wallet a charge topped
 up.
 

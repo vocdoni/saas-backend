@@ -32,7 +32,9 @@ func upPaygBilling(ctx context.Context, database *mongo.Database) error {
 			Keys:    bson.D{{Key: "idempotencyKey", Value: 1}},
 			Options: options.Index().SetUnique(true),
 		},
-		{Keys: bson.D{{Key: "orgAddress", Value: 1}, {Key: "createdAt", Value: -1}}},
+		// the ledger page sorts by createdAt then _id (tie-break), so both are in the index or every
+		// page is an in-memory sort over the organization's whole ledger
+		{Keys: bson.D{{Key: "orgAddress", Value: 1}, {Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}}},
 		// a Stripe refund names the payment intent of the top-up it returns
 		{Keys: bson.D{{Key: "paymentIntentId", Value: 1}}, Options: options.Index().SetSparse(true)},
 	}

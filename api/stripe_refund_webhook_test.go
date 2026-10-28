@@ -23,7 +23,7 @@ func refundObject(id, paymentIntentID, status string, amountCents pricing.Cents)
 // is mirrored in the wallet: debited net of the top-up's own VAT, once per refund across replays
 // and its later updates, a partial refund and the rest each once, even below zero, and shown in
 // the history as a refund. Refunds that are not settled, or of payments that are not top-ups,
-// change nothing.
+// change nothing; a debited refund that later fails or is canceled is credited back once.
 func TestStripeRefundWebhookDebitsWallet(t *testing.T) {
 	c := qt.New(t)
 	installStripeWebhookService(t)
@@ -78,4 +78,57 @@ func TestStripeRefundWebhookDebitsWallet(t *testing.T) {
 		OrgAddress: orgAddress, ProcessID: bson.NewObjectID(), AmountCents: 1, PriceCents: 1,
 	})
 	c.Assert(err, qt.ErrorIs, db.ErrInsufficientWalletBalance)
+
+	// a debited refund that later fails is credited back once, as a refund row
+	post("evt_"+util.RandomHex(8), "refund.updated", refundObject("re_rest", intent, "failed", 9_075))
+	post("evt_"+util.RandomHex(8), "refund.updated", refundObject("re_rest", intent, "canceled", 9_075))
+	assertWallet(t, orgAddress, -500, db.WalletEntryRefund, 3)
+}
+
+// disputeObject is the wire shape of a dispute inside a webhook event.
+func disputeObject(id, paymentIntentID string, amountCents pricing.Cents) map[string]any {
+	return map[string]any{"id": id, "object": "dispute", "amount": amountCents, "payment_intent": paymentIntentID}
+}
+
+// TestStripeDisputeWebhookDebitsWallet: a dispute on a top-up debits the withdrawn funds net of
+// VAT, once, even below zero; reinstated funds credit that debit back once. A dispute on a payment
+// that is not a top-up, or reinstated funds never debited, change nothing.
+func TestStripeDisputeWebhookDebitsWallet(t *testing.T) {
+	c := qt.New(t)
+	installStripeWebhookService(t)
+	token := testCreateUser(t, "disputesync123456")
+	orgAddress := testCreateOrganization(t, token)
+
+	// a €100 top-up charged €121 with VAT, then €80 of it spent
+	intent := "pi_dispute_" + util.RandomHex(6)
+	topUp := checkoutSessionObject("cs_dispute_"+util.RandomHex(6), "paid", 10_000, map[string]string{
+		stripe.MetadataKeyWalletTopUpOrg: orgAddress.String(),
+	})
+	topUp["amount_total"] = 12_100
+	topUp["payment_intent"] = intent
+	code := postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8), "checkout.session.completed", topUp)
+	c.Assert(code, qt.Equals, http.StatusOK)
+	c.Assert(testDB.DebitWalletForProcess(db.WalletDebit{
+		OrgAddress: orgAddress, ProcessID: bson.NewObjectID(), ProcessOrgAddress: orgAddress,
+		AmountCents: 8_000, PriceCents: 8_000,
+	}), qt.IsNil)
+
+	post := func(eventType string, dispute map[string]any) {
+		c.Assert(postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8), eventType, dispute),
+			qt.Equals, http.StatusOK)
+	}
+	dispute := "dp_" + util.RandomHex(6)
+	post("charge.dispute.funds_reinstated", disputeObject(dispute, intent, 12_100)) // never withdrawn
+	post("charge.dispute.funds_withdrawn", disputeObject("dp_other", "pi_not_a_topup", 5_000))
+	assertWallet(t, orgAddress, 2_000, db.WalletEntryRefund, 0)
+
+	// the whole €121 is withdrawn: €100 net, below zero
+	post("charge.dispute.funds_withdrawn", disputeObject(dispute, intent, 12_100))
+	post("charge.dispute.funds_withdrawn", disputeObject(dispute, intent, 12_100))
+	assertWallet(t, orgAddress, -8_000, db.WalletEntryRefund, 1)
+
+	// the dispute is won: the funds come back once
+	post("charge.dispute.funds_reinstated", disputeObject(dispute, intent, 12_100))
+	post("charge.dispute.funds_reinstated", disputeObject(dispute, intent, 12_100))
+	assertWallet(t, orgAddress, 2_000, db.WalletEntryRefund, 2)
 }

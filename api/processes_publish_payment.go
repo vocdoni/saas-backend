@@ -28,18 +28,27 @@ func walletPayer(org *db.Organization) common.Address {
 // walletShortError is the 402 of a payer whose balance does not cover dueCents of quote: 40175
 // with requiredCents/availableCents for a managed organization (its integrator pays), 40178 with
 // the quote, the balance and the shortfall a top-up checkout covers for any other.
-func walletShortError(org *db.Organization, quote pricing.Quote, dueCents, balanceCents pricing.Cents) error {
-	if org.ManagedBy != (common.Address{}) {
+func walletShortError(s walletShort) error {
+	if s.org.ManagedBy != (common.Address{}) {
 		return errors.ErrInsufficientWalletBalance.WithData(map[string]pricing.Cents{
-			"requiredCents":  dueCents,
-			"availableCents": balanceCents,
+			"requiredCents":  s.dueCents,
+			"availableCents": s.balanceCents,
 		})
 	}
 	return errors.ErrPaymentRequired.WithData(&apicommon.ProcessPaymentRequired{
-		Quote:          quote,
-		BalanceCents:   balanceCents,
-		ShortfallCents: dueCents - balanceCents,
+		Quote:          s.quote,
+		BalanceCents:   s.balanceCents,
+		ShortfallCents: s.dueCents - s.balanceCents,
 	})
+}
+
+// walletShort is what walletShortError reports: dueCents of quote, against the payer's
+// balanceCents.
+type walletShort struct {
+	org          *db.Organization
+	quote        pricing.Quote
+	dueCents     pricing.Cents
+	balanceCents pricing.Cents
 }
 
 // paymentDueForPublish is the publish gate: it refuses, before the publish is claimed, what the
@@ -92,7 +101,7 @@ func (a *API) paymentDueForPublish(vp *db.VotingProcess) error {
 	if wallet.BalanceCents >= dueCents {
 		return nil
 	}
-	return walletShortError(org, quote, dueCents, wallet.BalanceCents)
+	return walletShortError(walletShort{org: org, quote: quote, dueCents: dueCents, balanceCents: wallet.BalanceCents})
 }
 
 // debitProcessWallet charges a draft's publish to its payer's wallet: atomic, and priced against
@@ -224,7 +233,9 @@ func (a *API) chargeProcessWallet(c processCharge) (pricing.Cents, error) {
 			if werr != nil {
 				return 0, fmt.Errorf("wallet short, and its balance could not be read: %w", werr)
 			}
-			return 0, walletShortError(c.org, c.quote, dueCents, wallet.BalanceCents)
+			return 0, walletShortError(walletShort{
+				org: c.org, quote: c.quote, dueCents: dueCents, balanceCents: wallet.BalanceCents,
+			})
 		}
 		return 0, fmt.Errorf("failed to debit wallet: %w", err)
 	}
@@ -577,7 +588,7 @@ func (a *API) publishPaidProcess(t stripe.ProcessTopUp) error {
 		return fmt.Errorf("failed to re-check payment of topped-up process: %w", err)
 	}
 	target := publishTarget{vp: vp, questions: questions, census: census, user: user}
-	if problems, _ := a.publishPreflightProblems(target); len(problems) > 0 {
+	if problems, _, _ := a.publishPreflightProblems(target); len(problems) > 0 {
 		log.Warnw("topped-up process failed publish preflight, the credit stays for a manual publish",
 			"processId", processID.Hex(), "problems", strings.Join(problems, "; "))
 		return nil

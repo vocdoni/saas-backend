@@ -2,7 +2,6 @@ package subscriptions
 
 import (
 	"testing"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
@@ -90,30 +89,13 @@ func TestHasDBPermission(t *testing.T) {
 
 func TestOrgCanAddWriter(t *testing.T) {
 	c := qt.New(t)
-	user := func(role db.UserRole) db.User {
-		return db.User{Organizations: []db.OrganizationUser{{Address: testOrgAddress, Role: role}}}
-	}
-	valid := time.Now().Add(time.Hour)
-	mockDB := &mockMongoStorage{
-		orgUsers: map[string][]db.User{testOrgAddress.String(): {
-			user(db.AdminRole), user(db.ManagerRole), user(db.ManagerRole), user(db.ViewerRole), user(db.ViewerRole),
-		}},
-		invitations: map[string][]db.OrganizationInvite{testOrgAddress.String(): {
-			{Role: db.ManagerRole, Expiration: valid}, {Role: db.ViewerRole, Expiration: valid},
-		}},
-	}
+	mockDB := &mockMongoStorage{writers: map[string]int64{testOrgAddress.String(): MaxWritersPerOrg - 1}}
 	subs := &Subscriptions{db: mockDB}
 
-	// 3 writers + 1 pending write invitation: one seat left; viewers never count
+	// one seat left
 	c.Assert(subs.OrgCanAddWriter(testOrgAddress), qt.IsNil)
 
-	// an expired write invitation holds no seat
-	mockDB.invitations[testOrgAddress.String()] = append(mockDB.invitations[testOrgAddress.String()],
-		db.OrganizationInvite{Role: db.AdminRole, Expiration: time.Now().Add(-time.Hour)})
-	c.Assert(subs.OrgCanAddWriter(testOrgAddress), qt.IsNil)
-
-	mockDB.invitations[testOrgAddress.String()] = append(mockDB.invitations[testOrgAddress.String()],
-		db.OrganizationInvite{Role: db.AdminRole, Expiration: valid})
+	mockDB.writers[testOrgAddress.String()] = MaxWritersPerOrg
 	c.Assert(subs.OrgCanAddWriter(testOrgAddress), qt.ErrorIs, errors.ErrMaxWritersReached)
 }
 
@@ -186,9 +168,8 @@ type mockMongoStorage struct {
 	users map[string]*db.User
 	orgs  map[string]*db.Organization
 	// keyed by orgAddress string
-	orgUsers    map[string][]db.User
-	invitations map[string][]db.OrganizationInvite
-	orgMembers  map[string]int64
+	writers    map[string]int64
+	orgMembers map[string]int64
 	// keyed by orgAddress string; draft voting-process count
 	votingDraftCounts map[string]int64
 }
@@ -209,12 +190,8 @@ func (m *mockMongoStorage) Organization(address common.Address) (org *db.Organiz
 	return org, nil
 }
 
-func (m *mockMongoStorage) OrganizationUsers(address common.Address) ([]db.User, error) {
-	return m.orgUsers[address.String()], nil
-}
-
-func (m *mockMongoStorage) PendingInvitations(address common.Address) ([]db.OrganizationInvite, error) {
-	return m.invitations[address.String()], nil
+func (m *mockMongoStorage) CountOrgWriters(addr common.Address) (int64, error) {
+	return m.writers[addr.String()], nil
 }
 
 func (m *mockMongoStorage) CountOrgMembers(addr common.Address) (int64, error) {
