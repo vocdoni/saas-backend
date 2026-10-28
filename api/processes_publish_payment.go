@@ -311,7 +311,7 @@ func (a *API) publishPaidProcess(processID bson.ObjectID) error {
 		return nil
 	}
 	target := publishTarget{vp: vp, questions: questions, census: census, user: user}
-	if problems, _ := a.publishPreflightProblems(target); len(problems) > 0 {
+	if problems, _, _ := a.publishPreflightProblems(target); len(problems) > 0 {
 		log.Warnw("paid process failed publish preflight, staying paid for a manual publish",
 			"processId", processID.Hex(), "problems", strings.Join(problems, "; "))
 		return nil

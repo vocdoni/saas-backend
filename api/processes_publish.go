@@ -106,7 +106,11 @@ type publishTarget struct {
 // questionsMismatch singles out the one problem that is not the caller's request but the server's
 // own data state — a stored question set that does not match the process. Publish answers that with
 // a 409 rather than a 400; the dry-run ignores the flag and just reports the problem.
-func (a *API) publishPreflightProblems(t publishTarget) (problems []string, questionsMismatch bool) {
+//
+// denied is the organization's typed refusal (OrgCanPublishProcess: the integrator's own org,
+// 40174, or the 90-day duration cap), also listed in problems. Publish answers it as that error,
+// as draft creation does, rather than folding it into a 400.
+func (a *API) publishPreflightProblems(t publishTarget) (problems []string, questionsMismatch bool, denied error) {
 	vp, questions, census, user := t.vp, t.questions, t.census, t.user
 	problems = validateVotingProcessForPublish(vp, questions, census)
 	if p := questionSetProblem(vp, questions); p != "" {
@@ -114,11 +118,11 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 		questionsMismatch = true
 	}
 	if census == nil {
-		return problems, questionsMismatch // the checks below need the census
+		return problems, questionsMismatch, nil // the checks below need the census
 	}
 	orgDoc, err := a.db.Organization(vp.OrgAddress)
 	if err != nil {
-		return append(problems, "organization not found"), questionsMismatch
+		return append(problems, "organization not found"), questionsMismatch, nil
 	}
 	if !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
 		problems = append(problems, "publishing requires the admin role")
@@ -134,7 +138,7 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	// the checks below but fail in the worker (electionParamsForQuestion). Reject it here.
 	if maxSize == 0 {
 		problems = append(problems, "census has no members")
-		return problems, questionsMismatch
+		return problems, questionsMismatch, nil
 	}
 	start := vp.StartDate
 	if start.IsZero() || start.Before(time.Now()) {
@@ -146,8 +150,9 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	}
 	if err := a.subscriptions.OrgCanPublishProcess(orgDoc, durationSeconds); err != nil {
 		problems = append(problems, err.Error())
+		denied = err
 	}
-	return problems, questionsMismatch
+	return problems, questionsMismatch, denied
 }
 
 // publishVotingProcessHandler godoc
@@ -172,6 +177,7 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 //	@Failure		400			{object}	errors.Error							"Not ready to publish"
 //	@Failure		401			{object}	errors.Error
 //	@Failure		402			{object}	errors.Error	"Payment required (quote in data), or insufficient integrator wallet balance"
+//	@Failure		403			{object}	errors.Error	"An integrator's own organization cannot own processes (40174)"
 //	@Failure		404			{object}	errors.Error
 //	@Failure		409			{object}	errors.Error	"Publish in progress, questions out of sync, or payment still processing"
 //	@Failure		422			{object}	errors.Error	"Census size requires a custom quote"
@@ -214,13 +220,19 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 	// predictable is rejected here rather than as an opaque async job failure;
 	// only funding and chain submission are left to the worker.
 	target := publishTarget{vp: vp, questions: questions, census: census, user: user}
-	if problems, questionsMismatch := a.publishPreflightProblems(target); len(problems) > 0 {
+	if problems, questionsMismatch, denied := a.publishPreflightProblems(target); len(problems) > 0 {
 		// a stored question set that does not match the process is server-side state, not a bad
 		// request, so it answers 409. It wins over any other problem present: it has to be repaired
 		// (by saving the draft again) before the rest of the draft is even worth looking at.
+		// Next comes the organization's typed refusal (403 40174, or the duration cap), as at draft
+		// creation; anything else is a 400.
 		apiErr := errors.ErrMalformedBody
-		if questionsMismatch {
+		switch {
+		case questionsMismatch:
 			apiErr = errors.ErrProcessQuestionsMismatch
+		case denied != nil:
+			writeSubscriptionError(w, denied)
+			return
 		}
 		apiErr.Withf("process is not ready to publish: %s", strings.Join(problems, "; ")).Write(w)
 		return
