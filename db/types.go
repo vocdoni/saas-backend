@@ -715,6 +715,11 @@ type ElectionParams struct {
 	ElectionType  ElectionType          `json:"electionType" bson:"electionType"`
 	TypeMetadata  *ElectionTypeMetadata `json:"type,omitempty" bson:"type,omitempty"`
 	MaxCensusSize uint64                `json:"maxCensusSize,omitempty" bson:"maxCensusSize,omitempty"`
+	// Meta is the free-form "meta" block of the election metadata document (api.ElectionMetadata.Meta).
+	// Publish sets {"questionId": <question ObjectID hex>} so the content-addressed metadata URL
+	// (objectstorage.PutJSON) is unique per question and an election can be matched back to its
+	// question from the URL alone. Built at publish time, never stored or exposed.
+	Meta map[string]any `json:"-" bson:"-"`
 	// InitialStatus is the on-chain status the election is published with. Empty (the default)
 	// means READY; "PAUSED" publishes it in the PAUSED state, so voting only opens once an
 	// admin sets it to READY via SET_PROCESS_STATUS. Only "" / "READY" / "PAUSED" are

@@ -201,6 +201,12 @@ type API struct {
 	// publishChainOverride, when set, is what resolvePublishTxs asks instead of the account. A test
 	// seam; nil in production.
 	publishChainOverride publishTxChain
+	// publishSubmitFault, when set, runs in a publish round in place of the batch submit once its
+	// txs are recorded, and an error it returns is taken as the submit's own (a lost request);
+	// publishSubmittedFault runs right after a batch was submitted and its outcome recorded, and
+	// fails the attempt with what it returns. Test seams; nil in production.
+	publishSubmitFault    func() error
+	publishSubmittedFault func() error
 	// writerLocks makes the write-seat cap check (OrgCanAddWriter) and the invitation or role
 	// write it allows one step per organization, so parallel invites cannot pass the same check.
 	// ponytail: in-memory, like orgTxLocks — one API instance; a DB-side conditional write if that changes
