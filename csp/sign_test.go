@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 	qt "github.com/frankban/quicktest"
 	blind "github.com/vocdoni/go-blindsecp256k1"
 	"github.com/vocdoni/saas-backend/csp/signers"
@@ -41,6 +42,19 @@ func TestSign(t *testing.T) {
 	c.Run("invalid signer type", func(c *qt.C) {
 		_, err := csp.Sign(testToken, testAddress, testPID, testUserWeightBytes, "invalid")
 		c.Assert(err, qt.ErrorIs, ErrInvalidSignerType)
+	})
+
+	c.Run("blind pub key is the compressed root point", func(c *qt.C) {
+		got, err := csp.BlindPubKey()
+		c.Assert(err, qt.IsNil)
+		pub, err := ethcrypto.DecompressPubkey(got)
+		c.Assert(err, qt.IsNil)
+		bp := csp.Signer.BlindPubKey()
+		want := make([]byte, 65)
+		want[0] = 0x04
+		bp.X.FillBytes(want[1:33])
+		bp.Y.FillBytes(want[33:])
+		c.Assert(ethcrypto.FromECDSAPub(pub), qt.DeepEquals, want)
 	})
 
 	c.Run("ecdsa salted success", func(c *qt.C) {
@@ -202,12 +216,10 @@ func TestBlindSign(t *testing.T) {
 		msgs := [][]byte{bytes.Repeat([]byte{0x01}, 32), bytes.Repeat([]byte{0x02}, 32)}
 		var wg sync.WaitGroup
 		results := make([]error, len(msgs))
-		wg.Add(len(msgs))
 		for i, m := range msgs {
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				_, _, results[i] = csp.BlindSign(testToken, pid, m)
-			}()
+			})
 		}
 		wg.Wait()
 

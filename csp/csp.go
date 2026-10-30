@@ -2,7 +2,6 @@ package csp
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"fmt"
 	"sync"
 	"time"
@@ -241,5 +240,9 @@ func (c *CSP) BlindPubKey() (internal.HexBytes, error) {
 	if bp == nil || bp.X == nil || bp.Y == nil {
 		return nil, fmt.Errorf("blind public key is not available")
 	}
-	return ethcrypto.CompressPubkey(&ecdsa.PublicKey{Curve: ethcrypto.S256(), X: bp.X, Y: bp.Y}), nil
+	// compressed SEC1 point: 0x02/0x03 by the parity of Y, then X as 32 big-endian bytes
+	out := make([]byte, 33)
+	out[0] = 0x02 | byte(bp.Y.Bit(0))
+	bp.X.FillBytes(out[1:])
+	return out, nil
 }
