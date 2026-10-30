@@ -253,6 +253,9 @@ func preflightError(problems []string, questionsMismatch bool, denied error) err
 //	@Description	over 3 hours for 15. Poll GET /jobs/{jobId} until it is completed or failed.
 //	@Description	If the publish finally fails before any election is mined, a failed publish credits the
 //	@Description	payer's wallet back (a `creditBack` history row) and publishing again charges again.
+//	@Description	A publish that failed after submitting its elections is credited back only once the chain
+//	@Description	proves none of them can be mined; until then the draft stays paid, and publishing again
+//	@Description	adopts any election that did mine instead of creating a second one, at no new charge.
 //	@Description	409 (40172) means the stored questions do not match the process and the draft has to be
 //	@Description	saved again before it can be published.
 //	@Description	400 (40004) "process is not ready to publish: ..." lists every problem found, including

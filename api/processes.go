@@ -436,6 +436,9 @@ func (a *API) settleSubmittedPublish(
 //	@Description	questions on-chain, so the draft can only be published again (resuming the rest), not edited.
 //	@Description	409 (40177) when the edit turns a once-per-organization add-on on for a draft that was paid
 //	@Description	without it, since an add-on cannot be added after payment.
+//	@Description	409 (40903) while a publish is running, or while an election a failed publish submitted is
+//	@Description	not settled on chain yet (it may still be mined): retry later. One that was mined is adopted
+//	@Description	first, and the edit then answers 409 (40904).
 //	@Description	The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
 //	@Description	as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
 //	@Description	`typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a

@@ -5462,6 +5462,10 @@ paths:
         checkout of the draft is expired first; one already completed still credits the
         wallet when its webhook arrives.
 
+        409 (40903) also answers while an election a failed publish submitted is not settled on
+        chain yet (it may still be mined): retry later. One that was mined is adopted, and the
+        draft then answers 409 (40904) like any partially published one.
+
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Process ID
@@ -5538,6 +5542,9 @@ paths:
         questions on-chain, so the draft can only be published again (resuming the rest), not edited.
         409 (40177) when the edit turns a once-per-organization add-on on for a draft that was paid
         without it, since an add-on cannot be added after payment.
+        409 (40903) while a publish is running, or while an election a failed publish submitted is
+        not settled on chain yet (it may still be mined): retry later. One that was mined is adopted
+        first, and the edit then answers 409 (40904).
         The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
         as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
         `typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
@@ -6532,6 +6539,9 @@ paths:
         over 3 hours for 15. Poll GET /jobs/{jobId} until it is completed or failed.
         If the publish finally fails before any election is mined, a failed publish credits the
         payer's wallet back (a `creditBack` history row) and publishing again charges again.
+        A publish that failed after submitting its elections is credited back only once the chain
+        proves none of them can be mined; until then the draft stays paid, and publishing again
+        adopts any election that did mine instead of creating a second one, at no new charge.
         409 (40172) means the stored questions do not match the process and the draft has to be
         saved again before it can be published.
         400 (40004) "process is not ready to publish: ..." lists every problem found, including
