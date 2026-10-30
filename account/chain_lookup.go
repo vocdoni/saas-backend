@@ -15,10 +15,16 @@ import (
 
 // TxMined reports whether the tx with the given hash is in a block. Only the node's 204 ("not
 // found") answers false with no error; any other answer, a 5xx or a transport failure included, is
-// an error, because "not mined" may release money (apiclient.TransactionReference maps every
-// non-200 to "does not exist", so it is not used here).
+// an error, because "not mined" may release money.
+//
+// It asks GET /chain/transactions/{hash}, not /chain/transactions/reference/{hash}: the node's
+// reference handler maps every indexer read error to 204 (dvote api/chain.go chainTxRefByHashHandler
+// returns ErrTransactionNotFound.WithErr(err)), so a failing indexer would look like "not mined",
+// while chainTxByHashHandler runs the same indexer query and answers 204 only when the tx is not
+// found and 500 (ErrVochainGetTxFailed) on a read error. apiclient.TransactionReference is not used
+// either: it maps every non-200 to "does not exist".
 func (a *Account) TxMined(hash internal.HexBytes) (bool, error) {
-	resp, code, err := a.client.Request(apiclient.HTTPGET, nil, "chain", "transactions", "reference", hash.String())
+	resp, code, err := a.client.Request(apiclient.HTTPGET, nil, "chain", "transactions", hash.String())
 	if err != nil {
 		return false, fmt.Errorf("could not look up tx %s: %w", hash.String(), err)
 	}

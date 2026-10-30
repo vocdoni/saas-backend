@@ -24,14 +24,17 @@ func newLookupNode(c *qt.C, handler http.HandlerFunc) *Account {
 }
 
 // TestTxMined pins the only answers that may feed the dead rule: 200 is mined, 204 is not found,
-// and anything else (a 500, a 404, a dropped connection) is an error, never "not mined".
+// and anything else (a 500, a 404, a dropped connection) is an error, never "not mined". It also
+// pins the endpoint: /chain/transactions/{hash}, whose 500 on an indexer read error is what makes
+// the rule sound (the reference endpoint answers 204 for that error too), so a server that only
+// serves the reference path must make every lookup fail.
 func TestTxMined(t *testing.T) {
 	c := qt.New(t)
 	hash := internal.HexBytes{0xab, 0xcd}
 	answers := map[string]func(http.ResponseWriter){
 		"200": func(w http.ResponseWriter) {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(&api.TransactionReference{Height: 7})
+			_ = json.NewEncoder(w).Encode(&api.GenericTransactionWithInfo{TxContent: json.RawMessage(`{}`)})
 		},
 		"204":       func(w http.ResponseWriter) { w.WriteHeader(http.StatusNoContent) },
 		"500":       func(w http.ResponseWriter) { http.Error(w, "indexer unavailable", http.StatusInternalServerError) },
@@ -40,7 +43,7 @@ func TestTxMined(t *testing.T) {
 	}
 	var answer string
 	a := newLookupNode(c, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/chain/transactions/reference/abcd" {
+		if r.URL.Path != "/chain/transactions/abcd" {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
@@ -63,6 +66,18 @@ func TestTxMined(t *testing.T) {
 		c.Assert(err, qt.Not(qt.IsNil), qt.Commentf("answer %s", failing))
 		c.Assert(mined, qt.IsFalse)
 	}
+
+	// a node that only answers the reference path (200 there, nothing else) is never asked
+	referenceOnly := newLookupNode(c, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/chain/transactions/reference/abcd" {
+			_ = json.NewEncoder(w).Encode(&api.TransactionReference{Height: 7})
+			return
+		}
+		http.Error(w, "not found", http.StatusNotFound)
+	})
+	mined, err = referenceOnly.TxMined(hash)
+	c.Assert(err, qt.Not(qt.IsNil))
+	c.Assert(mined, qt.IsFalse)
 }
 
 // TestOrgElectionIDs pins the organization listing: ids newest first as the node pages them, an
