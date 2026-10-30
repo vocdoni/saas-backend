@@ -5463,8 +5463,9 @@ paths:
         wallet when its webhook arrives.
 
         409 (40903) also answers while an election a failed publish submitted is not settled on
-        chain yet (it may still be mined): retry later. One that was mined is adopted, and the
-        draft then answers 409 (40904) like any partially published one.
+        chain yet (it may still be mined): publish the draft again (it adopts or resubmits at no
+        new charge) or retry later. One that was mined is adopted, and the draft then answers 409
+        (40904) like any partially published one.
 
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
@@ -5543,8 +5544,9 @@ paths:
         409 (40177) when the edit turns a once-per-organization add-on on for a draft that was paid
         without it, since an add-on cannot be added after payment.
         409 (40903) while a publish is running, or while an election a failed publish submitted is
-        not settled on chain yet (it may still be mined): retry later. One that was mined is adopted
-        first, and the edit then answers 409 (40904).
+        not settled on chain yet (it may still be mined): publish the draft again (it adopts or
+        resubmits at no new charge) or retry later. One that was mined is adopted first, and the
+        edit then answers 409 (40904).
         The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
         as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
         `typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a

@@ -42,8 +42,9 @@ import (
 //	@Description	wallet when its webhook arrives.
 //	@Description
 //	@Description	409 (40903) also answers while an election a failed publish submitted is not settled on
-//	@Description	chain yet (it may still be mined): retry later. One that was mined is adopted, and the
-//	@Description	draft then answers 409 (40904) like any partially published one.
+//	@Description	chain yet (it may still be mined): publish the draft again (it adopts or resubmits at no
+//	@Description	new charge) or retry later. One that was mined is adopted, and the draft then answers 409
+//	@Description	(40904) like any partially published one.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
