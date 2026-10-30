@@ -141,6 +141,10 @@ func (a *API) reconcileStaleClaim(claim db.StalePublishClaim) {
 	if e := a.db.ClearVotingProcessPublishing(id, owner); e != nil {
 		log.Warnw("could not release the stale publish reconcile claim", "processId", id.Hex(), "error", e)
 	}
+	if vp, questions, e := a.db.ProcessWithQuestions(id); e == nil && vp.PublishSubmitted {
+		log.Warnw("stale publish left unresolved", "processId", id.Hex(), "txHashes", publishTxHashes(questions))
+		return
+	}
 	log.Infow("reconciled stale publishing process", "processId", id.Hex())
 }
 

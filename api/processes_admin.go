@@ -122,6 +122,16 @@ func (a *API) deleteDraftProcess(vp *db.VotingProcess, teardown *orgTeardown) er
 	if err != nil {
 		return fmt.Errorf("failed to get the draft: %w", err)
 	}
+	// a submitted publish tx is settled first: a mined one is adopted, and counts as mined below;
+	// one that may still mine, or that the chain cannot tell about (or no chain: cmd/userdel),
+	// keeps the draft, which would otherwise be refunded or dropped under a live election
+	unresolved, err := a.resolvePublishTxs(current, questions)
+	if err != nil {
+		return fmt.Errorf("failed to resolve submitted publish txs: %w", err)
+	}
+	if unresolved {
+		return errors.ErrPublishInProgress.Withf("a submitted election of the draft is not settled on chain yet; retry later")
+	}
 	// the flag is set before a mined election id is stored, so it also covers an election whose
 	// id never reached its question
 	if anyMined(questions) || current.HasMinedElections {
@@ -329,7 +339,9 @@ func (a *API) creditUndeliveredAddOns(org, payer common.Address, teardown *orgTe
 // server: cmd/userdel, whose erasure must not strand money when it tears an organization down. It
 // has no payment gateway: an open top-up checkout is dropped with its draft and left to Stripe's
 // own expiry, and paying it meanwhile only credits the wallet. It stops at the first draft it
-// cannot delete, leaving it and the rest in place.
+// cannot delete, leaving it and the rest in place. It has no chain client either, so a draft with a
+// submitted publish tx not settled yet (db.VotingProcess.PublishSubmitted) stops it with 409
+// ErrPublishInProgress: run the service, which settles it, or delete the draft through the API.
 //
 // ponytail: the wallet lock it takes is its own, not the running server's — a census headroom
 // charge on the same payer landing between a draft's refund read and its credit stays debited for

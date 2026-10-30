@@ -40,6 +40,17 @@ func publishedQuestionStatus(vp *db.VotingProcess) string {
 	return db.QuestionStatusReady
 }
 
+// publishTxHashes lists the hashes of the records the questions hold, for logs.
+func publishTxHashes(questions []db.VotingProcessQuestion) []string {
+	var hashes []string
+	for i := range questions {
+		for _, tx := range questions[i].PublishTxs {
+			hashes = append(hashes, tx.Hash.String())
+		}
+	}
+	return hashes
+}
+
 // resolvePublishTxs settles, against the chain, the submitted publish txs recorded on the
 // questions of vp that have no election yet (db.PublishTx). Per question: a mined record is
 // adopted (its election recorded on the question, as persistPublished does); records none of
