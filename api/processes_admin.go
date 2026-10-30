@@ -134,7 +134,9 @@ func (a *API) deleteDraftProcess(vp *db.VotingProcess, teardown *orgTeardown) er
 		return fmt.Errorf("failed to resolve submitted publish txs: %w", err)
 	}
 	if unresolved {
-		return errors.ErrPublishInProgress.Withf("a submitted election of the draft is not settled on chain yet; retry later")
+		return errors.ErrPublishInProgress.Withf(
+			"a submitted election of the draft is not settled on chain yet; " +
+				"publish the draft again (it adopts or resubmits at no new charge) or retry later")
 	}
 	// the flag is set before a mined election id is stored, so it also covers an election whose
 	// id never reached its question

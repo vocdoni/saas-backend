@@ -374,7 +374,9 @@ func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id bson.ObjectID, u
 	case current.PublishInProgress():
 		errors.ErrPublishInProgress.Write(w)
 	case current.PublishSubmitted:
-		errors.ErrPublishInProgress.Withf("a submitted election of the draft is not settled on chain yet; retry later").Write(w)
+		errors.ErrPublishInProgress.Withf(
+			"a submitted election of the draft is not settled on chain yet; " +
+				"publish the draft again (it adopts or resubmits at no new charge) or retry later").Write(w)
 	case current.HasMinedElections:
 		errors.ErrProcessPartiallyPublished.Write(w)
 	default:

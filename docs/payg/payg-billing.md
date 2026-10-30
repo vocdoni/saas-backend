@@ -302,7 +302,9 @@ claim:
 - **unresolved** (anything else, including a chain that does not answer): nothing is credited
   back, and an edit or a delete answers **409** (40903). The draft stays paid — the state a
   delete refunds and a publish reuses — and the next touch settles it again. A publish is never
-  blocked: its next round resubmits the question at the same nonce.
+  blocked: its next round resubmits the question at the same nonce. An operator can also settle a
+  draft whose nonce never moves by publishing it on the customer's behalf; there is no support tool
+  for it yet.
 
 `cmd/userdel` has no chain client, so a draft still flagged stops the erasure with 409 (40903):
 run the service, which settles it, or delete the draft through the API first.
@@ -310,6 +312,10 @@ run the service, which settles it, or delete the draft through the API first.
 Deployment assumption: the nonce and the tx are read from the same node. `VOCDONI_VOCDONIAPI` must
 not round-robin across gateways at different heights, or a tx another gateway has not indexed yet
 could be taken for dead.
+
+The election metadata document each question publishes carries `meta.questionId` (the question's
+id), which is what makes its content-addressed URL unique per question and lets an election be
+matched back to its question.
 
 ## Topping up for a process
 
