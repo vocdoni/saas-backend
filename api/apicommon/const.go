@@ -25,9 +25,18 @@ const DefaultLang = "en"
 // VerificationCodeMaxAttempts is the maximum number of attempts to verify a code
 const VerificationCodeMaxAttempts = 3
 
+// VerificationCodeMaxSends is the maximum number of times a single verification code is
+// delivered (the initial send plus resends). Deliveries are counted separately from
+// verification attempts, so resending a code never spends guess budget.
+const VerificationCodeMaxSends = 3
+
 const (
 	// VerificationCodeLength is the length of the verification code in bytes
 	VerificationCodeLength = 3
+	// InvitationCodeLength is the length of an organization invitation code in bytes. Unlike
+	// verification codes, invitation codes are looked up by value with no attempt limit and stay
+	// valid for days, so they must be unguessable rather than short.
+	InvitationCodeLength = 16
 	// InvitationExpiration is the duration of the invitation code before it is
 	// invalidated
 	InvitationExpiration = 5 * 24 * time.Hour // 5 days

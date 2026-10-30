@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -47,7 +48,7 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(createdMember.Phone.Bytes(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, testPlaintextPhone))
 		c.Assert(createdMember.MemberNumber, qt.Equals, member.MemberNumber)
 		c.Assert(createdMember.Name, qt.Equals, testName)
-		c.Assert(createdMember.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, testPassword))
+		c.Assert(createdMember.HashedPass, qt.DeepEquals, HashMemberPassword(testSalt, createdMember.ID, testPassword))
 		c.Assert(createdMember.CreatedAt, qt.Not(qt.IsNil))
 
 		// Test updating an existing member
@@ -256,12 +257,12 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(lastStatus.MemberIDs, qt.Contains, member1.ID.Hex())
 		c.Assert(member1.Phone.Bytes(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, testPlaintextPhone))
-		c.Assert(member1.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, testPassword))
+		c.Assert(member1.HashedPass, qt.DeepEquals, HashMemberPassword(testSalt, member1.ID, testPassword))
 
 		member2, err := testDB.OrgMemberByMemberNumber(testOrgAddress, members[1].MemberNumber)
 		c.Assert(err, qt.IsNil)
 		c.Assert(member2.Phone.Bytes(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, members[1].PlaintextPhone))
-		c.Assert(member2.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, members[1].Password))
+		c.Assert(member2.HashedPass, qt.DeepEquals, HashMemberPassword(testSalt, member2.ID, members[1].Password))
 
 		// Verify that the org members count is correct
 		count, err := testDB.CountOrgMembers(testOrgAddress)
@@ -606,7 +607,7 @@ func TestUpsertOrgMemberPartialUpdateKeepsLoginHash(t *testing.T) {
 	c.Assert(found.ParticipantID, qt.Equals, member.ID.Hex())
 
 	// a partial update carrying only the weight: every hashed field is absent from the request
-	_, created, err := testDB.UpsertOrgMemberAndCensusParticipants(
+	_, created, err := testDB.UpsertOrgMemberAndCensusParticipants(context.Background(),
 		org, &OrgMemberUpdate{ID: member.ID, Weight: new(uint64(7))}, "test_salt",
 	)
 	c.Assert(err, qt.IsNil)
@@ -668,7 +669,7 @@ func TestUpsertOrgMemberClearsFields(t *testing.T) {
 	c.Assert(stored.Phone.IsEmpty(), qt.IsFalse)
 
 	// surname is left nil (kept), name is changed, the rest is cleared
-	_, created, err := testDB.UpsertOrgMemberAndCensusParticipants(org, &OrgMemberUpdate{
+	_, created, err := testDB.UpsertOrgMemberAndCensusParticipants(context.Background(), org, &OrgMemberUpdate{
 		ID:           member.ID,
 		Name:         new("Augusta"),
 		MemberNumber: new(""),
@@ -708,7 +709,7 @@ func TestUpsertOrgMemberReportsCreated(t *testing.T) {
 	org := &Organization{Address: testOrgAddress, CreatedAt: time.Now()}
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
-	id, created, err := testDB.UpsertOrgMemberAndCensusParticipants(org, &OrgMemberUpdate{
+	id, created, err := testDB.UpsertOrgMemberAndCensusParticipants(context.Background(), org, &OrgMemberUpdate{
 		MemberNumber: new("created-1"),
 		Name:         new("Grace"),
 		Email:        new("grace.created@example.com"),
@@ -716,7 +717,7 @@ func TestUpsertOrgMemberReportsCreated(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(created, qt.IsTrue)
 
-	_, created, err = testDB.UpsertOrgMemberAndCensusParticipants(org, &OrgMemberUpdate{
+	_, created, err = testDB.UpsertOrgMemberAndCensusParticipants(context.Background(), org, &OrgMemberUpdate{
 		ID:   id,
 		Name: new("Grace Hopper"),
 	}, "test_salt")
@@ -734,7 +735,7 @@ func TestUpsertOrgMemberClientChosenIDStampsCreatedAt(t *testing.T) {
 	org := &Organization{Address: testOrgAddress, CreatedAt: time.Now()}
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
-	id, created, err := testDB.UpsertOrgMemberAndCensusParticipants(org, &OrgMemberUpdate{
+	id, created, err := testDB.UpsertOrgMemberAndCensusParticipants(context.Background(), org, &OrgMemberUpdate{
 		ID:    bson.NewObjectID(),
 		Name:  new("Grace"),
 		Email: new("grace.chosen@example.com"),
@@ -745,4 +746,37 @@ func TestUpsertOrgMemberClientChosenIDStampsCreatedAt(t *testing.T) {
 	member, err := testDB.OrgMember(testOrgAddress, id.Hex())
 	c.Assert(err, qt.IsNil)
 	c.Assert(member.CreatedAt.IsZero(), qt.IsFalse)
+}
+
+// TestPrepareOrgMemberHashingBusy pins that a member whose phone or password could not be hashed in
+// time is not prepared at all, rather than stored without the field.
+func TestPrepareOrgMemberHashingBusy(t *testing.T) {
+	c := qt.New(t)
+	org := &Organization{Address: common.Address{0x42}, Country: "ES"}
+	busy := memberHasher{
+		phone: func(string, *Organization) (HashedPhone, error) { return nil, internal.ErrHashingBusy },
+		password: func(string, bson.ObjectID, string) ([]byte, error) {
+			return nil, internal.ErrHashingBusy
+		},
+	}
+	clientHash := strings.Repeat("ab", 32)
+	for _, m := range []*OrgMember{
+		{PlaintextPhone: "612345601"},
+		{Password: clientHash},
+	} {
+		member, errs, err := prepareOrgMember(org, m, "salt", time.Now(), busy)
+		c.Assert(err, qt.ErrorIs, internal.ErrHashingBusy)
+		c.Assert(member, qt.IsNil)
+		c.Assert(errs, qt.HasLen, 0)
+	}
+
+	// the background hasher stores the same hashes the request path would compute
+	member, errs, err := prepareOrgMember(org, &OrgMember{PlaintextPhone: "612345601", Password: clientHash},
+		"salt", time.Now(), backgroundHasher)
+	c.Assert(err, qt.IsNil)
+	c.Assert(errs, qt.HasLen, 0)
+	wantPhone, err := NewHashedPhone("612345601", org)
+	c.Assert(err, qt.IsNil)
+	c.Assert(member.Phone, qt.DeepEquals, wantPhone)
+	c.Assert(member.HashedPass, qt.DeepEquals, HashMemberPassword("salt", member.ID, clientHash))
 }

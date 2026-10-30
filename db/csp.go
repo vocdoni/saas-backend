@@ -29,6 +29,8 @@ type CSPAuth struct {
 	Attempts   int       `json:"attempts" bson:"attempts"`
 	Verified   bool      `json:"verified" bson:"verified"`
 	VerifiedAt time.Time `json:"verifiedAt" bson:"verifiedat"`
+	// Resends counts the challenge resends of the token, capped by ClaimCSPAuthResend.
+	Resends int `json:"resends" bson:"resends"`
 }
 
 // CSPProcess is the status of a process in a bundle of processes for a user
@@ -41,6 +43,10 @@ type CSPProcess struct {
 	UsedAt      time.Time         `json:"usedAt" bson:"consumedat"`
 	UsedAddress internal.HexBytes `json:"usedAddress" bson:"consumedaddress"`
 	TimesVoted  int               `json:"timesVoted" bson:"timesVoted"`
+	// VotedOnChain caches that the chain has a vote under this row's nullifier. It is set once a
+	// lookup finds the vote and never cleared (a vote cannot leave the chain), so a row that has
+	// it needs no further chain read. A missing field reads false: there is no migration.
+	VotedOnChain bool `json:"votedOnChain" bson:"votedonchain,omitempty"`
 	// BlindSecret holds the CSP's one-time blind-signature nonce k between the two rounds of a
 	// blind (OFF_CHAIN_CA_V2) signature: armed in round 1 and atomically claimed in round 2.
 	// Never leaves the server; absent for the non-anonymous ECDSA flow and once claimed.
@@ -138,7 +144,7 @@ func (ms *MongoStorage) VerifyCSPAuth(token internal.HexBytes) error {
 	return nil
 }
 
-// IncrementCSPAuthAttempts atomically records a failed verification attempt for
+// IncrementCSPAuthAttempts atomically records a verification attempt for
 // the given token, but only while the stored attempt count is still below
 // maxAttempts. It returns recorded=true when the attempt was counted, and
 // recorded=false when the cap had already been reached (no increment performed)
@@ -169,6 +175,24 @@ func (ms *MongoStorage) IncrementCSPAuthAttempts(token internal.HexBytes, maxAtt
 		return false, err
 	}
 	return false, nil
+}
+
+// ClaimCSPAuthResend atomically records a challenge resend for the token, refusing it (returning
+// false) once maxResends resends have been recorded, so concurrent requests cannot exceed the cap.
+func (ms *MongoStorage) ClaimCSPAuthResend(token internal.HexBytes, maxResends int) (bool, error) {
+	if token == nil {
+		return false, ErrBadInputs
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	// tokens stored before the counter existed have no resends field, which $lt does not match
+	res, err := ms.cspTokens.UpdateOne(ctx,
+		bson.M{"_id": token, "resends": bson.M{"$not": bson.M{"$gte": maxResends}}},
+		bson.M{"$inc": bson.M{"resends": 1}})
+	if err != nil {
+		return false, errors.Join(ErrStoreToken, err)
+	}
+	return res.MatchedCount == 1, nil
 }
 
 // CSPProcess returns the CSPProcess for the given token and processID.
@@ -226,7 +250,7 @@ func (ms *MongoStorage) IsCSPProcessConsumed(userID, processID internal.HexBytes
 	default:
 		return false, err
 	}
-	return currentStatus.TimesVoted > MaxVoteOverwritesPerProcess, nil
+	return currentStatus.TimesVoted >= MaxCSPSignaturesPerElection, nil
 }
 
 // ConsumeCSPProcess method consumes a CSP process for a user. It returns an
@@ -234,7 +258,9 @@ func (ms *MongoStorage) IsCSPProcessConsumed(userID, processID internal.HexBytes
 // the token does not exist, the process has already been consumed or thecspAuthTokenStatusID(
 // token is not verified.
 func (ms *MongoStorage) ConsumeCSPProcess(token, processID, address internal.HexBytes) error {
-	if token == nil || processID == nil || address == nil {
+	// an empty address would be stored as an empty string, which the address pin below can never
+	// match again, so it is refused like a missing one
+	if token == nil || processID == nil || len(address) == 0 {
 		return ErrBadInputs
 	}
 	// lock the keys
@@ -248,49 +274,64 @@ func (ms *MongoStorage) ConsumeCSPProcess(token, processID, address internal.Hex
 	if err != nil {
 		return err
 	}
-	// get the token status
-	tokenStatus, err := ms.fetchCSPProcessFromDB(ctx, tokenData.UserID, processID)
-	if err != nil && !errors.Is(err, ErrTokenNotFound) {
-		return err
-	}
-	// check if the token is already consumed
-	if tokenStatus != nil && tokenStatus.TimesVoted > MaxVoteOverwritesPerProcess {
-		return ErrProcessAlreadyConsumed
-	}
-	timesVoted := 1
-	if tokenStatus != nil {
-		timesVoted = tokenStatus.TimesVoted + 1
-		// check if the address is the same as the previous one used to vote
-		if tokenStatus.UsedAddress != nil && !tokenStatus.UsedAddress.Equals(address) {
-			return ErrInvalidData
-		}
-	}
 	// calculate the status id
 	id := cspAuthTokenStatusID(tokenData.UserID, processID)
-	// prepare the document to update
-	updateDoc, err := dynamicUpdateDocument(CSPProcess{
-		ID:          id,
-		UserID:      tokenData.UserID,
-		ProcessID:   processID,
-		Used:        true,
-		UsedAt:      time.Now(),
-		UsedToken:   token,
-		UsedAddress: address,
-		TimesVoted:  timesVoted,
-	}, nil)
-	if err != nil {
-		return errors.Join(ErrPrepareDocument, err)
+	// consume in one conditional upsert, so a concurrent caller — also from another
+	// service replica — can never push the row past the overwrite budget or move it
+	// to another address: the vote budget and the address pin are part of the filter,
+	// and the first consumption creates the row atomically. A row that fails the
+	// filter makes the upsert hit the unique _id and return a duplicate-key error,
+	// which we resolve by reading the row to name the refusal.
+	filter := bson.M{
+		"_id":             id,
+		"timesVoted":      bson.M{"$not": bson.M{"$gte": MaxCSPSignaturesPerElection}},
+		"consumedaddress": bson.M{"$in": bson.A{nil, address}},
 	}
-	// set the filter and update options to create the document if it does not
-	// exist
-	filter := bson.M{"_id": id}
+	update := bson.M{
+		"$inc": bson.M{"timesVoted": 1},
+		"$set": bson.M{
+			"consumed":        true,
+			"consumedat":      time.Now(),
+			"consumedtoken":   token,
+			"consumedaddress": address,
+		},
+		"$setOnInsert": bson.M{
+			"userid":    tokenData.UserID,
+			"processid": processID,
+		},
+	}
 	opts := options.UpdateOne().SetUpsert(true)
-	// update the token status
-	if _, err = ms.cspTokensStatus.UpdateOne(ctx, filter, updateDoc, opts); err != nil {
-		return errors.Join(ErrStoreToken, err)
+	for range consumeCSPProcessAttempts {
+		_, err := ms.cspTokensStatus.UpdateOne(ctx, filter, update, opts)
+		if err == nil {
+			return nil
+		}
+		if !mongo.IsDuplicateKeyError(err) {
+			return errors.Join(ErrStoreToken, err)
+		}
+		existing, ferr := ms.fetchCSPProcessFromDB(ctx, tokenData.UserID, processID)
+		if ferr != nil {
+			return ferr
+		}
+		if existing.TimesVoted >= MaxCSPSignaturesPerElection {
+			return ErrProcessAlreadyConsumed
+		}
+		// check if the address is the same as the previous one used to vote
+		if existing.UsedAddress != nil && !existing.UsedAddress.Equals(address) {
+			return ErrInvalidData
+		}
+		// two first consumptions raced on the row creation: the loser lands here
+		// with a row that still passes the filter, so retry the update against it
 	}
-	return nil
+	// the row keeps failing the filter while looking valid once decoded (e.g. a stored
+	// address the pin cannot match): refuse rather than spin against the database
+	return fmt.Errorf("%w: consumption row %s fails the consume filter", ErrStoreToken, id)
 }
+
+// consumeCSPProcessAttempts bounds ConsumeCSPProcess's conditional upsert retries. One retry is all a
+// lost row-creation race needs; more only guard against a row the filter and the decoded checks
+// disagree on, which must not turn into a busy loop.
+const consumeCSPProcessAttempts = 3
 
 // ArmCSPProcessBlind arms the round-1 half of a blind (OFF_CHAIN_CA_V2) signature: it atomically
 // stores the one-time nonce k, its blind point R and the CSP-authorized weight for (token's user,
@@ -436,43 +477,63 @@ func (ms *MongoStorage) CSPProcessByUserAndProcess(userID, processID internal.He
 	return ms.fetchCSPProcessFromDB(ctx, userID, processID)
 }
 
-// MembersWithUsedCSPProcess returns the subset of the given memberIDs (each the
-// hex of an OrgMember ObjectID) that have already cast a ballot in the given
-// process. The returned map is keyed by the memberID hex string and only
-// contains entries set to true; members without a CSP process for the given
-// process, or with one that has not been used, are simply absent from the map.
-//
-// A member is considered to have voted when a CSPProcess exists for
-// (memberID, processID) and its Used field is true — i.e. the member consumed
-// the process to cast a ballot.
-func (ms *MongoStorage) MembersWithUsedCSPProcess(
-	processID internal.HexBytes,
-	memberIDs []string,
-) (map[string]bool, error) {
-	if processID == nil {
-		return nil, ErrBadInputs
+// CSPProcessesByMembers returns, in one query, every CSP process row of the given members
+// (memberIDs are OrgMember ObjectID hex strings; ids that are not hex are skipped) on any of the
+// given elections. Rows exist only for (member, election) pairs the CSP has touched, so a missing
+// pair means "not signed".
+func (ms *MongoStorage) CSPProcessesByMembers(processIDs []internal.HexBytes, memberIDs []string) ([]CSPProcess, error) {
+	userIDs := normalizeCSPUserIDs(memberIDs)
+	if len(processIDs) == 0 || len(userIDs) == 0 {
+		return nil, nil
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
+	defer cancel()
+	// covered by the userid+processid index on cspTokensStatus
+	cursor, err := ms.cspTokensStatus.Find(ctx, bson.M{
+		"processid": bson.M{"$in": processIDs},
+		"userid":    bson.M{"$in": userIDs},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to query CSP processes of members: %w", err)
+	}
+	var rows []CSPProcess
+	if err := cursor.All(ctx, &rows); err != nil {
+		return nil, fmt.Errorf("failed to decode CSP processes of members: %w", err)
+	}
+	return rows, nil
+}
 
-	result := make(map[string]bool, len(memberIDs))
-	for _, id := range memberIDs {
-		// parsed rather than HexBytesFromString, which panics by design: an id that is not hex
-		// cannot have a CSP process, so it is skipped like one that simply has none
-		userID := internal.HexBytes{}
-		if err := userID.ParseString(id); err != nil {
-			continue
-		}
-		proc, err := ms.CSPProcessByUserAndProcess(userID, processID)
-		if err != nil {
-			if errors.Is(err, ErrTokenNotFound) {
-				continue
-			}
-			return nil, fmt.Errorf("failed to query CSP process status: %w", err)
-		}
-		if proc.Used {
-			result[id] = true
-		}
+// MarkCSPProcessVotedOnChain sets the VotedOnChain cache flag on the CSP process row of
+// (userID, processID), and on nothing else. A missing row is not an error: there is nothing to
+// cache on.
+func (ms *MongoStorage) MarkCSPProcessVotedOnChain(userID, processID internal.HexBytes) error {
+	if userID == nil || processID == nil {
+		return ErrBadInputs
 	}
-	return result, nil
+	return ms.markVotedOnChain(bson.M{"_id": cspAuthTokenStatusID(userID, processID)})
+}
+
+// MarkCSPProcessVotedOnChainByAddress caches that the vote cast by address on processID is on
+// chain, on the CSP process row that consumed that address: the relay knows the voter's address
+// and the election, not the member. No row matches a blind-census vote (its row holds no address),
+// which is not an error. The lookup is served by the cspTokensStatus processid+consumedaddress
+// index (migration 32).
+func (ms *MongoStorage) MarkCSPProcessVotedOnChainByAddress(processID, address internal.HexBytes) error {
+	if len(processID) == 0 || len(address) == 0 {
+		return ErrBadInputs
+	}
+	return ms.markVotedOnChain(bson.M{"processid": processID, "consumedaddress": address})
+}
+
+// markVotedOnChain sets the votedonchain cache on the CSP process row filter matches. A filter that
+// matches no row has nothing to cache on, which is not an error.
+func (ms *MongoStorage) markVotedOnChain(filter bson.M) error {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	if _, err := ms.cspTokensStatus.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"votedonchain": true}}); err != nil {
+		return fmt.Errorf("failed to mark CSP process voted on chain: %w", err)
+	}
+	return nil
 }
 
 // DeleteCSPAuthByAnchor removes every CSP authentication token tied to the given bundle.
@@ -484,7 +545,7 @@ func (ms *MongoStorage) DeleteCSPAuthByAnchor(anchorID internal.HexBytes) (int64
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 	res, err := ms.cspTokens.DeleteMany(ctx, bson.M{"bundleid": anchorID})
 	if err != nil {
@@ -502,7 +563,7 @@ func (ms *MongoStorage) DeleteCSPProcessByProcess(processID internal.HexBytes) (
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 	res, err := ms.cspTokensStatus.DeleteMany(ctx, bson.M{"processid": processID})
 	if err != nil {

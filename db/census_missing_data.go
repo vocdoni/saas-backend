@@ -24,9 +24,17 @@ func (e *CensusMembersError) Error() string {
 // MissingLoginData reports whether the member lacks the data to log in to a census with these
 // fields: any auth field empty, or, when 2FA is configured, no 2FA channel at all (with both email
 // and phone configured either one is enough). An empty string counts as empty just like an absent
-// field, and so does a whitespace-only one.
+// field, and so does a whitespace-only one. The password counts as empty when HashedPass, the stored
+// password hash, is. A login request carries no stored hash, so the CSP checks the password it sent
+// on its own and leaves the field out of the auth fields it passes here.
 func (m *OrgMember) MissingLoginData(authFields OrgMemberAuthFields, twoFaFields OrgMemberTwoFaFields) bool {
 	for _, field := range authFields {
+		if field == OrgMemberAuthFieldsPassword {
+			if len(m.HashedPass) == 0 {
+				return true
+			}
+			continue
+		}
 		if value, known := memberAuthFieldValue(m, field); known && strings.TrimSpace(value) == "" {
 			return true
 		}
@@ -66,6 +74,7 @@ func memberAuthFieldValue(m *OrgMember, field OrgMemberAuthField) (value string,
 	case OrgMemberAuthFieldsBirthDate:
 		return m.BirthDate, true
 	default:
+		// includes OrgMemberAuthFieldsPassword, which is never hashed (see MissingLoginData)
 		return "", false
 	}
 }

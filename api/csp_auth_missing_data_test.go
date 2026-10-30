@@ -54,7 +54,7 @@ func TestCSPAuthMissingData(t *testing.T) {
 			c.Assert(err.Code, qt.Equals, errors.ErrInvalidUserData.Code)
 		}
 		err := postProcessAuth0AndExpectError(t, pid, &handlers.AuthRequest{Name: "Twin", NationalID: "X1"})
-		c.Assert(err.Code, qt.Equals, errors.ErrCensusParticipantNotFound.Code)
+		c.Assert(err.Code, qt.Equals, errors.ErrCSPAuthFailed.Code)
 
 		// a complete member is unaffected
 		postProcessAuth0(t, pid, &handlers.AuthRequest{Name: "Jane", NationalID: "DNI002"})
@@ -67,6 +67,6 @@ func TestCSPAuthMissingData(t *testing.T) {
 		err := postProcessAuth0AndExpectError(t, pid, &handlers.AuthRequest{Email: "   "})
 		c.Assert(err.Code, qt.Equals, errors.ErrInvalidUserData.Code)
 		err = postProcessAuth0AndExpectError(t, pid, &handlers.AuthRequest{Email: "twin@example.com"})
-		c.Assert(err.Code, qt.Equals, errors.ErrCensusParticipantNotFound.Code)
+		c.Assert(err.Code, qt.Equals, errors.ErrCSPAuthFailed.Code)
 	})
 }
