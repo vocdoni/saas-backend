@@ -102,6 +102,40 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(org.DefaultLang, qt.Equals, "es")
 	})
 
+	t.Run("SetOrganizationWritesSubscriptionOnlyOnCreate", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+
+		address := testOrgAddress
+		c.Assert(testDB.SetOrganization(&Organization{
+			Address:      address,
+			Subscription: OrganizationSubscription{PlanID: "plan-initial", Active: true},
+		}), qt.IsNil)
+		org, err := testDB.Organization(address)
+		c.Assert(err, qt.IsNil)
+		c.Assert(org.Subscription.PlanID, qt.Equals, "plan-initial")
+		c.Assert(org.Subscription.Active, qt.IsTrue)
+
+		// a whole-document write of an existing organization updates its other fields only
+		org.Website = "https://example.com"
+		org.Subscription.PlanID = "plan-stale"
+		org.Subscription.StripeSubscriptionID = "sub_stale"
+		c.Assert(testDB.SetOrganization(org), qt.IsNil)
+		org, err = testDB.Organization(address)
+		c.Assert(err, qt.IsNil)
+		c.Assert(org.Website, qt.Equals, "https://example.com")
+		c.Assert(org.Subscription.PlanID, qt.Equals, "plan-initial")
+		c.Assert(org.Subscription.StripeSubscriptionID, qt.Equals, "")
+
+		// the last payment date has its own writer
+		paidAt := time.Now().Truncate(time.Millisecond)
+		c.Assert(testDB.SetOrganizationLastPaymentDate(address, paidAt), qt.IsNil)
+		org, err = testDB.Organization(address)
+		c.Assert(err, qt.IsNil)
+		c.Assert(org.Subscription.LastPaymentDate.Equal(paidAt), qt.IsTrue)
+		c.Assert(org.Subscription.PlanID, qt.Equals, "plan-initial")
+		c.Assert(testDB.SetOrganizationLastPaymentDate(testAnotherOrgAddress, paidAt), qt.ErrorIs, ErrNotFound)
+	})
+
 	t.Run("DeleteOrganization", func(_ *testing.T) {
 		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
@@ -151,6 +185,22 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(org, qt.Not(qt.IsNil))
 		c.Assert(org.Address, qt.DeepEquals, address)
 		c.Assert(org.Creator, qt.Equals, newCreator)
+		// a row without a signer seed (not yet backfilled) gets it pinned to the previous
+		// creator by the same update, so its derived signer does not change
+		c.Assert(org.SignerSeed, qt.Equals, testUserEmail)
+		c.Assert(org.SignerSeedValue(), qt.Equals, testUserEmail)
+		// an existing seed is never rewritten by later creator changes
+		c.Assert(testDB.ReplaceCreatorEmail(newCreator, "myThird@email.test"), qt.IsNil)
+		org, err = testDB.Organization(address)
+		c.Assert(err, qt.IsNil)
+		c.Assert(org.Creator, qt.Equals, "myThird@email.test")
+		c.Assert(org.SignerSeed, qt.Equals, testUserEmail)
+		// the new email is written literally, never evaluated as a pipeline field path
+		c.Assert(testDB.ReplaceCreatorEmail("myThird@email.test", "$signerSeed"), qt.IsNil)
+		org, err = testDB.Organization(address)
+		c.Assert(err, qt.IsNil)
+		c.Assert(org.Creator, qt.Equals, "$signerSeed")
+		c.Assert(org.SignerSeed, qt.Equals, testUserEmail)
 	})
 
 	t.Run("OrganizationsUsers", func(_ *testing.T) {
@@ -316,7 +366,9 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(user.Organizations[0].Address, qt.DeepEquals, orgAddress)
 
 		// Remove the user from the organization
-		c.Assert(testDB.RemoveOrganizationUser(orgAddress, userID), qt.IsNil)
+		removed, err := testDB.RemoveOrganizationUser(orgAddress, userID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(removed, qt.IsTrue)
 
 		// Verify the user is not tied to any organization now
 		user, err = testDB.User(userID)
@@ -326,9 +378,10 @@ func TestOrganizations(t *testing.T) {
 
 		// Test removing a non-existent user
 		nonExistentUserID := uint64(9999)
-		err = testDB.RemoveOrganizationUser(orgAddress, nonExistentUserID)
+		removed, err = testDB.RemoveOrganizationUser(orgAddress, nonExistentUserID)
 		// The function doesn't return an error for non-existent users, it just doesn't remove anything
 		c.Assert(err, qt.IsNil)
+		c.Assert(removed, qt.IsFalse)
 
 		// Create another user and add them to multiple organizations
 		secondUserEmail := "seconduser@example.com"
@@ -340,9 +393,11 @@ func TestOrganizations(t *testing.T) {
 		})
 		c.Assert(err, qt.IsNil)
 
-		// Create two organizations for the second user
-		firstOrgAddress := testOrgAddress
-		secondOrgAddress := testAnotherOrgAddress
+		// Create two organizations for the second user. Fresh addresses: SetOrganization grants
+		// the creator a role only when it actually creates the organization, so reusing the
+		// already-created testOrgAddress would (correctly) grant nothing.
+		firstOrgAddress := testThirdOrgAddress
+		secondOrgAddress := testFourthOrgAddress
 
 		c.Assert(testDB.SetOrganization(&Organization{
 			Address: firstOrgAddress,
@@ -360,7 +415,9 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(secondUser.Organizations, qt.HasLen, 2)
 
 		// Remove the second user from the first organization
-		c.Assert(testDB.RemoveOrganizationUser(firstOrgAddress, secondUserID), qt.IsNil)
+		removed, err = testDB.RemoveOrganizationUser(firstOrgAddress, secondUserID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(removed, qt.IsTrue)
 
 		// Verify the second user is now only a user of the second organization
 		secondUser, err = testDB.User(secondUserID)

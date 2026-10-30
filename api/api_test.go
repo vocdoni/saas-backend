@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -422,6 +424,13 @@ func TestMain(m *testing.M) {
 		// deliver notifications synchronously so waitForEmail observes a
 		// deterministic happens-before instead of racing the queue worker
 		NotificationsSyncDelivery: true,
+		// the production lookup, except for the nullifiers a test marks as failing
+		VoteOnChainLookup: func(ctx context.Context, nullifier []byte) (bool, error) {
+			if _, failing := failingVoteLookups.Load(string(nullifier)); failing {
+				return false, fmt.Errorf("injected vote lookup failure")
+			}
+			return testAPI.lookupVoteOnChain(ctx, nullifier)
+		},
 	})
 	testAPI.Start()
 	// wait for the API to start
@@ -432,6 +441,16 @@ func TestMain(m *testing.M) {
 	// run the tests
 	m.Run()
 }
+
+// failingVoteLookups holds the nullifiers whose on-chain vote lookup fails (see TestMain's
+// VoteOnChainLookup). Keyed per nullifier so parallel tests do not see each other's failures.
+var failingVoteLookups sync.Map
+
+// failVoteLookup makes every on-chain lookup of the given nullifier fail until unfailVoteLookup.
+func failVoteLookup(nullifier []byte) { failingVoteLookups.Store(string(nullifier), struct{}{}) }
+
+// unfailVoteLookup undoes failVoteLookup.
+func unfailVoteLookup(nullifier []byte) { failingVoteLookups.Delete(string(nullifier)) }
 
 // request sends a request to the API service and returns the response body and status code.
 // The body is expected to be a JSON object or null.
@@ -556,7 +575,7 @@ func signAsOrgAndSendVocdoniTx(
 	c := qt.New(t)
 	org, err := testDB.Organization(orgAddress)
 	c.Assert(err, qt.IsNil)
-	signer, err := account.OrganizationSigner(testSecret, org.Creator, org.Nonce)
+	signer, err := account.OrganizationSigner(testSecret, org.SignerSeedValue(), org.Nonce)
 	c.Assert(err, qt.IsNil)
 	tx, _, err = testAPI.account.FundTransaction(tx, signer.Address())
 	c.Assert(err, qt.IsNil)
@@ -1003,7 +1022,7 @@ func newOrgMembers(n int) []apicommon.OrgMember {
 			Surname:      fmt.Sprintf("Surname %d", i+1),
 			Email:        fmt.Sprintf("user%d@example.com", i+1),
 			Phone:        fmt.Sprintf("+346%08d", i+1),
-			Password:     fmt.Sprintf("password%d", i+1),
+			Password:     testMemberPassword(fmt.Sprintf("password%d", i+1)),
 			Other:        map[string]any{"some": "data"},
 			NationalID:   fmt.Sprintf("DNI%03d", i+1),
 			BirthDate:    time.Date(1980, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, i).Format("2006-01-02"),
@@ -1011,6 +1030,14 @@ func newOrgMembers(n int) []apicommon.OrgMember {
 		}
 	}
 	return members
+}
+
+// testMemberPassword returns a member password in the form the API takes it, the client hash: the
+// API accepts any 64 lowercase hex characters, so a SHA-256 of the plaintext stands in for the
+// client formula (which also salts with the organization address).
+func testMemberPassword(plaintext string) string {
+	sum := sha256.Sum256([]byte(plaintext))
+	return hex.EncodeToString(sum[:])
 }
 
 // organizationMembers methods

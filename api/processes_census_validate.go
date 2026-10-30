@@ -18,8 +18,9 @@ import (
 //	@Description	explicit memberIds subset, or the whole organization when neither is set. Returns 400
 //	@Description	with the offending member ids (duplicates / missingData) when the census is not usable,
 //	@Description	otherwise 200. A field that is empty or only whitespace counts as missing data, and
-//	@Description	members with missing data are never reported as duplicates. Requires Manager/Admin role
-//	@Description	of the organization.
+//	@Description	members with missing data are never reported as duplicates. The `password` auth field
+//	@Description	never identifies a member on its own: a census with no other auth field and no 2FA field
+//	@Description	is a 400. Requires Manager/Admin role of the organization.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
@@ -57,6 +58,10 @@ func (a *API) validateProcessCensusHandler(w http.ResponseWriter, r *http.Reques
 	census := req.Census
 	if len(census.AuthFields) == 0 && len(census.TwoFaFields) == 0 {
 		errors.ErrInvalidData.Withf("missing both authFields and twoFaFields").Write(w)
+		return
+	}
+	if err := db.ValidateCensusFields(census.AuthFields, census.TwoFaFields); err != nil {
+		errors.ErrInvalidData.With(db.PasswordNeedsLookupFieldMessage).Write(w)
 		return
 	}
 

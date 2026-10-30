@@ -105,44 +105,44 @@ func TestMultilingualFromAny(t *testing.T) {
 
 	// MultilingualText (in-memory, set at creation time)
 	mt := MultilingualText{"default": "hello"}
-	got := multilingualFromAny(mt)
+	got := MultilingualFromAny(mt)
 	c.Assert(got, qt.IsNotNil)
 	c.Assert(*got, qt.DeepEquals, mt)
 
 	// map[string]string (named type)
 	ms := map[string]string{"default": "world"}
-	got = multilingualFromAny(ms)
+	got = MultilingualFromAny(ms)
 	c.Assert(got, qt.IsNotNil)
 	c.Assert(*got, qt.DeepEquals, MultilingualText{"default": "world"})
 
 	// map[string]any with string values (the BSON-decoded form, see db/mongo.go)
 	ma := map[string]any{"default": "bson", "es": "bson-es"}
-	got = multilingualFromAny(ma)
+	got = MultilingualFromAny(ma)
 	c.Assert(got, qt.IsNotNil)
 	c.Assert(*got, qt.DeepEquals, MultilingualText{"default": "bson", "es": "bson-es"})
 
 	// map[string]any with a non-string value → nil
 	bad := map[string]any{"default": 42}
-	got = multilingualFromAny(bad)
+	got = MultilingualFromAny(bad)
 	c.Assert(got, qt.IsNil)
 
 	// plain string (legacy storage) → normalised to {"default": "..."}
-	got = multilingualFromAny("legacy name")
+	got = MultilingualFromAny("legacy name")
 	c.Assert(got, qt.IsNotNil)
 	c.Assert(*got, qt.DeepEquals, MultilingualText{"default": "legacy name"})
 
 	// nil → nil
-	got = multilingualFromAny(nil)
+	got = MultilingualFromAny(nil)
 	c.Assert(got, qt.IsNil)
 
 	// unknown type → nil
-	got = multilingualFromAny(123)
+	got = MultilingualFromAny(123)
 	c.Assert(got, qt.IsNil)
 }
 
 // TestOrganizationFromDBAfterMongoRoundTrip is the regression test for #679: the
 // name/logo/description shorthands used to vanish from every read, because the driver
-// decoded untyped subdocuments as bson.M and multilingualFromAny only matches
+// decoded untyped subdocuments as bson.M and MultilingualFromAny only matches
 // map[string]any.
 func TestOrganizationFromDBAfterMongoRoundTrip(t *testing.T) {
 	c := qt.New(t)

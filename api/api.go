@@ -59,7 +59,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -109,6 +108,10 @@ type Config struct {
 	CSP           *csp.CSP
 	// OAuth service URL
 	OAuthServiceURL string
+	// OriginSecret, when set, is the value the edge proxy puts in the X-Origin-Secret header.
+	// Requests without it are refused, so the origin can't be reached around the proxy and its
+	// rate limits (e.g. through the hosting provider's default domain).
+	OriginSecret string
 	// OTPExpiry overrides the validity window for all one-time codes (account
 	// verification, password reset). Zero uses notifications.DefaultOTPExpiry.
 	OTPExpiry time.Duration
@@ -125,6 +128,10 @@ type Config struct {
 	// StatusSyncer enqueues question status reconciliations with the background
 	// syncer. Nil only when left unwired (e.g. tests) — enqueues become no-ops.
 	StatusSyncer StatusEnqueuer
+	// VoteOnChainLookup overrides how /processes/{id}/check and the admin participants list
+	// ask the chain whether a vote is on chain. Nil (production) uses Account, bounded by the
+	// lookup slots shared with POST /votes/verify. Tests set it to inject lookup failures.
+	VoteOnChainLookup handlers.VoteOnChainLookup
 }
 
 // StatusEnqueuer hands question status reconciliations to the background syncer. It is satisfied by
@@ -159,19 +166,27 @@ type API struct {
 	objectStorage   *objectstorage.Client
 	csp             *csp.CSP
 	oauthServiceURL string
+	originSecret    string
 	stripeHandlers  *StripeHandlers
-	txQueue         chan txTask
-	txQueueMu       sync.Mutex
-	orgTxLocks      *orgTxMutex
-	otpExpiry       time.Duration
-	otpCooldown     time.Duration
-	notifySync      bool
-	statusSyncer    StatusEnqueuer
-	electionCache   *lru.Cache[string, *dvoteapi.Election]
+	// orgTxQueue runs organization-initiated txs (publish, status, census resize);
+	// relayTxQueue runs public vote relays. Separate so neither class starves the other.
+	orgTxQueue    *txQueue
+	relayTxQueue  *txQueue
+	orgTxLocks    *orgTxMutex
+	heldTxJobs    *heldTxJobs
+	otpExpiry     time.Duration
+	otpCooldown   time.Duration
+	notifySync    bool
+	statusSyncer  StatusEnqueuer
+	electionCache *lru.Cache[string, *dvoteapi.Election]
 	// liveElectionCache holds not-yet-final legacy elections for legacyLiveElectionTTL.
 	liveElectionCache *expirable.LRU[string, *dvoteapi.Election]
 	// legacyProjectionCache holds fully-final legacy records already projected onto /processes.
 	legacyProjectionCache *lru.Cache[string, *apicommon.VotingProcessResponse]
+	// electionReads coalesces, caches and bounds the public read paths' election fetches.
+	electionReads *electionReads
+	// voteOnChain tells whether a vote is on chain (see Config.VoteOnChainLookup).
+	voteOnChain handlers.VoteOnChainLookup
 }
 
 // enqueueConfirm asks the status syncer to confirm a status change landed on-chain; a no-op when
@@ -261,6 +276,7 @@ func New(ctx context.Context, conf *Config) *API {
 		objectStorage:         conf.ObjectStorage,
 		csp:                   conf.CSP,
 		oauthServiceURL:       conf.OAuthServiceURL,
+		originSecret:          conf.OriginSecret,
 		orgTxLocks:            newOrgTxMutex(),
 		otpExpiry:             otpExpiry,
 		otpCooldown:           otpCooldown,
@@ -270,7 +286,17 @@ func New(ctx context.Context, conf *Config) *API {
 		liveElectionCache:     liveElectionCache,
 		legacyProjectionCache: legacyProjectionCache,
 	}
-	a.startTxQueue()
+	a.electionReads = newElectionReads(func(id internal.HexBytes) (*dvoteapi.Election, error) {
+		return a.account.Election(id)
+	})
+	a.voteOnChain = conf.VoteOnChainLookup
+	if a.voteOnChain == nil {
+		a.voteOnChain = a.lookupVoteOnChain
+	}
+	a.startTxQueues()
+	// heartbeat this process's pending tx jobs and close those stranded by a process that died
+	// (see superviseTxJobs).
+	go a.superviseTxJobs()
 	// clear any publishing markers stranded by a previous crash/restart so those processes are
 	// publishable again (see reconcileStalePublishing).
 	a.reconcileStalePublishing()
@@ -301,7 +327,18 @@ func (a *API) Start() {
 		}()
 	}
 	go func() {
-		if err := http.ListenAndServe(fmt.Sprintf("%s:%d", a.host, a.port), a.initRouter()); err != nil {
+		// socket deadlines: the Timeout middleware only cancels the request context, it cannot
+		// unblock a handler stuck reading from or writing to a slow client, and without an idle
+		// timeout keep-alive connections opened by a request flood are held forever.
+		server := &http.Server{
+			Addr:              fmt.Sprintf("%s:%d", a.host, a.port),
+			Handler:           a.initRouter(),
+			ReadHeaderTimeout: serverReadHeaderTimeout,
+			ReadTimeout:       serverReadTimeout,
+			WriteTimeout:      serverWriteTimeout,
+			IdleTimeout:       serverIdleTimeout,
+		}
+		if err := server.ListenAndServe(); err != nil {
 			log.Fatalf("failed to start the API server: %v", err) //revive:disable:deep-exit
 		}
 	}()
@@ -322,6 +359,9 @@ func (a *API) initRouter() http.Handler {
 	}).Handler)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	if a.originSecret != "" {
+		r.Use(requireOriginSecret(a.originSecret))
+	}
 	r.Use(middleware.Throttle(100))
 	r.Use(middleware.ThrottleBacklog(5000, 40000, 60*time.Second))
 	r.Use(middleware.Timeout(45 * time.Second))
@@ -329,7 +369,7 @@ func (a *API) initRouter() http.Handler {
 	r.Use(a.setLang)
 
 	a.csp.PasswordSalt = passwordSalt
-	cspHandlers := handlers.New(a.csp, a.db)
+	cspHandlers := handlers.New(a.csp, a.db, a.voteOnChain)
 
 	// Initialize Stripe service
 	if err := a.InitializeStripeService(); err != nil {
@@ -359,6 +399,7 @@ func (a *API) initRouter() http.Handler {
 		r.Use(jwtauth.Verifier(a.auth))
 		// handle valid JWT tokens
 		r.Use(a.authenticator)
+		r.Use(limitBody(maxProtectedBodyBytes))
 
 		handle(r, http.MethodPost, authRefresTokenEndpoint, a.refreshTokenHandler)
 		handle(r, http.MethodGet, authAddressesEndpoint, a.organizationAddressesHandler)
@@ -366,6 +407,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodDelete, oauthUnlinkEndpoint, a.oauthUnlinkHandler)
 		handle(r, http.MethodGet, usersMeEndpoint, a.userInfoHandler)
 		handle(r, http.MethodPut, usersMeEndpoint, a.updateUserInfoHandler)
+		handle(r, http.MethodPost, usersMeEmailVerifyEndpoint, a.updateUserEmailVerifyHandler)
 		handle(r, http.MethodPut, usersPasswordEndpoint, a.updateUserPasswordHandler)
 		handle(r, http.MethodPost, organizationsEndpoint, a.createOrganizationHandler)
 		handle(r, http.MethodPut, organizationEndpoint, a.updateOrganizationHandler)
@@ -401,8 +443,13 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, integratorOrgAPIKeysEndpoint, a.createAPIKeyHandler)
 		handle(r, http.MethodGet, integratorOrgAPIKeysEndpoint, a.apiKeysHandler)
 		handle(r, http.MethodDelete, integratorOrgAPIKeyEndpoint, a.revokeAPIKeyHandler)
-		handle(r, http.MethodPost, subscriptionsCheckout, a.stripeHandlers.CreateSubscriptionCheckout)
-		handle(r, http.MethodGet, subscriptionsCheckoutSession, a.stripeHandlers.GetCheckoutSession)
+		// late-bound: a method value would capture a.stripeHandlers as it is at router-build time
+		handle(r, http.MethodPost, subscriptionsCheckout, func(w http.ResponseWriter, r *http.Request) {
+			a.stripeHandlers.CreateSubscriptionCheckout(w, r)
+		})
+		handle(r, http.MethodGet, subscriptionsCheckoutSession, func(w http.ResponseWriter, r *http.Request) {
+			a.stripeHandlers.GetCheckoutSession(w, r)
+		})
 		handle(r, http.MethodGet, subscriptionsPortal, func(w http.ResponseWriter, r *http.Request) {
 			a.stripeHandlers.CreateSubscriptionPortalSession(w, r, a)
 		})
@@ -424,6 +471,7 @@ func (a *API) initRouter() http.Handler {
 
 	// Public routes
 	r.Group(func(r chi.Router) {
+		r.Use(limitBody(maxPublicBodyBytes))
 		handle(r, http.MethodGet, "/ping", func(w http.ResponseWriter, _ *http.Request) {
 			if _, err := w.Write([]byte(".")); err != nil {
 				log.Warnw("failed to write ping response", "error", err)
@@ -445,6 +493,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, organizationTypesEndpoint, a.organizationsTypesHandler)
 		handle(r, http.MethodGet, organizationLanguagesEndpoint, a.organizationsLanguagesHandler)
 		handle(r, http.MethodGet, plansEndpoint, a.plansHandler)
+		handle(r, http.MethodGet, pricingEndpoint, a.pricingHandler)
 		handle(r, http.MethodPost, subscriptionsWebhook, a.stripeHandlers.HandleWebhook)
 		handle(r, http.MethodGet, objectStorageDownloadTypedEndpoint, a.objectStorage.DownloadImageInlineHandler)
 		handle(r, http.MethodGet, jobStatusEndpoint, a.jobStatusHandler)

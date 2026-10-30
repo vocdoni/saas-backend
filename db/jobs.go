@@ -90,14 +90,17 @@ func (ms *MongoStorage) CreateTxJob(jobID string, jobType JobType, orgAddress co
 func (ms *MongoStorage) CreateTxJobWithResult(
 	jobID string, jobType JobType, orgAddress common.Address, result *JobResult,
 ) error {
+	now := time.Now()
 	return ms.SetJob(&Job{
-		JobID:      jobID,
-		Type:       jobType,
-		OrgAddress: orgAddress,
-		Errors:     []string{},
-		Status:     JobStatusPending,
-		Result:     result,
-		CreatedAt:  time.Now(),
+		JobID:       jobID,
+		Type:        jobType,
+		OrgAddress:  orgAddress,
+		Errors:      []string{},
+		Status:      JobStatusPending,
+		Result:      result,
+		CreatedAt:   now,
+		Instance:    ms.instanceID,
+		HeartbeatAt: now,
 	})
 }
 
@@ -106,15 +109,18 @@ func (ms *MongoStorage) CreateTxJobWithResult(
 // process id and nullifier; Total is the batch size, so job progress is the number of
 // envelopes that have reported an outcome.
 func (ms *MongoStorage) CreateVoteBatchJob(jobID string, orgAddress common.Address, votes []VoteJobResult) error {
+	now := time.Now()
 	return ms.SetJob(&Job{
-		JobID:      jobID,
-		Type:       JobTypeRelayVotes,
-		OrgAddress: orgAddress,
-		Total:      len(votes),
-		Errors:     []string{},
-		Status:     JobStatusPending,
-		Result:     &JobResult{Votes: votes},
-		CreatedAt:  time.Now(),
+		JobID:       jobID,
+		Type:        JobTypeRelayVotes,
+		OrgAddress:  orgAddress,
+		Total:       len(votes),
+		Errors:      []string{},
+		Status:      JobStatusPending,
+		Result:      &JobResult{Votes: votes},
+		CreatedAt:   now,
+		Instance:    ms.instanceID,
+		HeartbeatAt: now,
 	})
 }
 
@@ -201,6 +207,91 @@ func (ms *MongoStorage) RecordBatchVoteOutcome(jobID string, index int, voteID i
 		return fmt.Errorf("failed to close batch vote job: %w", err)
 	}
 	return nil
+}
+
+// TxJobStaleAfter is how long a pending transaction job may go without a heartbeat from the
+// process that runs it before FailInterruptedTxJobs treats that process as gone. Live processes
+// heartbeat their jobs well within it (see HeartbeatTxJobs); it is wall-clock based, so it also
+// has to absorb the clock skew between replicas. A var so tests can shorten it.
+var TxJobStaleAfter = 2 * time.Minute
+
+// HeartbeatTxJobs refreshes the heartbeat of the given pending transaction jobs of this process,
+// vouching that a task or waiter in its memory will still finish them. Only the jobs the caller
+// actually holds are passed, so a job whose outcome write failed stops being refreshed and is
+// eventually swept by FailInterruptedTxJobs. A process calls it periodically, well within
+// TxJobStaleAfter. It returns how many jobs were refreshed.
+func (ms *MongoStorage) HeartbeatTxJobs(jobIDs []string) (int64, error) {
+	if len(jobIDs) == 0 {
+		return 0, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	res, err := ms.jobs.UpdateMany(ctx,
+		bson.M{"status": JobStatusPending, "instance": ms.instanceID, "jobId": bson.M{"$in": jobIDs}},
+		bson.M{"$set": bson.M{"heartbeatAt": time.Now()}},
+	)
+	if err != nil {
+		return 0, fmt.Errorf("failed to heartbeat tx jobs: %w", err)
+	}
+	return res.ModifiedCount, nil
+}
+
+// FailInterruptedTxJobs marks failed every transaction job still pending that no process
+// heartbeats anymore: the tx queues are in-memory, so such a job has no worker left to finish it
+// (its process stopped, or its worker could not record the outcome) and would stay pending
+// forever. Jobs a live process keeps heartbeating, this one included, are left alone — a replica
+// starting up must not fail the work of the replicas running next to it. Jobs written before jobs
+// carried an owner (no heartbeat) are judged by their age instead. The transactions themselves are never replayed — their outcome
+// is unknown (some may have mined), so resubmitting could duplicate them; the status syncer
+// reconciles the stored question status against the chain instead. Import jobs carry no status
+// field and are untouched. It returns how many jobs were closed.
+func (ms *MongoStorage) FailInterruptedTxJobs() (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+
+	cutoff := time.Now().Add(-TxJobStaleAfter)
+	orphaned := func() bson.M {
+		return bson.M{
+			"status": JobStatusPending,
+			"$or": bson.A{
+				bson.M{"heartbeatAt": bson.M{"$lt": cutoff}},
+				bson.M{"heartbeatAt": bson.M{"$exists": false}, "createdAt": bson.M{"$lt": cutoff}},
+			},
+		}
+	}
+
+	// close the still-pending envelopes of batch vote jobs first, so their per-vote entries
+	// explain the failure too rather than staying pending inside a failed job.
+	interrupted := "interrupted by a service restart or a lost outcome write; the transaction outcome is unknown"
+	batchFilter := orphaned()
+	batchFilter["type"] = JobTypeRelayVotes
+	_, err := ms.jobs.UpdateMany(ctx,
+		batchFilter,
+		bson.M{"$set": bson.M{
+			"result.votes.$[v].status": JobStatusFailed,
+			"result.votes.$[v].error":  interrupted,
+		}},
+		options.UpdateMany().SetArrayFilters([]any{bson.M{"v.status": JobStatusPending}}),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("failed to close interrupted batch vote entries: %w", err)
+	}
+	res, err := ms.jobs.UpdateMany(ctx,
+		orphaned(),
+		bson.M{"$set": bson.M{
+			"status":      JobStatusFailed,
+			"error":       interrupted,
+			"completedAt": time.Now(),
+		}},
+	)
+	if err != nil {
+		return 0, fmt.Errorf("failed to close interrupted tx jobs: %w", err)
+	}
+	return res.ModifiedCount, nil
 }
 
 // SetJobStatus records the terminal outcome of a transaction job. On success pass
@@ -306,7 +397,7 @@ func (ms *MongoStorage) DeleteJobsByOrg(orgAddress common.Address) (int64, error
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 	res, err := ms.jobs.DeleteMany(ctx, bson.M{"orgAddress": orgAddress})
 	if err != nil {

@@ -2,6 +2,10 @@ package db
 
 import "fmt"
 
+// PasswordNeedsLookupFieldMessage is the message of ErrPasswordNeedsLookupField, for handlers that
+// answer with errors.ErrInvalidData.With and must not double its prefix.
+const PasswordNeedsLookupFieldMessage = "password needs another credential or a 2FA field"
+
 var (
 	ErrNotFound      = fmt.Errorf("not found")
 	ErrInvalidData   = fmt.Errorf("invalid data provided")
@@ -31,6 +35,9 @@ var (
 	ErrUpdateWouldCreateDuplicates = fmt.Errorf("update would create duplicates")
 	// ErrMissingLoginData is returned when a member lacks the auth data a census requires to log in
 	ErrMissingLoginData = fmt.Errorf("missing required auth data")
+	// ErrPasswordNeedsLookupField is returned for a census whose only login field is the member
+	// password: it never takes part in the login hash, so every member would hash alike.
+	ErrPasswordNeedsLookupField = fmt.Errorf("%w: %s", ErrInvalidData, PasswordNeedsLookupFieldMessage)
 	// ErrAutoGroupCannotBeDeleted is returned when trying to delete the auto-generated "All members" group
 	ErrAutoGroupCannotBeDeleted = fmt.Errorf("auto-generated group cannot be deleted")
 	// ErrAutoGroupMembersCannotBeModified is returned when trying to manually add/remove members from the auto group
@@ -38,6 +45,13 @@ var (
 	// ErrManagedQuotaReached is returned when an atomic integrator-quota reservation would
 	// exceed the integrator's managed-orgs, managed-processes or managed-census-size limit.
 	ErrManagedQuotaReached = fmt.Errorf("integrator managed quota reached")
+	// ErrMaxSubOrgsReached is returned when the organization's plan allows no more suborganizations.
+	ErrMaxSubOrgsReached = fmt.Errorf("max suborganizations reached")
+	// ErrMaxUsersReached is returned when the organization's plan allows no more users.
+	ErrMaxUsersReached = fmt.Errorf("max users reached")
+	// ErrInvalidMetaPath is returned when MongoDB refuses a meta update path, such as a sub-key of a
+	// meta value that is not an object, or two paths where one is a prefix of the other.
+	ErrInvalidMetaPath = fmt.Errorf("invalid meta path")
 )
 
 // errorsAsStrings converts a slice of errors to a slice of strings

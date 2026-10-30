@@ -47,7 +47,15 @@ Vocdoni SaaS backend is a service that works on top of the [Vocdoni Protocol](ht
 
 This service also allows to the SDK to user it as remote signer, which makes that the use of this service transparent to the [Vocdoni SDK](https://github.com/vocdoni/vocdoni-sdk).
 
-Check out the service [API documentation](./api/docs.md) here.
+## API documentation
+
+The API itself is the source of truth. Its reference is [`docs/swagger.yaml`](./docs/swagger.yaml),
+generated from the handlers' annotations (`make swagger`) and browsable as
+[Swagger UI](https://vocdoni.github.io/saas-backend/) (built from the `stage` branch, so it can be
+ahead of production). The integrator guides live in the
+[developer docs](https://vocdoni.io/developers/docs), and the
+[Vocdoni Integrator SDK](https://github.com/vocdoni/vocdoni-integrator-sdk) wraps the API for TypeScript;
+both follow the API, so when either disagrees with it, the API is right and they need updating.
 
 ## Local Development
 
@@ -220,6 +228,60 @@ docker compose down -v
 ```
 
 
+## CI
+
+### Testing against an unmerged vocdoni-node
+
+Comment on a pull request to run the test suite with `go.vocdoni.io/dvote` replaced by a
+vocdoni-node commit (a `go.mod` replace, so the in-process vocone runs that code too):
+
+```text
+/integration vocdoni-node=<ref>
+```
+
+When to use it (a PR depending on an unmerged vocdoni-node change, a vocdoni-node PR that may break
+this repo, before a dvote bump) is in [AGENTS.md](AGENTS.md#when-to-post-integration).
+
+- A ref is a commit SHA (7-40 hex), a branch, a tag, or a pull request number of
+  `vocdoni/vocdoni-node`. Write the PR number bare (`vocdoni-node=1234`), the recommended form.
+  `vocdoni-node=#1234` also works, but GitHub autolinks `#1234` to this repo's issue. A branch or
+  tag named only 1-6 digits cannot be pinned by name.
+- Only users with write access count: comments from anyone else are ignored silently. A line that
+  does not parse gets a "rejected" reply. A bare `/integration` runs the suite against the
+  vocdoni-node version in `go.mod`.
+- The run tests the PR's merge commit, as the `pull_request` check does when the run starts. A push
+  after that is not picked up by that run.
+- Each comment starts its own run; earlier ones are not cancelled. The result is posted back to the
+  PR with the saas-backend merge, the vocdoni-node SHA and the run link. A failed run's reply includes
+  the failing step's output.
+- A ref that is a SHA runs once. A ref that is a branch, tag or PR number sticks: every push to the PR
+  re-resolves it and runs the suite again, until `/integration reset`. Each such push run posts its
+  result as a new PR comment, failure output included. A later sticky comment replaces
+  the earlier one. A bare `/integration` is one-shot and does not change the sticky state.
+- `/integration reset` clears the sticky state; it takes no refs.
+- On a pull request with a sticky ref, the test job runs on every push. Without one, pull requests are
+  tested only by the regular Main workflow.
+- A push to the vocdoni-node PR does not trigger a run here: comment the same line again, or use
+  "Run workflow" on the Actions tab.
+- The job's timeout is 45 minutes.
+- Comment runs use `.github/workflows/integration.yml` and the pin parser from `main`, so changes to
+  them take effect only after they are merged. Push-run reports run `scripts/integration-report.sh`
+  from the PR's base branch, so PR code never gets the comment-writing token.
+
+The "Run workflow" form on the Actions tab takes `vocdoni_node_ref`, with the same forms as above.
+Leave it empty for the `go.mod` version. The branch selected in "Use workflow from" is the
+saas-backend code under test.
+
+To run locally against a vocdoni-node ref:
+
+```bash
+scripts/integration-pin-node.sh <ref> /tmp/vocdoni-node
+go test -run TestName ./api/
+# when done, restore the files the script rewrote:
+git checkout go.mod go.sum
+rm -rf /tmp/vocdoni-node
+```
+
 ## CLI tools
 
 Operational CLI tools shipped alongside the API server (`cmd/service`). All follow the
@@ -252,18 +314,3 @@ read the impact report — a sole-admin org takes its entire voting history down
 Reserve `-yes` for scripted use. Watch for the `WARNING: creator email retained` lines in
 the output; those need manual follow-up. Stripe customer data and database backups are
 explicitly out of scope — handle those separately if the erasure request covers them.
-
-### [cmd/cli](cmd/cli/) — integrator switch
-
-**What it does.** `--setIntegrator` flags an organization as an integrator and sets its
-`maxManagedOrgs` limit.
-
-**How to run.**
-
-```bash
-go run ./cmd/cli --setIntegrator --orgAddress <hex> --maxManagedOrgs 5 -m <mongoURL> -d <mongoDB>
-```
-
-**Precautions.** It writes to the organizations collection, so treat it like any prod
-mutation: confirm the address and the target database first.
-

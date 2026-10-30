@@ -48,6 +48,10 @@ func (a *API) resolveOrCreateDefaultCensus(
 	}
 	censusID, err := a.db.SetCensus(census)
 	if err != nil {
+		// a census the caller configured wrong is theirs to fix, not a 500
+		if errors.Is(err, db.ErrPasswordNeedsLookupField) {
+			return nil, nil, errors.ErrInvalidData.With(db.PasswordNeedsLookupFieldMessage)
+		}
 		return nil, nil, fmt.Errorf("failed to create census: %w", err)
 	}
 	// self-clean: if any step below fails, delete the census we just created so a failed

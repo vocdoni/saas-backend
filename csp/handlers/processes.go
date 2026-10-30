@@ -3,8 +3,10 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -64,6 +66,17 @@ func memberEligibleForQuestion(q *db.VotingProcessQuestion, memberID string) boo
 // it has to err toward letting a real voter through.
 const startGrace = time.Minute
 
+// endGrace keeps signing open a little past the stored EndDate. The chain closes later than it:
+// an immediate-start election's duration is computed when its tx is built, so it ends EndDate plus
+// the time that tx took to be mined. A signature issued in that window can still be cast, and one
+// issued after the chain closed is only wasted: it carries no right the chain would honour.
+const endGrace = time.Minute
+
+// processEnded reports whether the process is past its end (plus endGrace), when it has one.
+func processEnded(vp *db.VotingProcess) bool {
+	return !vp.EndDate.IsZero() && !time.Now().Before(vp.EndDate.Add(endGrace))
+}
+
 // unvotableElection returns the 401 to write when the question's election does not currently
 // accept a signature, or nil when it does.
 //
@@ -74,9 +87,12 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 	if q.Status != db.QuestionStatusReady {
 		return errors.Ptr(errors.ErrUnauthorized.Withf("question is not open for voting"))
 	}
-	// only StartDate is checked: publish always persists one, while EndDate is optional.
+	// publish always persists a StartDate, while EndDate is optional.
 	if !vp.StartDate.IsZero() && time.Now().Add(startGrace).Before(vp.StartDate) {
 		return errors.Ptr(errors.ErrUnauthorized.Withf("process has not started yet"))
+	}
+	if processEnded(vp) {
+		return errors.Ptr(errors.ErrUnauthorized.Withf("process has ended"))
 	}
 	return nil
 }
@@ -87,8 +103,12 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 //	@Description	Two-step voter authentication for a multi-question voting process (the /processes
 //	@Description	replacement of the bundle auth flow); the issued token is anchored to the process.
 //	@Description	- Step 0: handlers.AuthRequest — member identification fields (name, surname,
-//	@Description	memberNumber, nationalId, birthDate, email, phone); which are required depends on the
-//	@Description	census auth configuration. If valid, a challenge is sent and a token returned.
+//	@Description	memberNumber, nationalId, birthDate, email, phone, password); which are required depends
+//	@Description	on the census auth configuration. If valid, a challenge is sent and a token returned.
+//	@Description	`password` is the member password's client hash (64 lowercase hex characters, see
+//	@Description	handlers.AuthRequest); a wrong one answers exactly like an unknown participant (40802)
+//	@Description	and spends the same failed-attempt budget. When the server's password-hashing capacity
+//	@Description	is exhausted, it answers 503, code 50302: retry later (this spends no budget).
 //	@Description	While the voter's previous code is still usable (not verified, expired or locked by
 //	@Description	failed attempts), a repeated step 0 returns a new token for that same code instead of
 //	@Description	a new code, re-sending it only once the cooldown since the last send has passed.
@@ -97,6 +117,14 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 //	@Description	- Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
 //	@Description	If valid the token is marked verified and returned. Auth-only censuses may not require
 //	@Description	a challenge solution.
+//	@Description	Step 0 returns the same error (40802) whether the login data matches no census participant
+//	@Description	or the contact data does not match an existing one. Failed attempts are capped per UTC hour
+//	@Description	on the process for each submitted set of login and contact fields, and, ten times higher,
+//	@Description	for each set of login fields across all contacts tried. Once either is exhausted, step 0
+//	@Description	answers 40017 until the hour ends (the voter cap even with the right contact data);
+//	@Description	data.retryAfter gives the seconds left.
+//	@Description	A member's challenge sends (new tokens + resends) are capped per UTC day, also answering
+//	@Description	40017 with data.retryAfter.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -104,10 +132,11 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 //	@Param			step		path		string					true	"Authentication step (0 or 1)"
 //	@Param			request		body		handlers.AuthRequest	true	"Step 0 body; step 1 uses AuthChallengeRequest (see description)"
 //	@Success		200			{object}	handlers.AuthResponse
-//	@Failure		400			{object}	errors.Error	"Invalid input data"
-//	@Failure		401			{object}	errors.Error	"Unauthorized, cooldown not reached, or invalid challenge"
-//	@Failure		404			{object}	errors.Error	"Process, census, organization, or participant not found"
+//	@Failure		400			{object}	errors.Error	"Invalid input data, or failed-attempt or daily send limit reached (40017)"
+//	@Failure		401			{object}	errors.Error	"Invalid authentication data, cooldown not reached, or invalid challenge"
+//	@Failure		404			{object}	errors.Error	"Process, census, or organization not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		503			{object}	errors.Error	"Password- or phone-hashing capacity exhausted, retry later (50302)"
 //	@Router			/processes/{processId}/auth/{step} [post]
 func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request) {
 	oid, anchor, ok := parseProcessID(w, r)
@@ -139,16 +168,19 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 //	@Description	census type (email/phone). The same token is returned if the challenge is queued.
 //	@Description	A code is sent at most once per cooldown: inside it the request fails with 40103,
 //	@Description	whose data.coolDownTime holds the milliseconds left.
+//	@Description	A token can be resent at most 3 times, and a contact that does not match the member spends
+//	@Description	one of them too.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
 //	@Param			processId	path		string						true	"Process ID"
 //	@Param			request		body		handlers.AuthResendRequest	true	"Resend request with auth token and contact data"
 //	@Success		200			{object}	handlers.AuthResponse
-//	@Failure		400			{object}	errors.Error	"Malformed body, missing auth token, invalid contact, or token already verified"
+//	@Failure		400			{object}	errors.Error	"Malformed body, missing token, invalid contact, verified token, or resend limit (40017)"
 //	@Failure		401			{object}	errors.Error	"Invalid/expired/locked token, cooldown not reached, foreign token, or contact mismatch"
 //	@Failure		404			{object}	errors.Error	"Census or organization not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		503			{object}	errors.Error	"Phone-hashing capacity exhausted, retry later (50302)"
 //	@Router			/processes/{processId}/auth/resend [post]
 func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Request) {
 	oid, anchor, ok := parseProcessID(w, r)
@@ -191,8 +223,22 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	lang := apicommon.NotificationLang(r.Context(), org)
+	var phone *voterPhone
+	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone) {
+		// parsed before a resend is claimed, so a busy answer spends none of the token's resends
+		if phone, err = parseVoterPhone(r.Context(), req.Phone, org); err != nil {
+			phoneParseFailed(err).Write(w)
+			return
+		}
+	}
+	// spend one of the token's resends before checking the contact, so that guessing a member's
+	// contact through resends is bounded like the resends themselves
+	if err := c.csp.ClaimChallengeResend(req.AuthToken); err != nil {
+		writeResendError(w, err)
+		return
+	}
 	toDestination, challengeType, err := determineContactMethod(
-		census, org, &AuthRequest{Email: req.Email, Phone: req.Phone}, member,
+		census, &AuthRequest{Email: req.Email, Phone: req.Phone}, phone, member,
 	)
 	if err != nil {
 		if apiErr, ok := err.(errors.Error); ok {
@@ -378,7 +424,7 @@ func authorizeLoadedQuestion(
 // bytes each leaves ample headroom. The cap tracks db.MaxQuestionsPerProcess (a voter holds at
 // most one ballot per question); like the relay endpoints this one is public, so the body has to
 // be bounded before it is buffered.
-const maxSignBatchBodyBytes = db.MaxQuestionsPerProcess*512 + 4<<10
+const maxSignBatchBodyBytes = db.MaxQuestionsPerProcess*512 + 4*internal.KiB
 
 // authorizedBallot is one item of a sign batch that survived the authorization pass: the
 // question's on-chain election id, resolved from the request, and the voter address.
@@ -411,9 +457,9 @@ type authorizedBallot struct {
 //	@Description	already signed for a different address; re-send with the address sign-info
 //	@Description	reports) or sign_failed (internal failure; retry). Retry ONLY the entries that
 //	@Description	carry a retryable code: re-sending the whole batch re-signs the ballots that
-//	@Description	already succeeded, and each re-sign counts toward the election's finite overwrite
-//	@Description	budget (MaxVoteOverwritesPerProcess, 10) — past it the election is permanently
-//	@Description	locked.
+//	@Description	already succeeded, and every signature, re-signs included, counts toward the election's
+//	@Description	limit (MaxCSPSignaturesPerElection, 10 in total) — past it the election is permanently
+//	@Description	locked for the voter.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -912,6 +958,11 @@ func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Reques
 //	@Description	question eligibility and vote status. The voter is identified solely by the auth token
 //	@Description	(the only voter data the client stores); the token must be verified and issued for this
 //	@Description	process. Ineligibility is reported as belongsToProcess=false with HTTP 200, not an error.
+//	@Description	Per question, hasSigned reports that the CSP signed the voter's ballot (the vote may not be
+//	@Description	on chain), and hasVoted that the vote is on chain. In an anonymous (blind) census hasVoted
+//	@Description	is always false, since the CSP never learns the voting address: hasSigned is the only
+//	@Description	signal. When the chain cannot be asked about a signed question the call fails with 500
+//	@Description	rather than report the vote as missing.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -919,8 +970,9 @@ func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Reques
 //	@Param			request		body		handlers.CheckMembershipRequest	true	"Request with auth token"
 //	@Success		200			{object}	handlers.ProcessCheckResponse
 //	@Failure		400			{object}	errors.Error	"Malformed body or missing auth token"
+//	@Failure		401			{object}	errors.Error	"Auth token not verified or not issued for this process"
 //	@Failure		404			{object}	errors.Error	"Process or census not found"
-//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		500			{object}	errors.Error	"Internal server error or blockchain request failed"
 //	@Router			/processes/{processId}/check [post]
 func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request) {
 	oid, anchor, ok := parseProcessID(w, r)
@@ -944,6 +996,12 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
 		return
 	}
+	// an unverified token only proves knowledge of the member's census fields, not control of their
+	// contact, so it must not reveal their weight or which questions they have voted
+	if !auth.Verified {
+		errors.ErrUnauthorized.WithErr(csp.ErrAuthTokenNotVerified).Write(w)
+		return
+	}
 	memberID := auth.UserID.String()
 	resp := &ProcessCheckResponse{}
 	if _, err := c.mainDB.CensusParticipant(vp.CensusID.Hex(), memberID); err == nil {
@@ -965,21 +1023,60 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+	resp.Questions = make([]ProcessQuestionStatus, len(questions))
+	rows := make([]*db.CSPProcess, len(questions))
 	for i := range questions {
 		q := &questions[i]
-		status := ProcessQuestionStatus{
+		resp.Questions[i] = ProcessQuestionStatus{
 			QuestionID: q.ID.Hex(),
 			UpstreamID: q.UpstreamID,
 			// a voter can only vote a question if they are a participant of the process
-			// census AND fall within the question's eligibility subset
-			CanVote: resp.BelongsToProcess && memberEligibleForQuestion(q, memberID),
+			// census AND fall within the question's eligibility subset, and not once the process
+			// has ended (the CSP no longer signs then)
+			CanVote: resp.BelongsToProcess && memberEligibleForQuestion(q, memberID) && !processEnded(vp),
 		}
-		if len(q.UpstreamID) > 0 {
-			if cspProc, err := c.mainDB.CSPProcessByUserAndProcess(auth.UserID, q.UpstreamID); err == nil {
-				status.HasVoted = cspProc.Used
-			}
+		if len(q.UpstreamID) == 0 {
+			continue // question not yet on chain
 		}
-		resp.Questions = append(resp.Questions, status)
+		row, err := c.mainDB.CSPProcessByUserAndProcess(auth.UserID, q.UpstreamID)
+		switch {
+		case err == nil:
+			rows[i] = row
+		case errors.Is(err, db.ErrTokenNotFound):
+			// the CSP never signed this question for the voter
+		default:
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+	}
+	// one goroutine per signed question (at most db.MaxQuestionsPerProcess); only uncached,
+	// non-blind rows reach the chain, and the lookup bounds node reads across requests. Each
+	// goroutine writes only its own index.
+	resolver := VoteStatusResolver{Store: c.mainDB, Lookup: c.voteOnChain}
+	errs := make([]error, len(rows))
+	var wg sync.WaitGroup
+	for i, row := range rows {
+		if row == nil {
+			continue
+		}
+		wg.Go(func() {
+			var st VoteStatus
+			st, errs[i] = resolver.Resolve(r.Context(), row)
+			resp.Questions[i].HasSigned, resp.Questions[i].HasVoted = st.Signed, st.Voted
+		})
+	}
+	wg.Wait()
+	// a vote the chain could not be asked about is not a hasVoted=false (same policy as
+	// POST /votes/verify): a voter told "not voted" by mistake would vote again. The raw node
+	// error goes to the log, not to the voter.
+	if err := stderrors.Join(errs...); err != nil {
+		// the voter gave up waiting: nobody is left to read an answer, and it is no node failure
+		if r.Context().Err() != nil {
+			return
+		}
+		log.Warnw("vote status lookup failed", "processId", oid.Hex(), "error", err)
+		errors.ErrVochainRequestFailed.Write(w)
+		return
 	}
 	apicommon.HTTPWriteJSON(w, resp)
 }

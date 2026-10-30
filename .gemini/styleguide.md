@@ -154,3 +154,10 @@ This document outlines the coding conventions for Go code in Vocdoni’s reposit
 - **Follow standard library practices:** When in doubt, look at the standard library for inspiration on how to structure your code.
 - **Avoid unnecessary abstractions:** Introduce abstraction only when it improves clarity or reuse, not simply to over-engineer the solution.
 
+
+## Repository-specific: API Documentation (saas-backend)
+
+<!-- saas-backend only: this file otherwise matches the shared Vocdoni Go style guide; keep this section when syncing it. -->
+
+- **The API code is the source of truth.** `docs/swagger.yaml` is generated from the swag annotations by `make swagger`. Flag a PR that changes a route, a handler in `api/` or `csp/handlers/`, or a type exposed by the API (`api/apicommon`, `csp/handlers`, wire-facing `db` types) without regenerating it, flag a `@Router` path that doesn't match the handler's route constant in `api/routes.go`, and flag any hand edit to `docs/swagger.yaml` or any new hand-written endpoint documentation in this repo.
+- **Downstream docs and SDK follow the API.** When a PR changes anything an API consumer can observe (routes, request/response fields, status or error codes, auth, job polling, quotas, the CSP voter flow), check that the PR description records the follow-up for the developer guides in `vocdoni/vocdoni.io` and, when needed, for `vocdoni/vocdoni-integrator-sdk`, as an issue/PR link or an explicit "pending"/"deferred" note. See the "API source of truth" section of `AGENTS.md`.

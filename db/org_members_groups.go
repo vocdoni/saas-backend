@@ -123,7 +123,9 @@ func (ms *MongoStorage) CreateOrganizationMemberGroup(group *OrganizationMemberG
 }
 
 // UpdateOrganizationMemberGroup updates an organization members group by adding
-// and/or removing members. If a member exists in both lists, it will be removed.
+// and/or removing members. A member present in both lists is rejected with ErrInvalidData:
+// honouring one list would contradict the other, and the removal's census revocation has
+// side effects an immediate re-add would not undo.
 // For the auto-generated group, only title and description can be updated;
 // manual membership changes are not allowed and return ErrAutoGroupMembersCannotBeModified.
 func (ms *MongoStorage) UpdateOrganizationMemberGroup(
@@ -143,6 +145,13 @@ func (ms *MongoStorage) UpdateOrganizationMemberGroup(
 	// Auto groups do not allow manual member manipulation.
 	if group.IsAutoGroup && (len(addedMembers) > 0 || len(removedMembers) > 0) {
 		return nil, ErrAutoGroupMembersCannotBeModified
+	}
+	// A member in both lists would be revoked from the group censuses and then kept in the
+	// group anyway, leaving it a member that can no longer vote. Refuse the ambiguity instead.
+	for _, id := range addedMembers {
+		if contains(removedMembers, id) {
+			return nil, fmt.Errorf("member %s is in both the added and removed lists: %w", id, ErrInvalidData)
+		}
 	}
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -567,12 +576,21 @@ func (ms *MongoStorage) findMemberFieldsCursor(
 		{Key: "orgAddress", Value: 1},
 	}
 	for _, f := range authFields {
-		proj = append(proj, bson.E{Key: string(f), Value: 1})
+		proj = append(proj, bson.E{Key: authFieldBSONKey(f), Value: 1})
 	}
 	for _, f := range twoFaFields {
 		proj = append(proj, bson.E{Key: string(f), Value: 1})
 	}
 	return ms.orgMembers.Find(ctx, filter, options.Find().SetProjection(proj))
+}
+
+// authFieldBSONKey returns the orgMembers document key holding an auth field: the field name itself,
+// except for the password, which a member holds as its argon2 hash under "pass" (OrgMember.HashedPass).
+func authFieldBSONKey(f OrgMemberAuthField) string {
+	if f == OrgMemberAuthFieldsPassword {
+		return "pass"
+	}
+	return string(f)
 }
 
 // Helper function to check if a string is in a slice
@@ -696,7 +714,7 @@ func (ms *MongoStorage) DeleteAllOrgMemberGroups(orgAddress common.Address) (int
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 	res, err := ms.orgMemberGroups.DeleteMany(ctx, bson.M{"orgAddress": orgAddress})
 	if err != nil {

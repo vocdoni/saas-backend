@@ -7,6 +7,7 @@ import (
 
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/pricing"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -17,7 +18,10 @@ type CensusSpec struct {
 	// Anonymous selects blind-CSP voting: the process publishes with census origin OFF_CHAIN_CA_V2
 	// and the CSP blind-signs each ballot so it cannot link a signature to the voter. Orthogonal to
 	// the mail/sms/auth 2FA channel; may be combined with Weighted (V2 binds the weight into the salt).
-	Anonymous   bool                    `json:"anonymous,omitempty"`
+	Anonymous bool `json:"anonymous,omitempty"`
+	// AuthFields are the member fields a voter logs in with. "password" is checked against the
+	// member's stored password after the other fields find the participant, so it needs at least
+	// one other auth field or a 2FA field.
 	AuthFields  db.OrgMemberAuthFields  `json:"authFields,omitempty"`
 	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
 	// GroupID is the org member group the census was built from. Round-trips: it is echoed back on
@@ -173,6 +177,19 @@ type VotingProcessResponse struct {
 	EndedAt string `json:"endedAt,omitempty"`
 }
 
+// ProcessPriceResponse is a server-side pay-per-process quote: the line breakdown and the
+// net total in EUR cents (VAT excluded; Stripe Tax adds it at checkout).
+type ProcessPriceResponse struct {
+	Lines      []pricing.QuoteLine `json:"lines"`
+	TotalCents pricing.Cents       `json:"totalCents"`
+	Currency   string              `json:"currency"`
+	// QuoteRecommended: census above 15 000 voters — suggest requesting a custom quote.
+	QuoteRecommended bool `json:"quoteRecommended"`
+	// QuoteRequired: census above 50 000 voters — quote-only: no price (no lines, totalCents 0,
+	// which is not free) and no self-service payment.
+	QuoteRequired bool `json:"quoteRequired"`
+}
+
 // VotingProcessListResponse is the paginated list of voting processes.
 type VotingProcessListResponse struct {
 	Processes  []VotingProcessResponse `json:"processes"`
@@ -200,12 +217,17 @@ type VotingProcessValidateResponse struct {
 	Errors []string `json:"errors"`
 }
 
-// ProcessParticipantQuestionVote is one question's voted status for a matched participant
-// (hasVoted is true when the member has consumed that question's on-chain election).
+// ProcessParticipantQuestionVote is one question's vote status for a matched participant.
+// HasSigned is true once the CSP signed the member's ballot for the question (the vote may not
+// be on chain); HasVoted is true only when the vote is on chain, and is always false in an
+// anonymous (blind) census. HasVotedUnknown is set when the chain could not be asked about this
+// member's vote: HasVoted is then false without meaning "not voted".
 type ProcessParticipantQuestionVote struct {
-	QuestionID string            `json:"questionId"`
-	UpstreamID internal.HexBytes `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
-	HasVoted   bool              `json:"hasVoted"`
+	QuestionID      string            `json:"questionId"`
+	UpstreamID      internal.HexBytes `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	HasSigned       bool              `json:"hasSigned"`
+	HasVoted        bool              `json:"hasVoted"`
+	HasVotedUnknown bool              `json:"hasVotedUnknown,omitempty"`
 }
 
 // ProcessParticipantEntry is a matched org member that is also a participant of the process

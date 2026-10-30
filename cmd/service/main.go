@@ -30,6 +30,7 @@ import (
 
 func main() {
 	// define flags
+	flag.String("logLevel", log.LogLevelInfo, "log level (debug, info, warn, error); debug logs voter credentials and PII")
 	flag.String("serverURL", "http://localhost:8080", "The full URL of the server (http or https)")
 	flag.StringP("host", "h", "0.0.0.0", "listen address")
 	flag.IntP("port", "p", 8080, "listen port")
@@ -58,9 +59,15 @@ func main() {
 	flag.String("stripeApiSecret", "", "Stripe API secret")
 	flag.String("stripeWebhookSecret", "", "Stripe Webhook secret")
 	flag.String("oauthServiceURL", "https://oauth.vocdoni.net", "OAuth service URL")
+	flag.String("originSecret", "", "if set, refuse requests without this value in the X-Origin-Secret header")
 	// OTP / verification code tuning (0 = use built-in defaults, applies to both API and CSP)
 	flag.Duration("otpExpiry", 0, "validity window for one-time codes (0 = default 15m)")
 	flag.Duration("otpCooldown", 0, "min wait between notification requests for the same account (0 = default 60s)")
+	// CSP abuse caps (0 = use built-in defaults, negative = disabled)
+	flag.Int("cspMaxDailySends", 0,
+		"max CSP challenges (new tokens + resends) sent per member and process per day (0 = default 10, negative = unlimited)")
+	flag.Int("cspMaxHourlyAuthFailures", 0,
+		"max failed CSP step-0 logins per submitted login fields and process per hour (0 = default 10, negative = unlimited)")
 	// CSP notification queue tuning (0 = use built-in defaults)
 	flag.Int("notificationWorkers", 0, "number of concurrent CSP notification senders (0 = default)")
 	flag.Duration("notificationQueueTTL", 0, "max age of a queued CSP notification before it is dropped (0 = default)")
@@ -113,7 +120,13 @@ func main() {
 	// oauth vars
 	oauthServiceURL := viper.GetString("oauthServiceURL")
 
-	log.Init("debug", "stdout", os.Stderr)
+	logLevel := viper.GetString("logLevel")
+	switch logLevel {
+	case log.LogLevelDebug, log.LogLevelInfo, log.LogLevelWarn, log.LogLevelError:
+	default:
+		log.Fatalf("invalid logLevel %q (allowed: debug, info, warn, error)", logLevel)
+	}
+	log.Init(logLevel, "stdout", os.Stderr)
 
 	// Validate Stripe configuration
 	if stripeAPISecret == "" || stripeWebhookSecret == "" {
@@ -159,6 +172,7 @@ func main() {
 		ServerURL:           server,
 		FullTransparentMode: fullTransparentMode,
 		OAuthServiceURL:     oauthServiceURL,
+		OriginSecret:        viper.GetString("originSecret"),
 		OTPExpiry:           viper.GetDuration("otpExpiry"),
 		OTPCooldown:         viper.GetDuration("otpCooldown"),
 	}
@@ -168,6 +182,8 @@ func main() {
 		DB:                             database,
 		NotificationTTL:                viper.GetDuration("otpExpiry"),
 		NotificationCoolDownTime:       viper.GetDuration("otpCooldown"),
+		MaxDailyChallengeSends:         viper.GetInt("cspMaxDailySends"),
+		MaxHourlyAuthFailures:          viper.GetInt("cspMaxHourlyAuthFailures"),
 		NotificationQueueWorkers:       viper.GetInt("notificationWorkers"),
 		NotificationQueueTTL:           viper.GetDuration("notificationQueueTTL"),
 		NotificationBreakerMaxFailures: viper.GetInt("notificationBreakerMaxFailures"),

@@ -48,7 +48,7 @@ func TestOrganizationGroups(t *testing.T) {
 				Name:         "Bob Johnson",
 				Email:        "bob.johnson@example.com",
 				Phone:        "+34611223344",
-				Password:     "password789",
+				Password:     testMemberPassword("password789"),
 				Other: map[string]any{
 					"department": "Sales",
 					"age":        35,
