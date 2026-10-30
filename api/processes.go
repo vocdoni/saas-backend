@@ -997,7 +997,7 @@ func (a *API) resolveQuestionMemos(ctx context.Context, q *db.VotingProcessQuest
 		return nil
 	}
 	defer a.electionReads.releaseSlot()
-	memos, err := a.account.ElectionMemos(q.UpstreamID, selectsOpen)
+	memos, err := a.account.ElectionMemos(ctx, q.UpstreamID, selectsOpen)
 	if err != nil {
 		log.Warnw("results: memos fetch failed",
 			"question", q.ID.Hex(), "upstreamId", q.UpstreamID.String(), "error", err)

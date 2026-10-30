@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -28,8 +27,13 @@ const electionMetadataVersion = "1.0"
 // DefaultElectionType is the metadata type used when ElectionParams.TypeMetadata is nil.
 const DefaultElectionType = "single-choice-multiquestion"
 
-// votesPageTimeout bounds each votes-list page request to the node.
-const votesPageTimeout = 30 * time.Second
+const (
+	// votesPageTimeout bounds each votes-list page request to the node, matching apiclient's
+	// DefaultTimeout for the other node reads.
+	votesPageTimeout = 10 * time.Second
+	// votesPageLimit is the votes-list page size requested from the node (its MaxItemsPerPage).
+	votesPageLimit = 100
+)
 
 // BuildElectionMetadata maps the high-level ElectionParams into an on-chain
 // ElectionMetadata document and returns its JSON encoding. The returned bytes are
@@ -354,22 +358,36 @@ func (a *Account) Election(processID []byte) (*api.Election, error) {
 // memo-carrying vote we fetch the single vote (which the node decrypts at RESULTS) and keep the
 // memo only if selectsOpen reports its decoded values selected the open choice (the predicate
 // owns the ballot layout — see OpenChoiceMatcher). Votes are listed through the node's
-// GET /votes?electionId={id}&page={n}; the loop stops on the last page, which the node marks
-// with a nil pagination.nextPage (an empty page also stops it, as a safeguard).
+// GET /votes?electionId={id}&page={n}&limit={votesPageLimit}; the loop stops on the last page,
+// which the node marks with a nil pagination.nextPage (an empty page also stops it, as a
+// safeguard). The node pages newest-first with an offset, so a vote cast while paging shifts
+// older votes onto the next page: votes are deduplicated by id so such a vote counts once.
+// Paging stops with ctx's error once ctx is done.
 //
 // ponytail: pages the whole election and does one extra GET per memo-carrying vote (N+1); fine for the
 // manager-only memo resolution folded into the results reads. Add saas-side pagination / a bounded
 // fetch pool if a process ever accumulates memos in the millions.
-func (a *Account) ElectionMemos(electionID []byte, selectsOpen func(votes []int) bool) ([]string, error) {
+func (a *Account) ElectionMemos(ctx context.Context, electionID []byte,
+	selectsOpen func(votes []int) bool,
+) ([]string, error) {
 	var memos []string
+	seen := make(map[string]struct{})
 	for page := 0; ; page++ {
-		list, err := a.votesPage(electionID, page)
+		list, err := a.votesPage(ctx, electionID, page)
 		if err != nil {
 			return nil, err
 		}
 		for _, v := range list.Votes {
+			if _, dup := seen[string(v.VoteID)]; dup {
+				continue
+			}
+			seen[string(v.VoteID)] = struct{}{}
 			if len(v.Memo) == 0 {
 				continue
+			}
+			// the per-vote fetch goes through apiclient, which takes no context
+			if err := ctx.Err(); err != nil {
+				return nil, fmt.Errorf("could not fetch memos of election %x: %w", electionID, err)
 			}
 			votes, err := a.voteSelectedValues(internal.HexBytes(v.VoteID))
 			if err != nil {
@@ -391,8 +409,9 @@ func (a *Account) ElectionMemos(electionID []byte, selectsOpen func(votes []int)
 }
 
 // votesPage fetches one page of the node's votes list for the given election
-// (GET /votes?electionId={id}&page={page}).
-func (a *Account) votesPage(electionID []byte, page int) (*api.VotesList, error) {
+// (GET /votes?electionId={id}&page={page}&limit={votesPageLimit}), bounded by votesPageTimeout
+// within ctx.
+func (a *Account) votesPage(ctx context.Context, electionID []byte, page int) (*api.VotesList, error) {
 	u, err := url.Parse(a.apiEndpoint)
 	if err != nil {
 		return nil, fmt.Errorf("invalid node API endpoint %q: %w", a.apiEndpoint, err)
@@ -401,31 +420,13 @@ func (a *Account) votesPage(electionID []byte, page int) (*api.VotesList, error)
 	u.RawQuery = url.Values{
 		"electionId": {internal.HexBytes(electionID).String()},
 		"page":       {strconv.Itoa(page)},
+		"limit":      {strconv.Itoa(votesPageLimit)},
 	}.Encode()
-	ctx, cancel := context.WithTimeout(context.Background(), votesPageTimeout)
+	ctx, cancel := context.WithTimeout(ctx, votesPageTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("could not build votes request for election %x: %w", electionID, err)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("could not fetch votes of election %x: %w", electionID, err)
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("could not read votes of election %x: %w", electionID, err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("could not fetch votes of election %x: unexpected status %d (%s)",
-			electionID, resp.StatusCode, body)
-	}
 	list := &api.VotesList{}
-	if err := json.Unmarshal(body, list); err != nil {
-		return nil, fmt.Errorf("could not decode votes of election %x: %w", electionID, err)
+	if err := getJSON(ctx, u.String(), list); err != nil {
+		return nil, fmt.Errorf("could not fetch votes page %d of election %x: %w", page, electionID, err)
 	}
 	return list, nil
 }
