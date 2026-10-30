@@ -198,6 +198,9 @@ type API struct {
 	publishPreJobFault   func() error
 	publishMinedFault    func() error
 	publishSubmittedHook func()
+	// publishChainOverride, when set, is what resolvePublishTxs asks instead of the account. A test
+	// seam; nil in production.
+	publishChainOverride publishTxChain
 	// writerLocks makes the write-seat cap check (OrgCanAddWriter) and the invitation or role
 	// write it allows one step per organization, so parallel invites cannot pass the same check.
 	// ponytail: in-memory, like orgTxLocks — one API instance; a DB-side conditional write if that changes
