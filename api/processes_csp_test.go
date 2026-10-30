@@ -145,10 +145,12 @@ func TestProcessCSP(t *testing.T) {
 	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "",
 		&handlers.CheckMembershipRequest{AuthToken: step0.AuthToken}, "processes", pid, "check")
 
-	// a resend with a contact that does not match the member fails with the same
-	// indistinguishable error that an unknown participant gets at step 0
-	requestAndAssertError(errors.ErrCSPAuthFailed, t, http.MethodPost, "",
+	// inside the cooldown a resend answers 40103 whatever the contact, spending no resend
+	requestAndAssertError(errors.ErrAttemptCoolDownTime, t, http.MethodPost, "",
 		&handlers.AuthResendRequest{AuthToken: step0.AuthToken, Email: "wrong-contact@example.com"},
+		"processes", pid, "auth", "resend")
+	requestAndAssertError(errors.ErrAttemptCoolDownTime, t, http.MethodPost, "",
+		&handlers.AuthResendRequest{AuthToken: step0.AuthToken, Email: members[0].Email},
 		"processes", pid, "auth", "resend")
 
 	// asking again inside the cooldown returns another token for the same code, without error
@@ -156,23 +158,26 @@ func TestProcessCSP(t *testing.T) {
 		t, http.MethodPost, "", authReq(0), "processes", pid, "auth", "0",
 	)
 	c.Assert(again.AuthToken, qt.Not(qt.DeepEquals), step0.AuthToken)
-
-	// resending inside the cooldown is refused, then allowed once it passes
-	requestAndAssertError(errors.ErrAttemptCoolDownTime, t, http.MethodPost, "",
-		&handlers.AuthResendRequest{AuthToken: step0.AuthToken, Email: members[0].Email},
-		"processes", pid, "auth", "resend")
 	time.Sleep(cspNotificationCoolDownTime)
+
+	// a resend with a contact that does not match the member fails with the same
+	// indistinguishable error that an unknown participant gets at step 0
+	requestAndAssertError(errors.ErrCSPAuthFailed, t, http.MethodPost, "",
+		&handlers.AuthResendRequest{AuthToken: step0.AuthToken, Email: "wrong-contact@example.com"},
+		"processes", pid, "auth", "resend")
 
 	// resend the OTP challenge for the mid-challenge token
 	resend := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "",
 		&handlers.AuthResendRequest{AuthToken: step0.AuthToken, Email: members[0].Email},
 		"processes", pid, "auth", "resend")
 	c.Assert(resend.AuthToken, qt.Not(qt.HasLen), 0)
+	time.Sleep(cspNotificationCoolDownTime)
 
-	// wrong contacts spend the token's resends like real ones (two spent so far, the cap is 3), so a
-	// token holder cannot probe a member's contact endlessly: once spent, even the right one is refused
+	// wrong contacts spend the code's resends like real ones, whichever of its tokens they come
+	// through (two spent so far, the cap is 3), so a token holder cannot probe a member's contact
+	// endlessly: once spent, even the right one is refused
 	requestAndAssertError(errors.ErrCSPAuthFailed, t, http.MethodPost, "",
-		&handlers.AuthResendRequest{AuthToken: step0.AuthToken, Email: "another-wrong@example.com"},
+		&handlers.AuthResendRequest{AuthToken: again.AuthToken, Email: "another-wrong@example.com"},
 		"processes", pid, "auth", "resend")
 	requestAndAssertError(errors.ErrVerificationMaxAttempts, t, http.MethodPost, "",
 		&handlers.AuthResendRequest{AuthToken: step0.AuthToken, Email: members[0].Email},

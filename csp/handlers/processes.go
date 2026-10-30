@@ -167,9 +167,9 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 //	@Description	process. The request must include the auth token and a valid contact method for the
 //	@Description	census type (email/phone). The same token is returned if the challenge is queued.
 //	@Description	A code is sent at most once per cooldown: inside it the request fails with 40103,
-//	@Description	whose data.coolDownTime holds the milliseconds left.
-//	@Description	A token can be resent at most 3 times, and a contact that does not match the member spends
-//	@Description	one of them too.
+//	@Description	whose data.coolDownTime holds the milliseconds left, and spends no resend.
+//	@Description	A code can be resent at most 3 times, counted across every token sharing it, and a
+//	@Description	contact that does not match the member spends one of them too.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json

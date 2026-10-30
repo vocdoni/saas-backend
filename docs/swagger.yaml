@@ -5015,9 +5015,9 @@ paths:
         process. The request must include the auth token and a valid contact method for the
         census type (email/phone). The same token is returned if the challenge is queued.
         A code is sent at most once per cooldown: inside it the request fails with 40103,
-        whose data.coolDownTime holds the milliseconds left.
-        A token can be resent at most 3 times, and a contact that does not match the member spends
-        one of them too.
+        whose data.coolDownTime holds the milliseconds left, and spends no resend.
+        A code can be resent at most 3 times, counted across every token sharing it, and a
+        contact that does not match the member spends one of them too.
       parameters:
       - description: Process ID
         in: path

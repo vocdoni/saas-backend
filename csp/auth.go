@@ -79,17 +79,22 @@ func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 
 	if challenge != nil && !lastToken.Verified && c.challengeUsable(challenge) {
 		token := newAuthToken()
-		if err := c.Storage.SetCSPAuthForChallenge(token, challenge); err != nil {
+		err := c.Storage.SetCSPAuthForChallenge(token, challenge, MaxChallengeTokens)
+		switch err {
+		case nil:
+			if _, err := c.resendChallengeCode(challenge, delivery); err != nil {
+				return nil, err
+			}
+			return token, nil
+		case db.ErrChallengeTokensExhausted, db.ErrTokenNotFound:
+			// the pending code cannot take more tokens (or is gone): send a new one below
+		default:
 			log.Warnw("error setting token for pending challenge",
 				"userID", uID,
 				"anchorID", anchorID,
 				"error", err)
 			return nil, ErrStorageFailure
 		}
-		if _, err := c.resendChallengeCode(challenge, delivery); err != nil {
-			return nil, err
-		}
-		return token, nil
 	}
 
 	// check if the last code was sent less than the cooldown time ago
@@ -139,20 +144,47 @@ func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 	return token, nil
 }
 
-// ClaimChallengeResend atomically spends one of the at most MaxChallengeResends resends of an
-// authentication token, returning ErrVerificationMaxAttempts once they are all spent. Each resend
-// sends an email or an SMS paid by the platform, and the token creation cooldown does not apply to
-// them. A resend request must claim before it checks the submitted contact, so a wrong contact
-// spends one too: otherwise a token holder could probe a member's other contact (say, the phone
-// once they know the email) with unlimited resends.
+// ClaimChallengeResend atomically spends one of the at most MaxChallengeResends resends of the
+// challenge code an authentication token answers, returning ErrVerificationMaxAttempts once they
+// are all spent. The count is kept on the challenge, so every token sharing a code shares its
+// resends. Each resend sends an email or an SMS paid by the platform. A resend request must claim
+// before it checks the submitted contact, so a wrong contact spends one too: otherwise a token
+// holder could probe a member's other contact (say, the phone once they know the email) with
+// unlimited resends. Inside the notification cooldown of a still usable code it spends nothing and
+// fails with ErrAttemptCoolDownTime carrying the remaining milliseconds, as the resend would send
+// nothing anyway.
 func (c *CSP) ClaimChallengeResend(token internal.HexBytes) error {
 	if len(token) == 0 {
 		return ErrInvalidAuthToken
 	}
-	claimed, err := c.Storage.ClaimCSPAuthResend(token, MaxChallengeResends)
+	authTokenData, err := c.Storage.CSPAuth(token)
+	if err != nil {
+		if err == db.ErrTokenNotFound {
+			return ErrInvalidAuthToken
+		}
+		log.Warnw("error getting token for resend",
+			"token", token,
+			"error", err)
+		return ErrStorageFailure
+	}
+	challenge, err := c.challengeOf(authTokenData)
+	if err != nil {
+		if err == db.ErrTokenNotFound {
+			return ErrTokenExpired
+		}
+		return ErrStorageFailure
+	}
+	// verified tokens and unusable codes go on to ResendChallenge, which reports why
+	if !authTokenData.Verified && c.challengeUsable(challenge) {
+		if remaining := c.notificationCoolDownTime - time.Since(challenge.LastSent()); remaining > 0 {
+			return coolDownError(remaining)
+		}
+	}
+	claimed, err := c.Storage.ClaimCSPAuthResend(challenge.Token, MaxChallengeResends)
 	if err != nil {
 		log.Warnw("error recording challenge resend",
 			"token", token,
+			"challenge", challenge.Token,
 			"error", err)
 		return ErrStorageFailure
 	}
@@ -162,10 +194,16 @@ func (c *CSP) ClaimChallengeResend(token internal.HexBytes) error {
 	return nil
 }
 
+// coolDownError is the ErrAttemptCoolDownTime answer carrying the milliseconds left, at least one.
+func coolDownError(remaining time.Duration) errors.Error {
+	remaining = max(remaining, time.Millisecond)
+	return errors.ErrAttemptCoolDownTime.WithData(map[string]any{"coolDownTime": remaining.Milliseconds()})
+}
+
 // ResendChallenge re-sends the challenge code a pending token answers, counting it against the
 // member's daily challenge budget, at most once per notification cooldown: inside it, it fails
-// with ErrAttemptCoolDownTime carrying the remaining milliseconds. The caller must have spent one
-// of the token's resends with ClaimChallengeResend first.
+// with ErrAttemptCoolDownTime carrying the remaining milliseconds and giving back the resend. The
+// caller must have spent one of the code's resends with ClaimChallengeResend first.
 func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 	ctype notifications.ChallengeType, lang string,
 	orgName, orgLogo string, orgAddress common.Address,
@@ -235,8 +273,14 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 		return err
 	}
 	if !sent {
-		coolDown := max(c.notificationCoolDownTime-time.Since(challenge.LastSent()), time.Millisecond)
-		return errors.ErrAttemptCoolDownTime.WithData(map[string]any{"coolDownTime": coolDown.Milliseconds()})
+		// a concurrent request sent the code since ClaimChallengeResend checked the cooldown: this
+		// one sent nothing, so give its resend back
+		if err := c.Storage.ReleaseCSPAuthResend(challenge.Token); err != nil {
+			log.Warnw("error releasing challenge resend",
+				"challenge", challenge.Token,
+				"error", err)
+		}
+		return coolDownError(c.notificationCoolDownTime - time.Since(challenge.LastSent()))
 	}
 	return nil
 }

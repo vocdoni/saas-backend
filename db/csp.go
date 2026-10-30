@@ -29,8 +29,12 @@ type CSPAuth struct {
 	Attempts   int       `json:"attempts" bson:"attempts"`
 	Verified   bool      `json:"verified" bson:"verified"`
 	VerifiedAt time.Time `json:"verifiedAt" bson:"verifiedat"`
-	// Resends counts the challenge resends of the token, capped by ClaimCSPAuthResend.
+	// Resends counts the resends of the challenge this row holds, shared by every token answering
+	// it and capped by ClaimCSPAuthResend. Only meaningful on a challenge row.
 	Resends int `json:"resends" bson:"resends"`
+	// Tokens counts the extra tokens issued for the challenge this row holds, capped by
+	// SetCSPAuthForChallenge. Only meaningful on a challenge row.
+	Tokens int `json:"-" bson:"tokens,omitempty"`
 	// ChallengeID, when set, is the token whose row holds the OTP challenge this token answers
 	// (secret, attempts, send time, and the creation time the code expires from). A repeated
 	// auth request reuses a pending code by issuing a new token pointing at its challenge, so
@@ -111,9 +115,10 @@ func (ms *MongoStorage) SetCSPAuth(token, userID, anchorID internal.HexBytes, se
 }
 
 // SetCSPAuthForChallenge stores a new token for the user and anchor of the given challenge
-// row, answering that challenge instead of holding its own. It returns an error if the token
-// is nil.
-func (ms *MongoStorage) SetCSPAuthForChallenge(token internal.HexBytes, challenge *CSPAuth) error {
+// row, answering that challenge instead of holding its own. At most maxTokens such tokens are
+// issued per challenge: past that it stores nothing and returns ErrChallengeTokensExhausted. It
+// returns ErrTokenNotFound if the challenge row no longer exists.
+func (ms *MongoStorage) SetCSPAuthForChallenge(token internal.HexBytes, challenge *CSPAuth, maxTokens int) error {
 	if token == nil || challenge == nil {
 		return ErrBadInputs
 	}
@@ -121,12 +126,27 @@ func (ms *MongoStorage) SetCSPAuthForChallenge(token internal.HexBytes, challeng
 	defer ms.keysLock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
+	challengeToken := challenge.ChallengeToken()
+	// claim one of the challenge's tokens first, in a single conditional update so concurrent
+	// requests cannot exceed the cap; rows without the counter have issued none
+	res, err := ms.cspTokens.UpdateOne(ctx,
+		bson.M{"_id": challengeToken, "tokens": bson.M{"$not": bson.M{"$gte": maxTokens}}},
+		bson.M{"$inc": bson.M{"tokens": 1}})
+	if err != nil {
+		return errors.Join(ErrStoreToken, err)
+	}
+	if res.MatchedCount == 0 {
+		if _, err := ms.fetchCSPAuthFromDB(ctx, challengeToken); err != nil {
+			return err
+		}
+		return ErrChallengeTokensExhausted
+	}
 	if _, err := ms.cspTokens.InsertOne(ctx, CSPAuth{
 		Token:       token,
 		UserID:      challenge.UserID,
 		AnchorID:    challenge.AnchorID,
 		CreatedAt:   time.Now(),
-		ChallengeID: challenge.ChallengeToken(),
+		ChallengeID: challengeToken,
 	}); err != nil {
 		return errors.Join(ErrStoreToken, err)
 	}
@@ -295,6 +315,22 @@ func (ms *MongoStorage) ClaimCSPAuthResend(token internal.HexBytes, maxResends i
 		return false, errors.Join(ErrStoreToken, err)
 	}
 	return res.MatchedCount == 1, nil
+}
+
+// ReleaseCSPAuthResend gives back a resend claimed with ClaimCSPAuthResend that sent nothing.
+// It never takes the counter below zero.
+func (ms *MongoStorage) ReleaseCSPAuthResend(token internal.HexBytes) error {
+	if token == nil {
+		return ErrBadInputs
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	if _, err := ms.cspTokens.UpdateOne(ctx,
+		bson.M{"_id": token, "resends": bson.M{"$gt": 0}},
+		bson.M{"$inc": bson.M{"resends": -1}}); err != nil {
+		return errors.Join(ErrStoreToken, err)
+	}
+	return nil
 }
 
 // CSPProcess returns the CSPProcess for the given token and processID.
