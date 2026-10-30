@@ -55,3 +55,18 @@ func TestMapBatchResults(t *testing.T) {
 	}
 	c.Assert([]byte(got[2].UpstreamID), qt.DeepEquals, []byte{0x0c})
 }
+
+// TestMapBatchResultsInCache: a failed item the node refused as already cached is marked InCache,
+// any other failure is not.
+func TestMapBatchResultsInCache(t *testing.T) {
+	c := qt.New(t)
+	out := mapBatchResults(&dvoteapi.TransactionBatchResult{
+		Failed: []dvoteapi.TransactionBatchItem{{Error: "tx already exists in cache"}},
+	})
+	c.Assert(out, qt.HasLen, 1)
+	c.Assert(out[0].InCache, qt.IsTrue)
+	out = mapBatchResults(&dvoteapi.TransactionBatchResult{
+		Failed: []dvoteapi.TransactionBatchItem{{Error: "bad nonce"}},
+	})
+	c.Assert(out[0].InCache, qt.IsFalse)
+}
