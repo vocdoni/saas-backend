@@ -136,12 +136,10 @@ func TestOrganizationUsers(t *testing.T) {
 		nInvites := 15
 		t.Logf("Will invite %d users", nInvites)
 		var wg sync.WaitGroup
-		wg.Add(nInvites)
 
 		// Send invites concurrently to trigger the race condition
 		for range nInvites {
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				resp, code := testRequest(
 					t,
 					http.MethodPost,
@@ -155,7 +153,7 @@ func TestOrganizationUsers(t *testing.T) {
 					"users",
 				)
 				c.Logf("response (%d): %s", code, resp)
-			}()
+			})
 		}
 		// Wait for all invites to complete
 		wg.Wait()
