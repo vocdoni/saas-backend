@@ -183,6 +183,8 @@ const (
 	processesQuestionsStatusEndpoint = "/processes/{processId}/questions/status"
 	// PUT /processes/{processId}/questions/{questionId}/status to change one question's status
 	processesQuestionStatusEndpoint = "/processes/{processId}/questions/{questionId}/status"
+	// PUT /processes/{processId}/endDate to extend a published process's end date (admin only)
+	processesEndDateEndpoint = "/processes/{processId}/endDate"
 	// GET /processes/{processId}/questions/{questionId} to read one question (public voter read; a
 	// manager/admin caller additionally gets an open-value question's voter memos in its results)
 	processesQuestionEndpoint = "/processes/{processId}/questions/{questionId}"

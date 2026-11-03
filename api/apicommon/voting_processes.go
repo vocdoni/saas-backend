@@ -372,6 +372,12 @@ type SetQuestionsStatusRequest struct {
 	Questions []QuestionStatusID `json:"questions,omitempty"`
 }
 
+// SetProcessEndDateRequest moves the end date of a published process later. EndDate is RFC 3339;
+// it is truncated to whole seconds.
+type SetProcessEndDateRequest struct {
+	EndDate string `json:"endDate" example:"2026-12-31T23:59:59Z"`
+}
+
 // QuestionStatusID identifies a target question by its id.
 type QuestionStatusID struct {
 	ID string `json:"id"`
