@@ -23,6 +23,9 @@ import (
 type Account struct {
 	client *apiclient.HTTPclient
 	signer *ethereum.SignKeys
+	// apiEndpoint is the node API base URL, for the routes that take query parameters
+	// (apiclient.HTTPclient.Request only builds paths).
+	apiEndpoint string
 
 	PubKey            internal.HexBytes `swaggertype:"string" format:"hex" example:"deadbeef"`
 	TxCosts           map[models.TxType]uint64
@@ -72,6 +75,7 @@ func New(privateKey string, apiEndpoint string) (*Account, error) {
 	return &Account{
 		client:            apiClient,
 		signer:            &signer,
+		apiEndpoint:       apiEndpoint,
 		PubKey:            internal.HexBytes(signer.PublicKey()),
 		TxCosts:           txCosts,
 		ElectionPriceCalc: electionPriceCalc,
