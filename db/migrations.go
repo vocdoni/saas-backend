@@ -26,7 +26,9 @@ const (
 	migrationLockID = "migration-lock"
 	// migrationLockTTL is how long a lock left behind by a crashed instance
 	// stays valid before another instance may take it over. It matches the
-	// migration context timeout, so a live holder can never outlive its lock.
+	// migration context timeout, so a live holder can never outlive its lock;
+	// a migration that opts out of that timeout renews the lock instead
+	// (migrations.RenewLock).
 	migrationLockTTL = 10 * time.Minute
 	// migrationLockRetryInterval is how long an instance waits between
 	// attempts to take the lock while another instance holds it.
@@ -60,6 +62,25 @@ func (ms *MongoStorage) acquireMigrationLock(ctx context.Context, holder string)
 	}
 }
 
+// migrationRunTimeout bounds a RunMigrationsUp run. A migration may opt out of it for its own
+// work, renewing the lock as it goes (migrations.RenewLock); a variable so a test can shorten it.
+var migrationRunTimeout = 10 * time.Minute
+
+// renewMigrationLock moves the expiry of the lock holder holds to migrationLockTTL from now. It
+// fails when holder no longer holds the lock: it expired and another instance took it over.
+func (ms *MongoStorage) renewMigrationLock(ctx context.Context, holder string) error {
+	res, err := ms.migrations.UpdateOne(ctx,
+		bson.M{"_id": migrationLockID, "holder": holder},
+		bson.M{"$set": bson.M{"expiresat": time.Now().Add(migrationLockTTL)}})
+	if err != nil {
+		return fmt.Errorf("failed to renew migration lock: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return fmt.Errorf("migration lock lost: another instance holds it")
+	}
+	return nil
+}
+
 // releaseMigrationLock releases the cross-instance migration lock, but only if
 // this instance still holds it (an expired lock may have been taken over).
 func (ms *MongoStorage) releaseMigrationLock(holder string) {
@@ -76,7 +97,7 @@ func (ms *MongoStorage) releaseMigrationLock(holder string) {
 // to do.
 func (ms *MongoStorage) RunMigrationsUp() error {
 	// Create a context with timeout for migrations
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), migrationRunTimeout)
 	defer cancel()
 
 	lastMigration, err := lastAppliedMigration(ctx, ms.migrations)
@@ -111,6 +132,11 @@ func (ms *MongoStorage) RunMigrationsUp() error {
 
 	log.Infow("starting database migrations", "migrationsAvailable", len(migs), "lastAppliedMigration", lastMigration)
 
+	// a migration that outlives ctx (migrations.RenewLock) renews the lock through this
+	upCtx := migrations.WithLockRenewer(ctx, func(renewCtx context.Context) error {
+		return ms.renewMigrationLock(renewCtx, holder)
+	})
+
 	// Apply pending migrations
 	for _, migration := range migs {
 		if migration.Version <= lastMigration {
@@ -119,22 +145,31 @@ func (ms *MongoStorage) RunMigrationsUp() error {
 
 		log.Infow("applying migration", "version", migration.Version, "name", migration.Name)
 
-		if err := migration.Up(ctx, ms.DBClient.Database(ms.database)); err != nil {
+		if err := migration.Up(upCtx, ms.DBClient.Database(ms.database)); err != nil {
 			return fmt.Errorf("failed to apply migration %d (%s): %w", migration.Version, migration.Name, err)
 		}
 
-		record := MigrationRecord{
-			Version:   migration.Version,
-			AppliedAt: time.Now(),
-		}
-		if _, err := ms.migrations.InsertOne(ctx, record); err != nil {
-			return fmt.Errorf("failed to record migration %d: %w", migration.Version, err)
+		if err := ms.recordMigration(migration.Version); err != nil {
+			return err
 		}
 
 		log.Infow("migration applied successfully", "version", migration.Version, "name", migration.Name)
 	}
 
 	log.Infow("database migrations completed successfully")
+	return nil
+}
+
+// recordMigration writes the ledger record of an applied migration. It has its own context, as
+// releaseMigrationLock does: a migration that renewed the lock past the run timeout must still be
+// recorded, or it would run again on the next start.
+func (ms *MongoStorage) recordMigration(version int) error {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	record := MigrationRecord{Version: version, AppliedAt: time.Now()}
+	if _, err := ms.migrations.InsertOne(ctx, record); err != nil {
+		return fmt.Errorf("failed to record migration %d: %w", version, err)
+	}
 	return nil
 }
 
