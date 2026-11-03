@@ -411,9 +411,12 @@ func (u *OrgMemberUpdate) applyTo(stored OrgMember) *OrgMember {
 	set(&member.Surname, u.Surname)
 	if u.NationalID != nil {
 		member.NationalID = *u.NationalID
-		// the stored marker described the replaced value; prepareOrgMember sets it again if the new
-		// value is letterless too
-		member.NationalIDOriginal = ""
+		// clear the marker only when the nationalId actually changes; re-sending the stored canonical
+		// value (or its original letterless form) keeps the marker so the organizer can still review
+		// it. prepareOrgMember re-sets the marker if the genuinely new value is letterless.
+		if internal.NormalizeNationalID(*u.NationalID).Normalized != stored.NationalID {
+			member.NationalIDOriginal = ""
+		}
 	}
 	set(&member.Email, u.Email)
 	if u.BirthDate != nil {
