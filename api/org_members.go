@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -186,8 +187,9 @@ func memberHashCount(members []apicommon.OrgMember) int {
 // addOrganizationMembersHandler godoc
 //
 //	@Summary		Add members to an organization
-//	@Description	Add multiple members to an organization. Requires Manager/Admin role and is subject to the
-//	@Description	plan's member quota. With `async=true` the import runs in the background and the response
+//	@Description	Add multiple members to an organization. Requires Manager/Admin role; the organization's
+//	@Description	memberbase is capped at 50 000 members (40145).
+//	@Description	With `async=true` the import runs in the background and the response
 //	@Description	carries a `jobId` to poll via GET /jobs/{jobId}; otherwise it
 //	@Description	completes synchronously. A synchronous import whose members carry more than 150 phones and
 //	@Description	passwords in total (each one is an expensive hash) runs as if `async=true` had been sent: the
@@ -195,18 +197,33 @@ func memberHashCount(members []apicommon.OrgMember) int {
 //	@Description	empty members list is a no-op that returns added=0.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `members:write`).
+//	@Description
+//	@Description	402 when the change would grow a published process's census beyond what it paid for:
+//	@Description	40178 with the quote in data (its processId names the process to buy headroom for with
+//	@Description	POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
+//	@Description	integrator's wallet falls short (data: requiredCents, availableCents), or 40183 past the
+//	@Description	spend cap its integrator set (data: capCents, spentCents, requiredCents).
+//	@Description	422 when the grown census needs a custom quote.
+//	@Description	409 (40903) while a process built on a census the change grows holds its publish claim:
+//	@Description	nothing is written; retry once the claim is released: when its publish job ends, or up to 15
+//	@Description	minutes after a service restart (PublishStaleAfter), as for POST /processes/{processId}/publish.
+//	@Description	A checkout, a checkout cancel or an eligibility update of the draft holds the claim briefly too.
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			orgAddress	path		string							true	"Organization address"
-//	@Param			async		query		boolean							false	"Process asynchronously and return job ID"
-//	@Param			request		body		apicommon.AddMembersRequest		true	"Members to add"
-//	@Success		200			{object}	apicommon.AddMembersResponse	"Added count (sync) or jobId (async)"
-//	@Failure		400			{object}	errors.Error					"Invalid input data"
-//	@Failure		401			{object}	errors.Error					"Unauthorized"
-//	@Failure		403			{object}	errors.Error					"Plan member quota exceeded"
-//	@Failure		500			{object}	errors.Error					"Internal server error"
+//	@Param			orgAddress	path		string													true	"Organization address"
+//	@Param			async		query		boolean													false	"Process asynchronously and return job ID"
+//	@Param			request		body		apicommon.AddMembersRequest								true	"Members to add"
+//	@Success		200			{object}	apicommon.AddMembersResponse							"Added count (sync) or jobId (async)"
+//	@Failure		400			{object}	errors.Error											"Invalid input data"
+//	@Failure		401			{object}	errors.Error											"Unauthorized"
+//	@Failure		403			{object}	errors.Error											"Organization members limit exceeded"
+//	@Failure		402			{object}	errors.Error{data=apicommon.ProcessCensusGrowthQuote}	"Census growth beyond the price paid"
+//	@Failure		409			{object}	errors.Error											"A process on the census is being published (40903)"
+//	@Failure		422			{object}	errors.Error											"Census size requires a custom quote"
+//	@Failure		500			{object}	errors.Error											"Internal server error"
+//	@Failure		503			{object}	errors.Error											"Busy (50302), retry after Retry-After"
 //	@Router			/organizations/{orgAddress}/members [post]
 func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
@@ -253,16 +270,28 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 		errors.ErrInvalidData.WithErr(err).Write(w)
 		return
 	}
-	// check if the new members pass the organization members limit
-	if err := a.subscriptions.OrgCanAddNMembers(org.Address, len(members.Members)); err != nil {
-		if apiErr := (errors.Error{}); errors.As(err, &apiErr) {
-			apiErr.Write(w)
-			return
-		}
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+	// the member cap and growth checks and the writes they allow are one step (censusGrowthLocks),
+	// so the lock is held until the imported members are propagated — by the goroutine, when async.
+	// ponytail: an import holds the organization's census growth for its whole run; a lock per
+	// census, if imports get long enough to stall other census changes. Released earlier, a second
+	// import would pass the same checks against the same stored counts; every other request waits
+	// for it a bounded time (lockOrBusy) and answers 503.
+	growthLock, err := a.censusGrowthLocks.lockOrBusy(r.Context(), org.Address)
+	if err != nil {
+		writeSubscriptionError(w, err)
 		return
 	}
-
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			growthLock.Unlock()
+		}
+	}()
+	// check if the new members pass the organization members limit
+	if err := a.subscriptions.OrgCanAddNMembers(org.Address, len(members.Members)); err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
 	// the imported members join the auto "All members" group, so they join the censuses built from
 	// it. Quota and signer are checked first: an over-quota import must not create the members
 	// either. A failure to resolve those censuses is a real lookup error — abort before creating
@@ -323,7 +352,9 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 	// request values to outlive it
 	mailCtx := context.WithoutCancel(r.Context())
 
+	handedOff = true
 	go func() {
+		defer growthLock.Unlock()
 		var lastProgress *db.BulkOrgMembersJob
 		for p := range progressChan {
 			lastProgress = p
@@ -343,7 +374,8 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 		// The members that were actually inserted join the auto group's censuses. Discarding the
 		// result is deliberate: the import job has already been completed, and CompleteJob $sets
 		// errors wholesale, so a second write would clobber the import errors rather than merge
-		// the propagation ones — a failure here is logged, not reported. #628 tracks surfacing it.
+		// the propagation ones — a failure here (a refused resize included) is logged by
+		// propagateMembersToCensuses, not reported. #628 tracks surfacing it.
 		if lastProgress != nil {
 			a.propagateMembersToCensuses(org.Address, autoCensuses, lastProgress.MemberIDs)
 		}
@@ -368,17 +400,39 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 //	@Description	to keep them.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `members:write`).
+//	@Description
+//	@Description	402 when the change would grow a published process's census beyond what it paid for:
+//	@Description	40178 with the quote in data (its processId names the process to buy headroom for with
+//	@Description	POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
+//	@Description	integrator's wallet falls short (data: requiredCents, availableCents), or 40183 past the
+//	@Description	spend cap its integrator set (data: capCents, spentCents, requiredCents).
+//	@Description	422 when the grown census needs a custom quote.
+//	@Description	409 (40903) while a process built on a census the change grows holds its publish claim:
+//	@Description	nothing is written (except for an edit turned into a creation, below); retry once the claim is
+//	@Description	released: when its publish job ends, or up to 15 minutes after a service restart
+//	@Description	(PublishStaleAfter), as for POST /processes/{processId}/publish. A checkout, a checkout cancel
+//	@Description	or an eligibility update of the draft holds the claim briefly too.
+//	@Description
+//	@Description	An edit whose member was deleted concurrently turns into a creation. When that creation's
+//	@Description	growth is refused (409, 402, 422 or a busy lock), the member is written anyway: the answer is
+//	@Description	a 200 with its id and an error "member created but not added to its censuses", and it is in no
+//	@Description	census. Re-sending the upsert will not add it: add it with PUT /processes/{processId}/census
+//	@Description	{memberIds:[id]} for a published process, or by editing the draft's census (PUT
+//	@Description	/processes/{processId}).
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			orgAddress	path		string								true	"Organization address"
-//	@Param			request		body		apicommon.UpsertOrgMemberRequest	true	"Member data to insert or update"
-//	@Success		200			{object}	apicommon.UpsertOrgMemberResponse	"Member id, plus any census resize jobs and errors"
-//	@Failure		400			{object}	errors.Error						"Invalid input data"
-//	@Failure		401			{object}	errors.Error						"Unauthorized"
-//	@Failure		500			{object}	errors.Error						"Internal server error"
-//	@Failure		503			{object}	errors.Error						"Server busy hashing, retry after Retry-After (50302)"
+//	@Param			orgAddress	path		string													true	"Organization address"
+//	@Param			request		body		apicommon.UpsertOrgMemberRequest						true	"Member data to insert or update"
+//	@Success		200			{object}	apicommon.UpsertOrgMemberResponse						"Member id, plus any census resize jobs and errors"
+//	@Failure		400			{object}	errors.Error											"Invalid input data"
+//	@Failure		401			{object}	errors.Error											"Unauthorized"
+//	@Failure		402			{object}	errors.Error{data=apicommon.ProcessCensusGrowthQuote}	"Census growth beyond the price paid"
+//	@Failure		409			{object}	errors.Error											"A process on the census is being published (40903)"
+//	@Failure		422			{object}	errors.Error											"Census size requires a custom quote"
+//	@Failure		500			{object}	errors.Error											"Internal server error"
+//	@Failure		503			{object}	errors.Error											"Server busy hashing or locked, retry after Retry-After (50302)"
 //	@Router			/organizations/{orgAddress}/members [put]
 func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
@@ -415,22 +469,33 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 	// A new member joins the auto "All members" group, so it joins the censuses built from it.
 	// Quota and signer are checked first: an over-quota request must not create the member either.
 	//
-	// Only a creation grows a census, so only a creation is preflighted. Checking unconditionally
-	// would refuse every edit of an existing member once the census sits at the plan limit — the
-	// quota is on census size, and an edit does not change it. An id that names no member of this
+	// Only a creation grows the memberbase and a census, so only a creation is preflighted.
+	// Checking unconditionally would refuse every edit of an existing member once the
+	// organization sits at its limit, and an edit does not change its size. An id that names no member of this
 	// organization counts as a creation, which is what the upsert will do with it.
 	//
 	// This read and the upsert are not atomic, and the upsert decides `created` from its own read
-	// under the keys lock. A member deleted in between therefore turns an edit into an unpreflighted
-	// creation, overshooting the quota by one. Bounded and self-correcting — the member is still
-	// propagated correctly, since that keys off the upsert's answer rather than this one, and the
-	// next request is refused. Closing it would mean a quota-checked upsert in the db layer, which
-	// would have to import subscriptions to do it.
+	// under the keys lock. A member deleted in between therefore turns an edit into a creation the
+	// quota did not check, overshooting it by one: bounded and self-correcting, as the next request
+	// is refused. Closing it would mean a quota-checked upsert in the db layer, which would have to
+	// import subscriptions to do it. Its census growth is still guarded: before such a creation
+	// joins the censuses it takes the growth lock and the census preflight (the publish 409 and the
+	// price), and a refusal is reported in the response's errors, the member row already written.
 	isUpdate := false
 	if member.ID != "" {
 		if _, err := a.db.OrgMember(org.Address, member.ID); err == nil {
 			isUpdate = true
 		}
+	}
+	// the growth check and the census write it allows are one step (censusGrowthLocks). Only a
+	// creation runs that check, so an edit does not queue behind a bulk import holding the lock.
+	if !isUpdate {
+		growthLock, err := a.censusGrowthLocks.lockOrBusy(r.Context(), org.Address)
+		if err != nil {
+			writeSubscriptionError(w, err)
+			return
+		}
+		defer growthLock.Unlock()
 	}
 	// resolved before the write: a failure here is a real lookup error, and creating the member
 	// anyway would leave a silent non-voter — no quota consumed, no propagation — behind a 200.
@@ -471,6 +536,22 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 	// Propagate on create only. AddCensusParticipantsByMemberIDs re-adds anything missing, so
 	// running it on an ordinary member edit would silently undo every revocation.
 	if created {
+		if isUpdate {
+			// an edit that turned into a creation (see above): guarded like one before it propagates
+			growthLock, err := a.censusGrowthLocks.lockOrBusy(r.Context(), org.Address)
+			if err == nil {
+				defer growthLock.Unlock()
+				err = a.preflightCensusGrowth(org, autoCensuses, 1)
+			}
+			if err != nil {
+				resp.Errors = []string{fmt.Sprintf("member created but not added to its censuses: %v; "+
+					"it is in no census, and re-sending the upsert will not add it: add it with "+
+					"PUT /processes/{processId}/census {memberIds:[%s]} for a published process, "+
+					"or by editing the draft's census (PUT /processes/{processId})", err, memberID.Hex())}
+				apicommon.HTTPWriteJSON(w, resp)
+				return
+			}
+		}
 		propagated := a.propagateMembersToCensuses(org.Address, autoCensuses, []string{memberID.Hex()})
 		resp.CensusJobIDs = propagated.JobIDs
 		// reported rather than dropped, as the bulk and group paths already do. The member is

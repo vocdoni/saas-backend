@@ -152,6 +152,11 @@ func (e Error) Write(w http.ResponseWriter) {
 		}
 	}
 
+	// every 503 is a transient refusal: tell the client when to retry, unless the caller already
+	// did. 10 s is the longest a request waits for a busy lock.
+	if e.HTTPstatus == http.StatusServiceUnavailable && w.Header().Get("Retry-After") == "" {
+		w.Header().Set("Retry-After", "10")
+	}
 	// Set the content type to JSON
 	w.Header().Set("Content-Type", "application/json")
 	http.Error(w, string(msg), e.HTTPstatus)

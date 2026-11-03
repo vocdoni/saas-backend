@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
@@ -118,22 +117,4 @@ func TestStatusChangeNoOpAndPerQuestionOutcomes(t *testing.T) {
 	rejected := byID[questions[1].ID.Hex()]
 	c.Assert(rejected.Status, qt.Equals, db.JobStatusFailed)
 	c.Assert(rejected.Error, qt.Not(qt.Equals), "")
-}
-
-// TestDrawsManagedSlotSkipsResume pins that the publish preflight probes the integrator's
-// managed-process quota only for a first publish: a resume consumes the slot the first attempt
-// reserved, so probing would refuse a half-published process once the integrator is at its limit.
-func TestDrawsManagedSlotSkipsResume(t *testing.T) {
-	c := qt.New(t)
-	managed := &db.Organization{ManagedBy: common.Address{0x01}}
-	standalone := &db.Organization{}
-	big := &db.Census{Size: db.TestMaxCensusSize + 1}
-	small := &db.Census{Size: db.TestMaxCensusSize}
-	fresh := []db.VotingProcessQuestion{{}, {}}
-	resumed := []db.VotingProcessQuestion{{UpstreamID: internal.HexBytes{0xab}}, {}}
-
-	c.Assert(drawsManagedSlot(managed, big, fresh), qt.IsTrue)
-	c.Assert(drawsManagedSlot(managed, big, resumed), qt.IsFalse)
-	c.Assert(drawsManagedSlot(managed, small, fresh), qt.IsFalse)
-	c.Assert(drawsManagedSlot(standalone, big, fresh), qt.IsFalse)
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
+	"github.com/vocdoni/saas-backend/pricing"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/log"
 )
@@ -262,10 +263,9 @@ type OrganizationInfo struct {
 	// Description is a shorthand for meta["description"]. Same encoding rules as Name.
 	Description *MultilingualText `json:"description,omitempty"`
 
-	// Whether to subscribe the new organization to the free integrator plan at
-	// creation time (opt-in). Used by the integrator portal so a newly created org
-	// becomes an integrator on the free tier with no checkout. Default false uses
-	// the regular default plan.
+	// Whether the new organization is an integrator (opt-in, used by the integrator
+	// portal): it may create managed organizations and pay for their processes from
+	// its wallet.
 	Integrator bool `json:"integrator,omitempty"`
 }
 
@@ -302,9 +302,8 @@ type UserOrganization struct {
 	// Organization information
 	Organization *OrganizationInfo `json:"organization"`
 
-	// Whether this organization is enabled as an integrator. Computed from the
-	// organization's integrator limits / active plan (see Subscriptions.IsIntegrator),
-	// not stored. Populated by GET /users/me; omitted when false.
+	// Whether this organization is enabled as an integrator (see
+	// Subscriptions.IsIntegrator). Populated by GET /users/me; omitted when false.
 	IsIntegrator bool `json:"isIntegrator,omitempty"`
 }
 
@@ -651,8 +650,38 @@ type CreateManagedOrganizationRequest struct {
 
 // ListManagedOrganizations is the paginated list of organizations managed by an integrator.
 type ListManagedOrganizations struct {
-	Pagination    *Pagination         `json:"pagination"`
-	Organizations []*OrganizationInfo `json:"organizations"`
+	Pagination    *Pagination                `json:"pagination"`
+	Organizations []*ManagedOrganizationInfo `json:"organizations"`
+}
+
+// ManagedOrganizationInfo is a managed organization as its integrator sees it: the organization
+// plus what it may spend and has spent from the integrator's wallet.
+type ManagedOrganizationInfo struct {
+	OrganizationInfo
+	// SpendCapCents is the most the organization's processes may hold debited from the wallet at
+	// once, in EUR cents; null is unlimited.
+	SpendCapCents *pricing.Cents `json:"spendCapCents" extensions:"x-nullable"`
+	// SpentCents is what its processes hold debited now: refunds and failed-publish credit-backs
+	// take their amount off again.
+	SpentCents pricing.Cents `json:"spentCents"`
+}
+
+// ManagedOrganizationFromDB builds the integrator's view of a managed organization from the
+// organization and its spending as recorded on the integrator's wallet.
+func ManagedOrganizationFromDB(org *db.Organization, spend db.ManagedOrgSpend) *ManagedOrganizationInfo {
+	return &ManagedOrganizationInfo{
+		OrganizationInfo: *OrganizationFromDB(org, nil),
+		SpendCapCents:    spend.CapCents,
+		SpentCents:       spend.SpentCents,
+	}
+}
+
+// UpdateManagedOrganizationRequest is the body of PUT /integrator/organizations/{orgAddress}.
+type UpdateManagedOrganizationRequest struct {
+	// SpendCapCents caps what the organization's processes may hold debited from the
+	// integrator's wallet, in EUR cents; null lifts the cap. Required: a body without it (or
+	// with any other key) is refused.
+	SpendCapCents *pricing.Cents `json:"spendCapCents" extensions:"x-nullable"`
 }
 
 // DeleteManagedOrganizationResponse is returned by DELETE
@@ -661,40 +690,27 @@ type DeleteManagedOrganizationResponse struct {
 	Address string `json:"address"`
 }
 
-// IntegratorUsage holds an integrator's current managed-resource usage counters. SentVotes/
-// SentSMS/SentEmails are the shared-pool totals summed across the integrator's managed orgs.
+// IntegratorUsage holds an integrator's usage summed across its managed organizations: how
+// many it manages, and the votes relayed and 2FA SMS/emails sent by them.
 type IntegratorUsage struct {
-	ManagedOrgs      int `json:"managedOrgs"`
-	ManagedProcesses int `json:"managedProcesses"`
-	SentVotes        int `json:"sentVotes"`
-	SentSMS          int `json:"sentSMS"`
-	SentEmails       int `json:"sentEmails"`
+	ManagedOrgs int `json:"managedOrgs"`
+	SentVotes   int `json:"sentVotes"`
+	SentSMS     int `json:"sentSMS"`
+	SentEmails  int `json:"sentEmails"`
 }
 
-// IntegratorLimits holds an integrator's effective caps for the dashboard. MaxManagedOrgs is
-// the effective integrator limit; the rest are the integrator's subscription-plan caps for the
-// pools shared across its managed orgs.
-//
-// Zero is not uniformly "unlimited". Only MaxVotes treats 0 as unlimited (vote enforcement is
-// skipped when the plan's MaxVotes is 0). MaxManagedProcesses, MaxSMS and MaxEmails are hard
-// caps where 0 means no allowance. Separately, the plan-sourced fields (everything except
-// MaxManagedOrgs, which always comes from the effective integrator limit) are left at 0 when an
-// override-enabled integrator has no subscription plan to source caps from — an "unknown" the
-// dashboard should treat distinctly from a real 0 cap.
-type IntegratorLimits struct {
-	MaxManagedOrgs      int `json:"maxManagedOrgs"`
-	MaxManagedProcesses int `json:"maxManagedProcesses"`
-	MaxVotes            int `json:"maxVotes"`
-	MaxSMS              int `json:"maxSMS"`
-	MaxEmails           int `json:"maxEmails"`
-}
-
-// IntegratorInfoResponse is returned by the path-less GET /integrator.
-// Limits is only present when Enabled is true.
+// IntegratorInfoResponse is returned by the path-less GET /integrator. What an integrator spends
+// is bounded by its wallet balance (GET /wallet). Until its wallet keeps a top-up it creates one
+// managed organization, deleted ones included (40184 past it); then there is no limit.
 type IntegratorInfoResponse struct {
-	Enabled bool              `json:"enabled"`
-	Limits  *IntegratorLimits `json:"limits,omitempty"`
-	Usage   IntegratorUsage   `json:"usage"`
+	Enabled bool            `json:"enabled"`
+	Usage   IntegratorUsage `json:"usage"`
+	// ManagedOrgsCreated counts the managed organizations it ever created, deleted ones included.
+	ManagedOrgsCreated int64 `json:"managedOrgsCreated"`
+	// NetTopUpCents is what its wallet kept from Stripe top-ups (refunds and disputes subtract).
+	NetTopUpCents pricing.Cents `json:"netTopUpCents"`
+	// CanCreateManagedOrg: one more managed organization would be allowed now.
+	CanCreateManagedOrg bool `json:"canCreateManagedOrg"`
 }
 
 // OrganizationSubscriptionInfo provides detailed information about an organization's subscription.
@@ -743,9 +759,6 @@ type SubscriptionPlan struct {
 
 	// Features available in this plan
 	Features SubscriptionFeatures `json:"features"`
-
-	// Integrator limits for this plan (zero when the plan is not an integrator plan)
-	IntegratorLimits SubscriptionIntegratorLimits `json:"integratorLimits"`
 }
 
 // SubscriptionPlanFromDB converts a db.Plan to a SubscriptionPlan.
@@ -764,7 +777,6 @@ func SubscriptionPlanFromDB(plan *db.Plan) SubscriptionPlan {
 		Organization:         SubscriptionPlanLimits(plan.Organization),
 		VotingTypes:          SubscriptionVotingTypes(plan.VotingTypes),
 		Features:             SubscriptionFeatures(plan.Features),
-		IntegratorLimits:     SubscriptionIntegratorLimits(plan.IntegratorLimits),
 	}
 }
 
@@ -798,17 +810,6 @@ type SubscriptionPlanLimits struct {
 
 	// Whether this is a custom plan
 	CustomPlan bool `json:"customPlan"`
-}
-
-// SubscriptionIntegratorLimits represents the integrator limits of a subscription plan.
-// It is the mirror struct of db.IntegratorLimits. All-zero means the plan is not an
-// integrator plan.
-// swagger:model SubscriptionIntegratorLimits
-type SubscriptionIntegratorLimits struct {
-	// Maximum number of organizations the integrator may manage. The aggregate
-	// process and census-size caps across managed orgs come from the plan's
-	// top-level limits (maxProcesses / maxCensus).
-	MaxManagedOrgs int `json:"maxManagedOrgs"`
 }
 
 // SubscriptionVotingTypes represents the voting types available in a subscription plan.

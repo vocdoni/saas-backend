@@ -99,14 +99,15 @@ const (
 	organizationGroupEndpoint = "/organizations/{orgAddress}/groups/{groupId}"
 	// GET /organizations/{orgAddress}/groups/{groupId}/members to get the members of an organization member group
 	organizationGroupMembersEndpoint = "/organizations/{orgAddress}/groups/{groupId}/members"
-	// GET /integrator to get integrator quota and usage for the caller's own integrator org.
+	// GET /integrator to get integrator status and usage for the caller's own integrator org.
 	// Path-less: the integrator org is resolved from the API key (its org) or the user session.
 	integratorEndpoint = "/integrator"
 	// POST /integrator/organizations to create a managed org; GET to list them, for the caller's
 	// own integrator org. Path-less: the integrator is resolved from the API key or the user
 	// session, so no organization address is passed in the URL.
 	managedOrganizationsEndpoint = "/integrator/organizations"
-	// DELETE /integrator/organizations/{orgAddress} to delete a managed org and all its data.
+	// DELETE /integrator/organizations/{orgAddress} to delete a managed org and all its data; PUT
+	// to set its spend cap.
 	managedOrganizationEndpoint = "/integrator/organizations/{orgAddress}"
 	// POST /integrator/organizations/{orgAddress}/apikeys to create an API key; GET to list them
 	integratorOrgAPIKeysEndpoint = "/integrator/organizations/{orgAddress}/apikeys"
@@ -157,8 +158,23 @@ const (
 	// GET /processes/{processId}/validation publish-readiness dry-run (protected)
 	processesValidateEndpoint = "/processes/{processId}/validation"
 
+	// GET routes to get the server-side price of a voting process
+	processesPriceEndpoint = "/processes/{processId}/price"
+
 	// GET routes to compute a price from formula inputs (public calculator)
 	pricingEndpoint = "/pricing"
+
+	// GET an organization's wallet (balance + history); not for managed organizations
+	walletEndpoint = "/organizations/{orgAddress}/wallet"
+
+	// POST starts a one-time checkout that tops up an organization's wallet
+	walletTopUpEndpoint = "/organizations/{orgAddress}/wallet/topup"
+
+	// POST starts (or resumes) the wallet top-up checkout of a voting process;
+	// GET reports its payment status; DELETE cancels its open checkout
+	processesCheckoutEndpoint = "/processes/{processId}/checkout"
+	// POST buys census headroom for an already-paid process from the wallet (raises the paid envelope)
+	processesCensusCheckoutEndpoint = "/processes/{processId}/census/checkout"
 	// POST /processes/{processId}/check voter eligibility/status (public CSP)
 	processesCheckEndpoint = "/processes/{processId}/check"
 	// POST /processes/{processId}/publish to publish the process (one election per question)

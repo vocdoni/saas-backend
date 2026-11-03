@@ -10,6 +10,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -26,7 +27,7 @@ func TestAPIKeyConfinedToItsOrganization(t *testing.T) {
 	orgAddr := testCreateOrganization(t, token)
 	org, err := testDB.Organization(orgAddr)
 	c.Assert(err, qt.IsNil)
-	org.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 2}
+	org.Integrator = true
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
 	otherToken := testCreateUser(t, "apikeyotherpass123")
@@ -61,7 +62,7 @@ func TestAPIKeyConfinedToItsOrganization(t *testing.T) {
 }
 
 // TestUpsertMemberEnforcesMemberQuota covers the regression where the single-member PUT skipped
-// the member-base quota the bulk POST enforces: creations past the plan limit must be refused,
+// the member-base quota the bulk POST enforces: creations past the limit must be refused,
 // while edits of existing members at the limit stay allowed.
 func TestUpsertMemberEnforcesMemberQuota(t *testing.T) {
 	c := qt.New(t)
@@ -71,11 +72,9 @@ func TestUpsertMemberEnforcesMemberQuota(t *testing.T) {
 	members := postOrgMembers(t, token, orgAddr, newOrgMembers(2)...)
 	c.Assert(members, qt.HasLen, 2)
 
-	// shrink the default plan's member limit to the current member base
-	reducedFreePlan := *mockFreePlan
-	reducedFreePlan.Organization.MaxCensus = 2
-	c.Assert(testDB.SetPlan(&reducedFreePlan), qt.IsNil)
-	c.Cleanup(func() { c.Assert(testDB.SetPlan(mockFreePlan), qt.IsNil) })
+	// shrink the memberbase limit to the current member base
+	defer func(prev int64) { subscriptions.MaxMembersPerOrg = prev }(subscriptions.MaxMembersPerOrg)
+	subscriptions.MaxMembersPerOrg = 2
 
 	// creating one more member via PUT must be refused with the quota error
 	newMember := newOrgMembers(3)[2]
@@ -162,14 +161,14 @@ func TestGroupUpdateRejectsOverlappingLists(t *testing.T) {
 }
 
 // TestCreateSubOrganizationWithinPlan covers the regression where creating a suborganization
-// always failed: the parent check took the length of a fixed-size address, never zero. Within the
-// plan's limit a suborganization is created; past it the dedicated 400 is returned.
+// always failed: the parent check took the length of a fixed-size address, never zero. No plan
+// caps suborganizations anymore, so a plan's former limit does not stop the next one either.
 func TestCreateSubOrganizationWithinPlan(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "suborgplanpass123")
 	parentAddr := testCreateOrganization(t, token)
 
-	// the essential plan allows one suborganization
+	// the essential plan used to allow one suborganization
 	parent, err := testDB.Organization(parentAddr)
 	c.Assert(err, qt.IsNil)
 	parent.Subscription.PlanID = mockEssentialPlan.ID
@@ -183,8 +182,9 @@ func TestCreateSubOrganizationWithinPlan(t *testing.T) {
 	c.Assert(sub.Parent, qt.Not(qt.IsNil))
 	c.Assert(sub.Parent.Address, qt.Equals, parentAddr)
 
-	// the plan is now exhausted
-	requestAndAssertError(errors.ErrMaxSubOrgsReached, t, http.MethodPost, token, subOrgInfo, organizationsEndpoint)
+	// the plan's former limit (one suborganization) no longer applies
+	second := requestAndParse[apicommon.OrganizationInfo](t, http.MethodPost, token, subOrgInfo, organizationsEndpoint)
+	c.Assert(second.Address, qt.Not(qt.Equals), sub.Address)
 
 	// a suborganization cannot be the parent of another one
 	nested := &apicommon.OrganizationInfo{
@@ -282,7 +282,7 @@ func TestManagedOrgBillingEmailRedacted(t *testing.T) {
 	// enable the org as an integrator with capacity for one managed org
 	org, err := testDB.Organization(orgAddr)
 	c.Assert(err, qt.IsNil)
-	org.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 2}
+	org.Integrator = true
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
 	// create a second user to own the managed org so the integrator is not its admin

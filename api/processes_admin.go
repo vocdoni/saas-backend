@@ -6,6 +6,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +31,16 @@ import (
 //	@Description	published process has on-chain elections and cannot be deleted. Requires
 //	@Description	Manager/Admin role of the organization that owns the process.
 //	@Description
+//	@Description	A paid draft is credited back to the wallet that paid it before it is deleted (the
+//	@Description	organization's own, or its integrator's for a managed organization); nothing is ever
+//	@Description	refunded to a card. The payment record goes with the draft: the credit-back row in the
+//	@Description	wallet history (GET /organizations/{orgAddress}/wallet) is the audit trail. The
+//	@Description	once-per-organization add-ons it paid (branding, custom URL) are released so the
+//	@Description	organization's next process can buy them — except one another process relies on,
+//	@Description	which is withheld from the credit and stays the organization's. An open top-up
+//	@Description	checkout of the draft is expired first; one already completed still credits the
+//	@Description	wallet when its webhook arrives.
+//	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
 //	@Produce		json
@@ -38,8 +49,9 @@ import (
 //	@Success		200			{string}	string			"OK"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		404			{object}	errors.Error	"Process not found"
-//	@Failure		409			{object}	errors.Error	"Process already published, partially published (40904), or being published"
+//	@Failure		409			{object}	errors.Error	"Already published, partially published (40904), being published, or payment changed"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		503			{object}	errors.Error	"Busy (50302), retry after Retry-After"
 //	@Router			/processes/{processId} [delete]
 func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)
@@ -51,23 +63,42 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	// only a draft can be deleted; a published process lives on-chain and is immutable.
-	if vp.Published {
-		errors.ErrDuplicateConflict.Withf("process already published and not in draft mode").Write(w)
+	if err := a.deleteDraftProcess(vp, nil); err != nil {
+		writeSubscriptionError(w, err)
 		return
 	}
-	// Deleting mid-publish would orphan on chain whatever the worker has already mined. So
-	// delete takes the claim a publish takes, and the two exclude each other: checking the
-	// marker on the read above would let a publish claim the draft right after.
+	apicommon.HTTPWriteOK(w)
+}
+
+// deleteDraftProcess deletes a draft, returning its money first: what it paid is credited back to
+// the wallet that paid it, an open top-up checkout is expired so it can no longer be paid, and the
+// add-on release a credit-back still owes is applied. Its payment row goes with it: the wallet
+// ledger is the record of what it paid and got back. It is what DELETE /processes/{processId}
+// does after authorization, and what an organization teardown does to each of its drafts. Errors are
+// errors.Error values carrying their HTTP semantics (write with writeSubscriptionError) or plain
+// errors meaning 500; the draft is then kept and the delete can be retried. A non-nil teardown (an
+// organization teardown, deleteOrgDrafts) drops a partially published draft too: its mined
+// elections stay on chain like a published process's, nothing is credited back (they were
+// delivered) and the payment row stays as their audit trail; and an add-on the draft paid is
+// withheld from its credit-back only when the teardown found it delivered (refundPaidProcess),
+// since every other draft goes too. DELETE /processes/{processId} passes nil and refuses a
+// partially published draft with 40904 so a publish can resume it.
+func (a *API) deleteDraftProcess(vp *db.VotingProcess, teardown *orgTeardown) error {
+	oid := vp.ID
+	// only a draft can be deleted; a published process lives on-chain and is immutable.
+	if vp.Published {
+		return errors.ErrDuplicateConflict.Withf("process already published and not in draft mode")
+	}
+	// Deleting mid-publish would orphan on chain whatever the worker has already mined, and
+	// refund it. So delete takes the claim a publish takes, and the two exclude each other:
+	// checking the marker on the read above would let a publish claim the draft right after.
 	// Every refusal below releases it; a deleted draft takes the marker with it.
 	owner, claimed, err := a.db.ClaimVotingProcessForPublish(oid, time.Time{})
 	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
+		return fmt.Errorf("failed to claim the draft: %w", err)
 	}
 	if !claimed {
-		errors.ErrPublishInProgress.Write(w)
-		return
+		return errors.ErrPublishInProgress
 	}
 	deleted := false
 	defer func() {
@@ -79,35 +110,236 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		}
 	}()
 	// a partially published draft (an earlier publish mined some elections before failing) is
-	// not deletable: dropping it would erase the on-chain ids and orphan the mined elections.
-	// Publishing again resumes the remaining questions instead. Reloaded under the claim, so
-	// no publish worker can be minting elections concurrently.
+	// not deletable on its own: dropping it would erase the on-chain ids and orphan the mined
+	// elections, while publishing again resumes the remaining questions. Only a teardown
+	// drops it. Reloaded under the claim, so no publish worker can be minting
+	// elections concurrently.
 	questions, err := a.db.QuestionsByProcess(oid)
 	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
+		return fmt.Errorf("failed to get process questions: %w", err)
 	}
 	current, err := a.db.VotingProcess(oid)
 	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
+		return fmt.Errorf("failed to get the draft: %w", err)
 	}
 	// the flag is set before a mined election id is stored, so it also covers an election whose
 	// id never reached its question
 	if anyMined(questions) || current.HasMinedElections {
-		errors.ErrProcessPartiallyPublished.Write(w)
-		return
+		if teardown == nil {
+			return errors.ErrProcessPartiallyPublished
+		}
+		if err := a.db.DeleteVotingProcess(oid); err != nil {
+			return fmt.Errorf("failed to delete the draft: %w", err)
+		}
+		deleted = true
+		if !vp.CensusID.IsZero() {
+			_ = a.db.DelCensus(vp.CensusID.Hex())
+		}
+		return nil
+	}
+	// an open top-up checkout is expired first, outside the wallet lock (it calls Stripe), so it
+	// can no longer be paid; a consumed one is in the wallet already
+	payment, err := a.db.ProcessPayment(oid)
+	if err != nil {
+		// a payment state it cannot read is never taken as absent: the draft may hold money
+		if !errors.Is(err, db.ErrNotFound) {
+			return fmt.Errorf("failed to get process payment: %w", err)
+		}
+		payment = nil // free process, or never quoted
+	}
+	// read before the checkout's row is dropped, so the add-on claims released below are its own
+	var claimHolder *db.Organization
+	if payment != nil && payment.Status == db.ProcessPaymentPending {
+		if claimHolder, err = a.db.Organization(vp.OrgAddress); err != nil {
+			return fmt.Errorf("failed to get organization: %w", err)
+		}
+		if !payment.Consumed {
+			if err := a.releasePendingCheckout(payment); err != nil {
+				return err
+			}
+		}
+	}
+	// what the draft paid goes back before the draft goes away; the ledger is the record of it
+	if err := a.refundPaidProcess(vp, teardown); err != nil {
+		return err
+	}
+	if err := atMoneyStep(moneyStepPaymentDrop, oid); err != nil {
+		return err
+	}
+	if err := a.db.DeleteProcessPayment(oid); err != nil {
+		return err
+	}
+	if claimHolder != nil {
+		a.releaseDroppedCheckoutClaim(vp, claimHolder)
+	}
+	if err := atMoneyStep(moneyStepDraftDelete, oid); err != nil {
+		return err
 	}
 	if err := a.db.DeleteVotingProcess(oid); err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
+		return fmt.Errorf("failed to delete the draft: %w", err)
 	}
 	deleted = true
 	// best-effort: drop the draft's inline census so it is not orphaned.
 	if !vp.CensusID.IsZero() {
 		_ = a.db.DelCensus(vp.CensusID.Hex())
 	}
-	apicommon.HTTPWriteOK(w)
+	return nil
+}
+
+// orgTeardown is what an organization teardown decides its credit-backs by: the
+// once-per-organization add-ons a published or mined process of the organization received.
+type orgTeardown struct {
+	delivered []db.OrgAddOn
+}
+
+// withDraftID names the draft a teardown stopped on. A typed API error keeps its code, status and
+// data and gains the id in its client-visible message; any other error becomes a 500 whose body
+// names the draft and whose internal detail stays log-only.
+func withDraftID(err error, id string) error {
+	var apiErr errors.Error
+	if errors.As(err, &apiErr) {
+		return apiErr.With("draft " + id)
+	}
+	return errors.ErrGenericInternalServerError.WithErr(err).With("draft " + id)
+}
+
+// deleteOrgDrafts deletes every draft of an organization with deleteDraftProcess, so the paid
+// ones are credited back before they go, and then credits back every once-per-organization add-on
+// an earlier credit-back withheld that no process received (creditUndeliveredAddOns). Before it
+// drops anything it records, under the payer's wallet lock, the add-ons a published or mined process
+// received (db.RecordOrganizationAddOnsDelivered); every credit-back decides by that set, so what
+// comes back depends neither on the order the drafts go in nor on what a crashed attempt already
+// removed. It stops at the first draft it cannot delete, returning that error and leaving it and
+// the rest in place, so a teardown aborts with no money stranded and a retry resumes where it
+// stopped.
+func (a *API) deleteOrgDrafts(org common.Address) error {
+	teardown, payer, err := a.startOrgTeardown(org)
+	if err != nil {
+		return err
+	}
+	for {
+		// always the first page: each pass deletes what it read, and stops on a failure
+		_, drafts, err := a.db.ListVotingProcesses(org, "", db.DraftOnly, 1, 100)
+		if err != nil {
+			return fmt.Errorf("failed to list drafts: %w", err)
+		}
+		if len(drafts) == 0 {
+			return a.creditUndeliveredAddOns(org, payer, teardown)
+		}
+		for i := range drafts {
+			if err := a.deleteDraftProcess(&drafts[i], teardown); err != nil {
+				log.Warnw("could not delete a draft of an organization being torn down",
+					"org", org.Hex(), "processId", drafts[i].ID.Hex(), "error", err)
+				return withDraftID(err, drafts[i].ID.Hex())
+			}
+		}
+	}
+}
+
+// startOrgTeardown records the add-ons a published or mined process of org received, under its
+// payer's wallet lock, and returns them with the payer.
+func (a *API) startOrgTeardown(org common.Address) (*orgTeardown, common.Address, error) {
+	o, err := a.db.Organization(org)
+	if err != nil {
+		return nil, common.Address{}, fmt.Errorf("failed to get organization: %w", err)
+	}
+	payer := walletPayer(o)
+	walletLock, err := a.walletLocks.lockOrBusy(context.Background(), payer)
+	if err != nil {
+		return nil, common.Address{}, err
+	}
+	defer walletLock.Unlock()
+	delivered, err := a.db.RecordOrganizationAddOnsDelivered(org)
+	if err != nil {
+		return nil, common.Address{}, err
+	}
+	return &orgTeardown{delivered: delivered}, payer, nil
+}
+
+// creditUndeliveredAddOns credits back, once all of org's drafts are gone, each
+// once-per-organization add-on an earlier credit-back of the organization withheld (its price
+// stayed the organization's stamp) that no published or mined process received. Each withheld
+// price is credited once ever (db.TeardownAddOnCreditKey, per withholding row) to the wallet that
+// paid it, as a creditBack naming the withholding process. The stamp goes first, in the same
+// organization write that records the credit as owed (db.OweOrganizationAddOnCredit), so a cut
+// before the credit leaves no stamp a branded publish could ride for free; a retry credits every
+// owed price whatever the organization received since, and settles the record after the credit;
+// an add-on bought and withheld again after such a cut is a second price, credited too. A row
+// withholding several add-ons
+// splits its withheld cents in its order, each at most its list price.
+func (a *API) creditUndeliveredAddOns(org, payer common.Address, teardown *orgTeardown) error {
+	walletLock, err := a.walletLocks.lockOrBusy(context.Background(), payer)
+	if err != nil {
+		return err
+	}
+	defer walletLock.Unlock()
+	rows, err := a.db.OrganizationAddOnWithholdings(payer, org)
+	if err != nil {
+		return err
+	}
+	o, err := a.db.Organization(org)
+	if err != nil {
+		return fmt.Errorf("failed to get organization: %w", err)
+	}
+	var spentBy common.Address
+	if payer != org {
+		spentBy = org
+	}
+	for i := range rows {
+		row := &rows[i]
+		left := row.WithheldCents
+		for _, addOn := range row.WithheldAddOns {
+			cents := min(orgAddOnCents(addOn), left)
+			left -= cents
+			if cents <= 0 {
+				continue
+			}
+			key := db.TeardownAddOnCreditKey(org, addOn, row.ProcessID)
+			if !slices.Contains(o.AddOnsOwedCredit, key) {
+				if slices.Contains(teardown.delivered, addOn) {
+					continue
+				}
+				if err := a.db.OweOrganizationAddOnCredit(org, addOn, row); err != nil {
+					return err
+				}
+			}
+			if err := a.db.CreditWallet(db.WalletCredit{
+				OrgAddress:        payer,
+				AmountCents:       cents,
+				IdempotencyKey:    key,
+				Kind:              db.WalletEntryCreditBack,
+				ProcessID:         row.ProcessID,
+				ProcessOrgAddress: org,
+				SpentBy:           spentBy,
+			}); err != nil {
+				return fmt.Errorf("failed to credit back the withheld %s: %w", addOn, err)
+			}
+			if err := a.db.SettleOrganizationAddOnCredit(org, addOn, row.ProcessID); err != nil {
+				return err
+			}
+			log.Infow("withheld add-on no process received credited back at teardown",
+				"org", org.Hex(), "addOn", addOn, "amountCents", cents, "payer", payer.Hex())
+		}
+	}
+	return nil
+}
+
+// DeleteOrgDrafts deletes every draft of the organization the way DELETE /processes/{processId}
+// does — a paid one credited back first to the wallet that paid it — for a caller outside the API
+// server: cmd/userdel, whose erasure must not strand money when it tears an organization down. It
+// has no payment gateway: an open top-up checkout is dropped with its draft and left to Stripe's
+// own expiry, and paying it meanwhile only credits the wallet. It stops at the first draft it
+// cannot delete, leaving it and the rest in place.
+//
+// ponytail: the wallet lock it takes is its own, not the running server's — a census headroom
+// charge on the same payer landing between a draft's refund read and its credit stays debited for
+// the deleted draft (logged as an error); a DB lease if erasures ever run against live traffic.
+func DeleteOrgDrafts(database *db.MongoStorage, org common.Address) error {
+	if database == nil {
+		return fmt.Errorf("a database is required")
+	}
+	a := &API{db: database, walletLocks: newOrgTxMutex()}
+	return a.deleteOrgDrafts(org)
 }
 
 // votingProcessParticipantsHandler godoc
@@ -301,20 +533,30 @@ func (a *API) resolveVoteStatuses(ctx context.Context, rows []db.CSPProcess) (ma
 //	@Description	and raise each affected on-chain election's maxCensusSize so the new members can vote. Members are
 //	@Description	added synchronously; the maxCensusSize update runs as an async job (poll GET /jobs/{jobId}).
 //	@Description	Questions with an eligibility subset keep their fixed size and are unaffected. Requires
-//	@Description	Manager/Admin role and is subject to the plan's census quota.
+//	@Description	Manager/Admin role.
+//	@Description
+//	@Description	402 when the change would grow a published process's census beyond what it paid for:
+//	@Description	40178 with the quote in data (its processId names the process to buy headroom for with
+//	@Description	POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
+//	@Description	integrator's wallet falls short (data: requiredCents, availableCents), or 40183 past the
+//	@Description	spend cap its integrator set (data: capCents, spentCents, requiredCents).
+//	@Description	422 when the grown census needs a custom quote.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			processId	path		string									true	"Process ID"
-//	@Param			request		body		apicommon.AddCensusParticipantsRequest	true	"Member IDs to add"
-//	@Success		200			{object}	apicommon.UpdateProcessCensusResponse	"Members added; no on-chain resize needed"
-//	@Success		202			{object}	apicommon.UpdateProcessCensusResponse	"Members added; maxCensusSize update enqueued"
-//	@Failure		400			{object}	errors.Error							"Invalid input data"
-//	@Failure		401			{object}	errors.Error							"Unauthorized"
-//	@Failure		404			{object}	errors.Error							"Process not found"
-//	@Failure		409			{object}	errors.Error							"Process is not published"
-//	@Failure		500			{object}	errors.Error							"Internal server error"
+//	@Param			processId	path		string													true	"Process ID"
+//	@Param			request		body		apicommon.AddCensusParticipantsRequest					true	"Member IDs to add"
+//	@Success		200			{object}	apicommon.UpdateProcessCensusResponse					"Members added; no on-chain resize needed"
+//	@Success		202			{object}	apicommon.UpdateProcessCensusResponse					"Members added; maxCensusSize update enqueued"
+//	@Failure		400			{object}	errors.Error											"Invalid input data"
+//	@Failure		401			{object}	errors.Error											"Unauthorized"
+//	@Failure		404			{object}	errors.Error											"Process not found"
+//	@Failure		402			{object}	errors.Error{data=apicommon.ProcessCensusGrowthQuote}	"Census growth beyond the price paid"
+//	@Failure		422			{object}	errors.Error											"Census size requires a custom quote"
+//	@Failure		409			{object}	errors.Error											"Process is not published"
+//	@Failure		500			{object}	errors.Error											"Internal server error"
+//	@Failure		503			{object}	errors.Error											"Busy (50302), retry after Retry-After"
 //	@Router			/processes/{processId}/census [put]
 func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)
@@ -331,12 +573,6 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrDuplicateConflict.Withf("process is not published; edit the draft via PUT /processes/{processId}").Write(w)
 		return
 	}
-	census, err := a.db.Census(vp.CensusID.Hex())
-	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-
 	var req apicommon.AddCensusParticipantsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		errors.ErrMalformedBody.Withf("couldn't decode participant IDs").Write(w)
@@ -346,37 +582,12 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 		apicommon.HTTPWriteJSON(w, &apicommon.UpdateProcessCensusResponse{Added: 0})
 		return
 	}
-
-	if err := a.subscriptions.OrgCanAddCensusParticipants(census.OrgAddress, census.ID.Hex(), len(req.MemberIDs)); err != nil {
+	grown, err := a.addProcessCensusMembers(r.Context(), vp, req.MemberIDs)
+	if err != nil {
 		writeSubscriptionError(w, err)
 		return
 	}
-
-	added, memberErrs, err := a.db.AddCensusParticipantsByMemberIDs(census.ID.Hex(), req.MemberIDs)
-	switch {
-	case err == nil:
-	case stderrors.Is(err, db.ErrInvalidData), stderrors.Is(err, db.ErrUpdateWouldCreateDuplicates):
-		errors.ErrInvalidData.WithErr(err).Write(w)
-		return
-	case stderrors.Is(err, db.ErrNotFound):
-		errors.ErrCensusNotFound.Write(w)
-		return
-	default:
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-
-	// recount and persist the census size so the on-chain maxCensusSize we set below is correct.
-	size, err := a.db.CountCensusParticipants(census.ID.Hex())
-	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-	census.Size = size
-	if _, err := a.db.SetCensus(census); err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
+	census := grown.census
 
 	// only whole-census questions grow when participants are added; one that names an eligibility
 	// subset is unaffected by who else joined the census. A terminal question has no room to take
@@ -394,13 +605,71 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 		writeSubscriptionError(w, err)
 		return
 	}
-	resp := &apicommon.UpdateProcessCensusResponse{JobID: jobID, Added: uint32(added), Errors: memberErrs}
+	resp := &apicommon.UpdateProcessCensusResponse{JobID: jobID, Added: uint32(grown.added), Errors: grown.memberErrs}
 	if jobID == "" {
 		// no whole-census election to resize (subset-only questions): nothing async is pending, so 200.
 		apicommon.HTTPWriteJSON(w, resp)
 		return
 	}
 	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, resp)
+}
+
+// processCensusGrowth is what addProcessCensusMembers did to a process census.
+type processCensusGrowth struct {
+	census     *db.Census // with its recounted size stored
+	added      int
+	memberErrs []string
+}
+
+// addProcessCensusMembers adds memberIDs to the census of the published process vp and stores
+// its recounted size. Its errors are errors.Error values (write them with writeSubscriptionError),
+// or plain errors meaning 500.
+//
+// The growth check and the write it allows are one step per organization (censusGrowthLocks),
+// and the census is read inside it: two parallel requests would otherwise each pass against
+// the same size and together grow past the price paid. Memberbase propagation takes the same
+// lock. It is released before the caller enqueues the on-chain resize, which waits on orgTxLocks.
+func (a *API) addProcessCensusMembers(
+	ctx context.Context, vp *db.VotingProcess, memberIDs []string,
+) (*processCensusGrowth, error) {
+	growthLock, err := a.censusGrowthLocks.lockOrBusy(ctx, vp.OrgAddress)
+	if err != nil {
+		return nil, err
+	}
+	defer growthLock.Unlock()
+	census, err := a.db.Census(vp.CensusID.Hex())
+	if err != nil {
+		return nil, err
+	}
+	// pay-per-process: the price is a function of the census size, so the census may grow
+	// only as far as the price already paid reaches. Past that the 402 carries what the
+	// growth costs, which POST /processes/{processId}/census/checkout sells — by card, or
+	// from the integrator wallet for a managed organization.
+	if err := a.censusGrowthRefusal(vp, census, memberIDs); err != nil {
+		return nil, err
+	}
+
+	added, memberErrs, err := a.db.AddCensusParticipantsByMemberIDs(census.ID.Hex(), memberIDs)
+	switch {
+	case err == nil:
+	case stderrors.Is(err, db.ErrInvalidData), stderrors.Is(err, db.ErrUpdateWouldCreateDuplicates):
+		return nil, errors.ErrInvalidData.WithErr(err)
+	case stderrors.Is(err, db.ErrNotFound):
+		return nil, errors.ErrCensusNotFound
+	default:
+		return nil, err
+	}
+
+	// recount and persist the census size so the on-chain maxCensusSize set next is correct.
+	size, err := a.db.CountCensusParticipants(census.ID.Hex())
+	if err != nil {
+		return nil, err
+	}
+	census.Size = size
+	if _, err := a.db.SetCensus(census); err != nil {
+		return nil, err
+	}
+	return &processCensusGrowth{census: census, added: added, memberErrs: memberErrs}, nil
 }
 
 // updateVotingProcessQuestionCensusHandler godoc
@@ -428,20 +697,29 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 //	@Description	`data.signedMemberIds`.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
+//	@Description
+//	@Description	402 when the change would grow a published process's census beyond what it paid for:
+//	@Description	40178 with the quote in data (its processId names the process to buy headroom for with
+//	@Description	POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
+//	@Description	integrator's wallet falls short (data: requiredCents, availableCents), or 40183 past the
+//	@Description	spend cap its integrator set (data: capCents, spentCents, requiredCents).
+//	@Description	422 when the grown census needs a custom quote.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			processId	path		string									true	"Process ID"
-//	@Param			questionId	path		string									true	"Question ID"
-//	@Param			request		body		apicommon.UpdateQuestionCensusRequest	true	"Complete desired eligibility list"
-//	@Success		200			{object}	apicommon.UpdateQuestionCensusResponse	"Eligibility updated; no on-chain resize needed"
-//	@Success		202			{object}	apicommon.UpdateQuestionCensusResponse	"Eligibility updated; maxCensusSize update enqueued"
-//	@Failure		400			{object}	errors.Error							"Invalid input data, or a member is not part of the census"
-//	@Failure		401			{object}	errors.Error							"Unauthorized"
-//	@Failure		404			{object}	errors.Error							"Process or question not found"
-//	@Failure		409			{object}	errors.Error							"Publish in progress, member already signed for, or list changed"
-//	@Failure		500			{object}	errors.Error							"Internal server error"
+//	@Param			processId	path		string													true	"Process ID"
+//	@Param			questionId	path		string													true	"Question ID"
+//	@Param			request		body		apicommon.UpdateQuestionCensusRequest					true	"Complete desired eligibility list"
+//	@Success		200			{object}	apicommon.UpdateQuestionCensusResponse					"Eligibility updated; no on-chain resize needed"
+//	@Success		202			{object}	apicommon.UpdateQuestionCensusResponse					"Eligibility updated; maxCensusSize update enqueued"
+//	@Failure		400			{object}	errors.Error											"Invalid input data, or a member is not part of the census"
+//	@Failure		401			{object}	errors.Error											"Unauthorized"
+//	@Failure		404			{object}	errors.Error											"Process or question not found"
+//	@Failure		409			{object}	errors.Error											"Publish in progress, member already signed for, or list changed"
+//	@Failure		402			{object}	errors.Error{data=apicommon.ProcessCensusGrowthQuote}	"Census growth beyond the price paid"
+//	@Failure		422			{object}	errors.Error											"Census size requires a custom quote"
+//	@Failure		500			{object}	errors.Error											"Internal server error"
 //	@Router			/processes/{processId}/questions/{questionId}/census [put]
 func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)
@@ -515,6 +793,20 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 		return
 	}
 
+	// What the election needs, with an empty list meaning the whole census (see the resize below).
+	needed := uint64(len(eligible))
+	if len(eligible) == 0 {
+		needed = uint64(census.Size)
+	}
+	// the resize below pushes needed on chain; past what the process paid for it is refused here,
+	// before the list is stored — refusing at the resize would strand it undersized. Pricing needed
+	// rather than the census lets a question narrow even once the census has outgrown its price.
+	if len(question.UpstreamID) > 0 {
+		if err := a.censusGrowthPaymentError(censusGrowth{vp: vp, census: census, size: int64(needed)}); err != nil {
+			writeSubscriptionError(w, err)
+			return
+		}
+	}
 	won, err := a.db.SetQuestionEligibleMemberIDs(question.ID, previous, eligible)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -531,10 +823,8 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 		Removed:  uint32(len(removed)),
 	}
 
-	// What the election needs, with an empty list meaning the whole census.
-	//
-	// This is always handed to enqueueSetProcessCensus rather than pre-filtered here against what
-	// the stored list implies the election was sized for. That proxy is wrong in exactly the case
+	// needed, computed above, is always handed to enqueueSetProcessCensus rather than pre-filtered
+	// against what the stored list implies the election was sized for. That proxy is wrong in exactly the case
 	// that matters: the list is committed above before the resize is enqueued, so a queue-full 503
 	// leaves the two disagreeing — and the retry, which is the whole recovery since nothing sweeps
 	// failed SetProcessCensus jobs, diffs to nothing and would conclude the election already has
@@ -546,10 +836,6 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 	// nobody by name yet can multiply the electorate, and account.ComputeMaxCensusSize stamped that
 	// election at exactly the old subset size — zero headroom. The CSP would sign and the chain
 	// would reject.
-	needed := uint64(len(eligible))
-	if len(eligible) == 0 {
-		needed = uint64(census.Size)
-	}
 	question.EligibleMemberIDs = eligible
 	jobID, err := a.enqueueSetProcessCensus(vp.OrgAddress, []censusSizeTarget{
 		{question: *question, census: census, size: needed},
