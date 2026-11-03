@@ -21,10 +21,15 @@ import (
 // attempts allowed for a single authentication token before it is rejected.
 const MaxChallengeAttempts = 5
 
-// MaxChallengeResends is the number of times the challenge of a single authentication token can
-// be resent. New tokens are already spaced by the notification cooldown, so this bounds the
-// emails/SMS a member can be sent per cooldown period.
+// MaxChallengeResends is the number of resend requests one challenge code can take, across every
+// authentication token answering it. Resends are also spaced by the notification cooldown, so
+// this bounds the emails/SMS a member can be sent for one code.
 const MaxChallengeResends = 3
+
+// MaxChallengeTokens is the number of extra authentication tokens repeated auth requests can be
+// issued for one pending challenge code. Past it, a request gets a new code instead, subject to
+// the notification cooldown and the daily send cap, so the tokens sharing a code stay bounded.
+const MaxChallengeTokens = 10
 
 // DefaultMaxDailyChallengeSends is the default cap on the OTP challenges (new tokens and resends
 // together) one member can be sent for one voting process per UTC day. The cooldown only spaces
@@ -70,8 +75,8 @@ type Config struct {
 	// NotificationTTL is how long a CSP OTP challenge remains valid. After
 	// this window ResendChallenge returns ErrTokenExpired and queued but
 	// undelivered notifications are dropped. Distinct from
-	// NotificationCoolDownTime (the anti-spam rate limit on new token
-	// requests). Zero uses notifications.DefaultOTPExpiry.
+	// NotificationCoolDownTime (the anti-spam minimum interval between sends
+	// of a challenge code). Zero uses notifications.DefaultOTPExpiry.
 	NotificationTTL time.Duration
 	// NotificationQueueWorkers is the number of concurrent notification senders.
 	// It bounds the maximum number of in-flight provider sends. Zero uses the

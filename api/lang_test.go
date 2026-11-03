@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"testing"
+	"time"
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -132,6 +133,7 @@ func TestOrgDefaultLangNotifications(t *testing.T) {
 	assertContentMatches(t, waitForEmail(t, members[0].Email), "ca", otpEmailRegexps)
 
 	// a resend without a lang param must also fall back to the org default
+	time.Sleep(cspNotificationCoolDownTime)
 	resendResp := requestAndParse[handlers.AuthResponse](t, "POST", "",
 		&handlers.AuthResendRequest{AuthToken: authResp.AuthToken, Email: members[0].Email},
 		"processes", pid, "auth", "resend")

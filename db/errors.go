@@ -26,6 +26,12 @@ var (
 	// ErrBlindNonceNotFound is returned when a round-2 blind claim finds no armed nonce for the
 	// (user, election): round 1 was never run, or the nonce was already claimed.
 	ErrBlindNonceNotFound = fmt.Errorf("no armed blind nonce")
+	// ErrChallengeConsumed is returned when verifying a token whose OTP challenge was already
+	// solved, through this token or another one sharing the challenge
+	ErrChallengeConsumed = fmt.Errorf("challenge already consumed")
+	// ErrChallengeTokensExhausted is returned when an OTP challenge already has the maximum
+	// number of extra tokens answering it
+	ErrChallengeTokensExhausted = fmt.Errorf("challenge tokens exhausted")
 	// ErrTokenNotVerified is returned if the token has not been verified
 	ErrTokenNotVerified = fmt.Errorf("token not verified")
 	// ErrUpdateWouldCreateDuplicates is returned when trying to update an OrgMember
