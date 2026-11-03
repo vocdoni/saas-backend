@@ -599,3 +599,29 @@ func TestReclaimStalePublishClaim(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(reclaimed, qt.IsFalse)
 }
+
+// TestSetVotingProcessEndDate pins that a new end date is only stored on a published process:
+// a draft keeps its end date (drafts are edited through PUT /processes) and reports ErrNotFound.
+func TestSetVotingProcessEndDate(t *testing.T) {
+	c := qt.New(t)
+	org := common.Address{0x12, 0xe0}
+	setupVotingProcessOrg(c, org)
+	draftEnd := time.Now().Add(24 * time.Hour).Truncate(time.Second).UTC()
+	id, err := testDB.SetVotingProcess(&VotingProcess{OrgAddress: org, EndDate: draftEnd})
+	c.Assert(err, qt.IsNil)
+	newEnd := draftEnd.Add(48 * time.Hour)
+
+	c.Assert(testDB.SetVotingProcessEndDate(id, newEnd), qt.Equals, ErrNotFound)
+	got, err := testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.EndDate.Equal(draftEnd), qt.IsTrue)
+
+	c.Assert(testDB.SetVotingProcessPublished(id, "", time.Now()), qt.IsNil)
+	c.Assert(testDB.SetVotingProcessEndDate(id, newEnd), qt.IsNil)
+	got, err = testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.EndDate.Equal(newEnd), qt.IsTrue)
+
+	c.Assert(testDB.SetVotingProcessEndDate(id, time.Time{}), qt.Equals, ErrInvalidData)
+	c.Assert(JobTypeSetProcessEndDate.IsValid(), qt.IsTrue)
+}
