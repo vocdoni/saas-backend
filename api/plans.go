@@ -38,8 +38,8 @@ func (a *API) plansHandler(w http.ResponseWriter, _ *http.Request) {
 	apicommon.HTTPWriteJSON(w, visible)
 }
 
-// planForResponse returns the plan as clients see it: a copy with anonymous voting reported as
-// unavailable while it is temporarily off. The stored plan is left untouched.
+// planForResponse returns the plan as clients see it. While anonymous voting is temporarily off it is
+// a copy with Features.Anonymous forced to false; otherwise it is the stored plan, its value unchanged.
 func (a *API) planForResponse(plan *db.Plan) *db.Plan {
 	if plan == nil || !a.csp.BlindCSPDisabled() {
 		return plan
