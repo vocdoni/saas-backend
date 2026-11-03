@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/vocdoni/saas-backend/csp/notifications"
 	"github.com/vocdoni/saas-backend/csp/signers/saltedkey"
@@ -240,9 +241,8 @@ func (c *CSP) BlindPubKey() (internal.HexBytes, error) {
 	if bp == nil || bp.X == nil || bp.Y == nil {
 		return nil, fmt.Errorf("blind public key is not available")
 	}
-	// compressed SEC1 point: 0x02/0x03 by the parity of Y, then X as 32 big-endian bytes
-	out := make([]byte, 33)
-	out[0] = 0x02 | byte(bp.Y.Bit(0))
-	bp.X.FillBytes(out[1:])
-	return out, nil
+	var x, y secp256k1.FieldVal
+	x.SetByteSlice(bp.X.Bytes())
+	y.SetByteSlice(bp.Y.Bytes())
+	return secp256k1.NewPublicKey(&x, &y).SerializeCompressed(), nil
 }
