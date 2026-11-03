@@ -20,7 +20,9 @@ import (
 //	@Description	otherwise 200. A field that is empty or only whitespace counts as missing data, and
 //	@Description	members with missing data are never reported as duplicates. The `password` auth field
 //	@Description	never identifies a member on its own: a census with no other auth field and no 2FA field
-//	@Description	is a 400. Requires Manager/Admin role of the organization.
+//	@Description	is a 400. Requires Manager/Admin role of the organization. While the service has anonymous
+//	@Description	voting temporarily off, an `anonymous: true` spec is a 400 (40037) "anonymous voting is
+//	@Description	temporarily unavailable".
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
@@ -29,7 +31,7 @@ import (
 //	@Security		BearerAuth
 //	@Param			request	body		apicommon.ValidateProcessCensusRequest	true	"Org address + census spec"
 //	@Success		200		{string}	string									"OK"
-//	@Failure		400		{object}	errors.Error							"Invalid census (duplicates or missing data)"
+//	@Failure		400		{object}	errors.Error							"Invalid census (duplicates, missing data), or anonymous voting unavailable"
 //	@Failure		401		{object}	errors.Error							"Unauthorized"
 //	@Failure		500		{object}	errors.Error							"Internal server error"
 //	@Router			/processes/census/validation [post]

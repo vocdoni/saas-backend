@@ -23,6 +23,15 @@ func setDisableBlindCSP(t *testing.T, on bool) {
 	t.Cleanup(func() { testAPI.csp.SetBlindCSPDisabled(previous) })
 }
 
+// assertPublishNotReady asserts the publish is refused by the preflight, listing the switch's problem.
+func assertPublishNotReady(t *testing.T, jwt, pid string) {
+	t.Helper()
+	apiErr := requestAndExpectError(t, http.MethodPost, jwt, nil, "processes", pid, "publish")
+	qt.Assert(t, apiErr.Code, qt.Equals, errors.ErrMalformedBody.Code)
+	qt.Assert(t, apiErr.Error(), qt.Contains, "process is not ready to publish")
+	qt.Assert(t, apiErr.Error(), qt.Contains, anonymousVotingUnavailable)
+}
+
 // assertAnonymousVotingUnavailable asserts the request is refused with the switch's 400.
 func assertAnonymousVotingUnavailable(t *testing.T, method, jwt string, jsonBody any, urlPath ...string) {
 	t.Helper()
@@ -78,7 +87,7 @@ func TestProcessBlindCSPSwitch(t *testing.T) {
 		t, http.MethodGet, token, nil, "processes", anonymousDraft, "validation")
 	c.Assert(validation.Valid, qt.IsFalse)
 	c.Assert(validation.Errors, qt.Contains, anonymousVotingUnavailable)
-	assertAnonymousVotingUnavailable(t, http.MethodPost, token, nil, "processes", anonymousDraft, "publish")
+	assertPublishNotReady(t, token, anonymousDraft)
 	got = requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", anonymousDraft)
 	c.Assert(got.Published, qt.IsFalse)
 	c.Assert(got.Census.Anonymous, qt.IsTrue)
@@ -97,6 +106,45 @@ func TestProcessBlindCSPSwitch(t *testing.T) {
 		c.Assert(got.Published, qt.IsTrue)
 		c.Assert(got.Census.Anonymous, qt.IsFalse)
 	}
+}
+
+// TestProcessBlindCSPSwitchResumesPartialPublish checks that an anonymous process some of whose
+// questions are already on chain still resumes its publish with anonymous voting off: it cannot be
+// edited or deleted, so refusing the resume would leave it half published.
+func TestProcessBlindCSPSwitchResumesPartialPublish(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(2)...))
+
+	req := newVotingProcessRequest(orgAddress, ids)
+	req.StartDate = ""
+	req.Census.Anonymous = true
+	pid := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint).ProcessID
+	_, questions, err := testDB.ProcessWithQuestions(objectID(c, pid))
+	c.Assert(err, qt.IsNil)
+	c.Assert(questions, qt.HasLen, 2)
+
+	// simulate a publish that mined the first question's election and then failed
+	mined := internal.HexBytes(randomProcessID())
+	c.Assert(testDB.SetQuestionPublished(questions[0].ID, mined, "url", db.QuestionStatusReady), qt.IsNil)
+
+	setDisableBlindCSP(t, true)
+
+	validation := requestAndParse[apicommon.VotingProcessValidateResponse](
+		t, http.MethodGet, token, nil, "processes", pid, "validation")
+	c.Assert(validation.Valid, qt.IsTrue, qt.Commentf("problems: %v", validation.Errors))
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
+
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(got.Published, qt.IsTrue)
+	c.Assert(got.Census.Anonymous, qt.IsTrue)
+	c.Assert(got.Questions, qt.HasLen, 2)
+	c.Assert(got.Questions[0].UpstreamID.String(), qt.Equals, mined.String())
+	c.Assert(got.Questions[1].UpstreamID, qt.Not(qt.HasLen), 0)
 }
 
 // TestProcessBlindCSPSwitchStopsBlindSigning checks that with anonymous voting off the blind rounds
