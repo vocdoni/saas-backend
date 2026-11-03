@@ -59,12 +59,7 @@ func TestLoginHashLookupUsesPartialIndex(t *testing.T) {
 	} {
 		c.Run(tc.name, func(c *qt.C) {
 			filter := loginHashesFilter(censusID, tc.hashes, tc.extra)
-			var explain struct {
-				ExecutionStats struct {
-					NReturned         int `bson:"nReturned"`
-					TotalDocsExamined int `bson:"totalDocsExamined"`
-				} `bson:"executionStats"`
-			}
+			var explain explainExecution
 			err := testDB.DBClient.Database(testDB.database).RunCommand(context.Background(), bson.D{
 				{Key: "explain", Value: bson.D{
 					{Key: "find", Value: "censusParticipants"},
@@ -78,4 +73,15 @@ func TestLoginHashLookupUsesPartialIndex(t *testing.T) {
 				qt.Commentf("examined %d documents for %d branches", explain.ExecutionStats.TotalDocsExamined, len(tc.hashes)))
 		})
 	}
+}
+
+// explainExecution is the part of an executionStats explain that counts the work a query did.
+type explainExecution struct {
+	ExecutionStats explainExecutionStats `bson:"executionStats"`
+}
+
+// explainExecutionStats counts the documents a query returned and examined.
+type explainExecutionStats struct {
+	NReturned         int `bson:"nReturned"`
+	TotalDocsExamined int `bson:"totalDocsExamined"`
 }
