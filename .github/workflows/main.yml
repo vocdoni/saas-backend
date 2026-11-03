@@ -120,6 +120,16 @@ jobs:
       # A self-hosted workspace keeps an earlier job's credential-less checkout,
       # which the action's changed-files step would fail to fetch from.
       - uses: actions/checkout@v7
+      # go-coverage-report shells out to the GitHub CLI, which some self-hosted
+      # runners lack; install it for this job only (same step as integration.yml).
+      - name: Ensure gh
+        run: |
+          set -euo pipefail
+          command -v gh >/dev/null && exit 0
+          v=2.100.0
+          case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) echo "unsupported arch" >&2; exit 1 ;; esac
+          curl -fsSL "https://github.com/cli/cli/releases/download/v$v/gh_${v}_linux_$arch.tar.gz" | tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/gh_${v}_linux_$arch/bin" >> "$GITHUB_PATH"
       # The action installs its binary with `sudo mv` into /usr/bin, which the
       # self-hosted runner refuses; DRY_RUN leaves it in .github/outputs instead.
       - name: Put the go-coverage-report download dir on PATH
