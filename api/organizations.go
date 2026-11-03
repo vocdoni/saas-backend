@@ -467,7 +467,7 @@ func (a *API) organizationSubscriptionHandler(w http.ResponseWriter, r *http.Req
 	info := &apicommon.OrganizationSubscriptionInfo{
 		SubscriptionDetails: apicommon.SubscriptionDetailsFromDB(&org.Subscription),
 		Usage:               apicommon.SubscriptionUsageFromDB(&org.Counters),
-		Plan:                apicommon.SubscriptionPlanFromDB(plan),
+		Plan:                apicommon.SubscriptionPlanFromDB(a.planForResponse(plan)),
 	}
 	apicommon.HTTPWriteJSON(w, info)
 }

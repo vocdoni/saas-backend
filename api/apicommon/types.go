@@ -838,7 +838,8 @@ type SubscriptionVotingTypes struct {
 // It is the mirror struct of db.Features.
 // swagger:model SubscriptionFeatures
 type SubscriptionFeatures struct {
-	// Whether zk-SNARK anonymous voting is available. Blind-CSP anonymous voting (census.anonymous) is available on every plan.
+	// Whether anonymous voting is available: the plan's zk-SNARK flag, reported false while the service has
+	// anonymous voting (census.anonymous) temporarily off.
 	Anonymous bool `json:"anonymous"`
 
 	// Whether census overwrite is allowed
