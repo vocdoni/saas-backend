@@ -198,6 +198,42 @@ func authAttemptKeys(census *db.Census, member *db.OrgMember) (submission, voter
 	return submission, voter
 }
 
+// participantByLogin finds the census participant a step-0 login names. input is the normalized
+// login (OrgMember.Normalized) and typedNationalID the nationalId as the request carried it. When
+// normalization rewrote that nationalId (a derived check letter, separators, padding), the participant
+// holding the hash of the typed value as is goes first, and the normalized one is only tried when
+// nobody holds it. A member migration 34 skipped on a collision keeps a letterless value next to its
+// lettered twin: the exact lookup keeps each of them matching their own input, so a letterless login
+// never resolves to the twin. Every other login is a single lookup of the normalized input.
+func (c *CSPHandlers) participantByLogin(census *db.Census, input *db.OrgMember, typedNationalID string,
+) (*db.CensusParticipant, error) {
+	if verbatim := verbatimNationalIDLogin(census, input, typedNationalID); verbatim != nil {
+		participant, err := c.mainDB.CensusParticipantByLoginHash(*census, *verbatim)
+		if !errors.Is(err, db.ErrNotFound) {
+			return participant, err
+		}
+	}
+	return c.mainDB.CensusParticipantByLoginHash(*census, *input)
+}
+
+// verbatimNationalIDLogin returns input with its nationalId put back to the trimmed typed value,
+// or nil when the census does not log in with the nationalId or normalization did not change it.
+// A mere case change is no rewrite, since the login hash folds case. EqualFold agrees with the
+// hash's strings.ToLower here: a value normalization rewrites is ASCII apart from whitespace, and
+// one it does not rewrite is passed through byte for byte.
+func verbatimNationalIDLogin(census *db.Census, input *db.OrgMember, typedNationalID string) *db.OrgMember {
+	if !slices.Contains(census.AuthFields, db.OrgMemberAuthFieldsNationalID) {
+		return nil
+	}
+	typed := strings.TrimSpace(typedNationalID)
+	if strings.EqualFold(typed, input.NationalID) {
+		return nil
+	}
+	verbatim := *input
+	verbatim.NationalID = typed
+	return &verbatim
+}
+
 // memberPasswordMatches reports whether the client hash a voter sent matches the member's stored
 // password, hashing it as db.HashMemberPassword does and comparing the argon2 hashes in constant
 // time. A member without a stored password never matches. The hash runs in the service-wide
@@ -376,7 +412,7 @@ func (c *CSPHandlers) authFirstStep(
 	}()
 
 	// Check the participant is in the census
-	censusParticipant, err := c.mainDB.CensusParticipantByLoginHash(*census, *inputMember)
+	censusParticipant, err := c.participantByLogin(census, inputMember, req.NationalID)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, c.unknownParticipant(r.Context(), password, errors.ErrCSPAuthFailed)
