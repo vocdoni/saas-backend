@@ -179,6 +179,9 @@ func TestProcessBlindCSPSwitchStopsBlindSigning(t *testing.T) {
 	c.Assert(voter.Generate(), qt.IsNil)
 
 	setDisableBlindCSP(t, true)
+	// publishing it again answers as for any published process: 200 with its id, nothing enqueued
+	again := requestAndParse[apicommon.CreateVotingProcessResponse](t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(again.ProcessID, qt.Equals, pid)
 	assertAnonymousVotingUnavailable(t, http.MethodPost, "",
 		&handlers.BlindPointRequest{AuthToken: tok, Elections: []internal.HexBytes{election}},
 		"processes", pid, "blind-point")
