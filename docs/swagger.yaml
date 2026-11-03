@@ -1280,8 +1280,8 @@ definitions:
         type: integer
       anonymous:
         description: |-
-          Whether anonymous voting is available: the plan's zk-SNARK flag, reported false while the service has
-          anonymous voting (census.anonymous) temporarily off.
+          The plan's stored zk-SNARK anonymous voting flag, which does not gate census.anonymous. It is forced
+          to false while the service has anonymous voting temporarily off, and passed through unchanged otherwise.
         type: boolean
       emailReminder:
         description: Whether email reminders are available
@@ -4958,6 +4958,8 @@ paths:
         data.retryAfter gives the seconds left.
         A member's challenge sends (new tokens + resends) are capped per UTC day, also answering
         40017 with data.retryAfter.
+        Step 0 for an anonymous census is refused (400, 40037, "anonymous voting is temporarily
+        unavailable") while the service has anonymous voting off.
       parameters:
       - description: Process ID
         in: path
@@ -4983,8 +4985,8 @@ paths:
           schema:
             $ref: '#/definitions/handlers.AuthResponse'
         "400":
-          description: Invalid input data, or failed-attempt or daily send limit reached
-            (40017)
+          description: Invalid input data, attempt or send limit (40017), or anonymous
+            voting unavailable
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -5017,7 +5019,8 @@ paths:
         process. The request must include the auth token and a valid contact method for the
         census type (email/phone). The same token is returned if the challenge is queued.
         A token can be resent at most 3 times, and a contact that does not match the member spends
-        one of them too.
+        one of them too. For an anonymous census it is refused (400, 40037, "anonymous voting is
+        temporarily unavailable") while the service has anonymous voting off.
       parameters:
       - description: Process ID
         in: path
