@@ -371,6 +371,12 @@ type OrgMember struct {
 	Other           map[string]any `json:"other" bson:"other"`
 	CreatedAt       time.Time      `json:"createdAt" bson:"createdAt"`
 	UpdatedAt       time.Time      `json:"updatedAt" bson:"updatedAt"`
+
+	// NationalIDOriginal is the nationalId as imported when its DNI/NIE check letter was derived
+	// rather than supplied (NationalID then holds the derived canonical form), so the organizer can
+	// review the derivation. Empty when the letter was supplied or the value is not a DNI/NIE. Only
+	// prepareOrgMember sets it, and an explicit nationalId update clears it (OrgMemberUpdate.applyTo).
+	NationalIDOriginal string `json:"nationalIdOriginal,omitempty" bson:"nationalIdOriginal,omitempty"`
 }
 
 // OrgMemberUpdate is a change to an organization member. A nil field leaves the stored value as
@@ -403,7 +409,12 @@ func (u *OrgMemberUpdate) applyTo(stored OrgMember) *OrgMember {
 	set(&member.MemberNumber, u.MemberNumber)
 	set(&member.Name, u.Name)
 	set(&member.Surname, u.Surname)
-	set(&member.NationalID, u.NationalID)
+	if u.NationalID != nil {
+		member.NationalID = *u.NationalID
+		// the stored marker described the replaced value; prepareOrgMember sets it again if the new
+		// value is letterless too
+		member.NationalIDOriginal = ""
+	}
 	set(&member.Email, u.Email)
 	if u.BirthDate != nil {
 		member.BirthDate = *u.BirthDate
@@ -428,7 +439,9 @@ func (u *OrgMemberUpdate) applyTo(stored OrgMember) *OrgMember {
 
 // Normalized returns a copy of the member with every field that can feed the CSP
 // login hash reduced to its canonical form: surrounding whitespace trimmed, the
-// email lowercased, the birthdate canonicalized to YYYY-MM-DD.
+// email lowercased, the birthdate canonicalized to YYYY-MM-DD, and a DNI/NIE
+// nationalId canonicalized by internal.NormalizeNationalID (separators dropped,
+// uppercased, zero-padded, a missing check letter derived).
 //
 // This is the single definition of that canonical form, and both sides of the
 // login-hash comparison go through it: members are stored normalized, and the
@@ -446,7 +459,7 @@ func (m *OrgMember) Normalized() *OrgMember {
 	normalized.Name = strings.TrimSpace(normalized.Name)
 	normalized.Surname = strings.TrimSpace(normalized.Surname)
 	normalized.MemberNumber = strings.TrimSpace(normalized.MemberNumber)
-	normalized.NationalID = strings.TrimSpace(normalized.NationalID)
+	normalized.NationalID = internal.NormalizeNationalID(normalized.NationalID).Normalized
 	normalized.Email = internal.NormalizeEmail(normalized.Email)
 	normalized.BirthDate = internal.NormalizeBirthDate(normalized.BirthDate)
 	return &normalized

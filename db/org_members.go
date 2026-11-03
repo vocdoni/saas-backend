@@ -255,6 +255,7 @@ func HashMemberPasswordContext(ctx context.Context, salt string, memberID bson.O
 
 // prepareOrgMember processes a member for storage by:
 //   - Normalizing the fields that feed the CSP login hash (OrgMember.Normalized)
+//   - Recording the imported nationalId when its check letter was derived (NationalIDOriginal)
 //   - Setting the organization address
 //   - Setting the creation timestamp
 //   - Validating what Normalized only canonicalized (email, birthdate)
@@ -272,6 +273,12 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 	// picked up from a spreadsheet or CSV import would otherwise make the member
 	// impossible to authenticate.
 	member := *m.Normalized()
+	// a letterless DNI/NIE was stored with a derived check letter: keep the value as imported, so the
+	// organizer can review the derivation (census validation reports it). A value that is not
+	// letterless leaves the marker as it is, so re-saving a member keeps it.
+	if internal.NormalizeNationalID(m.NationalID).Class == internal.NationalIDDerivedLetter {
+		member.NationalIDOriginal = strings.TrimSpace(m.NationalID)
+	}
 	// named errs, not errors: this file imports the errors package
 	var errs []error
 

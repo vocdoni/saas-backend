@@ -440,7 +440,12 @@ func TestRepairMatchesCanonicalHash(t *testing.T) {
 			OrgMemberAuthFields{OrgMemberAuthFieldsName, OrgMemberAuthFieldsSurname},
 			OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail, OrgMemberTwoFaFieldPhone},
 		},
+		{OrgMemberAuthFields{OrgMemberAuthFieldsNationalID}, OrgMemberTwoFaFields{}},
+		{OrgMemberAuthFields{OrgMemberAuthFieldsNationalID}, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail}},
 	}
+	// the last two combos hold a canonical DNI and a letterless one as stored before migration 34:
+	// both must hash through the mirrored code exactly as through HashAuthTwoFaFields
+	nationalIDs := map[int]string{len(combos) - 2: "12345678Z", len(combos) - 1: "12345678"}
 
 	type seeded struct {
 		memberID bson.ObjectID
@@ -464,6 +469,9 @@ func TestRepairMatchesCanonicalHash(t *testing.T) {
 			Name: " MiXeD ", Surname: "CaSe ", MemberNumber: "M-00" + string(rune('A'+i)),
 			NationalID: "DnI00" + string(rune('1'+i)), BirthDate: "1990-01-02",
 			Email: "person@example.com", Phone: phone, CreatedAt: time.Now(),
+		}
+		if id, ok := nationalIDs[i]; ok {
+			member.NationalID = id
 		}
 		ctx := context.Background()
 		_, err = testDB.orgMembers.InsertOne(ctx, member)

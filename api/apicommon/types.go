@@ -1109,8 +1109,13 @@ type OrgMember struct {
 	// Member's surname
 	Surname string `json:"surname,omitempty"`
 
-	// Member's National ID No
+	// Member's National ID No. A Spanish DNI/NIE is stored in its canonical form: 9 characters,
+	// uppercase, leading zeros kept, separators dropped, a missing check letter derived.
 	NationalID string `json:"nationalId,omitempty"`
+
+	// NationalIDOriginal is the nationalId as imported when its DNI/NIE check letter was derived
+	// rather than supplied, so the derivation can be reviewed. Read-only: ignored on writes.
+	NationalIDOriginal string `json:"nationalIdOriginal,omitempty"`
 
 	// Member's date of birth in format YYYY-MM-DD
 	BirthDate string `json:"birthDate,omitempty"`
@@ -1286,6 +1291,8 @@ func OrgMemberFromDb(p db.OrgMember) OrgMember {
 		HasPassword:  len(p.HashedPass) > 0,
 		Other:        p.Other,
 		Weight:       fmt.Sprintf("%d", p.Weight),
+
+		NationalIDOriginal: p.NationalIDOriginal,
 	}
 }
 
