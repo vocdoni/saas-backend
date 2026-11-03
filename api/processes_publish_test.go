@@ -8,6 +8,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
@@ -156,4 +157,72 @@ func TestVotingProcessPublishRejectsStrayQuestion(t *testing.T) {
 	validation = requestAndParse[apicommon.VotingProcessValidateResponse](
 		t, http.MethodGet, token, nil, "processes", pid, "validation")
 	c.Assert(validation.Valid, qt.IsTrue, qt.Commentf("errors: %v", validation.Errors))
+}
+
+// TestConfirmBatchCause checks that confirmBatch reports why a round did not confirm, without
+// touching the chain or the DB: the failure paths never reach the publish worker's app.
+func TestConfirmBatchCause(t *testing.T) {
+	c := qt.New(t)
+	pw := &publishWorker{}
+
+	c.Run("rejected by node", func(c *qt.C) {
+		pending := []*db.VotingProcessQuestion{{ID: bson.NewObjectID()}}
+		ok, err := pw.confirmBatch(pending, []account.BatchItemResult{
+			{Status: account.BatchFailed, Err: "tx check failed: some reason"},
+		})
+		c.Assert(ok, qt.IsFalse)
+		c.Assert(err, qt.Not(qt.IsNil))
+		c.Assert(err.Error(), qt.Contains, "some reason")
+		c.Assert(err.Error(), qt.Contains, pending[0].ID.Hex())
+	})
+
+	c.Run("pending does not overwrite the rejection", func(c *qt.C) {
+		pending := []*db.VotingProcessQuestion{{ID: bson.NewObjectID()}, {ID: bson.NewObjectID()}}
+		ok, err := pw.confirmBatch(pending, []account.BatchItemResult{
+			{Status: account.BatchFailed, Err: "tx check failed: first reason"},
+			{Status: account.BatchPending},
+		})
+		c.Assert(ok, qt.IsFalse)
+		c.Assert(err, qt.Not(qt.IsNil))
+		c.Assert(err.Error(), qt.Contains, "first reason")
+		c.Assert(err.Error(), qt.Contains, pending[0].ID.Hex())
+		c.Assert(err.Error(), qt.Not(qt.Contains), pending[1].ID.Hex())
+	})
+
+	c.Run("result count mismatch", func(c *qt.C) {
+		pending := []*db.VotingProcessQuestion{{ID: bson.NewObjectID()}}
+		ok, err := pw.confirmBatch(pending, nil)
+		c.Assert(ok, qt.IsFalse)
+		c.Assert(err, qt.Not(qt.IsNil))
+		c.Assert(err.Error(), qt.Contains, "0 batch results for 1 transactions")
+	})
+}
+
+// TestPublishDenial checks that a permission failure reaches the job error without internal
+// detail: a plan refusal keeps its message, while an internal failure only says the check failed.
+func TestPublishDenial(t *testing.T) {
+	c := qt.New(t)
+
+	c.Run("plan refusal keeps its message", func(c *qt.C) {
+		err := publishDenial(errors.ErrMaxProcessesReached)
+		c.Assert(err.Error(), qt.Contains, "not permitted")
+		c.Assert(err.Error(), qt.Contains, "max processes reached")
+	})
+
+	c.Run("internal error hides its detail", func(c *qt.C) {
+		err := publishDenial(errors.ErrGenericInternalServerError.WithErr(fmt.Errorf("dial tcp 10.1.2.3:27017")))
+		c.Assert(err.Error(), qt.Not(qt.Contains), "10.1.2.3")
+		c.Assert(err.Error(), qt.Contains, "could not check")
+	})
+
+	c.Run("plain plan refusal keeps its message", func(c *qt.C) {
+		err := publishDenial(fmt.Errorf("vote overwrites are not allowed"))
+		c.Assert(err.Error(), qt.Contains, "not permitted")
+		c.Assert(err.Error(), qt.Contains, "vote overwrites are not allowed")
+	})
+
+	c.Run("denied without error", func(c *qt.C) {
+		err := publishDenial(nil)
+		c.Assert(err.Error(), qt.Contains, "not permitted")
+	})
 }
