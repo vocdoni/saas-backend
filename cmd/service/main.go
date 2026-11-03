@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -27,6 +28,20 @@ import (
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
+
+// disableBlindCSPKey is the flag of the anonymous voting switch. Its underscore is what makes
+// AutomaticEnv read it as VOCDONI_DISABLE_BLINDCSP (viper upper-cases keys, with no replacer).
+const disableBlindCSPKey = "disable_blindcsp"
+
+// initViper binds the flags and the VOCDONI_<FLAG> environment variables to v.
+func initViper(v *viper.Viper, flags *flag.FlagSet) error {
+	v.SetEnvPrefix("VOCDONI")
+	if err := v.BindPFlags(flags); err != nil {
+		return fmt.Errorf("binding flags: %w", err)
+	}
+	v.AutomaticEnv()
+	return nil
+}
 
 func main() {
 	// define flags
@@ -77,17 +92,11 @@ func main() {
 	// when a status changes through the API or a process/question is read)
 	flag.Duration("statusSyncInterval", 60*time.Second, "poll cadence for confirm retries + read freshness window (0=60s)")
 	flag.Duration("statusSyncConfirmTimeout", 5*time.Minute, "max wait for on-chain confirmation before reconciling (0=5m)")
-	flag.Bool("disableBlindCSP", false, "temporarily stop offering anonymous voting (no new anonymous processes, no blind signing)")
+	flag.Bool(disableBlindCSPKey, false, "temporarily stop offering anonymous voting (no new anonymous processes, no blind signing)")
 	// parse flags
 	flag.Parse()
 	// initialize Viper
-	viper.SetEnvPrefix("VOCDONI")
-	if err := viper.BindPFlags(flag.CommandLine); err != nil {
-		panic(err)
-	}
-	viper.AutomaticEnv()
-	// AutomaticEnv would read VOCDONI_DISABLEBLINDCSP; the documented name keeps the underscore.
-	if err := viper.BindEnv("disableBlindCSP", "VOCDONI_DISABLE_BLINDCSP"); err != nil {
+	if err := initViper(viper.GetViper(), flag.CommandLine); err != nil {
 		panic(err)
 	}
 	// read the configuration
@@ -193,7 +202,7 @@ func main() {
 		NotificationQueueTTL:           viper.GetDuration("notificationQueueTTL"),
 		NotificationBreakerMaxFailures: viper.GetInt("notificationBreakerMaxFailures"),
 		NotificationBreakerCooldown:    viper.GetDuration("notificationBreakerCooldown"),
-		DisableBlindCSP:                viper.GetBool("disableBlindCSP"),
+		DisableBlindCSP:                viper.GetBool(disableBlindCSPKey),
 	}
 
 	// overwrite the email notifications service with the SMTP service if the
