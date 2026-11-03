@@ -1,6 +1,6 @@
 # DNI/NIE canonical form and login-hash migration (SP1): design
 
-Status: audited (2026-11-03), awaiting owner approval   Class: architectural
+Status: approved (2026-11-03)   Class: architectural
 Owner decisions so far (2026-11-03, umbrella plan §7/§12 + progress.md):
 - Letterless DNI/NIE: derive the check letter; derived entries are a warning-level bucket the
   organizer must explicitly confirm (umbrella §7 ruling). Never phrased as success.
