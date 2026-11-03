@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -182,10 +183,7 @@ func (ms *MongoStorage) CensusParticipantByLoginHash(census Census, member OrgMe
 	// Calculate hashes based on census configuration
 	hashes := calculateParticipantHashesBson(census, member)
 
-	findFilter := bson.M{
-		"censusId": census.ID.Hex(),
-		"$or":      loginHashesOrFilter(hashes),
-	}
+	findFilter := loginHashesFilter(census.ID.Hex(), hashes, nil)
 
 	// find the participant
 	participant := &CensusParticipant{}
@@ -565,11 +563,8 @@ func (ms *MongoStorage) AddCensusParticipantsByMemberIDs(censusID string, member
 
 		// Calculate hashes based on census configuration, matching updateCensusParticipantsForMember.
 		hashes := calculateParticipantHashesBson(*census, *member)
-		conflictFilter := bson.M{
-			"participantID": bson.M{"$ne": member.ID.Hex()},
-			"censusId":      census.ID.Hex(),
-			"$or":           loginHashesOrFilter(hashes),
-		}
+		conflictFilter := loginHashesFilter(census.ID.Hex(), hashes,
+			bson.M{"participantID": bson.M{"$ne": member.ID.Hex()}})
 		conflictCount, err := ms.censusParticipants.CountDocuments(ctx, conflictFilter)
 		if err != nil {
 			memberErrors = append(memberErrors, fmt.Errorf("%s: failed to validate duplicate hashes for member  %w", memberID, err))
@@ -885,15 +880,21 @@ func calculateParticipantHashesBson(census Census, member OrgMember) bson.M {
 	return hashes
 }
 
-// loginHashesOrFilter turns participant hashes into the branches of an $or matching any of them.
-// The (censusId, loginHash*) indexes are partial on {$exists: true, $type: "binData"}, and MongoDB
-// only picks a partial index when the query implies its filter expression, which a bare equality
-// does not. Each branch therefore repeats those predicates; without them every lookup falls back
-// to the censusId index and scans the whole census.
-func loginHashesOrFilter(hashes bson.M) []bson.M {
+// loginHashesFilter matches the participants of a census holding any of the given login hashes,
+// each branch also carrying the extra conditions. The (censusId, loginHash*) indexes are partial on
+// {$exists: true, $type: "binData"}, and MongoDB only picks a partial index when the query implies
+// its filter expression, which a bare equality does not; for an $or it checks that per branch only
+// when the $or is the whole query. So each branch repeats censusId, the extra conditions and the
+// index predicates. Otherwise the lookup falls back to the censusId index and scans the census.
+func loginHashesFilter(censusID string, hashes, extra bson.M) bson.M {
 	branches := make([]bson.M, 0, len(hashes))
 	for field, hash := range hashes {
-		branches = append(branches, bson.M{field: bson.M{"$eq": hash, "$exists": true, "$type": "binData"}})
+		branch := bson.M{
+			"censusId": censusID,
+			field:      bson.M{"$eq": hash, "$exists": true, "$type": "binData"},
+		}
+		maps.Copy(branch, extra)
+		branches = append(branches, branch)
 	}
-	return branches
+	return bson.M{"$or": branches}
 }

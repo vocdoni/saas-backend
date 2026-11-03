@@ -41,16 +41,24 @@ func TestLoginHashLookupUsesPartialIndex(t *testing.T) {
 	_, err := testDB.censusParticipants.InsertMany(context.Background(), docs)
 	c.Assert(err, qt.IsNil)
 
-	for name, hashes := range map[string]bson.M{
-		"loginHash only": {"loginHash": last["loginHash"]},
-		"2FA email and phone": {
-			"loginHash":      last["loginHash"],
-			"loginHashEmail": last["loginHashEmail"],
-			"loginHashPhone": last["loginHashPhone"],
-		},
+	all := bson.M{
+		"loginHash":      last["loginHash"],
+		"loginHashEmail": last["loginHashEmail"],
+		"loginHashPhone": last["loginHashPhone"],
+	}
+	for _, tc := range []struct {
+		name   string
+		hashes bson.M
+		extra  bson.M
+		want   int // documents returned
+	}{
+		{"loginHash only", bson.M{"loginHash": last["loginHash"]}, nil, 1},
+		{"2FA email and phone", all, nil, 1},
+		// the duplicate checks exclude the member's own participant
+		{"duplicate check", all, bson.M{"participantID": bson.M{"$ne": last["participantID"]}}, 0},
 	} {
-		c.Run(name, func(c *qt.C) {
-			filter := bson.M{"censusId": censusID, "$or": loginHashesOrFilter(hashes)}
+		c.Run(tc.name, func(c *qt.C) {
+			filter := loginHashesFilter(censusID, tc.hashes, tc.extra)
 			var explain struct {
 				ExecutionStats struct {
 					NReturned         int `bson:"nReturned"`
@@ -65,9 +73,9 @@ func TestLoginHashLookupUsesPartialIndex(t *testing.T) {
 				{Key: "verbosity", Value: "executionStats"},
 			}).Decode(&explain)
 			c.Assert(err, qt.IsNil)
-			c.Assert(explain.ExecutionStats.NReturned, qt.Equals, 1)
-			c.Assert(explain.ExecutionStats.TotalDocsExamined <= len(hashes), qt.IsTrue,
-				qt.Commentf("examined %d documents for %d branches", explain.ExecutionStats.TotalDocsExamined, len(hashes)))
+			c.Assert(explain.ExecutionStats.NReturned, qt.Equals, tc.want)
+			c.Assert(explain.ExecutionStats.TotalDocsExamined <= len(tc.hashes), qt.IsTrue,
+				qt.Commentf("examined %d documents for %d branches", explain.ExecutionStats.TotalDocsExamined, len(tc.hashes)))
 		})
 	}
 }
