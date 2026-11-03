@@ -78,6 +78,34 @@ func TestPrepareOrgMemberNationalID(t *testing.T) {
 	})
 }
 
+// TestOrgMembersByFieldAnyOf pins the []string form of OrgMembersByField: a member matching any of
+// the values is returned, and an empty list or value is refused.
+func TestOrgMembersByFieldAnyOf(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+	c.Assert(testDB.SetOrganization(&Organization{Address: testOrgAddress, CreatedAt: time.Now()}), qt.IsNil)
+
+	a, err := testDB.SetOrgMember("salt", &OrgMember{OrgAddress: testOrgAddress, NationalID: "12345678Z"})
+	c.Assert(err, qt.IsNil)
+	b, err := testDB.SetOrgMember("salt", &OrgMember{OrgAddress: testOrgAddress, NationalID: "PAB123456"})
+	c.Assert(err, qt.IsNil)
+
+	got, err := testDB.OrgMembersByField(testOrgAddress, OrgMemberLookupFieldNationalID,
+		[]string{"12.345.678-Z", "12345678Z", "PAB123456"})
+	c.Assert(err, qt.IsNil)
+	ids := make([]string, 0, len(got))
+	for _, m := range got {
+		ids = append(ids, m.ID.Hex())
+	}
+	c.Assert(ids, qt.ContentEquals, []string{a, b})
+
+	for _, bad := range [][]string{{}, {"12345678Z", ""}} {
+		_, err := testDB.OrgMembersByField(testOrgAddress, OrgMemberLookupFieldNationalID, bad)
+		c.Assert(err, qt.ErrorIs, ErrInvalidData)
+	}
+}
+
 // TestCensusParticipantNationalIDVariants pins end-to-end hash equality: a member imported in one
 // DNI variant is found by the login lookup from any other variant of the same document, because
 // both sides go through OrgMember.Normalized (umbrella plan Appendix B, last row).

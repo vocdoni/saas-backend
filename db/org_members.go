@@ -1217,7 +1217,8 @@ func (f OrgMemberLookupField) bsonField() string {
 //
 // For OrgMemberLookupFieldPhone, the caller must pass an already-hashed value
 // (HashedPhone bytes); for the other fields the value is matched verbatim as a
-// string. Returns an empty slice (not an error) when there is no match.
+// string, or a []string matching any of its (non-empty) values. Returns an empty
+// slice (not an error) when there is no match.
 func (ms *MongoStorage) OrgMembersByField(
 	orgAddress common.Address,
 	field OrgMemberLookupField,
@@ -1226,11 +1227,17 @@ func (ms *MongoStorage) OrgMembersByField(
 	if !field.IsValid() {
 		return nil, ErrInvalidData
 	}
+	match := value
 	switch v := value.(type) {
 	case string:
 		if v == "" {
 			return nil, ErrInvalidData
 		}
+	case []string:
+		if len(v) == 0 || slices.Contains(v, "") {
+			return nil, ErrInvalidData
+		}
+		match = bson.M{"$in": v}
 	case HashedPhone:
 		if v.IsEmpty() {
 			return nil, ErrInvalidData
@@ -1250,7 +1257,7 @@ func (ms *MongoStorage) OrgMembersByField(
 
 	filter := bson.M{
 		"orgAddress":      orgAddress,
-		field.bsonField(): value,
+		field.bsonField(): match,
 	}
 
 	cur, err := ms.orgMembers.Find(ctx, filter)

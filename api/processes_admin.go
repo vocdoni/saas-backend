@@ -385,6 +385,20 @@ func DeleteUserOrgDrafts(database *db.MongoStorage, userID uint64) (map[common.A
 	return balances, nil
 }
 
+// nationalIDLookupValues returns what an admin nationalId lookup matches: the trimmed value, plus
+// its canonical DNI/NIE form when that differs, so a member stored canonical is found from any
+// variant while a value stored verbatim (e.g. a member migration 34 skipped) still matches exactly.
+func nationalIDLookupValues(value string) any {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return value // nothing to normalize: matched verbatim, as before
+	}
+	if normalized := internal.NormalizeNationalID(trimmed).Normalized; normalized != trimmed {
+		return []string{trimmed, normalized}
+	}
+	return trimmed
+}
+
 // votingProcessParticipantsHandler godoc
 //
 //	@Summary		List voted participants of a voting process
@@ -395,8 +409,9 @@ func DeleteUserOrgDrafts(database *db.MongoStorage, userID uint64) (map[common.A
 //	@Description	anonymous (blind) census hasVoted is always false and hasSigned is the only signal. When
 //	@Description	the chain cannot be asked about a signed question, that question is reported with
 //	@Description	hasVotedUnknown=true (and hasVoted=false) instead of failing the whole list. For `phone`
-//	@Description	pass the plaintext number; it is hashed server-side. Requires Manager/Admin of the
-//	@Description	owning organization.
+//	@Description	pass the plaintext number; it is hashed server-side. For `nationalId` a Spanish DNI/NIE
+//	@Description	also matches its canonical form, so separator, case and padding variants find the member.
+//	@Description	Requires Manager/Admin of the owning organization.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
@@ -433,6 +448,9 @@ func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Re
 	}
 	// phone is stored hashed, so hash the plaintext before looking up.
 	var lookupValue any = value
+	if field == db.OrgMemberLookupFieldNationalID {
+		lookupValue = nationalIDLookupValues(value)
+	}
 	if field == db.OrgMemberLookupFieldPhone {
 		org, err := a.db.Organization(vp.OrgAddress)
 		if err != nil {
