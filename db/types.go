@@ -612,6 +612,9 @@ type OrgMemberAggregationResults struct {
 	// NotFound is a list of requested member IDs that matched no member of the organization
 	// (unknown, or belonging to another org). Only populated for the explicit-memberIds path.
 	NotFound []bson.ObjectID `json:"notFound" bson:"notFound"`
+	// NationalIDWarnings are the non-blocking nationalId problems of the members, reported only when
+	// nationalId is an auth field. They never make the census invalid.
+	NationalIDWarnings []NationalIDWarning `json:"nationalIdWarnings,omitempty" bson:"nationalIdWarnings,omitempty"`
 }
 
 const (

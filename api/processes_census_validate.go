@@ -24,13 +24,20 @@ import (
 //	@Description	voting temporarily off, an `anonymous: true` spec is a 400 (40037) "anonymous voting is
 //	@Description	temporarily unavailable".
 //	@Description
+//	@Description	When `nationalId` is an auth field, both answers carry `nationalIdWarnings` (in the 400 under
+//	@Description	`data`): one entry per member whose nationalId is missing, a DNI/NIE with a wrong check
+//	@Description	letter (`letter_mismatch`), another tax id (`unsupported_document`), not a DNI/NIE at all
+//	@Description	(`invalid`) or letterless with a derived letter (`derived_letter`, with `original` and
+//	@Description	`derived`), plus a `duplicate_after_normalization` entry for every member sharing a canonical
+//	@Description	DNI/NIE with another. Warnings never make the census invalid.
+//	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			request	body		apicommon.ValidateProcessCensusRequest	true	"Org address + census spec"
-//	@Success		200		{string}	string									"OK"
+//	@Success		200		{object}	apicommon.ValidateProcessCensusResponse	"Usable census, with its nationalId warnings"
 //	@Failure		400		{object}	errors.Error							"Invalid census (duplicates, missing data), or anonymous voting unavailable"
 //	@Failure		401		{object}	errors.Error							"Unauthorized"
 //	@Failure		500		{object}	errors.Error							"Internal server error"
@@ -95,5 +102,9 @@ func (a *API) validateProcessCensusHandler(w http.ResponseWriter, r *http.Reques
 		errors.ErrInvalidData.WithData(results).Write(w)
 		return
 	}
-	apicommon.HTTPWriteOK(w)
+	warnings := results.NationalIDWarnings
+	if warnings == nil {
+		warnings = []db.NationalIDWarning{}
+	}
+	apicommon.HTTPWriteJSON(w, &apicommon.ValidateProcessCensusResponse{NationalIDWarnings: warnings})
 }

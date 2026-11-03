@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -99,6 +100,9 @@ type censusMembers struct {
 	missing  []bson.ObjectID
 	// holders maps every login key to the members and existing participants holding it
 	holders map[loginKey][]string
+	// nationalIDWarnings are the members' nationalId warnings, collected only when the census logs
+	// in with the nationalId (nil otherwise). Missing-data members are included.
+	nationalIDWarnings []NationalIDWarning
 }
 
 // duplicates returns the complete members holding a login hash that another member or existing
@@ -126,11 +130,18 @@ func classifyCensusMembers(
 	existing []CensusParticipant,
 ) (*censusMembers, error) {
 	cm := &censusMembers{missing: make([]bson.ObjectID, 0), holders: make(map[loginKey][]string)}
+	var nationalIDs *nationalIDWarnings
+	if slices.Contains(census.AuthFields, OrgMemberAuthFieldsNationalID) {
+		nationalIDs = newNationalIDWarnings()
+	}
 	seen := make(map[string]bool)
 	for cur.Next(ctx) {
 		m := &OrgMember{}
 		if err := cur.Decode(m); err != nil {
 			return nil, fmt.Errorf("decoding member: %w", err)
+		}
+		if nationalIDs != nil {
+			nationalIDs.add(NationalIDWarning{MemberID: m.ID.Hex()}, m.NationalID, m.NationalIDOriginal)
 		}
 		if m.MissingLoginData(census.AuthFields, census.TwoFaFields) {
 			cm.missing = append(cm.missing, m.ID)
@@ -146,6 +157,9 @@ func classifyCensusMembers(
 	}
 	if err := cur.Err(); err != nil {
 		return nil, fmt.Errorf("reading members: %w", err)
+	}
+	if nationalIDs != nil {
+		cm.nationalIDWarnings = nationalIDs.result()
 	}
 	for _, p := range existing {
 		if seen[p.ParticipantID] {

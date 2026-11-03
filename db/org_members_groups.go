@@ -479,6 +479,8 @@ func aggregateMemberFields(
 		Duplicates:  cm.duplicates(),
 		MissingData: cm.missing,
 		NotFound:    make([]bson.ObjectID, 0),
+
+		NationalIDWarnings: cm.nationalIDWarnings,
 	}
 	dup := make(map[bson.ObjectID]bool, len(results.Duplicates))
 	for _, id := range results.Duplicates {
@@ -564,7 +566,8 @@ func membersFilter(orgAddress common.Address, memberIDs []string) (bson.D, error
 }
 
 // findMemberFieldsCursor runs a projected find over orgMembers for the given filter, returning only
-// _id/orgAddress plus the requested auth/2FA fields.
+// _id/orgAddress plus the requested auth/2FA fields, and the nationalId marker (NationalIDOriginal)
+// along with the nationalId, which the nationalId warnings report.
 func (ms *MongoStorage) findMemberFieldsCursor(
 	ctx context.Context,
 	filter bson.D,
@@ -577,6 +580,9 @@ func (ms *MongoStorage) findMemberFieldsCursor(
 	}
 	for _, f := range authFields {
 		proj = append(proj, bson.E{Key: authFieldBSONKey(f), Value: 1})
+		if f == OrgMemberAuthFieldsNationalID {
+			proj = append(proj, bson.E{Key: "nationalIdOriginal", Value: 1})
+		}
 	}
 	for _, f := range twoFaFields {
 		proj = append(proj, bson.E{Key: string(f), Value: 1})

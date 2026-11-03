@@ -102,6 +102,13 @@ type ValidateProcessCensusRequest struct {
 	Census     CensusSpec        `json:"census"`
 }
 
+// ValidateProcessCensusResponse is the 200 answer of POST /processes/census/validation: the census
+// is usable, and these are its non-blocking nationalId warnings (empty unless nationalId is an auth
+// field and some member's value is missing, not a valid DNI/NIE, letter-derived or shared).
+type ValidateProcessCensusResponse struct {
+	NationalIDWarnings []db.NationalIDWarning `json:"nationalIdWarnings"`
+}
+
 // UpdateProcessCensusResponse is the result of PUT and DELETE /processes/{processId}/census: the
 // number of members added to or removed from the census synchronously, plus the async job id that
 // raises each published election's maxCensusSize on-chain (empty when no on-chain update was
