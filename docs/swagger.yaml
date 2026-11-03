@@ -1279,8 +1279,9 @@ definitions:
         description: Two-factor authentication sms limit
         type: integer
       anonymous:
-        description: Whether zk-SNARK anonymous voting is available. Blind-CSP anonymous
-          voting (census.anonymous) is available on every plan.
+        description: |-
+          Whether anonymous voting is available: the plan's zk-SNARK flag, reported false while the service has
+          anonymous voting (census.anonymous) temporarily off.
         type: boolean
       emailReminder:
         description: Whether email reminders are available
@@ -4758,6 +4759,9 @@ paths:
         `typeSetup`** — responses always carry a protocol, so echoing one back unchanged
         re-applies it.
 
+        While the service has anonymous voting temporarily off, a census with `anonymous: true` is
+        a 400 (40037) "anonymous voting is temporarily unavailable".
+
         `typeSetup.minChoices` has no on-chain counterpart and is a validation hint for
         clients. It is stored as sent for multichoice, and is always `1` for singlechoice,
         whose ballot is the single field a voter fills.
@@ -4781,7 +4785,8 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.CreateVotingProcessResponse'
         "400":
-          description: Bad Request
+          description: Invalid input data, or anonymous voting temporarily unavailable
+            (40037)
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -4885,7 +4890,8 @@ paths:
 
         Census members are handled as on create: those missing required auth data are left out
         and listed in `missingData`, and those the census cannot tell apart are a 400 (40037)
-        whose `data.duplicates` lists them.
+        whose `data.duplicates` lists them. While the service has anonymous voting temporarily off,
+        a census with `anonymous: true` is a 400 (40037) "anonymous voting is temporarily unavailable".
       parameters:
       - description: Process ID
         in: path
@@ -4906,7 +4912,8 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.CreateVotingProcessResponse'
         "400":
-          description: Bad Request
+          description: Invalid input data, or anonymous voting temporarily unavailable
+            (40037)
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -5067,7 +5074,8 @@ paths:
         batch is authorized as a unit (each election must belong to the process and the member
         be eligible, else 401); per-election issuance failures are reported inline with a code.
         Public endpoint: the verified auth token authenticates the voter. Rejected (400) for a
-        non-anonymous process — use the sign endpoints there.
+        non-anonymous process — use the sign endpoints there. Refused (400, "anonymous voting is
+        temporarily unavailable") while the service has anonymous voting off.
       parameters:
       - description: Process ID
         in: path
@@ -5088,7 +5096,8 @@ paths:
           schema:
             $ref: '#/definitions/handlers.BlindPointResponse'
         "400":
-          description: Invalid input data or non-anonymous process
+          description: Invalid input data, non-anonymous process, or anonymous voting
+            temporarily unavailable
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -5119,7 +5128,8 @@ paths:
         consuming that election's slot; the response is always 200 with one entry per item, in
         order, carrying the raw blind-signature scalar or a stable code (blind_request_missing if
         no round-1 point was issued; the other signing codes as usual). Public endpoint. Rejected
-        (400) for a non-anonymous process — use the sign endpoints there.
+        (400) for a non-anonymous process — use the sign endpoints there. Refused (400, "anonymous
+        voting is temporarily unavailable") while the service has anonymous voting off.
       parameters:
       - description: Process ID
         in: path
@@ -5140,7 +5150,8 @@ paths:
           schema:
             $ref: '#/definitions/handlers.BlindSignResponse'
         "400":
-          description: Invalid input data or non-anonymous process
+          description: Invalid input data, non-anonymous process, or anonymous voting
+            temporarily unavailable
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -5441,6 +5452,9 @@ paths:
         GET /jobs/{jobId}. Idempotent once published.
         409 (40172) means the stored questions do not match the process and the draft has to be
         saved again before it can be published.
+        400 (40004) "process is not ready to publish: ..." lists every problem found, including
+        "anonymous voting is temporarily unavailable" for an anonymous process while the service has
+        anonymous voting off. A process some of whose questions are already on chain still resumes.
       parameters:
       - description: Process ID
         in: path
@@ -5459,7 +5473,7 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.EnqueuedResponse'
         "400":
-          description: Not ready to publish
+          description: Not ready to publish (lists every problem)
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -5964,7 +5978,9 @@ paths:
         otherwise 200. A field that is empty or only whitespace counts as missing data, and
         members with missing data are never reported as duplicates. The `password` auth field
         never identifies a member on its own: a census with no other auth field and no 2FA field
-        is a 400. Requires Manager/Admin role of the organization.
+        is a 400. Requires Manager/Admin role of the organization. While the service has anonymous
+        voting temporarily off, an `anonymous: true` spec is a 400 (40037) "anonymous voting is
+        temporarily unavailable".
 
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
@@ -5982,7 +5998,8 @@ paths:
           schema:
             type: string
         "400":
-          description: Invalid census (duplicates or missing data)
+          description: Invalid census (duplicates, missing data), or anonymous voting
+            unavailable
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
