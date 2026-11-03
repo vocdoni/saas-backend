@@ -239,6 +239,20 @@ func (ms *MongoStorage) RunMigrationsDown(steps int) error {
 	return nil
 }
 
+// MigrationApplied reports whether the migration with the given version has a record in the
+// migrations ledger (RunMigrationsUp writes one per applied migration). The ledger only compares
+// its highest version when deciding what to run, so a migration a branch merge absorbed under a
+// higher version is skipped silently; a feature that depends on a migration's data checks this.
+func (ms *MongoStorage) MigrationApplied(version int) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	n, err := ms.migrations.CountDocuments(ctx, bson.M{"version": version}, options.Count().SetLimit(1))
+	if err != nil {
+		return false, fmt.Errorf("failed to check migration %d: %w", version, err)
+	}
+	return n > 0, nil
+}
+
 // lastAppliedMigration returns the last applied migration version.
 func lastAppliedMigration(ctx context.Context, collection *mongo.Collection) (int, error) {
 	migs, err := getAppliedMigrations(ctx, collection)
