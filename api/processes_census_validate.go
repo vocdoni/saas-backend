@@ -56,6 +56,10 @@ func (a *API) validateProcessCensusHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	census := req.Census
+	if a.anonymousCensusRefused(census.Anonymous) {
+		errors.ErrInvalidData.With(anonymousVotingUnavailable).Write(w)
+		return
+	}
 	if len(census.AuthFields) == 0 && len(census.TwoFaFields) == 0 {
 		errors.ErrInvalidData.Withf("missing both authFields and twoFaFields").Write(w)
 		return

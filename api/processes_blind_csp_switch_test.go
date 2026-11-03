@@ -11,6 +11,7 @@ import (
 )
 
 // setDisableBlindCSP flips the operator switch on the shared test API for the rest of the test.
+// It mutates shared testAPI state; it relies on package api tests never running in parallel — do not use with t.Parallel.
 func setDisableBlindCSP(t *testing.T, on bool) {
 	t.Helper()
 	previous := testAPI.disableBlindCSP
@@ -55,6 +56,13 @@ func TestProcessBlindCSPSwitch(t *testing.T) {
 
 	// create with an anonymous census is refused
 	assertAnonymousVotingUnavailable(t, http.MethodPost, token, anonymousReq, processesCreateEndpoint)
+
+	// census validation preflight with an anonymous spec is refused
+	censusValidateReq := apicommon.ValidateProcessCensusRequest{
+		OrgAddress: orgAddress.Bytes(),
+		Census:     apicommon.CensusSpec{TwoFaFields: anonymousReq.Census.TwoFaFields, MemberIDs: ids, Anonymous: true},
+	}
+	assertAnonymousVotingUnavailable(t, http.MethodPost, token, censusValidateReq, processesCensusValidateEndpoint)
 
 	// updating a draft to an anonymous census is refused and leaves the draft as it was
 	assertAnonymousVotingUnavailable(t, http.MethodPut, token, anonymousReq, "processes", plainDraft)
