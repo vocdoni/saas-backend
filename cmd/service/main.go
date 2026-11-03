@@ -77,7 +77,7 @@ func main() {
 	// when a status changes through the API or a process/question is read)
 	flag.Duration("statusSyncInterval", 60*time.Second, "poll cadence for confirm retries + read freshness window (0=60s)")
 	flag.Duration("statusSyncConfirmTimeout", 5*time.Minute, "max wait for on-chain confirmation before reconciling (0=5m)")
-	flag.Bool("disableBlindCSP", false, "temporarily stop offering anonymous (blind CSP) voting on new or unpublished processes")
+	flag.Bool("disableBlindCSP", false, "temporarily stop offering anonymous voting (no new anonymous processes, no blind signing)")
 	// parse flags
 	flag.Parse()
 	// initialize Viper
@@ -180,7 +180,6 @@ func main() {
 		OriginSecret:        viper.GetString("originSecret"),
 		OTPExpiry:           viper.GetDuration("otpExpiry"),
 		OTPCooldown:         viper.GetDuration("otpCooldown"),
-		DisableBlindCSP:     viper.GetBool("disableBlindCSP"),
 	}
 
 	cspConf := &csp.Config{
@@ -194,6 +193,7 @@ func main() {
 		NotificationQueueTTL:           viper.GetDuration("notificationQueueTTL"),
 		NotificationBreakerMaxFailures: viper.GetInt("notificationBreakerMaxFailures"),
 		NotificationBreakerCooldown:    viper.GetDuration("notificationBreakerCooldown"),
+		DisableBlindCSP:                viper.GetBool("disableBlindCSP"),
 	}
 
 	// overwrite the email notifications service with the SMTP service if the

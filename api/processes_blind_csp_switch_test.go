@@ -1,22 +1,26 @@
 package api
 
 import (
+	"encoding/hex"
 	"net/http"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/internal"
+	"go.vocdoni.io/dvote/crypto/ethereum"
 )
 
-// setDisableBlindCSP flips the operator switch on the shared test API for the rest of the test.
+// setDisableBlindCSP flips the operator switch on the shared test CSP for the rest of the test.
 // It mutates shared testAPI state; it relies on package api tests never running in parallel — do not use with t.Parallel.
 func setDisableBlindCSP(t *testing.T, on bool) {
 	t.Helper()
-	previous := testAPI.disableBlindCSP
-	testAPI.disableBlindCSP = on
-	t.Cleanup(func() { testAPI.disableBlindCSP = previous })
+	previous := testAPI.csp.BlindCSPDisabled()
+	testAPI.csp.SetBlindCSPDisabled(on)
+	t.Cleanup(func() { testAPI.csp.SetBlindCSPDisabled(previous) })
 }
 
 // assertAnonymousVotingUnavailable asserts the request is refused with the switch's 400.
@@ -93,4 +97,54 @@ func TestProcessBlindCSPSwitch(t *testing.T) {
 		c.Assert(got.Published, qt.IsTrue)
 		c.Assert(got.Census.Anonymous, qt.IsFalse)
 	}
+}
+
+// TestProcessBlindCSPSwitchStopsBlindSigning checks that with anonymous voting off the blind rounds
+// of an already published anonymous process are refused, the plain sign endpoints answer as before,
+// and blind signing works again once the switch is off.
+func TestProcessBlindCSPSwitchStopsBlindSigning(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	voterMember := members[1]
+
+	req := newVotingProcessRequest(orgAddress, memberIDs(members))
+	req.StartDate = ""
+	req.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname}
+	req.Census.Anonymous = true
+	req.Questions = req.Questions[:1]
+	pid := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint).ProcessID
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	election := got.Questions[0].UpstreamID
+
+	tok := authProcessCSP(t, pid, &handlers.AuthRequest{
+		Name: voterMember.Name, Surname: voterMember.Surname, Email: voterMember.Email,
+	})
+	voter := ethereum.SignKeys{}
+	c.Assert(voter.Generate(), qt.IsNil)
+
+	setDisableBlindCSP(t, true)
+	assertAnonymousVotingUnavailable(t, http.MethodPost, "",
+		&handlers.BlindPointRequest{AuthToken: tok, Elections: []internal.HexBytes{election}},
+		"processes", pid, "blind-point")
+	assertAnonymousVotingUnavailable(t, http.MethodPost, "",
+		&handlers.BlindSignRequest{AuthToken: tok, Ballots: []handlers.BlindSignBallot{
+			{UpstreamID: election, BlindedMessage: internal.HexBytes{0x01}},
+		}}, "processes", pid, "blind-sign")
+	// the plain sign endpoint keeps its own answer for an anonymous census
+	apiErr := requestAndExpectError(t, http.MethodPost, "",
+		&handlers.SignRequest{AuthToken: tok, ProcessID: election, Payload: hex.EncodeToString(voter.Address().Bytes())},
+		"processes", pid, "sign")
+	c.Assert(apiErr.Code, qt.Equals, errors.ErrMalformedBody.Code)
+	c.Assert(apiErr.Error(), qt.Not(qt.Contains), anonymousVotingUnavailable)
+
+	// back on: the voter completes the blind flow
+	setDisableBlindCSP(t, false)
+	proof := testBlindSignBallot(t, pid, tok, election, voter.Address().Bytes())
+	c.Assert(proof.GetCa(), qt.Not(qt.IsNil))
 }

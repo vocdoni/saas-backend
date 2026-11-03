@@ -7,6 +7,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -29,14 +30,14 @@ func censusBuildError(err error) error {
 	}
 }
 
-// anonymousVotingUnavailable is the message returned for an anonymous census while
-// Config.DisableBlindCSP is on.
-const anonymousVotingUnavailable = "anonymous voting is temporarily unavailable"
+// anonymousVotingUnavailable is the message returned for an anonymous census while anonymous
+// voting is temporarily off (csp.Config.DisableBlindCSP).
+const anonymousVotingUnavailable = csp.AnonymousVotingUnavailable
 
-// anonymousCensusRefused reports whether an anonymous census must be refused because the operator
-// switch to temporarily stop offering anonymous voting is on.
+// anonymousCensusRefused reports whether an anonymous census must be refused because anonymous
+// voting is temporarily off.
 func (a *API) anonymousCensusRefused(anonymous bool) bool {
-	return anonymous && a.disableBlindCSP
+	return anonymous && a.csp.BlindCSPDisabled()
 }
 
 // resolveOrCreateDefaultCensus materializes the inline census spec of a voting process into
