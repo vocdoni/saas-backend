@@ -1,6 +1,6 @@
 # DNI/NIE canonical form and login-hash migration (SP1): design
 
-Status: draft (2026-11-03)   Class: architectural
+Status: audited (2026-11-03), awaiting owner approval   Class: architectural
 Owner decisions so far (2026-11-03, umbrella plan §7/§12 + progress.md):
 - Letterless DNI/NIE: derive the check letter; derived entries are a warning-level bucket the
   organizer must explicitly confirm (umbrella §7 ruling). Never phrased as success.
@@ -20,9 +20,9 @@ kept (`Document.Number`, cert-check `internal/identity/document.go:37`). Stored 
   `NationalID` (`db/types.go:432`), unlike email (lowercased) and birthdate (canonicalised).
 - The login hash lowercases both sides (`db.HashAuthTwoFaFields`, `db/types.go:547-556`,
   via `memberAuthFieldValue`, `db/census_missing_data.go:64`), so matching is case-insensitive
-  but separator- and padding-sensitive: stored `55.555.555-B` can never match a certificate's
-  `55555555B`, and stored `5555555B` (7 digits) can never match `05555555B`.
-- Organizers' spreadsheets really contain `55.555.555-B`, `5555555B`, letterless `55555555`,
+  but separator- and padding-sensitive: stored `12.345.678-Z` can never match a certificate's
+  `12345678Z`, and stored `2345678T` (7 digits) can never match `02345678T`.
+- Organizers' spreadsheets really contain `12.345.678-Z`, `2345678T`, letterless `12345678`,
   and wrong letters; nothing validates or reports any of that at import
   (`prepareOrgMember`, `db/org_members.go:267-335`, validates email/phone/birthdate only) or
   at census validation (`POST /processes/census/validation`,
@@ -38,7 +38,7 @@ imported in any non-canonical variant.
    produced by a single function `internal.NormalizeNationalID`, with the letterless ruling
    (derive, classify as warning) built in.
 2. The canonical form is what gets stored for members and what feeds the login hash on both
-   sides, so a voter typing `55.555.555-B` into an existing (non-certificate) `nationalId`
+   sides, so a voter typing `12.345.678-Z` into an existing (non-certificate) `nationalId`
    census still matches after the change — the typed input at `auth/0` is normalised through
    the same function.
 3. A migration canonicalises every stored `nationalId` and recomputes the affected census
@@ -110,7 +110,7 @@ All verified on `feat/nationalid-normalization` @ 6fae524:
   errors are line-prefixed strings (`createOrgMemberBulkOperations`, `db/org_members.go:337`).
 - Admin participant lookup matches `nationalId` verbatim against the stored value
   (`votingProcessParticipantsHandler`, `api/processes_admin.go:149-180`,
-  `OrgMembersByField`, `db/org_members.go:1207`).
+  `OrgMembersByField`, `db/org_members.go:1214`).
 - cert-check (read-only clone `~/.cache/vocdoni-app/ext/cert-check` @ be40f07, private
   module — **not imported**): `Document.Number` is "9 characters, uppercase, leading zeros
   kept" (`internal/identity/document.go:37`); `ValidDNI` = 8 digits + `controlLetters[n%23]`
@@ -190,7 +190,7 @@ every `Canonical` output re-validates as `canonical`; the full 23-letter sweep o
   `NationalIDOriginal string \`json:"nationalIdOriginal,omitempty" bson:"nationalIdOriginal,omitempty"\``
   — the as-imported value whenever the stored canonical letter was **derived** rather than
   supplied. Empty means the letter was supplied (or the value is not a DNI/NIE). This is what
-  lets census validation show the "was 55555565 — will match 55555565X" diff months after
+  lets census validation show the "was 12345679 — will match 12345679S" diff months after
   import, when the original would otherwise be gone.
 - `OrgMember.Normalized()` (`db/types.go:427`) sets
   `NationalID = internal.NormalizeNationalID(m.NationalID).Normalized`. Nothing else changes:
@@ -205,23 +205,44 @@ every `Canonical` output re-validates as `canonical`; the full 23-letter sweep o
   re-sets it if the new value is again letterless. A partial update that does not carry
   `nationalId` keeps both the canonical value and the marker.
 - `apicommon.OrgMember` (`api/apicommon/types.go:1111` block) and `OrgMemberFromDb` expose
-  `nationalIdOriginal`, so SP4 can show the diff in member lists too.
+  `nationalIdOriginal`, so SP4 can show the diff in member lists too. `nationalIdOriginal` is
+  read-only like `HasPassword` (`api/apicommon/types.go:1128-1129`): write paths ignore it,
+  and only `prepareOrgMember` ever sets it.
 
 ### 3. `auth/0` typed input (existing non-certificate censuses)
 
-No new code: `authFirstStep` already funnels the request through `Normalized()`
-(`csp/handlers/auth.go:335-344`), so after this change a voter typing `55.555.555-B`, `
-55555555 b `, or letterless `55555555` into a census with `authFields: ["nationalId"]`
+`authFirstStep` already funnels the request through `Normalized()`
+(`csp/handlers/auth.go:335-344`), so after this change a voter typing `12.345.678-Z`,
+` 12345678 z `, or letterless `12345678` into a census with `authFields: ["nationalId"]`
 hashes to the same canonical form as the migrated stored value and still matches. A stored
-value that is not canonicalisable (e.g. wrong letter `55555555A`) passes through trimmed on
+value that is not canonicalisable (e.g. wrong letter `12345678A`) passes through trimmed on
 both sides, so the voter who types the same wrong value keeps matching exactly as today.
 This is stated as a goal and pinned by `TestCSPAuthNationalIDNormalization` because SP1 must
 not regress any live census.
 
-Consistency fix in the same spirit: `votingProcessParticipantsHandler`
-(`api/processes_admin.go:154-161`) normalises the lookup `value` with
-`NormalizeNationalID(...).Normalized` when `field == nationalId`, so admins can find the
-migrated (canonical) member by typing any variant.
+One addition, so a collision-skipped member (§5 step 3, Failure modes) is never resolved to
+their lettered twin:
+
+- At `auth/0`, when `NormalizeNationalID(typed).Normalized` differs from `TrimSpace(typed)`
+  (the input was rewritten: derived letter, separators or padding; compared case-insensitively,
+  since the hash lowercases), the participant lookup (`CensusParticipantByLoginHash`,
+  `csp/handlers/auth.go:374`) tries the hash of the trimmed raw input FIRST and falls back to
+  the canonical hash only when no participant holds it. Migrated members keep matching via the
+  fallback; a collision-skipped member keeps matching their own stored value exactly as today,
+  and the letterless input never resolves to the lettered twin. This costs one extra
+  `CensusParticipantByLoginHash` call, only for rewritten inputs, and consumes a single
+  rate-limit unit (the claim at `csp/handlers/auth.go:362` is taken once, before both
+  lookups). Only the lookup changes: the rate-limit keys and the hash functions are untouched.
+
+This narrow exact-first fallback sits on top of the migration; it is not the "dual lookup
+instead of a migration" rejected under Alternatives.
+
+Consistency fix in the same spirit: when `field == nationalId`,
+`votingProcessParticipantsHandler` (`api/processes_admin.go:149-180`) queries
+`OrgMembersByField` (`db/org_members.go:1214`) with BOTH the trimmed typed value and
+`NormalizeNationalID(value).Normalized` when they differ (`$in`), so admins find migrated
+(canonical) members from any variant without losing verbatim matches on collision-skipped or
+otherwise non-canonical stored values.
 
 ### 4. Warnings: one shape for import and census validation
 
@@ -253,7 +274,11 @@ that; other censuses get no nationalId warnings).
   `Derived = m.NationalID` (a stored letterless value — possible for migration collision
   skips — reports `derived_letter` live, with `Original` = stored, `Derived` = computed).
   Members sharing a canonical value each get a `duplicate_after_normalization` entry (both
-  of a pair listed, matching the existing `Duplicates` semantics).
+  of a pair listed, matching the existing `Duplicates` semantics). When the pair already
+  collides on login hashes (both stored canonical), they appear in the blocking `Duplicates`
+  as today AND in `nationalIdWarnings` with `duplicate_after_normalization`; the warning is
+  the stable signal SP4 renders, the block is unchanged behaviour. A letterless/lettered
+  collision-skipped pair has distinct hashes, so it appears only as the warning.
 - `db.OrgMemberAggregationResults` (`db/types.go:572`) gains
   `NationalIDWarnings []NationalIDWarning \`json:"nationalIdWarnings,omitempty"\``,
   populated by `aggregateMemberFields` and so present in the `400` error data as today.
@@ -276,14 +301,24 @@ already-stored members remain census validation's job. Plumbing:
 - `apicommon.AddMembersResponse` (`api/apicommon/types.go:1299`) gains
   `NationalIDWarnings []db.NationalIDWarning \`json:"nationalIdWarnings,omitempty"\``
   (sync path).
-- `db.Job` (`db/types.go:1075`) gains the same field (bson + json), and `CompleteJob`
-  (`db/jobs.go:325`) takes the warnings (signature extended; the compiler finds the few
-  callers). `GET /jobs/{jobId}` therefore carries them for async imports (job responses
-  already serialize `db.Job`; authorization by `OrgAddress` unchanged).
+- `db.Job` (`db/types.go:1075`) gains the same field (bson + json), `CompleteJob`
+  (`db/jobs.go:325`) takes the warnings (signature extended; one non-test caller,
+  `api/org_members.go:338`, feeds them from the final `BulkOrgMembersJob`), and
+  `apicommon.JobResponse` + `JobResponseFromDB` (`api/apicommon/types.go:1508,1527`) gain
+  `nationalIdWarnings`, since `GET /jobs/{jobId}` serializes `JobResponse`, not `db.Job`.
+  That route is callable anonymously; `jobStatusHandler` (`api/jobs.go:56-60`) must null the
+  warnings in the same branch that nulls `resp.Errors`, so DNI values reach only
+  Manager/Admin callers.
 
 Warnings carry DNI values (original/derived) only in Manager/Admin-authorized responses and
 in the org-scoped job document — data the organizer already owns. Logs never carry them
 (IDs only; see Failure modes).
+
+Single-member add/edit responses (`upsertOrganizationMemberHandler`, `api/org_members.go:383`
+→ `UpsertOrgMemberAndCensusParticipants`, `db/org_members.go:512`, which runs the same
+derivation through `prepareOrgMember` at `:541`) carry no warning in SP1. This is
+deliberate: the member list exposes `nationalIdOriginal` and census validation reports the
+class; SP4 may surface it inline.
 
 ### 5. Migration 0034 `normalize_national_ids`
 
@@ -293,7 +328,7 @@ plan); 34 is the next free number on both `main` and `origin/lts` ledgers (both 
 satisfying the forward-merge rule documented in `migrations/repair_login_hashes.go:16-24`.
 Exported alongside it: `const NationalIDNormalizationVersion = 34`.
 
-Shape = 0015 verbatim, with these substitutions:
+Shape = 0015's per-member logic, with these substitutions (and batched iteration, step 7):
 
 1. Coarse server-side prefilter: members with a non-empty `nationalId` (a cheap regex
    prefilter for values that cannot already be canonical, e.g. not `^[0-9]{8}[A-Z]$` and not
@@ -316,6 +351,57 @@ Shape = 0015 verbatim, with these substitutions:
 5. Log counters only: `normalized`, `derived`, `skipped`.
 6. `down` is a no-op with a comment: the normalisation is lossy (original separators, case
    and padding are unrecoverable), same stance as 0015 and 0025.
+7. Run-time bound: designed for any collection size. `RunMigrationsUp` caps the whole run
+   with one 10-minute context (`db/migrations.go:79`) and the cross-instance lock expires,
+   unrenewed, `migrationLockTTL` (10 minutes) after acquisition (`db/migrations.go:30,47`).
+   0034's candidate set can be most of a legacy collection, so it must not depend on
+   finishing inside either bound:
+   - **Batching**: keyset pagination over the prefilter, sorted by `_id`, in batches of
+     `nationalIDBatchSize = 500` members: each batch is a fresh `Find` with `_id > lastID`
+     and `Limit(500)`, so no cursor is held across batches (none can idle out on the
+     server). Members inside a batch are processed one by one with steps 1-5; `lastID`
+     advances past skipped members too, so one run visits each candidate once.
+   - **Per-batch context**: each batch runs under
+     `context.WithTimeout(context.WithoutCancel(ctx), nationalIDBatchTimeout)` with
+     `nationalIDBatchTimeout = 2 * time.Minute`. `WithoutCancel` drops the framework's
+     10-minute deadline but keeps the context values (the lock renewer below). A batch that
+     exceeds its timeout fails the migration like any other error.
+   - **Lock renewal per batch**: every batch starts with `migrations.RenewLock(batchCtx)`,
+     which moves the lock's `expiresat` to now + `migrationLockTTL`. A batch is capped at 2
+     minutes and the TTL is 10, so the lock cannot expire while the holder is alive; if the
+     holder dies, the lock expires at most 10 minutes after its last renewal and the next
+     replica resumes (idempotent, step 4). A renewal that matches no document (the lock was
+     lost) returns an error and aborts the migration before that batch writes anything.
+   - **Framework change needed** (`db/migrations.go`, `migrations/migrations.go`). The
+     migration cannot do this alone: `MigrationFunc` receives neither the lock holder id nor
+     any handle on the lock, and `RunMigrationsUp` writes the ledger record with the same
+     10-minute `ctx` (`db/migrations.go:130`), so a 0034 that legitimately finishes after 10
+     minutes would fail to record and run again on the next start. The minimal change keeps
+     the `MigrationFunc` signature (the 33 existing migrations stay untouched):
+     1. `migrations` gains `WithLockRenewer(ctx, func(context.Context) error)
+        context.Context` and `RenewLock(ctx) error`; `RenewLock` is a no-op returning nil
+        when no renewer is set (tests that call `Up` directly, `RunMigrationsDown`).
+     2. `RunMigrationsUp` passes `migrations.WithLockRenewer(ctx, renew)` to `migration.Up`
+        (`db/migrations.go:122`), where `renew` calls a new
+        `ms.renewMigrationLock(ctx, holder)`: `UpdateOne({_id: migrationLockID, holder:
+        holder}, {$set: {expiresat: now + migrationLockTTL}})`, erroring when
+        `MatchedCount == 0`.
+     3. The ledger `InsertOne` (`db/migrations.go:130`) uses its own
+        `context.WithTimeout(context.Background(), defaultTimeout)`, as
+        `releaseMigrationLock` already does (`db/migrations.go:66`), so a long migration is
+        still recorded.
+     Every other migration keeps the 10-minute bound; opting out is explicit and per
+     migration (0034 only). A later migration in the same `RunMigrationsUp` call after a long
+     0034 inherits the expired parent context and fails; 0034 is already recorded by then, so
+     the next start applies only the later one. Recorded in the PR description.
+   - **Waiting replicas**: other replicas wait for the lock under their own 10-minute
+     context (`acquireMigrationLock`, `db/migrations.go:55-57`); during a longer 0034 they
+     fail startup with "gave up waiting for the migration lock" and the orchestrator restarts
+     them. They write nothing, and once 0034 is recorded they start normally. Unchanged in SP1.
+   - **Pre-deploy measurement** (owner/ops action; does not block implementation): before
+     deploying to stg and production, count the candidates on a recent production dump
+     (`db.orgMembers.countDocuments(<0034 prefilter>)`) and time 0034 against it, so the
+     deploy window and any startup-probe grace period come from a real number.
 
 Idempotent: canonical values re-normalise to themselves; a second run finds nothing.
 
@@ -341,7 +427,7 @@ instead of a census whose hashes never match.
 
 | Option | Why not |
 |---|---|
-| Dual lookup at auth (try old hash, then canonical) instead of a migration | Leaves two hash dialects live forever; SP2's redeem has only the certificate's canonical value, so letterless/separator members still never match; doubles every lookup. |
+| Dual lookup at auth (try old hash, then canonical) instead of a migration | Leaves two hash dialects live forever; SP2's redeem has only the certificate's canonical value, so letterless/separator members still never match; doubles every lookup. (§3's exact-first fallback is different: on top of the migration, only for rewritten inputs.) |
 | Canonicalise inside the hash functions only, keep stored values raw | Two sources of truth (display vs hash); `hashMemberFields` and `HashAuthTwoFaFields` would both grow DNI logic (more mirrored code to drift); migration still needed for the hashes anyway. |
 | Mirror `NormalizeNationalID` byte-for-byte into `migrations` (umbrella SP1 wording) | Unnecessary: `migrations` already imports `internal` directly (0015 uses `internal.NormalizeEmail`); only `db` functions need mirrors. One shared function beats a guarded copy. |
 | Require the letter (reject letterless) or match on digits only | Ruled out by the owner-approved §7 ruling: requiring locks out the target members; digits-only destroys the letter's typo-detection signal entirely. |
@@ -357,7 +443,10 @@ instead of a census whose hashes never match.
   `nationalIdWarnings`. All additive except the 200 body, which SP3 (SDK types) and SP4
   consume; `make swagger` regenerates the spec, and the PR description records the
   vocdoni.io + integrator-sdk impact (suggested follow-ups, per AGENTS.md).
-- **Data migration**: 0034 as above, at startup, under the existing cross-instance lock.
+- **Data migration**: 0034 as above, at startup, under the existing cross-instance lock,
+  batched and renewing that lock per batch (§5 step 7, with its minimal framework change).
+  The candidate count is measured on a production dump before the stg/prod deploy (owner/ops
+  action, §5 step 7).
 - **Rolling deploy window**: while old replicas serve a migrated database, a voter typing a
   separator variant of a previously separator-stored value fails on old replicas (old code
   trims only). The window is the migration's duration; voters typing the canonical or the
@@ -371,26 +460,33 @@ instead of a census whose hashes never match.
 - **Fresh databases**: migrations run in order at startup; `prepareOrgMember` canonicalises
   everything from the first insert, so 0034 finds nothing.
 - **Existing non-certificate `nationalId` censuses**: matching gets strictly more forgiving
-  for canonicalisable values and stays byte-identical for everything else (see §3). The one
-  behavioural seam is the collision case, documented below.
+  for canonicalisable values and stays byte-identical for everything else (see §3). The
+  collision case keeps today's behaviour at `auth/0` thanks to §3's exact-first lookup; its
+  remaining seam (certificate matching in SP2) is documented below.
 - **Ordering with SP2**: SP1 merges and migrates before any certificate census can exist
   (`authMethod: "certificate"` does not parse yet); the publish guard covers the
   skipped-migration deploy hazard.
 
 ## Failure modes and security
 
-- **Migration collision (letterless vs lettered twin)**: members `55555555` and `55555555B`
+- **Migration collision (letterless vs lettered twin)**: members `12345678` and `12345678Z`
   in one `nationalId` census collide after derivation. 0034 skips the letterless member
-  (keeps value and hashes) and logs IDs. Consequence: that voter's letterless typed input now
-  derives the letter client-side of the hash and **matches the other member** (reaching their
-  2FA contact, or their auth-only token). This is the pre-existing "two members, one number"
-  data error made visible: the skipped pair is logged by the migration, reported as
-  `duplicate_after_normalization` by validation, and the lettered member keeps working. The
-  collision test pins exactly this.
+  (keeps value and hashes) and logs IDs. Without care, that voter's letterless typed input
+  would now normalise to `12345678Z` and resolve to the lettered member (wrong-person
+  authentication: their auth-only token, or a 2FA code sent to their contact), and no input
+  could reproduce the skipped member's stored hash. §3's exact-first lookup prevents both:
+  the letterless input hashes verbatim first and finds the skipped member, so each input
+  keeps matching its own member exactly as today. The pair is logged by the migration and
+  reported as `duplicate_after_normalization` by validation. The collision test pins both
+  members authenticating as themselves.
+  Note for SP2: certificate redeem only has the canonical value, so a collision-skipped
+  letterless member cannot match by certificate; validation reports the pair as
+  `duplicate_after_normalization`.
 - **Derived-letter typo admits the wrong real person**: inherent to the owner-approved
   ruling (umbrella §7, risk 7); SP1's job is to make it visible (`derived_letter` warnings
   with the diff, persisted marker); SP4 adds the confirmation gate. Appendix B's
-  typo-neighbour vector (`55555565` → `55555565X`) is in the table test.
+  typo-neighbour vector (`12345679` → `12345679S`, one digit off `12345678Z`) is in the table
+  test.
 - **Untrusted input**: `NormalizeNationalID` takes arbitrary organizer/voter strings; the
   fuzz test asserts no panics, idempotency, and that canonical outputs re-validate. No
   regexp backtracking hazards (hand-rolled scans like cert-check's).
@@ -401,7 +497,8 @@ instead of a census whose hashes never match.
   not written, startup fails loudly, and the rerun is safe (idempotent; per-member write
   order makes interrupted members re-detectable).
 - **Concurrency**: the existing migration lock (`db/migrations.go:40-61`) serialises 0034
-  across replicas; per-member collision checks use the same read-before-write pattern as
+  across replicas for as long as 0034 runs, because 0034 renews it per batch and aborts if it
+  was lost (§5 step 7); per-member collision checks use the same read-before-write pattern as
   0015, acceptable because the lock excludes concurrent migrators and live writers go
   through `prepareOrgMember`, which now writes canonical values that 0034 would skip.
 
@@ -409,43 +506,73 @@ instead of a census whose hashes never match.
 
 - [ ] AC1: `internal.NormalizeNationalID` passes the full Appendix B vector table, including
   the 23-letter sweep, padding, NIE prefixes, the typo-neighbour vector and Unicode
-  lookalikes — `go test -run TestNormalizeNationalID ./internal/`.
+  lookalikes — `go test -run TestNormalizeNationalID ./internal/`. Appendix B's DNI letters
+  are corrected first (umbrella-plan change, same PR series): the `55555555B`/`05555555B`/
+  `55555565X` rows use non-mod-23 letters (55555555 → K, 05555555 → C, 55555565 → P), and
+  the `Z7654321H` row calls a valid NIE a wrong letter (27654321 mod 23 → H). The example
+  family becomes `12345678Z` (canonical), `12345678` → `12345678Z` (derived), `12345678A` →
+  `letter_mismatch`, `12345679` → `12345679S` (typo neighbour), `2345678T` → `02345678T`
+  (pad), two members `2345678T`/`02345678T` → `duplicate_after_normalization`, cert
+  `02345678T` vs stored `2.345.678-t` → match; `Z7654321H` moves to the canonical rows.
+  The NIE rows (`X1234567L` canonical, `Y1234567` → `Y1234567X`) are already correct.
+  Every vector here was checked against `TRWAGMYFPDXBNJZSQVHLCKE` with the X/Y/Z prefix
+  read as 0/1/2.
 - [ ] AC2: idempotency, canonical-revalidation and no-panic properties hold under fuzzing —
   `FuzzNormalizeNationalID` seeds pass in `go test ./internal/`, and
   `go test -fuzz=FuzzNormalizeNationalID -fuzztime=30s ./internal/` finds no crasher locally.
 - [ ] AC3: storage canonicalises and the marker behaves — `TestPrepareOrgMemberNationalID`
   (derived sets `nationalIdOriginal`; explicit lettered update clears it; an update not
   carrying nationalId preserves it) — `go test -run TestPrepareOrgMemberNationalID ./db/`.
-- [ ] AC4: end-to-end hash equality: member stored as `5.555.555-b` is found by
-  `CensusParticipantByLoginHash` for input `55555555B` and vice versa (Appendix B last row)
+- [ ] AC4: end-to-end hash equality: member stored as `2.345.678-t` is found by
+  `CensusParticipantByLoginHash` for input `02345678T` and vice versa (Appendix B last row)
   — `go test -run TestCensusParticipantNationalIDVariants ./db/`.
-- [ ] AC5: `auth/0` with typed `55.555.555-B` (and letterless `55555555`) authenticates
-  against a canonical-stored member in a `nationalId` census, and an invalid stored value
+- [ ] AC5: `auth/0` with typed `12.345.678-Z` (and letterless `12345678`) authenticates
+  against a canonical-stored member `12345678Z` in a `nationalId` census through the
+  canonical fallback, consuming one rate-limit unit; an invalid stored value (`12345678A`)
   still matches its identical typed input —
   `go test -run TestCSPAuthNationalIDNormalization ./api/`.
 - [ ] AC6: migration 0034 canonicalises stored values, derives letters with the marker set,
   recomputes participant hashes that the real login lookup then resolves, and is idempotent
   — `go test -run TestMigration0034NormalizeNationalIDs ./db/` (pattern:
   `db/migration_normalize_emails_test.go`).
-- [ ] AC7: the collision case: letterless/lettered twins in one census → letterless member
-  skipped and logged, lettered member still authenticates, validation reports
-  `duplicate_after_normalization` — `go test -run TestMigration0034Collision ./db/`.
+- [ ] AC7: the collision case: letterless/lettered twins (`12345678`/`12345678Z`) in one
+  census → letterless member skipped and logged (IDs only), validation reports
+  `duplicate_after_normalization` for both — `go test -run TestMigration0034Collision ./db/`;
+  and at `auth/0` the lettered member authenticates with their lettered input AND the
+  letterless member still authenticates as themselves with their letterless input (exact-first
+  lookup, §3), never as the twin —
+  `go test -run TestCSPAuthNationalIDCollisionSkipped ./api/`.
 - [ ] AC8: migration/db hash parity still holds with canonical and derived nationalId
   members added to the matrix — `go test -run TestRepairMatchesCanonicalHash ./db/`.
 - [ ] AC9: census validation returns 200 with per-class `nationalIdWarnings` (derived
   entries carrying original+derived; duplicates listing both members), includes them in the
   400 data when blocking problems coexist, and emits none when `nationalId` is not an auth
-  field — `go test -run TestValidateProcessCensusNationalIDWarnings ./api/`.
-- [ ] AC10: import reports line-numbered warnings sync and via `GET /jobs/{jobId}` async,
-  including batch-local `duplicate_after_normalization` —
-  `go test -run TestAddMembersNationalIDWarnings ./api/`.
+  field. A canonical pair appears in both the blocking `Duplicates` and the warning; a
+  letterless/lettered skipped pair appears only as the warning —
+  `go test -run TestValidateProcessCensusNationalIDWarnings ./api/`.
+- [ ] AC10: import reports line-numbered warnings sync and via `GET /jobs/{jobId}` async
+  (through `JobResponse`), including batch-local `duplicate_after_normalization`; the async
+  test asserts the warnings for a Manager/Admin poll and their absence for an anonymous poll
+  of the same job — `go test -run TestAddMembersNationalIDWarnings ./api/`.
 - [ ] AC11: `MigrationApplied(migrations.NationalIDNormalizationVersion)` is false on a
   ledger without 0034 and true after `RunMigrationsUp` —
   `go test -run TestMigrationApplied ./db/`.
 - [ ] AC12: admin participant lookup finds the canonical member from a separator-typed
-  value — `go test -run TestVotingProcessParticipantsNationalIDLookup ./api/`.
+  value (`12.345.678-Z`) and still finds a collision-skipped member stored as `12345678` from
+  that exact value — `go test -run TestVotingProcessParticipantsNationalIDLookup ./api/`.
 - [ ] AC13: the whole suite, lint and generated spec are green: `go test -failfast ./...`,
   `make lint`, `./scripts/check-qt-patterns.sh`, and `make swagger` committed with the PR.
+- [ ] AC14: the framework lock renewal works: `migrations.RenewLock` extends `expiresat` for
+  the current holder, errors when the lock was taken over (holder mismatch), and is a no-op
+  without a renewer; a migration that outlives the parent context is still recorded in the
+  ledger — `go test -run TestMigrationLockRenewal ./db/`.
+- [ ] AC15: 0034 processes more than one batch (the test inserts `2*500+1` candidates, so no
+  batch-size test hook is needed), renews the lock once per batch, normalises every candidate
+  exactly once, and aborts without writing the batch when the lock was lost —
+  `go test -run TestMigration0034Batches ./db/`.
+- [ ] AC16: `nationalIdOriginal` is read-only over the API: a create or update carrying it is
+  ignored (the stored marker is only what `prepareOrgMember` derived), and reads expose it —
+  `go test -run TestOrgMemberNationalIDOriginalReadOnly ./api/`.
 
 ## Constraints
 
