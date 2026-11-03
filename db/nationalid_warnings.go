@@ -77,3 +77,18 @@ func (n *nationalIDWarnings) result() []NationalIDWarning {
 	}
 	return out
 }
+
+// nationalIDImportWarnings returns the nationalId warnings of a member import, Line being each
+// member's 1-based position in members. Duplicates are checked within members only; checking
+// them against the members already stored is census validation's job. An empty nationalId is
+// not reported: it is only a problem for a census logging in with it, which validation reports.
+func nationalIDImportWarnings(members []*OrgMember) []NationalIDWarning {
+	n := newNationalIDWarnings()
+	for i, m := range members {
+		if strings.TrimSpace(m.NationalID) == "" {
+			continue
+		}
+		n.add(NationalIDWarning{Line: i + 1}, m.NationalID, "")
+	}
+	return n.result()
+}

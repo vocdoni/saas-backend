@@ -33,7 +33,12 @@ func TestJobStatusImportErrorsGatedByRole(t *testing.T) {
 	const piiPhone = "+34600123456"
 	importErr := "could not parse email: " + piiEmail + " invalid; invalid phone \"" + piiPhone + "\""
 	c.Assert(testDB.CreateJob(jobID, db.JobTypeOrgMembers, orgAddress, 3), qt.IsNil)
-	c.Assert(testDB.CompleteJob(jobID, 2, []string{importErr}), qt.IsNil)
+	// the nationalId warnings carry DNI values, so they are gated exactly like the errors
+	const piiDNI = "12345678Z"
+	warnings := []db.NationalIDWarning{{Line: 1, Class: "derived_letter", Original: "12345678", Derived: piiDNI}}
+	c.Assert(testDB.CompleteJob(jobID, db.CompleteJobResults{
+		Added: 2, Errors: []string{importErr}, NationalIDWarnings: warnings,
+	}), qt.IsNil)
 
 	// stripped: raw body carries no PII, errors empty, but status + counters remain.
 	assertStripped := func(who, token string) {
@@ -41,9 +46,11 @@ func TestJobStatusImportErrorsGatedByRole(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK)
 		c.Assert(strings.Contains(string(body), piiEmail), qt.IsFalse, qt.Commentf("%s body leaked email: %s", who, body))
 		c.Assert(strings.Contains(string(body), piiPhone), qt.IsFalse, qt.Commentf("%s body leaked phone: %s", who, body))
+		c.Assert(strings.Contains(string(body), piiDNI), qt.IsFalse, qt.Commentf("%s body leaked a DNI: %s", who, body))
 		var resp apicommon.JobResponse
 		c.Assert(json.Unmarshal(body, &resp), qt.IsNil)
 		c.Assert(resp.Errors, qt.HasLen, 0, qt.Commentf("%s got error detail", who))
+		c.Assert(resp.NationalIDWarnings, qt.HasLen, 0, qt.Commentf("%s got nationalId warnings", who))
 		c.Assert(resp.Status, qt.Equals, db.JobStatusCompleted)
 		c.Assert(resp.Result, qt.Not(qt.IsNil))
 		c.Assert(resp.Result.Total, qt.Equals, 3)
@@ -70,6 +77,7 @@ func TestJobStatusImportErrorsGatedByRole(t *testing.T) {
 	// (2) the org admin sees the full per-row error detail on GET /jobs/{jobId}.
 	adminJob := requestAndParse[apicommon.JobResponse](t, http.MethodGet, adminToken, nil, "jobs", jobID)
 	c.Assert(adminJob.Errors, qt.Contains, importErr)
+	c.Assert(adminJob.NationalIDWarnings, qt.DeepEquals, warnings)
 
 	// the auth-gated GET /jobs list keeps the full detail too.
 	list := requestAndParse[apicommon.JobsListResponse](
@@ -83,6 +91,7 @@ func TestJobStatusImportErrorsGatedByRole(t *testing.T) {
 	}
 	c.Assert(found, qt.Not(qt.IsNil), qt.Commentf("seeded job not found in the admin list"))
 	c.Assert(found.Errors, qt.Contains, importErr)
+	c.Assert(found.NationalIDWarnings, qt.DeepEquals, warnings)
 }
 
 // TestJobStatusNotFound asserts an unknown job id returns 404.

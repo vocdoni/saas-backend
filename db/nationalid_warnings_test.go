@@ -43,3 +43,23 @@ func TestNationalIDWarnings(t *testing.T) {
 		{MemberID: "h", Class: NationalIDWarningDuplicate},
 	})
 }
+
+// TestNationalIDImportWarnings pins the import flavour: line-numbered, empty values skipped, and
+// duplicates checked within the submitted list only.
+func TestNationalIDImportWarnings(t *testing.T) {
+	c := qt.New(t)
+	members := []*OrgMember{
+		{NationalID: "12345678"},
+		{NationalID: "12.345.678-z"},
+		{NationalID: ""},
+		{NationalID: "12345678A"},
+		{NationalID: "87654321X"},
+	}
+	c.Assert(nationalIDImportWarnings(members), qt.DeepEquals, []NationalIDWarning{
+		{Line: 1, Class: "derived_letter", Original: "12345678", Derived: "12345678Z"},
+		{Line: 4, Class: "letter_mismatch"},
+		{Line: 1, Class: NationalIDWarningDuplicate},
+		{Line: 2, Class: NationalIDWarningDuplicate},
+	})
+	c.Assert(nationalIDImportWarnings([]*OrgMember{{NationalID: "87654321X"}, {}}), qt.HasLen, 0)
+}

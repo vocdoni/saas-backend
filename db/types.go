@@ -1379,4 +1379,8 @@ type Job struct {
 	// touching the jobs another live replica is still running (see FailInterruptedTxJobs).
 	Instance    string    `json:"-" bson:"instance,omitempty"`
 	HeartbeatAt time.Time `json:"-" bson:"heartbeatAt,omitempty"`
+
+	// NationalIDWarnings are the nationalId warnings of a member import job (JobTypeOrgMembers).
+	// They carry DNI values: GET /jobs/{jobId} hides them from anonymous callers, like Errors.
+	NationalIDWarnings []NationalIDWarning `json:"nationalIdWarnings,omitempty" bson:"nationalIdWarnings,omitempty"`
 }

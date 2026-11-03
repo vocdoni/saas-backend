@@ -167,6 +167,9 @@ type BulkOrgMembersJob struct {
 	// MemberIDs are the hex ids of the members actually inserted, so the caller can propagate
 	// them to the censuses the organization's auto group backs.
 	MemberIDs []string
+	// NationalIDWarnings are the non-blocking nationalId problems of the submitted members, Line
+	// being each one's 1-based position in the submitted list. Set before the first batch runs.
+	NationalIDWarnings []NationalIDWarning
 }
 
 // ErrorsAsStrings returns the errors as a slice of strings
@@ -447,7 +450,11 @@ func (ms *MongoStorage) addOrgMemberBatches(
 	total := len(orgMembers)
 	currentTime := time.Now()
 
-	progress := &bulkOrgMembersProgress{job: BulkOrgMembersJob{Total: total, Errors: []error{}}}
+	progress := &bulkOrgMembersProgress{job: BulkOrgMembersJob{
+		Total:              total,
+		Errors:             []error{},
+		NationalIDWarnings: nationalIDImportWarnings(orgMembers),
+	}}
 
 	// Create a context for the progress reporter
 	ctx, cancel := context.WithCancel(context.Background())
