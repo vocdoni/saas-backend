@@ -182,14 +182,9 @@ func (ms *MongoStorage) CensusParticipantByLoginHash(census Census, member OrgMe
 	// Calculate hashes based on census configuration
 	hashes := calculateParticipantHashesBson(census, member)
 
-	findHashes := make([]bson.M, 0, len(hashes))
-	for k, v := range hashes {
-		findHashes = append(findHashes, bson.M{k: v})
-	}
-
 	findFilter := bson.M{
 		"censusId": census.ID.Hex(),
-		"$or":      findHashes,
+		"$or":      loginHashesOrFilter(hashes),
 	}
 
 	// find the participant
@@ -570,14 +565,10 @@ func (ms *MongoStorage) AddCensusParticipantsByMemberIDs(censusID string, member
 
 		// Calculate hashes based on census configuration, matching updateCensusParticipantsForMember.
 		hashes := calculateParticipantHashesBson(*census, *member)
-		findHashes := make([]bson.M, 0, len(hashes))
-		for k, v := range hashes {
-			findHashes = append(findHashes, bson.M{k: v})
-		}
 		conflictFilter := bson.M{
 			"participantID": bson.M{"$ne": member.ID.Hex()},
 			"censusId":      census.ID.Hex(),
-			"$or":           findHashes,
+			"$or":           loginHashesOrFilter(hashes),
 		}
 		conflictCount, err := ms.censusParticipants.CountDocuments(ctx, conflictFilter)
 		if err != nil {
@@ -892,4 +883,17 @@ func calculateParticipantHashesBson(census Census, member OrgMember) bson.M {
 		hashes[field] = hash
 	}
 	return hashes
+}
+
+// loginHashesOrFilter turns participant hashes into the branches of an $or matching any of them.
+// The (censusId, loginHash*) indexes are partial on {$exists: true, $type: "binData"}, and MongoDB
+// only picks a partial index when the query implies its filter expression, which a bare equality
+// does not. Each branch therefore repeats those predicates; without them every lookup falls back
+// to the censusId index and scans the whole census.
+func loginHashesOrFilter(hashes bson.M) []bson.M {
+	branches := make([]bson.M, 0, len(hashes))
+	for field, hash := range hashes {
+		branches = append(branches, bson.M{field: bson.M{"$eq": hash, "$exists": true, "$type": "binData"}})
+	}
+	return branches
 }

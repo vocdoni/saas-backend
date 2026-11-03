@@ -624,17 +624,12 @@ func (ms *MongoStorage) updateCensusParticipantsForMember(ctx context.Context, m
 		// Calculate new hashes based on census configuration
 		hashes := calculateParticipantHashesBson(*census, *member)
 
-		findHashes := make([]bson.M, 0, len(hashes))
-		for k, v := range hashes {
-			findHashes = append(findHashes, bson.M{k: v})
-		}
-
 		// First "simulate" the update, checks that no conflicts would arise when trying to
 		// update all census participants where participantID == orgMemberID
 		findFilter := bson.M{
 			"participantID": bson.M{"$ne": participant.ParticipantID},
 			"censusId":      participant.CensusID,
-			"$or":           findHashes,
+			"$or":           loginHashesOrFilter(hashes),
 		}
 		count, err := ms.censusParticipants.CountDocuments(ctx, findFilter)
 		if err != nil {
