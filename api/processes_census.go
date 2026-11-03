@@ -29,6 +29,16 @@ func censusBuildError(err error) error {
 	}
 }
 
+// anonymousVotingUnavailable is the message returned for an anonymous census while
+// Config.DisableBlindCSP is on.
+const anonymousVotingUnavailable = "anonymous voting is temporarily unavailable"
+
+// anonymousCensusRefused reports whether an anonymous census must be refused because the operator
+// switch to temporarily stop offering anonymous voting is on.
+func (a *API) anonymousCensusRefused(anonymous bool) bool {
+	return anonymous && a.disableBlindCSP
+}
+
 // resolveOrCreateDefaultCensus materializes the inline census spec of a voting process into
 // a db.Census (auth/2FA policy + participants) and returns it. The census type is inferred
 // from the 2FA fields (SetCensus does this). Census/vote quotas are enforced, mirroring
@@ -38,6 +48,9 @@ func censusBuildError(err error) error {
 func (a *API) resolveOrCreateDefaultCensus(
 	spec apicommon.CensusSpec, orgAddress common.Address,
 ) (*db.Census, []string, error) {
+	if a.anonymousCensusRefused(spec.Anonymous) {
+		return nil, nil, errors.ErrInvalidData.With(anonymousVotingUnavailable)
+	}
 	census := &db.Census{
 		OrgAddress:  orgAddress,
 		Weighted:    spec.Weighted,

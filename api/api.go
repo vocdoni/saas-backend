@@ -132,6 +132,9 @@ type Config struct {
 	// ask the chain whether a vote is on chain. Nil (production) uses Account, bounded by the
 	// lookup slots shared with POST /votes/verify. Tests set it to inject lookup failures.
 	VoteOnChainLookup handlers.VoteOnChainLookup
+	// DisableBlindCSP is an operator switch to temporarily stop offering anonymous (blind CSP)
+	// voting: drafts cannot ask for an anonymous census and anonymous drafts cannot be published.
+	DisableBlindCSP bool
 }
 
 // StatusEnqueuer hands question status reconciliations to the background syncer. It is satisfied by
@@ -187,6 +190,8 @@ type API struct {
 	electionReads *electionReads
 	// voteOnChain tells whether a vote is on chain (see Config.VoteOnChainLookup).
 	voteOnChain handlers.VoteOnChainLookup
+	// disableBlindCSP refuses anonymous censuses on create, update and publish (see Config).
+	disableBlindCSP bool
 }
 
 // enqueueConfirm asks the status syncer to confirm a status change landed on-chain; a no-op when
@@ -285,6 +290,7 @@ func New(ctx context.Context, conf *Config) *API {
 		electionCache:         electionCache,
 		liveElectionCache:     liveElectionCache,
 		legacyProjectionCache: legacyProjectionCache,
+		disableBlindCSP:       conf.DisableBlindCSP,
 	}
 	a.electionReads = newElectionReads(func(id internal.HexBytes) (*dvoteapi.Election, error) {
 		return a.account.Election(id)

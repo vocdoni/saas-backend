@@ -116,6 +116,9 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	if census == nil {
 		return problems, questionsMismatch // plan checks below need the census
 	}
+	if a.anonymousCensusRefused(census.Anonymous) {
+		problems = append(problems, anonymousVotingUnavailable)
+	}
 	orgDoc, err := a.db.Organization(vp.OrgAddress)
 	if err != nil {
 		return append(problems, "organization not found"), questionsMismatch
@@ -245,6 +248,11 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 	census, err := a.db.Census(vp.CensusID.Hex())
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	// the switch also covers drafts already stored with an anonymous census
+	if a.anonymousCensusRefused(census.Anonymous) {
+		errors.ErrInvalidData.With(anonymousVotingUnavailable).Write(w)
 		return
 	}
 	// full synchronous publish-readiness gate (same as GET .../check): structural checks plus
