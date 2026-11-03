@@ -4,7 +4,9 @@ import (
 	"encoding/hex"
 	"net/http"
 	"testing"
+	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp/handlers"
@@ -239,4 +241,92 @@ func TestPlansReportAnonymousVotingSwitch(t *testing.T) {
 	catalog, subscription = reported()
 	c.Assert(catalog, qt.IsTrue)
 	c.Assert(subscription, qt.IsTrue)
+}
+
+// waitSentEmails polls the organization's sent-email counter, which is bumped asynchronously once a
+// challenge is delivered, until it reaches want, and returns its counters.
+func waitSentEmails(t *testing.T, orgAddress common.Address, want int) db.OrganizationCounters {
+	t.Helper()
+	var counters db.OrganizationCounters
+	for range 50 {
+		org, err := testDB.Organization(orgAddress)
+		qt.Assert(t, err, qt.IsNil)
+		counters = org.Counters
+		if counters.SentEmails >= want {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	qt.Assert(t, counters.SentEmails, qt.Equals, want)
+	return counters
+}
+
+// TestProcessBlindCSPSwitchStopsAuthChallenges checks that with anonymous voting off an anonymous
+// process sends no auth challenge (step 0 and resend are refused and the org's sent counters stay
+// put), a non-anonymous process still sends its own, and voters already verified keep check and
+// sign-info. Once the switch is off the anonymous process sends challenges again.
+func TestProcessBlindCSPSwitchStopsAuthChallenges(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	authReq := func(i int) *handlers.AuthRequest {
+		return &handlers.AuthRequest{Name: members[i].Name, Surname: members[i].Surname, Email: members[i].Email}
+	}
+
+	newRequest := func(anonymous bool) *apicommon.CreateVotingProcessRequest {
+		req := newVotingProcessRequest(orgAddress, memberIDs(members))
+		req.StartDate = ""
+		req.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname}
+		req.Census.Anonymous = anonymous
+		req.Questions = req.Questions[:1]
+		return req
+	}
+	anonymousPID, _ := publishProcessRequest(t, token, newRequest(true))
+	plainPID, _ := publishProcessRequest(t, token, newRequest(false))
+
+	// switch off: member 0 gets a challenge it does not answer yet, member 1 completes the auth
+	org, err := testDB.Organization(orgAddress)
+	c.Assert(err, qt.IsNil)
+	sent := org.Counters.SentEmails
+	pending := requestAndParse[handlers.AuthResponse](
+		t, http.MethodPost, "", authReq(0), "processes", anonymousPID, "auth", "0").AuthToken
+	c.Assert(pending, qt.Not(qt.HasLen), 0)
+	waitForEmail(t, members[0].Email) // drained, so the next OTP read for member 0 is the next challenge
+	verified := authProcessCSP(t, anonymousPID, authReq(1))
+	before := waitSentEmails(t, orgAddress, sent+2)
+
+	setDisableBlindCSP(t, true)
+
+	// the anonymous process sends nothing: step 0 and resend are refused
+	for i := range members {
+		assertAnonymousVotingUnavailable(t, http.MethodPost, "", authReq(i), "processes", anonymousPID, "auth", "0")
+	}
+	assertAnonymousVotingUnavailable(t, http.MethodPost, "",
+		&handlers.AuthResendRequest{AuthToken: pending, Email: members[0].Email},
+		"processes", anonymousPID, "auth", "resend")
+
+	// a voter verified earlier still reads their status and sign info
+	check := requestAndParse[handlers.ProcessCheckResponse](t, http.MethodPost, "",
+		&handlers.CheckMembershipRequest{AuthToken: verified}, "processes", anonymousPID, "check")
+	c.Assert(check.BelongsToProcess, qt.IsTrue)
+	requestAndParse[handlers.ProcessSignInfoResponse](t, http.MethodPost, "",
+		&handlers.ConsumedAddressRequest{AuthToken: verified}, "processes", anonymousPID, "sign-info")
+
+	// the non-anonymous process still sends its challenge, and it is the only send counted
+	c.Assert(authProcessCSP(t, plainPID, authReq(0)), qt.Not(qt.HasLen), 0)
+	after := waitSentEmails(t, orgAddress, before.SentEmails+1)
+	c.Assert(after.SentSMS, qt.Equals, before.SentSMS)
+
+	// back on: the anonymous process sends challenges again
+	setDisableBlindCSP(t, false)
+	resent := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "",
+		&handlers.AuthResendRequest{AuthToken: pending, Email: members[0].Email},
+		"processes", anonymousPID, "auth", "resend")
+	c.Assert(resent.AuthToken, qt.DeepEquals, pending)
+	waitForEmail(t, members[0].Email)
+	time.Sleep(cspNotificationCoolDownTime) // the cooldown between new tokens of one member
+	c.Assert(authProcessCSP(t, anonymousPID, authReq(0)), qt.Not(qt.HasLen), 0)
+	waitSentEmails(t, orgAddress, after.SentEmails+2)
 }
