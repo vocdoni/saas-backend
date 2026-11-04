@@ -21,6 +21,7 @@ func TestCertAuthCloudflareMode(t *testing.T) {
 	cloudflare := func(cidrs ...string) func(*Config) {
 		return func(cfg *Config) {
 			cfg.Mode, cfg.CFOriginPullCAPEM, cfg.CFAllowedCIDRs = ModeCloudflare, aop.CertPEM(), cidrs
+			cfg.CFAcknowledged = true
 		}
 	}
 	e := newTestEnv(c, cloudflare())

@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -115,6 +116,10 @@ type Config struct {
 	CFOriginPullCAPEM []byte
 	// CFAllowedCIDRs, when set, are the only peers the auth listener accepts in cloudflare mode.
 	CFAllowedCIDRs []string
+	// CFAcknowledged is the explicit opt-in cloudflare mode refuses to start without (Task 12's
+	// --certAuthCloudflareAcknowledged): set only after the blockers in the spec section 3b are verified
+	// and the AOP CA is a per-zone or per-hostname certificate, never Cloudflare's global one.
+	CFAcknowledged bool
 	// TestProvider adds the synthetic provider of TestProviderCAPEM, only against an allowlisted API.
 	TestProvider            bool
 	TestProviderCAPEM       []byte
@@ -192,6 +197,12 @@ func (cfg *Config) validate() (*validated, error) {
 	return v, nil
 }
 
+// errCloudflareNotAcknowledged refuses cloudflare mode without its explicit opt-in: the forwarded
+// certificate headers are only trustworthy behind a per-zone or per-hostname AOP certificate.
+var errCloudflareNotAcknowledged = errors.New("certauth: cloudflare mode needs certAuthCloudflareAcknowledged: " +
+	"set it only after the blockers in the spec section 3b are verified and the AOP CA is a per-zone or " +
+	"per-hostname certificate, never Cloudflare's global one")
+
 // validateFronts checks the PROXY protocol and cloudflare settings.
 func (cfg *Config) validateFronts(v *validated) error {
 	var err error
@@ -208,6 +219,9 @@ func (cfg *Config) validateFronts(v *validated) error {
 	}
 	if cfg.Mode != ModeCloudflare {
 		return nil
+	}
+	if !cfg.CFAcknowledged {
+		return errCloudflareNotAcknowledged
 	}
 	v.cfCAs = x509.NewCertPool()
 	if !v.cfCAs.AppendCertsFromPEM(cfg.CFOriginPullCAPEM) {

@@ -41,9 +41,9 @@ func TestCertAuthStartupValidation(t *testing.T) {
 		"proxy protocol bad cidr": func(cfg *Config) {
 			cfg.ProxyProtocol, cfg.ProxyFrontCIDRs = true, []string{"10.0.0.0/33"}
 		},
-		"cloudflare without origin pull CA": func(cfg *Config) { cfg.Mode = ModeCloudflare },
+		"cloudflare without origin pull CA": func(cfg *Config) { cfg.Mode, cfg.CFAcknowledged = ModeCloudflare, true },
 		"proxy protocol in cloudflare mode": func(cfg *Config) {
-			cfg.Mode, cfg.CFOriginPullCAPEM = ModeCloudflare, pki.CertPEM()
+			cfg.Mode, cfg.CFOriginPullCAPEM, cfg.CFAcknowledged = ModeCloudflare, pki.CertPEM(), true
 			cfg.ProxyProtocol, cfg.ProxyFrontCIDRs = true, []string{"10.0.0.0/8"}
 		},
 		"test provider against production": func(cfg *Config) { cfg.VocdoniAPI = "https://api.vocdoni.io/v2" },
@@ -63,12 +63,26 @@ func TestCertAuthStartupValidation(t *testing.T) {
 		"extra test api": func(cfg *Config) {
 			cfg.VocdoniAPI, cfg.TestProviderAllowedAPIs = "https://api-e2e.internal/v2", []string{"api-e2e.internal"}
 		},
-		"dev api":    func(cfg *Config) { cfg.VocdoniAPI = "https://api-dev.vocdoni.net/v2" },
-		"cloudflare": func(cfg *Config) { cfg.Mode, cfg.CFOriginPullCAPEM = ModeCloudflare, pki.CertPEM() },
+		"dev api": func(cfg *Config) { cfg.VocdoniAPI = "https://api-dev.vocdoni.net/v2" },
+		"cloudflare": func(cfg *Config) {
+			cfg.Mode, cfg.CFOriginPullCAPEM, cfg.CFAcknowledged = ModeCloudflare, pki.CertPEM(), true
+		},
 	} {
 		cfg := testConfig(c, pki, 443)
 		mutate(&cfg)
 		_, err := New(cfg, deps)
 		c.Assert(err, qt.IsNil, qt.Commentf("%s", name))
 	}
+
+	// cloudflare mode is an explicit opt-in: without the acknowledgement it refuses to start, even
+	// with its CA, and says why; with it, it starts and still warns
+	cfg := testConfig(c, pki, 443)
+	cfg.Mode, cfg.CFOriginPullCAPEM = ModeCloudflare, pki.CertPEM()
+	_, err = New(cfg, deps)
+	c.Assert(err, qt.ErrorIs, errCloudflareNotAcknowledged)
+	c.Assert(err, qt.ErrorMatches, `.*certAuthCloudflareAcknowledged.*per-zone or per-hostname.*`)
+	cfg.CFAcknowledged = true
+	s, err := New(cfg, deps)
+	c.Assert(err, qt.IsNil)
+	c.Assert(s.v.warnings, qt.Any(qt.Matches), `cloudflare mode is not production ready.*`)
 }
