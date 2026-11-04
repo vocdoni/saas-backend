@@ -90,12 +90,8 @@ func run(opts *options) error {
 		return fmt.Errorf("could not find user: %w", err)
 	}
 
-	plan, err := ms.UserErasurePlan(user.ID)
-	if err != nil {
+	if err := showPlan(os.Stdout, ms, user.ID); err != nil {
 		return err
-	}
-	if err := printPlan(os.Stdout, plan); err != nil {
-		return fmt.Errorf("could not print the plan: %w", err)
 	}
 	if opts.dryRun {
 		fmt.Println("\ndry run: nothing was deleted")
@@ -124,6 +120,23 @@ func run(opts *options) error {
 	}
 	if err != nil {
 		return fmt.Errorf("erasure finished with errors: %w", err)
+	}
+	return nil
+}
+
+// showPlan prints the user's erasure plan and fails when it is blocked, so that neither a dry run
+// nor a real one goes on (to the prompt, the wallet drain or any deletion) with a sub-org or managed
+// org that the erasure would orphan.
+func showPlan(w io.Writer, ms *db.MongoStorage, userID uint64) error {
+	plan, err := ms.UserErasurePlan(userID)
+	if err != nil {
+		return err
+	}
+	if err := printPlan(w, plan); err != nil {
+		return fmt.Errorf("could not print the plan: %w", err)
+	}
+	if len(plan.Blocked) > 0 {
+		return fmt.Errorf("erasure blocked: orgs %v have sub-orgs or managed orgs that would survive them", plan.Blocked)
 	}
 	return nil
 }

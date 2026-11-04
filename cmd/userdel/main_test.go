@@ -14,6 +14,8 @@ import (
 	"github.com/vocdoni/saas-backend/pricing"
 	"github.com/vocdoni/saas-backend/test"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	mongooptions "go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // TestDeleteDrafts: with no Stripe access the drafts go, an open top-up checkout's included (its
@@ -432,6 +434,57 @@ func TestDeleteUserOrgDrafts(t *testing.T) {
 	c.Assert(err, qt.Equals, db.ErrNotFound)
 	_, err = ms.VotingProcess(sharedDraft)
 	c.Assert(err, qt.IsNil)
+}
+
+// TestShowPlanBlocked: a blocked plan is printed and fails before anything is written: the wallet
+// movement left unposted stays queued and the draft stays. Once unblocked it passes.
+func TestShowPlanBlocked(t *testing.T) {
+	c := qt.New(t)
+	ctx := context.Background()
+	container, err := test.StartMongoContainer(ctx)
+	c.Assert(err, qt.IsNil)
+	c.Cleanup(func() { c.Assert(container.Terminate(ctx), qt.IsNil) })
+	uri, err := container.ConnectionString(ctx)
+	c.Assert(err, qt.IsNil)
+	dbName := test.RandomDatabaseName()
+	ms, err := db.New(uri, dbName)
+	c.Assert(err, qt.IsNil)
+	c.Cleanup(ms.Close)
+	// the wallets are read raw: db.Wallet would post the unposted movements itself
+	client, err := mongo.Connect(mongooptions.Client().ApplyURI(uri))
+	c.Assert(err, qt.IsNil)
+	c.Cleanup(func() { c.Assert(client.Disconnect(ctx), qt.IsNil) })
+	wallets := client.Database(dbName).Collection("wallets")
+
+	org, child := common.Address{0x91}, common.Address{0x92}
+	user := &db.User{
+		Email: "userdel-blocked@test.com", Password: "pass", FirstName: "User", LastName: "Del", Verified: true,
+		Organizations: []db.OrganizationUser{{Address: org, Role: db.AdminRole}},
+	}
+	user.ID, err = ms.SetUser(user)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ms.SetOrganization(&db.Organization{Address: org, Creator: user.Email, Country: "ES"}), qt.IsNil)
+	c.Assert(ms.SetOrganization(&db.Organization{Address: child, Parent: org, Country: "ES"}), qt.IsNil)
+	draft, err := ms.SetVotingProcess(&db.VotingProcess{OrgAddress: org})
+	c.Assert(err, qt.IsNil)
+	c.Assert(ms.CreditWallet(db.WalletCredit{OrgAddress: org, AmountCents: 100, IdempotencyKey: "cs_userdel_blocked"}), qt.IsNil)
+	// a movement left unposted (as by a crash): only a drain would post it
+	_, err = wallets.UpdateOne(ctx, bson.M{"_id": org}, bson.M{"$push": bson.M{"unposted": db.WalletLedgerEntry{
+		ID: bson.NewObjectID(), OrgAddress: org, Kind: db.WalletEntryTopUp, IdempotencyKey: "userdel-blocked-unposted",
+	}}})
+	c.Assert(err, qt.IsNil)
+
+	var out bytes.Buffer
+	c.Assert(showPlan(&out, ms, user.ID), qt.ErrorMatches, "erasure blocked: orgs .* would survive them")
+	c.Assert(out.String(), qt.Contains, "  BLOCKED: ")
+	var wallet db.Wallet
+	c.Assert(wallets.FindOne(ctx, bson.M{"_id": org}).Decode(&wallet), qt.IsNil)
+	c.Assert(wallet.Unposted, qt.HasLen, 1)
+	_, err = ms.VotingProcess(draft)
+	c.Assert(err, qt.IsNil)
+
+	c.Assert(ms.DelOrganization(&db.Organization{Address: child}), qt.IsNil)
+	c.Assert(showPlan(&bytes.Buffer{}, ms, user.ID), qt.IsNil)
 }
 
 // TestPrintPlan: the dry-run report is rendered from the erasure plan, API keys and blocking
