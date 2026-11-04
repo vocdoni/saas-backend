@@ -70,6 +70,7 @@ import (
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/certauth"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
@@ -133,6 +134,10 @@ type Config struct {
 	// ask the chain whether a vote is on chain. Nil (production) uses Account, bounded by the
 	// lookup slots shared with POST /votes/verify. Tests set it to inject lookup failures.
 	VoteOnChainLookup handlers.VoteOnChainLookup
+	// CertAuth is the certificate sign-in feature (its auth listener and the two JSON endpoints).
+	// Nil when it is not configured: the endpoints answer ErrCertificateAuthDisabled, certificate
+	// censuses are refused, and nothing else changes.
+	CertAuth *certauth.Service
 }
 
 // StatusEnqueuer hands question status reconciliations to the background syncer. It is satisfied by
@@ -219,6 +224,8 @@ type API struct {
 	electionReads *electionReads
 	// voteOnChain tells whether a vote is on chain (see Config.VoteOnChainLookup).
 	voteOnChain handlers.VoteOnChainLookup
+	// certAuth is the certificate sign-in feature, nil when it is off (see Config.CertAuth).
+	certAuth *certauth.Service
 	// draftLocks makes the draft cap check (OrgCanCreateVotingProcessDraft) and the draft write it
 	// allows one step per organization, so parallel creations cannot pass the same count.
 	// ponytail: in-memory, like orgTxLocks — one API instance; a DB-side conditional write if that changes
@@ -331,6 +338,7 @@ func New(ctx context.Context, conf *Config) *API {
 		return a.account.Election(id)
 	})
 	a.voteOnChain = conf.VoteOnChainLookup
+	a.certAuth = conf.CertAuth
 	if a.voteOnChain == nil {
 		a.voteOnChain = a.lookupVoteOnChain
 	}
@@ -397,6 +405,13 @@ func (a *API) Start() {
 			log.Fatalf("failed to start the API server: %v", err) //revive:disable:deep-exit
 		}
 	}()
+	if a.certAuth != nil {
+		go func() {
+			if err := a.certAuth.ListenAndServe(); err != nil {
+				log.Fatalf("failed to start the certificate auth listener: %v", err) //revive:disable:deep-exit
+			}
+		}()
+	}
 }
 
 // router creates the router with all the routes and middleware.
@@ -405,13 +420,19 @@ func (a *API) Start() {
 func (a *API) initRouter() http.Handler {
 	// Create the router with a basic middleware stack
 	r := chi.NewRouter()
-	r.Use(cors.New(cors.Options{
+	generalCORS := cors.New(cors.Options{
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
 		AllowCredentials: true,
 		MaxAge:           300, // Maximum value not ignored by any of major browsers
-	}).Handler)
+	}).Handler
+	if a.certAuth != nil {
+		// the certificate endpoints answer the allowlisted app origins only, without credentials
+		r.Use(a.certAuth.CORS(generalCORS))
+	} else {
+		r.Use(generalCORS)
+	}
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	if a.originSecret != "" {
@@ -578,6 +599,8 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, processesResultsEndpoint, a.votingProcessResultsHandler)
 		handle(r, http.MethodPost, processesCheckEndpoint, cspHandlers.ProcessCheckHandler)
 		handle(r, http.MethodPost, processesAuthEndpoint, cspHandlers.ProcessAuthHandler)
+		handle(r, http.MethodPost, processesAuthCertEndpoint, a.certAuthCreateHandler)
+		handle(r, http.MethodPost, processesAuthCertRedeemEndpoint, a.certAuthRedeemHandler)
 		handle(r, http.MethodPost, processesAuthResendEndpoint, cspHandlers.ProcessAuthResendHandler)
 		handle(r, http.MethodPost, processesSignEndpoint, cspHandlers.ProcessSignHandler)
 		handle(r, http.MethodPost, processesSignBatchEndpoint, cspHandlers.ProcessSignBatchHandler)

@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api"
+	"github.com/vocdoni/saas-backend/certauth"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
@@ -93,6 +94,7 @@ func main() {
 	flag.Duration("statusSyncInterval", 60*time.Second, "poll cadence for confirm retries + read freshness window (0=60s)")
 	flag.Duration("statusSyncConfirmTimeout", 5*time.Minute, "max wait for on-chain confirmation before reconciling (0=5m)")
 	flag.Bool(disableBlindCSPKey, false, "temporarily stop offering anonymous voting (no new anonymous processes, no blind signing)")
+	defineCertAuthFlags()
 	// parse flags
 	flag.Parse()
 	// initialize Viper
@@ -297,6 +299,19 @@ func main() {
 	})
 	if err != nil {
 		log.Fatal(err)
+	}
+	// certificate voter sign-in: only when a mode is set; otherwise nothing of it is read or started
+	if viper.GetString("certAuthMode") != "" {
+		certConf, err := certAuthConfig(viper.GetViper())
+		if err != nil {
+			log.Fatalf("could not configure certificate sign-in: %v", err)
+		}
+		certConf.VocdoniAPI, certConf.RootKey = apiEndpoint, bPrivKey
+		certConf.TrustForwardedFor = apiConf.OriginSecret != ""
+		certConf.MaxHourlyFailures = viper.GetInt("cspMaxHourlyAuthFailures")
+		if apiConf.CertAuth, err = certauth.New(certConf, certauth.Deps{Storage: database, Tokens: apiConf.CSP}); err != nil {
+			log.Fatalf("could not configure certificate sign-in: %v", err)
+		}
 	}
 	// create the local API server
 	api.New(ctx, apiConf).Start()
