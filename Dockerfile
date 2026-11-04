@@ -14,7 +14,7 @@ RUN --mount=type=cache,target=/go-cache --mount=type=secret,id=PRIVATE_MODULES_T
     GIT_CONFIG_VALUE_0=https://github.com/vocdoni/cert-check \
     go mod download
 RUN --mount=type=cache,target=/go-cache go run scripts/circuits/main.go
-RUN --mount=type=cache,target=/go-cache go build -o=backend -ldflags="-s -w" cmd/service/main.go
+RUN --mount=type=cache,target=/go-cache go build -o=backend -ldflags="-s -w" ./cmd/service
 
 FROM debian:bookworm-slim AS base
 

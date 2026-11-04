@@ -29,7 +29,7 @@ ENV LD_LIBRARY_PATH=${WASMER_PATH}
 
 # API target
 FROM base AS api
-RUN go build -o /usr/local/bin/api ./cmd/service/main.go
+RUN go build -o /usr/local/bin/api ./cmd/service
 CMD ["/usr/local/bin/api"]
 
 # Local SMTP target (used for local testing)
