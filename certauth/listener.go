@@ -69,8 +69,8 @@ func (s *Service) ListenAndServe() error {
 	return s.Serve(ln)
 }
 
-// Serve serves the auth listener on a TCP listener: the PROXY protocol when configured, then TLS,
-// then HTTP/1.1 only.
+// Serve serves the auth listener on a TCP listener: the PROXY protocol (origin mode) or the peer
+// filter (cloudflare mode) first, then TLS, then HTTP/1.1 only.
 func (s *Service) Serve(ln net.Listener) error {
 	tlsLn := tls.NewListener(s.wrapListener(ln), s.listenerTLSConfig())
 	srv := &http.Server{
@@ -95,11 +95,13 @@ func (debugWriter) Write(p []byte) (int, error) {
 }
 
 // wrapListener applies the front of the mode: in origin mode the PROXY protocol, honoured only from
-// the front CIDRs (any other peer is plain TCP).
+// the front CIDRs (any other peer is plain TCP); in cloudflare mode the peer allowlist.
 func (s *Service) wrapListener(ln net.Listener) net.Listener {
 	switch {
 	case s.cfg.Mode == ModeOrigin && s.cfg.ProxyProtocol:
 		return &proxyproto.Listener{Listener: ln, ConnPolicy: s.proxyPolicy, ReadHeaderTimeout: proxyHeaderTimeout}
+	case s.cfg.Mode == ModeCloudflare && len(s.v.cfNets) > 0:
+		return &peerFilter{Listener: ln, allowed: s.v.cfNets}
 	default:
 		return ln
 	}
@@ -130,6 +132,9 @@ func ipIn(addr net.Addr, nets []*net.IPNet) bool {
 
 // listenerTLSConfig is the TLS configuration of the mode.
 func (s *Service) listenerTLSConfig() *tls.Config {
+	if s.cfg.Mode == ModeCloudflare {
+		return s.cloudflareTLSConfig()
+	}
 	return &tls.Config{
 		MinVersion:         tls.VersionTLS12,
 		NextProtos:         []string{alpnHTTP1},
@@ -247,8 +252,11 @@ func (*Service) redirect(w http.ResponseWriter, target string, fragment url.Valu
 }
 
 // presentedChain returns the DER chain the browser presented, leaf first, and whether it presented
-// one at all: the TLS peer certificates.
-func (*Service) presentedChain(r *http.Request) ([][]byte, bool) {
+// one at all: the TLS peer certificates in origin mode, the forwarded headers in cloudflare mode.
+func (s *Service) presentedChain(r *http.Request) ([][]byte, bool) {
+	if s.cfg.Mode == ModeCloudflare {
+		return cloudflareChain(r.Header)
+	}
 	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
 		return nil, false
 	}
@@ -279,9 +287,14 @@ func boundChain(chain [][]byte) [][]byte {
 	return nil
 }
 
-// listenerClientIP is the client IP the logs record: the TCP peer, the PROXY header's source when a
-// front sent one.
-func (*Service) listenerClientIP(r *http.Request) string {
+// listenerClientIP is the client IP the logs record: the TCP peer (the PROXY header's source when a
+// front sent one), or Cloudflare's CF-Connecting-IP in cloudflare mode, where the peer is Cloudflare.
+func (s *Service) listenerClientIP(r *http.Request) string {
+	if s.cfg.Mode == ModeCloudflare {
+		if ip := net.ParseIP(r.Header.Get("CF-Connecting-IP")); ip != nil {
+			return ip.String()
+		}
+	}
 	return clientIP(r.RemoteAddr)
 }
 
