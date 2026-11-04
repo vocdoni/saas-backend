@@ -468,3 +468,24 @@ func (ms *MongoStorage) SetVotingProcessEndDate(id bson.ObjectID, endDate time.T
 	}
 	return nil
 }
+
+// DeleteVotingProcessesByOrg removes every voting process of an organization, drafts included,
+// and all their questions, returning how many processes went. It is the bulk step of an
+// organization teardown and must run after DeleteVotingProcessCSPByOrg, which reads their ids.
+func (ms *MongoStorage) DeleteVotingProcessesByOrg(orgAddress common.Address) (int64, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return 0, ErrInvalidData
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	if _, err := ms.processesQuestions.DeleteMany(ctx, bson.M{"orgAddress": orgAddress}); err != nil {
+		return 0, fmt.Errorf("failed to delete voting process questions: %w", err)
+	}
+	res, err := ms.votingProcesses.DeleteMany(ctx, bson.M{"orgAddress": orgAddress})
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete voting processes: %w", err)
+	}
+	return res.DeletedCount, nil
+}
