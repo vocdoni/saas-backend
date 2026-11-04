@@ -299,7 +299,8 @@ paid ones are credited back to the wallet that paid them and their payment recor
 them (the credit-back row in the wallet history is the audit trail), and a once-per-organization
 add-on price no published or mined process received comes back too; no Stripe secret is needed. A draft that cannot be deleted aborts the erasure with nothing else
 erased. Wallets and their history are kept, and a torn-down organization's balance is printed
-to be returned by hand. In kept orgs the user created, the creator email is deliberately retained — the org signing key is derived
+to be returned by hand. It refuses, erasing nothing (not even the drafts), while an organization it
+would delete manages other organizations: erase those first with `orgdel`. In kept orgs the user created, the creator email is deliberately retained — the org signing key is derived
 from `secret+creator+nonce`, so redacting it would break the org's on-chain account. Those
 orgs are flagged in the output for manual follow-up.
 
@@ -325,3 +326,27 @@ read the impact report — a sole-admin org takes its entire voting history down
 Reserve `-yes` for scripted use. Watch for the `WARNING: creator email retained` lines in
 the output; those need manual follow-up. Stripe customer data and database backups are
 explicitly out of scope — handle those separately if the erasure request covers them.
+
+### [cmd/orgdel](cmd/orgdel/) — single organization erasure
+
+**What it does.** Erases one organization and everything it owns in MongoDB (members, groups,
+censuses, participants, processes, bundles, voting processes, questions, API keys, CSP tokens,
+jobs, invitations), using the same teardown as `userdel`. It prints an impact report first. Drafts
+go first, a paid one credited back to the wallet that paid it (the integrator's for a managed
+organization); the organization's own wallet is kept and a non-zero balance is printed, to be
+returned by hand. It refuses, erasing nothing, while the organization manages other organizations,
+and, unless `-force`, while the stored state says an election may still be live on-chain (READY or
+PAUSED questions, processes being published, published legacy processes).
+
+**How to run.**
+
+```bash
+go run ./cmd/orgdel -org 0xABC... -dryRun   # impact report only
+go run ./cmd/orgdel -org 0xABC...           # report + "type 'yes'" prompt
+go run ./cmd/orgdel -org 0xABC... -yes      # skip confirmation
+go run ./cmd/orgdel -org 0xABC... -force    # erase even with possibly live elections
+```
+
+**Precautions.** Stripe, database backups and on-chain state are not touched, and the chain is not
+read: check a live election there before using `-force`. For managed organizations prefer
+`DELETE /integrator/organizations/{orgAddress}`, which reads the live chain status.

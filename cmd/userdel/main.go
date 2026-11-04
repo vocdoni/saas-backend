@@ -98,6 +98,11 @@ func run(opts *options) error {
 		return nil
 	}
 
+	// EraseUser refuses while an organization it would tear down manages others: refused here,
+	// before the drafts go, so a refused run erases nothing
+	if err := refuseManagingOrgs(ms, user); err != nil {
+		return err
+	}
 	if !opts.yes && !confirm() {
 		return fmt.Errorf("aborted")
 	}
@@ -120,6 +125,29 @@ func run(opts *options) error {
 	}
 	if err != nil {
 		return fmt.Errorf("erasure finished with errors: %w", err)
+	}
+	return nil
+}
+
+// refuseManagingOrgs returns an error when an organization the erasure would tear down manages
+// other organizations: EraseUser refuses those, so nothing (not even the drafts) must go first.
+func refuseManagingOrgs(ms *db.MongoStorage, user *db.User) error {
+	for _, userOrg := range user.Organizations {
+		soleAdmin, err := ms.IsSoleOrgAdmin(userOrg.Address, user.ID)
+		if err != nil {
+			return fmt.Errorf("could not classify org %s: %w", userOrg.Address, err)
+		}
+		if !soleAdmin {
+			continue
+		}
+		managed, _, err := ms.ListManagedOrganizations(userOrg.Address, 1, 1)
+		if err != nil {
+			return fmt.Errorf("could not list the organizations managed by org %s: %w", userOrg.Address, err)
+		}
+		if managed > 0 {
+			return fmt.Errorf("org %s manages %d organizations, erase them with orgdel first; nothing was erased",
+				userOrg.Address, managed)
+		}
 	}
 	return nil
 }
@@ -230,54 +258,23 @@ func printPlan(ms *db.MongoStorage, user *db.User) error {
 // printOrgContents prints how much data an organization about to be torn down
 // currently holds.
 func printOrgContents(ms *db.MongoStorage, address common.Address) error {
-	members, err := ms.CountOrgMembers(address)
+	s, err := ms.OrganizationDataSummary(address)
 	if err != nil {
-		return fmt.Errorf("could not count members of org %s: %w", address, err)
-	}
-	groups, _, err := ms.OrganizationMemberGroups(address, 1, 1)
-	if err != nil {
-		return fmt.Errorf("could not count groups of org %s: %w", address, err)
-	}
-	censuses, err := ms.CensusesByOrg(address)
-	if err != nil {
-		return fmt.Errorf("could not list censuses of org %s: %w", address, err)
-	}
-	var participants int64
-	for _, census := range censuses {
-		n, err := ms.CountCensusParticipants(census.ID.Hex())
-		if err != nil {
-			return fmt.Errorf("could not count participants of census %s: %w", census.ID.Hex(), err)
-		}
-		participants += n
-	}
-	processes, err := ms.CountProcesses(address, db.AllProcesses)
-	if err != nil {
-		return fmt.Errorf("could not count processes of org %s: %w", address, err)
-	}
-	bundles, err := ms.ProcessBundlesByOrg(address)
-	if err != nil {
-		return fmt.Errorf("could not list bundles of org %s: %w", address, err)
-	}
-	invites, err := ms.PendingInvitations(address)
-	if err != nil {
-		return fmt.Errorf("could not list invitations of org %s: %w", address, err)
-	}
-	votingProcesses, err := ms.CountVotingProcesses(address, db.AllProcesses)
-	if err != nil {
-		return fmt.Errorf("could not count voting processes of org %s: %w", address, err)
-	}
-	drafts, err := ms.CountVotingProcesses(address, db.DraftOnly)
-	if err != nil {
-		return fmt.Errorf("could not count drafts of org %s: %w", address, err)
+		return err
 	}
 	fmt.Printf("    the organization and its voting history metadata (%d processes, %d bundles)\n",
-		processes, len(bundles))
-	fmt.Printf("    %d voting processes, %d of them drafts (paid drafts are credited back first)\n",
-		votingProcesses, drafts)
-	fmt.Printf("    %d members in %d groups\n", members, groups)
-	fmt.Printf("    %d censuses with %d participants (incl. their CSP auth tokens)\n",
-		len(censuses), participants)
-	fmt.Printf("    %d pending invitations, plus import jobs\n", len(invites))
+		s.Processes, s.Bundles)
+	fmt.Printf("    %d voting processes (%d drafts; paid drafts are credited back first) with %d questions, %d API keys\n",
+		s.VotingProcesses, s.Drafts, s.Questions, s.Keys)
+	fmt.Printf("    %d members in %d groups\n", s.Members, s.Groups)
+	fmt.Printf("    %d censuses with %d participants (incl. their CSP auth tokens)\n", s.Censuses, s.Participants)
+	fmt.Printf("    %d pending invitations, plus import jobs\n", s.Invitations)
+	if s.ActiveQuestions > 0 {
+		fmt.Printf("    WARNING: %d questions are READY or PAUSED and may still be live on-chain\n", s.ActiveQuestions)
+	}
+	if s.ManagedOrgs > 0 {
+		fmt.Printf("    REFUSED: the organization manages %d organizations; erase them with orgdel first\n", s.ManagedOrgs)
+	}
 	return nil
 }
 

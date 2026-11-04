@@ -119,3 +119,15 @@ func (ms *MongoStorage) TouchAPIKey(id string, when time.Time) error {
 	_, err := ms.apiKeys.UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": bson.M{"lastUsedAt": when}})
 	return err
 }
+
+// DeleteAPIKeysByOrg removes every API key (revoked or not) of an organization and returns how
+// many were deleted.
+func (ms *MongoStorage) DeleteAPIKeysByOrg(orgAddress common.Address) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
+	defer cancel()
+	res, err := ms.apiKeys.DeleteMany(ctx, bson.M{"orgAddress": orgAddress})
+	if err != nil {
+		return 0, err
+	}
+	return res.DeletedCount, nil
+}

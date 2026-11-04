@@ -56,14 +56,15 @@ func (ms *MongoStorage) IsSoleOrgAdmin(address common.Address, userID uint64) (b
 
 // EraseUser removes a registered user and their personal data (right to
 // erasure). Organizations where the user is the sole admin are torn down
-// entirely (members, groups, censuses, participants, processes, voting processes
-// and their questions, bundles, CSP tokens, jobs, invitations); in organizations with other admins only the
+// entirely (members, groups, censuses, participants, processes, bundles, voting
+// processes, questions, API keys, CSP tokens, jobs, invitations); in organizations with other admins only the
 // user's membership is removed. Invitations addressed to or issued by the
 // user, their verification codes and the user document itself are deleted.
 // Each step is best-effort: failures are accumulated and returned joined, so a
 // single stuck collection cannot leave the erasure silently half-done. It refuses,
-// erasing nothing, while an organization it would tear down still has drafts: a
-// draft may hold money only the API layer can refund (api.DeleteOrgDrafts).
+// erasing nothing, while an organization it would tear down still has drafts (a
+// draft may hold money only the API layer can refund, api.DeleteOrgDrafts) or
+// manages other organizations.
 // Payment rows are kept: they are the audit trail of money that moved.
 func (ms *MongoStorage) EraseUser(userID uint64) (*UserErasureReport, error) {
 	user, err := ms.User(userID)
@@ -79,13 +80,8 @@ func (ms *MongoStorage) EraseUser(userID uint64) (*UserErasureReport, error) {
 		if !soleAdmin {
 			continue
 		}
-		drafts, err := ms.CountVotingProcesses(userOrg.Address, DraftOnly)
-		if err != nil {
-			return nil, fmt.Errorf("counting drafts of org %s: %w", userOrg.Address, err)
-		}
-		if drafts > 0 {
-			return nil, fmt.Errorf("org %s still has %d drafts: delete them (refunding the paid ones) first",
-				userOrg.Address, drafts)
+		if err := ms.orgTeardownBlocker(userOrg.Address); err != nil {
+			return nil, err
 		}
 	}
 	report := &UserErasureReport{UserID: user.ID, Email: user.Email}
@@ -97,8 +93,9 @@ func (ms *MongoStorage) EraseUser(userID uint64) (*UserErasureReport, error) {
 			continue
 		}
 		if soleAdmin {
-			if err := ms.eraseOrgData(userOrg.Address); err != nil {
+			if err := ms.EraseOrganizationData(userOrg.Address); err != nil {
 				errs = append(errs, fmt.Errorf("tearing down org %s: %w", userOrg.Address, err))
+				continue
 			}
 			report.DeletedOrgs = append(report.DeletedOrgs, userOrg.Address)
 			continue
@@ -143,13 +140,51 @@ func (ms *MongoStorage) deleteAllVerificationCodes(userID uint64) error {
 	return err
 }
 
-// eraseOrgData tears down every collection owned by the organization and
-// finally the organization document itself. It mirrors the cascade used by the
-// managed-organization deletion handler, minus the on-chain election guards
-// (erasure is an operator decision, not an API call). Failures are accumulated
-// so one stuck collection does not abort the rest of the teardown.
-func (ms *MongoStorage) eraseOrgData(address common.Address) error {
+// orgTeardownBlocker returns why the organization cannot be torn down yet, or nil. A draft may
+// hold money only the API layer can refund (api.DeleteOrgDrafts), and an organization it manages
+// would be left pointing at a manager that no longer exists.
+func (ms *MongoStorage) orgTeardownBlocker(address common.Address) error {
+	drafts, err := ms.CountVotingProcesses(address, DraftOnly)
+	if err != nil {
+		return fmt.Errorf("counting drafts of org %s: %w", address, err)
+	}
+	if drafts > 0 {
+		return fmt.Errorf("org %s still has %d drafts: delete them (refunding the paid ones) first", address, drafts)
+	}
+	managed, _, err := ms.ListManagedOrganizations(address, 1, 1)
+	if err != nil {
+		return fmt.Errorf("listing organizations managed by org %s: %w", address, err)
+	}
+	if managed > 0 {
+		return fmt.Errorf("org %s still manages %d organizations: delete them first", address, managed)
+	}
+	return nil
+}
+
+// EraseOrganizationData tears down every collection owned by the organization (including the
+// /processes voting processes, questions and API keys, and their CSP tokens and status) and
+// finally the organization document itself. It is the single cascade shared by user erasure and
+// the managed-organization deletion handler; callers run any on-chain election guards beforehand
+// (erasure is an operator decision, not an API call). It refuses, erasing nothing, while the
+// organization has drafts or manages other organizations. Users are unlinked and API keys deleted
+// first, so nothing new is created in the organization while the rest goes. Failures are
+// accumulated so one stuck collection does not abort the rest of the teardown; a collection whose
+// listing failed is kept, so the rows anchored on it can still be found, and so is the
+// organization document, so a second call can finish the job.
+func (ms *MongoStorage) EraseOrganizationData(address common.Address) error {
+	if address.Cmp(common.Address{}) == 0 {
+		return ErrInvalidData
+	}
+	if err := ms.orgTeardownBlocker(address); err != nil {
+		return err
+	}
 	var errs []error
+	if err := ms.RemoveOrganizationFromAllUsers(address); err != nil {
+		errs = append(errs, fmt.Errorf("unlinking organization from users: %w", err))
+	}
+	if _, err := ms.DeleteAPIKeysByOrg(address); err != nil {
+		errs = append(errs, fmt.Errorf("deleting API keys: %w", err))
+	}
 	// a managed organization's spending under its integrator's cap goes with it, as a managed
 	// organization's deletion drops it
 	if org, err := ms.Organization(address); err != nil {
@@ -159,9 +194,9 @@ func (ms *MongoStorage) eraseOrgData(address common.Address) error {
 			errs = append(errs, fmt.Errorf("dropping managed organization spend: %w", err))
 		}
 	}
-	bundles, err := ms.ProcessBundlesByOrg(address)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("listing process bundles: %w", err))
+	bundles, bundlesErr := ms.ProcessBundlesByOrg(address)
+	if bundlesErr != nil {
+		errs = append(errs, fmt.Errorf("listing process bundles: %w", bundlesErr))
 	}
 	for _, b := range bundles {
 		// match the encoding used by csp/handlers parseBundleID (hex-decoded ObjectID bytes)
@@ -174,9 +209,40 @@ func (ms *MongoStorage) eraseOrgData(address common.Address) error {
 			errs = append(errs, fmt.Errorf("deleting CSP auth tokens of bundle %s: %w", b.ID.Hex(), err))
 		}
 	}
-	published, err := ms.AllProcessesByOrg(address, PublishedOnly)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("listing published processes: %w", err))
+	// /processes: CSP tokens are anchored on the voting process id (ObjectID bytes) and the CSP
+	// status is keyed by each question's upstream id. List before deleting what the listing reads.
+	votingIDs, votingErr := ms.VotingProcessIDsByOrg(address)
+	if votingErr != nil {
+		errs = append(errs, fmt.Errorf("listing voting processes: %w", votingErr))
+	}
+	for _, id := range votingIDs {
+		if _, err := ms.DeleteCSPAuthByAnchor(internal.HexBytes(id[:])); err != nil {
+			errs = append(errs, fmt.Errorf("deleting CSP auth tokens of voting process %s: %w", id.Hex(), err))
+		}
+	}
+	upstreamIDs, upstreamErr := ms.QuestionUpstreamIDsByOrg(address)
+	if upstreamErr != nil {
+		errs = append(errs, fmt.Errorf("listing question upstream ids: %w", upstreamErr))
+	}
+	for _, id := range upstreamIDs {
+		if _, err := ms.DeleteCSPProcessByProcess(id); err != nil {
+			errs = append(errs, fmt.Errorf("deleting CSP status of question %s: %w", id.String(), err))
+		}
+	}
+	if upstreamErr == nil {
+		if _, err := ms.DeleteQuestionsByOrg(address); err != nil {
+			errs = append(errs, fmt.Errorf("deleting questions: %w", err))
+		}
+	}
+	// DeleteVotingProcessesByOrg deletes the questions too
+	if votingErr == nil && upstreamErr == nil {
+		if _, err := ms.DeleteVotingProcessesByOrg(address); err != nil {
+			errs = append(errs, fmt.Errorf("deleting voting processes: %w", err))
+		}
+	}
+	published, publishedErr := ms.AllProcessesByOrg(address, PublishedOnly)
+	if publishedErr != nil {
+		errs = append(errs, fmt.Errorf("listing published processes: %w", publishedErr))
 	}
 	for _, p := range published {
 		if p.Address.Equals(nil) {
@@ -186,8 +252,10 @@ func (ms *MongoStorage) eraseOrgData(address common.Address) error {
 			errs = append(errs, fmt.Errorf("deleting CSP status of process %s: %w", p.Address.String(), err))
 		}
 	}
-	if _, err := ms.DeleteProcessBundlesByOrg(address); err != nil {
-		errs = append(errs, fmt.Errorf("deleting process bundles: %w", err))
+	if bundlesErr == nil {
+		if _, err := ms.DeleteProcessBundlesByOrg(address); err != nil {
+			errs = append(errs, fmt.Errorf("deleting process bundles: %w", err))
+		}
 	}
 	censuses, err := ms.CensusesByOrg(address)
 	if err != nil {
@@ -201,12 +269,10 @@ func (ms *MongoStorage) eraseOrgData(address common.Address) error {
 			errs = append(errs, fmt.Errorf("deleting census %s: %w", c.ID.Hex(), err))
 		}
 	}
-	if _, err := ms.DeleteProcessesByOrg(address); err != nil {
-		errs = append(errs, fmt.Errorf("deleting processes: %w", err))
-	}
-	// published voting processes and their questions; EraseUser refused while drafts remained
-	if _, err := ms.DeleteVotingProcessesByOrg(address); err != nil {
-		errs = append(errs, fmt.Errorf("deleting voting processes: %w", err))
+	if publishedErr == nil {
+		if _, err := ms.DeleteProcessesByOrg(address); err != nil {
+			errs = append(errs, fmt.Errorf("deleting processes: %w", err))
+		}
 	}
 	if _, err := ms.DeleteAllOrgMemberGroups(address); err != nil {
 		errs = append(errs, fmt.Errorf("deleting member groups: %w", err))
@@ -225,11 +291,103 @@ func (ms *MongoStorage) eraseOrgData(address common.Address) error {
 	if _, err := ms.DeleteInvitationsByOrg(address); err != nil {
 		errs = append(errs, fmt.Errorf("deleting invitations: %w", err))
 	}
-	if err := ms.RemoveOrganizationFromAllUsers(address); err != nil {
-		errs = append(errs, fmt.Errorf("unlinking organization from users: %w", err))
+	// the organization document goes only once everything else did, so a retry can find it
+	if len(errs) > 0 {
+		return errors.Join(errs...)
 	}
 	if err := ms.DelOrganization(&Organization{Address: address}); err != nil {
-		errs = append(errs, fmt.Errorf("deleting organization document: %w", err))
+		return fmt.Errorf("deleting organization document: %w", err)
 	}
-	return errors.Join(errs...)
+	return nil
+}
+
+// OrgDataSummary counts the data an organization teardown would remove.
+type OrgDataSummary struct {
+	Members, Groups, Censuses, Participants                   int64
+	Processes, Bundles, Invitations                           int64
+	VotingProcesses, Drafts, Questions, ActiveQuestions, Keys int64
+	// MidPublish and LegacyPublished overlap the counts above (a forced teardown removes them too)
+	// and ManagedOrgs is never removed: all three flag a teardown that should not run (see
+	// OrganizationDataSummary).
+	MidPublish, LegacyPublished, ManagedOrgs int64
+}
+
+// OrganizationDataSummary counts the data EraseOrganizationData would remove.
+// ActiveQuestions are those whose stored status is READY or PAUSED (possibly live on-chain).
+// MidPublish are drafts a publish holds or has mined elections for, LegacyPublished the published
+// legacy /process elections (possibly live on-chain too), and ManagedOrgs the organizations it
+// manages, which make EraseOrganizationData refuse. Stored state only: the chain is not read.
+func (ms *MongoStorage) OrganizationDataSummary(address common.Address) (*OrgDataSummary, error) {
+	s := &OrgDataSummary{}
+	var err error
+	if s.Members, err = ms.CountOrgMembers(address); err != nil {
+		return nil, fmt.Errorf("could not count members of org %s: %w", address, err)
+	}
+	if s.Groups, _, err = ms.OrganizationMemberGroups(address, 1, 1); err != nil {
+		return nil, fmt.Errorf("could not count groups of org %s: %w", address, err)
+	}
+	censuses, err := ms.CensusesByOrg(address)
+	if err != nil {
+		return nil, fmt.Errorf("could not list censuses of org %s: %w", address, err)
+	}
+	s.Censuses = int64(len(censuses))
+	for _, census := range censuses {
+		n, err := ms.CountCensusParticipants(census.ID.Hex())
+		if err != nil {
+			return nil, fmt.Errorf("could not count participants of census %s: %w", census.ID.Hex(), err)
+		}
+		s.Participants += n
+	}
+	if s.Processes, err = ms.CountProcesses(address, AllProcesses); err != nil {
+		return nil, fmt.Errorf("could not count processes of org %s: %w", address, err)
+	}
+	bundles, err := ms.ProcessBundlesByOrg(address)
+	if err != nil {
+		return nil, fmt.Errorf("could not list bundles of org %s: %w", address, err)
+	}
+	s.Bundles = int64(len(bundles))
+	invites, err := ms.PendingInvitations(address)
+	if err != nil {
+		return nil, fmt.Errorf("could not list invitations of org %s: %w", address, err)
+	}
+	s.Invitations = int64(len(invites))
+	if s.VotingProcesses, err = ms.CountVotingProcesses(address, AllProcesses); err != nil {
+		return nil, fmt.Errorf("could not count voting processes of org %s: %w", address, err)
+	}
+	if s.Drafts, err = ms.CountVotingProcesses(address, DraftOnly); err != nil {
+		return nil, fmt.Errorf("could not count drafts of org %s: %w", address, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	if s.Questions, err = ms.processesQuestions.CountDocuments(ctx, bson.M{"orgAddress": address}); err != nil {
+		return nil, fmt.Errorf("could not count questions of org %s: %w", address, err)
+	}
+	if s.ActiveQuestions, err = ms.processesQuestions.CountDocuments(ctx, bson.M{
+		"orgAddress": address,
+		"status":     bson.M{"$in": []string{QuestionStatusReady, QuestionStatusPaused}},
+	}); err != nil {
+		return nil, fmt.Errorf("could not count active questions of org %s: %w", address, err)
+	}
+	if s.MidPublish, err = ms.votingProcesses.CountDocuments(ctx, bson.M{
+		"orgAddress": address,
+		"published":  false,
+		"$or": bson.A{
+			bson.M{"publishing": bson.M{"$exists": true}},
+			bson.M{"hasMinedElections": true},
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("could not count processes being published of org %s: %w", address, err)
+	}
+	if s.LegacyPublished, err = ms.CountProcesses(address, PublishedOnly); err != nil {
+		return nil, fmt.Errorf("could not count published processes of org %s: %w", address, err)
+	}
+	if s.ManagedOrgs, _, err = ms.ListManagedOrganizations(address, 1, 1); err != nil {
+		return nil, fmt.Errorf("could not count organizations managed by org %s: %w", address, err)
+	}
+	keys, err := ms.APIKeysByOrg(address)
+	if err != nil {
+		return nil, fmt.Errorf("could not list api keys of org %s: %w", address, err)
+	}
+	s.Keys = int64(len(keys))
+	return s, nil
 }

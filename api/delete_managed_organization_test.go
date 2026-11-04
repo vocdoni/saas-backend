@@ -146,11 +146,14 @@ func TestDeleteManagedOrgQuestionGuard(t *testing.T) {
 		Title: db.MultiLangString{"default": "Guard process"}, //nolint:goconst
 	})
 	c.Assert(err, qt.IsNil)
-	_, err = testDB.SetQuestion(&db.VotingProcessQuestion{
+	qID, err := testDB.SetQuestion(&db.VotingProcessQuestion{
 		ProcessID: vpID, OrgAddress: managed.Address, Order: 0,
 		Title: db.MultiLangString{"default": "Q"}, UpstreamID: election, Status: db.QuestionStatusReady,
 	})
 	c.Assert(err, qt.IsNil)
+	c.Assert(testDB.SetAPIKey(&db.APIKey{
+		ID: "qguard-key", OrgAddress: managed.Address, Hash: "qguard-hash", Label: "k",
+	}), qt.IsNil)
 
 	// READY question election → blocked with 409, nothing deleted.
 	_, code := testRequest(t, http.MethodDelete, token, nil, "integrator", "organizations", managed.Address.String())
@@ -165,6 +168,15 @@ func TestDeleteManagedOrgQuestionGuard(t *testing.T) {
 		t, http.MethodDelete, token, nil, "integrator", "organizations", managed.Address.String(),
 	)
 	c.Assert(resp.Address, qt.Equals, managed.Address.String())
+
+	// the /processes data and the API key are erased with the org.
+	_, err = testDB.VotingProcess(vpID)
+	c.Assert(err, qt.ErrorIs, db.ErrNotFound)
+	_, err = testDB.Question(qID)
+	c.Assert(err, qt.ErrorIs, db.ErrNotFound)
+	keys, err := testDB.APIKeysByOrg(managed.Address)
+	c.Assert(err, qt.IsNil)
+	c.Assert(keys, qt.HasLen, 0)
 }
 
 // enableProcessPlan subscribes the managed org to a process-capable plan so publish is allowed.

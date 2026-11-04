@@ -71,8 +71,9 @@ func TestDeleteDrafts(t *testing.T) {
 
 // TestEraseIntegratorWithManagedOrgs: erasing the sole admin of an integrator and of one of its
 // managed organizations deletes every draft before printing any balance, so the integrator's
-// balance printed already holds the credit-back of the managed organization's paid draft; and the
-// managed organization's spending under the integrator's cap goes with it.
+// balance printed already holds the credit-back of the managed organization's paid draft. The user
+// erasure refuses while the integrator still manages that organization, and once it is erased its
+// spending under the integrator's cap is gone.
 func TestEraseIntegratorWithManagedOrgs(t *testing.T) {
 	c := qt.New(t)
 	ctx := context.Background()
@@ -109,10 +110,18 @@ func TestEraseIntegratorWithManagedOrgs(t *testing.T) {
 		ManagedOrg: managed,
 	}), qt.IsNil)
 
+	// the run refuses before any draft goes while the integrator manages the other organization
+	c.Assert(refuseManagingOrgs(ms, user), qt.ErrorMatches, ".*manages 1 organizations.*")
+
 	var out bytes.Buffer
 	c.Assert(deleteDrafts(&out, ms, user), qt.IsNil)
 	c.Assert(out.String(), qt.Contains, "org "+integrator.String()+"\n    wallet balance: 10000 eur cents")
 
+	// the integrator still manages the other organization: refused, erasing nothing; erasing the
+	// managed organization first lets it through
+	_, err = ms.EraseUser(user.ID)
+	c.Assert(err, qt.ErrorMatches, ".*still manages 1 organizations.*")
+	c.Assert(ms.EraseOrganizationData(managed), qt.IsNil)
 	_, err = ms.EraseUser(user.ID)
 	c.Assert(err, qt.IsNil)
 	wallet, err := ms.Wallet(integrator)

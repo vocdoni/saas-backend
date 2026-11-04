@@ -67,8 +67,8 @@ func (ms *MongoStorage) SetVotingProcessDraft(vp *VotingProcess, seen time.Time)
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
-	// the organization may have been torn down since the caller read the process, so this is
-	// checked here exactly as in SetVotingProcess rather than assumed from the caller
+	// the organization may be deleted concurrently or by a teardown (which is not atomic), so
+	// this is checked here exactly as in SetVotingProcess rather than assumed from the caller
 	if _, err := ms.Organization(vp.OrgAddress); err != nil {
 		return fmt.Errorf("failed to get organization %s: %w", vp.OrgAddress, err)
 	}
@@ -486,4 +486,28 @@ func (ms *MongoStorage) SetVotingProcessPublished(id bson.ObjectID, owner string
 		return ErrNotFound
 	}
 	return nil
+}
+
+// VotingProcessIDsByOrg returns the ids of every voting process (draft or published) of an
+// organization.
+func (ms *MongoStorage) VotingProcessIDsByOrg(orgAddress common.Address) ([]bson.ObjectID, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
+	defer cancel()
+	cursor, err := ms.votingProcesses.Find(ctx, bson.M{"orgAddress": orgAddress},
+		options.Find().SetProjection(bson.M{"_id": 1}))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list voting process ids by organization: %w", err)
+	}
+	defer func() { _ = cursor.Close(ctx) }()
+	var rows []struct {
+		ID bson.ObjectID `bson:"_id"`
+	}
+	if err := cursor.All(ctx, &rows); err != nil {
+		return nil, fmt.Errorf("failed to decode voting process ids: %w", err)
+	}
+	ids := make([]bson.ObjectID, 0, len(rows))
+	for _, r := range rows {
+		ids = append(ids, r.ID)
+	}
+	return ids, nil
 }

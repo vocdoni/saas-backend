@@ -1,11 +1,14 @@
 package db
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // TestEraseUser covers the right-to-erasure cascade: an org where the user is
@@ -101,4 +104,229 @@ func TestEraseUser(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(usersB, qt.HasLen, 1)
 	c.Assert(usersB[0].ID, qt.Equals, otherID)
+}
+
+// seedProcessesData gives the organization a published voting process with two questions (one published,
+// with an upstream id), a CSP auth anchored on the process, the CSP status of the upstream id and
+// an API key. It returns the process id, the upstream id and the CSP token.
+func seedProcessesData(t *testing.T, org common.Address, tag byte) (pid bson.ObjectID, upstream, token internal.HexBytes) {
+	t.Helper()
+	c := qt.New(t)
+	c.Assert(testDB.SetOrganization(&Organization{Address: org, Country: "ES"}), qt.IsNil)
+	pid, err := testDB.SetVotingProcess(&VotingProcess{OrgAddress: org, Published: true})
+	c.Assert(err, qt.IsNil)
+	upstream = internal.HexBytes{0xAA, tag}
+	_, err = testDB.SetQuestion(&VotingProcessQuestion{ProcessID: pid, OrgAddress: org, Order: 0, UpstreamID: upstream})
+	c.Assert(err, qt.IsNil)
+	_, err = testDB.SetQuestion(&VotingProcessQuestion{ProcessID: pid, OrgAddress: org, Order: 1})
+	c.Assert(err, qt.IsNil)
+	token = internal.HexBytes{0xBB, tag}
+	c.Assert(testDB.SetCSPAuth(token, internal.HexBytes{0xCC, tag}, internal.HexBytes(pid[:]), "secret"), qt.IsNil)
+	c.Assert(testDB.ConsumeCSPProcess(token, upstream, internal.HexBytes{0xDD, tag}), qt.IsNil)
+	c.Assert(testDB.SetAPIKey(&APIKey{ID: "key-" + org.Hex(), OrgAddress: org, Hash: "hash-" + org.Hex()}), qt.IsNil)
+	return pid, upstream, token
+}
+
+// TestEraseOrganizationDataProcesses checks the teardown removes the /processes data (voting
+// processes, questions, their CSP tokens and status, API keys) of the organization only.
+func TestEraseOrganizationDataProcesses(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	orgA, orgB := common.Address{0x1A}, common.Address{0x1B}
+	pidA, upA, tokenA := seedProcessesData(t, orgA, 1)
+	pidB, upB, tokenB := seedProcessesData(t, orgB, 2)
+
+	// the zero address is rejected before anything is deleted
+	c.Assert(testDB.EraseOrganizationData(common.Address{}), qt.Equals, ErrInvalidData)
+
+	c.Assert(testDB.EraseOrganizationData(orgA), qt.IsNil)
+
+	// org A: everything is gone
+	_, err := testDB.VotingProcess(pidA)
+	c.Assert(err, qt.Equals, ErrNotFound)
+	qsA, err := testDB.QuestionsByProcess(pidA)
+	c.Assert(err, qt.IsNil)
+	c.Assert(qsA, qt.HasLen, 0)
+	_, err = testDB.CSPAuth(tokenA)
+	c.Assert(err, qt.Equals, ErrTokenNotFound)
+	statusA, err := testDB.cspTokensStatus.CountDocuments(context.Background(), bson.M{"processid": upA})
+	c.Assert(err, qt.IsNil)
+	c.Assert(statusA, qt.Equals, int64(0))
+	keysA, err := testDB.APIKeysByOrg(orgA)
+	c.Assert(err, qt.IsNil)
+	c.Assert(keysA, qt.HasLen, 0)
+
+	// org B: untouched
+	_, err = testDB.VotingProcess(pidB)
+	c.Assert(err, qt.IsNil)
+	qsB, err := testDB.QuestionsByProcess(pidB)
+	c.Assert(err, qt.IsNil)
+	c.Assert(qsB, qt.HasLen, 2)
+	_, err = testDB.CSPAuth(tokenB)
+	c.Assert(err, qt.IsNil)
+	statusB, err := testDB.cspTokensStatus.CountDocuments(context.Background(), bson.M{"processid": upB})
+	c.Assert(err, qt.IsNil)
+	c.Assert(statusB, qt.Equals, int64(1))
+	keysB, err := testDB.APIKeysByOrg(orgB)
+	c.Assert(err, qt.IsNil)
+	c.Assert(keysB, qt.HasLen, 1)
+}
+
+func TestOrganizationDataSummary(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	orgA, orgB := common.Address{0x2A}, common.Address{0x2B}
+	pidA, _, _ := seedProcessesData(t, orgA, 1)
+	seedProcessesData(t, orgB, 2)
+	_, err := testDB.SetQuestion(&VotingProcessQuestion{
+		ProcessID: pidA, OrgAddress: orgA, Order: 2, Status: QuestionStatusPaused,
+	})
+	c.Assert(err, qt.IsNil)
+
+	// a draft being published, a draft with mined elections, a plain draft, a published legacy
+	// /process and an organization orgA manages
+	_, err = testDB.SetVotingProcess(&VotingProcess{OrgAddress: orgA, Publishing: time.Now()})
+	c.Assert(err, qt.IsNil)
+	_, err = testDB.SetVotingProcess(&VotingProcess{OrgAddress: orgA, HasMinedElections: true})
+	c.Assert(err, qt.IsNil)
+	_, err = testDB.SetVotingProcess(&VotingProcess{OrgAddress: orgA})
+	c.Assert(err, qt.IsNil)
+	_, err = testDB.processes.InsertOne(context.Background(), bson.M{"_id": "legacy", "orgAddress": orgA, "address": "aabb"})
+	c.Assert(err, qt.IsNil)
+	c.Assert(testDB.SetOrganization(&Organization{Address: common.Address{0x2C}, ManagedBy: orgA}), qt.IsNil)
+
+	s, err := testDB.OrganizationDataSummary(orgA)
+	c.Assert(err, qt.IsNil)
+	c.Assert(s.VotingProcesses, qt.Equals, int64(4))
+	c.Assert(s.Drafts, qt.Equals, int64(3))
+	c.Assert(s.Questions, qt.Equals, int64(3))
+	c.Assert(s.Keys, qt.Equals, int64(1))
+	c.Assert(s.ActiveQuestions, qt.Equals, int64(1))
+	c.Assert(s.MidPublish, qt.Equals, int64(2))
+	c.Assert(s.LegacyPublished, qt.Equals, int64(1))
+	c.Assert(s.ManagedOrgs, qt.Equals, int64(1))
+}
+
+// TestEraseOrganizationDataRefuses: an organization with drafts, or managing others, is refused
+// before anything is erased (its API key and its users' links stay), and so is the erasure of a
+// user who is the sole admin of an organization managing others.
+func TestEraseOrganizationDataRefuses(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	user := &User{Email: "refuse@test.com", Password: "pass", FirstName: "Re", LastName: "Fuse", Verified: true}
+	userID, err := testDB.SetUser(user)
+	c.Assert(err, qt.IsNil)
+	withDraft, integrator, managed := common.Address{0x3A}, common.Address{0x3B}, common.Address{0x3C}
+	user.ID = userID
+	user.Organizations = []OrganizationUser{{Address: withDraft, Role: AdminRole}, {Address: integrator, Role: AdminRole}}
+	_, err = testDB.SetUser(user)
+	c.Assert(err, qt.IsNil)
+	seedProcessesData(t, withDraft, 3)
+	draftID, err := testDB.SetVotingProcess(&VotingProcess{OrgAddress: withDraft})
+	c.Assert(err, qt.IsNil)
+	seedProcessesData(t, integrator, 4)
+	c.Assert(testDB.SetOrganization(&Organization{Address: managed, Country: "ES", ManagedBy: integrator}), qt.IsNil)
+
+	c.Assert(testDB.EraseOrganizationData(withDraft), qt.ErrorMatches, ".*still has 1 drafts.*")
+	c.Assert(testDB.EraseOrganizationData(integrator), qt.ErrorMatches, ".*still manages 1 organizations.*")
+	for _, org := range []common.Address{withDraft, integrator} {
+		_, err = testDB.Organization(org)
+		c.Assert(err, qt.IsNil)
+		keys, err := testDB.APIKeysByOrg(org)
+		c.Assert(err, qt.IsNil)
+		c.Assert(keys, qt.HasLen, 1)
+	}
+	stored, err := testDB.User(userID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(stored.Organizations, qt.HasLen, 2)
+
+	// the draft goes: the user erasure still refuses, on the organization the user's integrator manages
+	c.Assert(testDB.DeleteVotingProcess(draftID), qt.IsNil)
+	_, err = testDB.EraseUser(userID)
+	c.Assert(err, qt.ErrorMatches, ".*still manages 1 organizations.*")
+	_, err = testDB.User(userID)
+	c.Assert(err, qt.IsNil)
+	_, err = testDB.Organization(withDraft)
+	c.Assert(err, qt.IsNil)
+}
+
+// TestEraseOrganizationDataKeepsWhatItCannotList: when the voting process ids or the question
+// upstream ids cannot be listed, the collection that listing reads is kept (so the CSP rows
+// anchored on it can still be found), and so is the organization document; users are unlinked and
+// API keys deleted regardless. Once the listing works again a second call finishes the job.
+func TestEraseOrganizationDataKeepsWhatItCannotList(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	ctx := context.Background()
+
+	user := &User{Email: "keep@test.com", Password: "pass", FirstName: "Ke", LastName: "Ep", Verified: true}
+	userID, err := testDB.SetUser(user)
+	c.Assert(err, qt.IsNil)
+	orgV, orgQ := common.Address{0x4A}, common.Address{0x4B}
+	user.ID = userID
+	user.Organizations = []OrganizationUser{{Address: orgV, Role: AdminRole}, {Address: orgQ, Role: AdminRole}}
+	_, err = testDB.SetUser(user)
+	c.Assert(err, qt.IsNil)
+	pidV, _, tokenV := seedProcessesData(t, orgV, 5)
+	pidQ, _, _ := seedProcessesData(t, orgQ, 6)
+
+	// a voting process whose id does not decode breaks VotingProcessIDsByOrg
+	_, err = testDB.votingProcesses.InsertOne(ctx, bson.M{"_id": "bad-id", "orgAddress": orgV, "published": true})
+	c.Assert(err, qt.IsNil)
+	c.Assert(testDB.EraseOrganizationData(orgV), qt.ErrorMatches, "(?s).*listing voting processes.*")
+	_, err = testDB.VotingProcess(pidV)
+	c.Assert(err, qt.IsNil)
+	_, err = testDB.CSPAuth(tokenV)
+	c.Assert(err, qt.IsNil)
+	qs, err := testDB.QuestionsByProcess(pidV)
+	c.Assert(err, qt.IsNil)
+	c.Assert(qs, qt.HasLen, 0) // the upstream ids listed fine, so the questions went
+	_, err = testDB.Organization(orgV)
+	c.Assert(err, qt.IsNil)
+	keys, err := testDB.APIKeysByOrg(orgV)
+	c.Assert(err, qt.IsNil)
+	c.Assert(keys, qt.HasLen, 0)
+	stored, err := testDB.User(userID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(stored.Organizations, qt.DeepEquals, []OrganizationUser{{Address: orgQ, Role: AdminRole}})
+
+	_, err = testDB.votingProcesses.DeleteOne(ctx, bson.M{"_id": "bad-id"})
+	c.Assert(err, qt.IsNil)
+	c.Assert(testDB.EraseOrganizationData(orgV), qt.IsNil)
+	_, err = testDB.VotingProcess(pidV)
+	c.Assert(err, qt.Equals, ErrNotFound)
+	_, err = testDB.CSPAuth(tokenV)
+	c.Assert(err, qt.Equals, ErrTokenNotFound)
+	_, err = testDB.Organization(orgV)
+	c.Assert(err, qt.Equals, ErrNotFound)
+
+	// a question whose upstream id does not decode breaks QuestionUpstreamIDsByOrg: the questions
+	// and the voting processes (whose bulk delete takes the questions too) are kept
+	badQ := bson.NewObjectID()
+	_, err = testDB.processesQuestions.InsertOne(ctx, bson.M{"_id": badQ, "orgAddress": orgQ, "upstreamId": "not-hex"})
+	c.Assert(err, qt.IsNil)
+	c.Assert(testDB.EraseOrganizationData(orgQ), qt.ErrorMatches, "(?s).*listing question upstream ids.*")
+	_, err = testDB.VotingProcess(pidQ)
+	c.Assert(err, qt.IsNil)
+	qs, err = testDB.QuestionsByProcess(pidQ)
+	c.Assert(err, qt.IsNil)
+	c.Assert(qs, qt.HasLen, 2)
+	_, err = testDB.Organization(orgQ)
+	c.Assert(err, qt.IsNil)
+
+	_, err = testDB.processesQuestions.DeleteOne(ctx, bson.M{"_id": badQ})
+	c.Assert(err, qt.IsNil)
+	c.Assert(testDB.EraseOrganizationData(orgQ), qt.IsNil)
+	_, err = testDB.VotingProcess(pidQ)
+	c.Assert(err, qt.Equals, ErrNotFound)
+	_, err = testDB.Organization(orgQ)
+	c.Assert(err, qt.Equals, ErrNotFound)
+
+	// both organizations were unlinked from the user
+	stored, err = testDB.User(userID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(stored.Organizations, qt.HasLen, 0)
 }

@@ -409,3 +409,43 @@ func (ms *MongoStorage) SetQuestionEligibleMemberIDs(
 	}
 	return res.MatchedCount == 1, nil
 }
+
+// QuestionUpstreamIDsByOrg returns the on-chain election id of every published question of an
+// organization (questions without an upstream id are skipped).
+func (ms *MongoStorage) QuestionUpstreamIDsByOrg(orgAddress common.Address) ([]internal.HexBytes, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
+	defer cancel()
+	cursor, err := ms.processesQuestions.Find(ctx,
+		bson.M{"orgAddress": orgAddress, "upstreamId": bson.M{"$exists": true, "$ne": nil}},
+		options.Find().SetProjection(bson.M{"upstreamId": 1}))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list question upstream ids by organization: %w", err)
+	}
+	defer func() { _ = cursor.Close(ctx) }()
+	var rows []struct {
+		UpstreamID internal.HexBytes `bson:"upstreamId"`
+	}
+	if err := cursor.All(ctx, &rows); err != nil {
+		return nil, fmt.Errorf("failed to decode question upstream ids: %w", err)
+	}
+	ids := make([]internal.HexBytes, 0, len(rows))
+	for _, r := range rows {
+		if len(r.UpstreamID) > 0 {
+			ids = append(ids, r.UpstreamID)
+		}
+	}
+	return ids, nil
+}
+
+// DeleteQuestionsByOrg removes every question of an organization and returns how many were deleted.
+func (ms *MongoStorage) DeleteQuestionsByOrg(orgAddress common.Address) (int64, error) {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
+	defer cancel()
+	res, err := ms.processesQuestions.DeleteMany(ctx, bson.M{"orgAddress": orgAddress})
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete questions by organization: %w", err)
+	}
+	return res.DeletedCount, nil
+}
