@@ -9,6 +9,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/api"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/pricing"
 	"github.com/vocdoni/saas-backend/test"
@@ -370,5 +371,102 @@ func TestDeleteDraftsCreditsWithheldAddOnBack(t *testing.T) {
 			c.Assert(err, qt.IsNil)
 			c.Assert(state.PaidCents, qt.Equals, pricing.Cents(0))
 		})
+	}
+}
+
+// TestDeleteUserOrgDrafts: only the drafts of the organizations the erasure tears down go, a paid
+// one credited back to the wallet that paid it, and the balances returned are those wallets'; a
+// blocked erasure deletes no draft.
+func TestDeleteUserOrgDrafts(t *testing.T) {
+	c := qt.New(t)
+	ctx := context.Background()
+	container, err := test.StartMongoContainer(ctx)
+	c.Assert(err, qt.IsNil)
+	c.Cleanup(func() { c.Assert(container.Terminate(ctx), qt.IsNil) })
+	uri, err := container.ConnectionString(ctx)
+	c.Assert(err, qt.IsNil)
+	ms, err := db.New(uri, test.RandomDatabaseName())
+	c.Assert(err, qt.IsNil)
+	c.Cleanup(ms.Close)
+
+	solo, shared := common.Address{0x71}, common.Address{0x72}
+	user := &db.User{
+		Email: "userdel-only@test.com", Password: "pass", FirstName: "User", LastName: "Del", Verified: true,
+		Organizations: []db.OrganizationUser{{Address: solo, Role: db.AdminRole}, {Address: shared, Role: db.AdminRole}},
+	}
+	user.ID, err = ms.SetUser(user)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ms.SetOrganization(&db.Organization{Address: solo, Creator: user.Email, Country: "ES"}), qt.IsNil)
+	c.Assert(ms.SetOrganization(&db.Organization{Address: shared, Creator: user.Email, Country: "ES"}), qt.IsNil)
+	_, err = ms.SetUser(&db.User{
+		Email: "userdel-other@test.com", Password: "pass", FirstName: "Oth", LastName: "Er", Verified: true,
+		Organizations: []db.OrganizationUser{{Address: shared, Role: db.AdminRole}},
+	})
+	c.Assert(err, qt.IsNil)
+
+	// solo's draft paid 2 000 from its wallet of 10 000; shared's draft is not the erasure's to delete
+	c.Assert(ms.CreditWallet(db.WalletCredit{
+		OrgAddress: solo, AmountCents: 10_000, IdempotencyKey: "cs_userdel_only",
+	}), qt.IsNil)
+	paid, err := ms.SetVotingProcess(&db.VotingProcess{OrgAddress: solo})
+	c.Assert(err, qt.IsNil)
+	c.Assert(ms.DebitWalletForProcess(db.WalletDebit{
+		OrgAddress: solo, ProcessID: paid, ProcessOrgAddress: solo, AmountCents: 2_000, PriceCents: 2_000,
+	}), qt.IsNil)
+	sharedDraft, err := ms.SetVotingProcess(&db.VotingProcess{OrgAddress: shared})
+	c.Assert(err, qt.IsNil)
+
+	// a sub-org of solo would survive: the erasure is blocked and no draft goes
+	child := common.Address{0x73}
+	c.Assert(ms.SetOrganization(&db.Organization{Address: child, Parent: solo, Country: "ES"}), qt.IsNil)
+	_, err = api.DeleteUserOrgDrafts(ms, user.ID)
+	c.Assert(err, qt.ErrorMatches, ".*would survive.*")
+	_, err = ms.VotingProcess(paid)
+	c.Assert(err, qt.IsNil)
+
+	c.Assert(ms.DelOrganization(&db.Organization{Address: child}), qt.IsNil)
+	balances, err := api.DeleteUserOrgDrafts(ms, user.ID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(balances, qt.DeepEquals, map[common.Address]int64{solo: 10_000})
+	_, err = ms.VotingProcess(paid)
+	c.Assert(err, qt.Equals, db.ErrNotFound)
+	_, err = ms.VotingProcess(sharedDraft)
+	c.Assert(err, qt.IsNil)
+}
+
+// TestPrintPlan: the dry-run report is rendered from the erasure plan, API keys and blocking
+// sub-orgs included.
+func TestPrintPlan(t *testing.T) {
+	c := qt.New(t)
+	solo, shared, child := common.Address{0x81}, common.Address{0x82}, common.Address{0x83}
+	var out bytes.Buffer
+	printPlan(&out, &db.UserErasurePlan{
+		UserID: 7, Name: "User Del", Email: "userdel-plan@test.com",
+		Orgs: []db.ErasurePlanOrg{
+			{
+				Address: solo, Name: "Solo", Role: db.AdminRole, DeletedEntirely: true,
+				LegacyProcesses: 1, Bundles: 2, VotingProcesses: 3, Drafts: 1, Members: 4, Groups: 1,
+				Censuses: 2, CensusParticipants: 5, PendingInvitations: 1, APIKeys: 2,
+				SurvivingChildren: []common.Address{child},
+			},
+			{Address: shared, Role: db.ManagerRole, CreatorEmailRetained: true},
+		},
+		Blocked: []common.Address{solo},
+	})
+	for _, want := range []string{
+		"This will erase user #7: User Del <userdel-plan@test.com>",
+		"Organization " + solo.String() + " (\"Solo\", role: admin)\n  DELETED ENTIRELY",
+		"    the organization and its voting history metadata (1 processes, 2 bundles)\n",
+		"    3 voting processes, 1 of them drafts (paid drafts are credited back first)\n",
+		"    4 members in 1 groups\n",
+		"    2 censuses with 5 participants (incl. their CSP auth tokens)\n",
+		"    1 pending invitations, plus import jobs\n    2 API keys\n",
+		"  BLOCKED: these sub-orgs or managed orgs would survive it; delete them or move them first:\n    " +
+			child.String() + "\n",
+		"Organization " + shared.String() + " (\"unnamed\", role: manager)\n  KEPT",
+		"  NOTE: the creator email stays",
+		"Not touched: Stripe billing data and database backups.",
+	} {
+		c.Assert(out.String(), qt.Contains, want)
 	}
 }
