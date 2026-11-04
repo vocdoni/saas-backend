@@ -6,25 +6,58 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/pricing"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/proto/build/go/models"
 )
 
-// maxPublishRounds bounds how many times the publish worker re-batches the not-yet-confirmed
-// questions before giving up and abandoning the attempt (questions are then regenerated from
-// scratch on the next publish).
+// maxPublishRounds bounds how many times one publish attempt re-batches the not-yet-confirmed
+// questions. Running out is a transient failure: the attempt is retried (publishRetryAttempts),
+// keeping the questions already mined.
 const maxPublishRounds = 3
+
+// publishRetryAttempts bounds how many times the service retries a publish that failed for a
+// transient reason (the chain or the tx queue, never the draft) before it gives up: abandons the
+// attempt and credits the payer's wallet back.
+const publishRetryAttempts = 5
+
+// publishRetryBackoff is the delay before the first retry; each further retry doubles it (5s, 10s,
+// 20s, 40s, 80s: about 2.5 minutes in all). The job stays pending meanwhile. A var so tests can
+// shorten it.
+//
+// The backoff is not the job's whole duration: each of the 6 attempts runs up to maxPublishRounds
+// rounds, and a round waits up to 40 s per question (account.WaitTxMined) on a chain that does not
+// mine. The worst case is 6 × 3 × 40 s × questions + the backoff: ~15 minutes for one question, over
+// 3 hours for MaxQuestionsPerProcess. Not bounded on purpose: the claim is renewed throughout, and
+// cutting it short would only turn a slow publish into a failed one.
+var publishRetryBackoff = 5 * time.Second
+
+// transientPublishError marks a publish failure that a later attempt may get past: the chain did
+// not answer or confirm, or the tx queue was full. Every other failure comes from the draft or the
+// server's own state and fails the publish at once.
+type transientPublishError struct{ err error }
+
+func (e transientPublishError) Error() string { return e.err.Error() }
+
+func (e transientPublishError) Unwrap() error { return e.err }
+
+// transient marks err as a transientPublishError.
+func transient(err error) error { return transientPublishError{err: err} }
+
+// errPublishClaimLost reports that the publishing marker this worker held is gone: released or
+// reclaimed as stale. The process is no longer the worker's, so it stops without touching it.
+var errPublishClaimLost = fmt.Errorf("publish claim lost")
 
 // electionParamsForQuestion builds the single-election params for one question by combining
 // the process's shared params with the question's ballot config (translated) and the
@@ -59,9 +92,11 @@ func electionParamsForQuestion(
 }
 
 // reconcileStalePublishing clears publishing markers left behind by a crash/restart/deploy
-// (processes whose marker is older than db.PublishStaleAfter) and resets their questions so they
-// can be published again. Run once at startup; the claim path also reclaims stale markers as a
-// second line of defense.
+// (processes whose marker is older than db.PublishStaleAfter), resets their questions so they
+// can be published again, and credits back the payer's wallet debit for a publish
+// that died before mining anything. Run at startup and once more when the markers a restart found
+// still fresh have gone stale (see New); the claim path also reclaims stale markers as a second
+// line of defense.
 func (a *API) reconcileStalePublishing() {
 	claims, err := a.db.StaleVotingProcesses()
 	if err != nil {
@@ -69,23 +104,39 @@ func (a *API) reconcileStalePublishing() {
 		return
 	}
 	for _, claim := range claims {
-		id := claim.ID
-		// release only the claim the scan found, and only while it is still stale: a sibling
-		// replica may have reclaimed the process since, and its fresh claim must survive
-		released, e := a.db.ReleaseStalePublishClaim(claim)
-		if e != nil {
-			log.Warnw("could not clear stale publishing marker", "processId", id.Hex(), "error", e)
-			continue
-		}
-		if !released {
-			continue
-		}
-		// mined questions keep their election ids: this only resets the unmined ones
-		if e := a.db.ResetQuestionsPublish(id); e != nil {
-			log.Warnw("could not reset questions of stale publishing process", "processId", id.Hex(), "error", e)
-		}
-		log.Infow("reconciled stale publishing process", "processId", id.Hex())
+		a.reconcileStaleClaim(claim)
 	}
+}
+
+// reconcileStaleClaim takes over one stale claim found by StaleVotingProcesses, resets the
+// process's unmined questions, credits back what nothing mined and clears the claim.
+func (a *API) reconcileStaleClaim(claim db.StalePublishClaim) {
+	id := claim.ID
+	// take over only the claim the scan found, and only while it is still stale: a sibling
+	// replica or a publish may have reclaimed the process since, and its fresh claim must
+	// survive. Holding the claim, no publish can start on the process while its questions are
+	// reset and its payment reverted.
+	owner, reclaimed, e := a.db.ReclaimStalePublishClaim(claim)
+	if e != nil {
+		log.Warnw("could not reclaim stale publishing marker", "processId", id.Hex(), "error", e)
+		return
+	}
+	if !reclaimed {
+		return
+	}
+	// mined questions keep their election ids: this only resets the unmined ones
+	if e := a.db.ResetQuestionsPublish(id); e != nil {
+		log.Warnw("could not reset questions of stale publishing process", "processId", id.Hex(), "error", e)
+	}
+	// the publish it held died with the worker: a final failure, so the wallet debit goes back
+	if e := a.reversePublishDebit(id); e != nil {
+		log.Errorw(e, "could not credit back the wallet debit of a stale publish; "+
+			"it stays paid, or owes the credit to its next publish, checkout or delete")
+	}
+	if e := a.db.ClearVotingProcessPublishing(id, owner); e != nil {
+		log.Warnw("could not release the stale publish reconcile claim", "processId", id.Hex(), "error", e)
+	}
+	log.Infow("reconciled stale publishing process", "processId", id.Hex())
 }
 
 // publishTarget is what a publish acts on: the process, its questions and census, and the
@@ -95,18 +146,24 @@ type publishTarget struct {
 	questions []db.VotingProcessQuestion
 	census    *db.Census
 	user      *db.User
+	// ceilingCents, when positive, is the most the publish debit may charge (debitProcessWalletUpTo)
+	ceilingCents pricing.Cents
 }
 
 // publishPreflightProblems returns every reason a process would fail to publish that can be
 // determined synchronously (without building/funding a tx or touching the chain): the structural
-// checks, plus the plan/quota/permission denials that would otherwise only surface asynchronously
+// checks, plus the role/duration/integrator denials that would otherwise only surface asynchronously
 // as an opaque job failure. It is shared by GET .../check (reported as {valid,errors}) and by
 // publish (enforced before enqueueing). Funding and chain submission stay async.
 //
 // questionsMismatch singles out the one problem that is not the caller's request but the server's
 // own data state — a stored question set that does not match the process. Publish answers that with
 // a 409 rather than a 400; the dry-run ignores the flag and just reports the problem.
-func (a *API) publishPreflightProblems(t publishTarget) (problems []string, questionsMismatch bool) {
+//
+// denied is the organization's typed refusal (OrgCanPublishProcess: the integrator's own org,
+// 40174, or the 90-day duration cap), also listed in problems. Publish answers it as that error,
+// as draft creation does, rather than folding it into a 400.
+func (a *API) publishPreflightProblems(t publishTarget) (problems []string, questionsMismatch bool, denied error) {
 	vp, questions, census, user := t.vp, t.questions, t.census, t.user
 	problems = validateVotingProcessForPublish(vp, questions, census)
 	if p := questionSetProblem(vp, questions); p != "" {
@@ -114,7 +171,7 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 		questionsMismatch = true
 	}
 	if census == nil {
-		return problems, questionsMismatch // plan checks below need the census
+		return problems, questionsMismatch, nil // the checks below need the census
 	}
 	// a resume must still mint the remaining questions of a partially published anonymous process
 	if a.anonymousCensusRefused(census.Anonymous) && !anyMined(questions) {
@@ -122,38 +179,12 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	}
 	orgDoc, err := a.db.Organization(vp.OrgAddress)
 	if err != nil {
-		return append(problems, "organization not found"), questionsMismatch
+		return append(problems, "organization not found"), questionsMismatch, nil
 	}
 	if !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
 		problems = append(problems, "publishing requires the admin role")
 	}
-	// Per-question plan voting-type gate, on the ballot each question actually encodes rather
-	// than the type it is labelled with: a stored type is only a label, and a question written
-	// before the two halves were reconciled may carry one its protocol contradicts.
-	//
-	// EffectiveQuestionType recognises the four named types (singlechoice, multichoice, ranked,
-	// cumulative) from their canonical protocol and gates each on its plan flag, so a raw protocol
-	// that encodes one of them is gated too — the label cannot be dropped to evade the plan.
-	//
-	// What still slips through is a protocol that is *almost* canonical: {maxCount:2, maxValue:1,
-	// maxTotalCost:2} is the multichoice ballot field-for-field bar costExponent, so it is not
-	// recognised and stays ungated. EffectiveQuestionType recognises a shape only when it is
-	// exactly canonical, which is what storage needs and what authorization does not. Actually
-	// holding the gate needs a deliberately loose classifier (maxValue == 1 && maxCount > 1 ⇒
-	// effectively multiple-choice, whatever else is set), not this one.
-	for i := range questions {
-		// a question that already mined (UpstreamID set) is immutable on chain: its type cannot be
-		// changed, and gating it would only block a resume that mints the remaining questions. So the
-		// voting-type gate covers only questions still pending their first publish.
-		if len(questions[i].UpstreamID) > 0 {
-			continue
-		}
-		if err := a.subscriptions.OrgAllowsVotingType(vp.OrgAddress, account.EffectiveQuestionType(&questions[i])); err != nil {
-			problems = append(problems, err.Error())
-		}
-	}
-	// the largest per-question census is the binding constraint for the plan MaxCensus cap;
-	// process count/weighted/duration are process-level, so one call covers them all.
+	// the largest per-question census: a process whose every question has no voter cannot publish
 	var maxSize uint64
 	for i := range questions {
 		if s := account.ComputeMaxCensusSize(questions[i].EligibleMemberIDs, census.Size); s > maxSize {
@@ -164,7 +195,7 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	// the checks below but fail in the worker (electionParamsForQuestion). Reject it here.
 	if maxSize == 0 {
 		problems = append(problems, "census has no members")
-		return problems, questionsMismatch
+		return problems, questionsMismatch, nil
 	}
 	start := vp.StartDate
 	if start.IsZero() || start.Before(time.Now()) {
@@ -174,28 +205,29 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	if vp.EndDate.After(start) {
 		durationSeconds = uint32(vp.EndDate.Sub(start).Seconds())
 	}
-	if err := a.subscriptions.OrgCanPublishProcess(orgDoc, maxSize, durationSeconds, census.Weighted); err != nil {
+	if err := a.subscriptions.OrgCanPublishProcess(orgDoc, durationSeconds); err != nil {
 		problems = append(problems, err.Error())
+		denied = err
 	}
-	// managed orgs draw a process slot from the integrator's shared quota (read-only here). Key
-	// this on census.Size — the same basis reserveManagedProcessSlot uses at publish — so the
-	// dry-run and the real reservation agree.
-	if drawsManagedSlot(orgDoc, census, questions) {
-		if integrator, err := a.db.Organization(orgDoc.ManagedBy); err != nil {
-			problems = append(problems, "integrator organization not found")
-		} else if err := a.subscriptions.CanReserveManagedPublish(integrator); err != nil {
-			problems = append(problems, err.Error())
-		}
+	return problems, questionsMismatch, denied
+}
+
+// preflightError is the refusal publish answers for what publishPreflightProblems found: 409
+// (40172) when the stored question set does not match the process, which has to be repaired
+// first; then the organization's typed refusal (403 40174, or the duration cap), as at draft
+// creation; and a 400 for anything else. Nil when nothing was found.
+func preflightError(problems []string, questionsMismatch bool, denied error) error {
+	if len(problems) == 0 {
+		return nil
 	}
-	// email/SMS/vote allowance for the inline census. One auth (2FA challenge) per voter, but the
-	// N questions are N elections so each voter can cast N ballots → votes scale with the question
-	// count while notifications do not.
-	notifyCount := int(census.Size)
-	voteCount := int(census.Size) * len(questions)
-	if err := a.subscriptions.OrgCanPublishCensus(census, notifyCount, voteCount); err != nil {
-		problems = append(problems, err.Error())
+	switch {
+	case questionsMismatch:
+		return errors.ErrProcessQuestionsMismatch.Withf("process is not ready to publish: %s", strings.Join(problems, "; "))
+	case denied != nil:
+		return denied
+	default:
+		return errors.ErrMalformedBody.Withf("process is not ready to publish: %s", strings.Join(problems, "; "))
 	}
-	return problems, questionsMismatch
 }
 
 // publishVotingProcessHandler godoc
@@ -204,11 +236,36 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 //	@Description	Publish a voting process: one on-chain election per question, submitted as a batch.
 //	@Description	Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
 //	@Description	GET /jobs/{jobId}. Idempotent once published.
+//	@Description	Transient failures (the chain not answering or confirming, a full tx queue) are retried
+//	@Description	by the service up to 5 times, with about 2.5 minutes of backoff between attempts; the job
+//	@Description	stays pending meanwhile. Each attempt runs up to 3 rounds, each waiting up to 40 s per
+//	@Description	question for its election to be mined, so on a stalled chain the job can stay pending for
+//	@Description	6 attempts × 3 rounds × 40 s × questions + 2.5 minutes: about 15 minutes for one question,
+//	@Description	over 3 hours for 15. Poll GET /jobs/{jobId} until it is completed or failed.
+//	@Description	If the publish finally fails before any election is mined, a failed publish credits the
+//	@Description	payer's wallet back (a `creditBack` history row) and publishing again charges again.
 //	@Description	409 (40172) means the stored questions do not match the process and the draft has to be
 //	@Description	saved again before it can be published.
 //	@Description	400 (40004) "process is not ready to publish: ..." lists every problem found, including
 //	@Description	"anonymous voting is temporarily unavailable" for an anonymous process while the service has
 //	@Description	anonymous voting off. A process some of whose questions are already on chain still resumes.
+//	@Description	409 (40177) while a top-up checkout opened for the draft is still open: pay it, or, when
+//	@Description	the draft's price changed since, call POST /processes/{processId}/checkout again to
+//	@Description	replace it (or cancel it with DELETE /processes/{processId}/checkout) and publish again.
+//	@Description	A priced process is paid from its payer's wallet (the organization's own, or its
+//	@Description	integrator's when managed) at publish. 402 (40178) means the organization's wallet does
+//	@Description	not cover it: the error data carries the quote, balanceCents and shortfallCents; top it
+//	@Description	up via POST /processes/{processId}/checkout, which publishes once paid. A draft that already
+//	@Description	paid part of its price (its census grew since) gets the data's paidCents and censusSize
+//	@Description	too, and buys the difference with POST /processes/{processId}/census/checkout. For a managed
+//	@Description	organization, 402 (40175) means its integrator's wallet does not cover the price (data:
+//	@Description	requiredCents, availableCents), and 402 (40183) that the price would take it past the
+//	@Description	spend cap its integrator set (data: capCents, spentCents, requiredCents).
+//	@Description	409 (40177) also answers while another draft is paying for a once-per-organization add-on
+//	@Description	(branding, custom URL) this one selects, and while it selects one its payment does not
+//	@Description	include that the organization has not paid for either: deselect it, or publish once
+//	@Description	another process pays for it.
+//	@Description	422 (40176) means the census is above 50 000 voters: quote-only, no self-service price.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -217,10 +274,13 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 //	@Success		202			{object}	apicommon.EnqueuedResponse
 //	@Success		200			{object}	apicommon.CreateVotingProcessResponse	"Already published"
 //	@Failure		400			{object}	errors.Error							"Not ready to publish (lists every problem)"
+//	@Failure		403			{object}	errors.Error							"An integrator's own organization cannot own processes (40174)"
 //	@Failure		401			{object}	errors.Error
+//	@Failure		402			{object}	errors.Error{data=apicommon.ProcessPaymentRequired}	"Wallet short or spend cap reached"
 //	@Failure		404			{object}	errors.Error
-//	@Failure		409			{object}	errors.Error	"Publish in progress, or the stored questions do not match the process"
-//	@Failure		503			{object}	errors.Error
+//	@Failure		409			{object}	errors.Error	"Publish in progress, out of sync, checkout open, add-on held, org being deleted (40901)"
+//	@Failure		422			{object}	errors.Error	"Census size requires a custom quote"
+//	@Failure		503			{object}	errors.Error	"Busy (50302 wallet or census growth, 50303 org tx), retry after Retry-After"
 //	@Router			/processes/{processId}/publish [post]
 func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)
@@ -255,19 +315,20 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	// full synchronous publish-readiness gate (same as GET .../check): structural checks plus
-	// plan voting-type, census-size, process-count, duration, managed-quota and email/SMS/vote
-	// allowance. Anything predictable is rejected here rather than as an opaque async job failure;
+	// admin role, integrator top-level guard and the 90-day duration cap. Anything
+	// predictable is rejected here rather than as an opaque async job failure;
 	// only funding and chain submission are left to the worker.
 	target := publishTarget{vp: vp, questions: questions, census: census, user: user}
-	if problems, questionsMismatch := a.publishPreflightProblems(target); len(problems) > 0 {
-		// a stored question set that does not match the process is server-side state, not a bad
-		// request, so it answers 409. It wins over any other problem present: it has to be repaired
-		// (by saving the draft again) before the rest of the draft is even worth looking at.
-		apiErr := errors.ErrMalformedBody
-		if questionsMismatch {
-			apiErr = errors.ErrProcessQuestionsMismatch
-		}
-		apiErr.Withf("process is not ready to publish: %s", strings.Join(problems, "; ")).Write(w)
+	if err := preflightError(a.publishPreflightProblems(target)); err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+
+	// payment gate: a priced process publishes only when its payer's wallet covers what is due,
+	// and the 402 carries what is missing so the client can go straight to a top-up checkout.
+	// The debit itself happens inside startProcessPublish, after the publish claim.
+	if err := a.paymentDueForPublish(vp); err != nil {
+		writeSubscriptionError(w, err)
 		return
 	}
 
@@ -287,14 +348,27 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 // chain — success for the caller, just nothing to enqueue.
 var errProcessAlreadyPublished = fmt.Errorf("process already published")
 
-// startProcessPublish runs the post-preflight publish pipeline: atomic claim, managed
-// slot reservation, organization signer, census publication, job creation and enqueue.
+// errPublishFailedAfterDebit is a publish request that failed after the payer's wallet paid for
+// it and before its job existed: the debit was credited back and the draft stays unpublished.
+// Over HTTP it answers as the error it wraps. The top-up webhook records it as the payment's
+// refusal and answers 200: Stripe redelivering would find the payment failed and publish nothing.
+type errPublishFailedAfterDebit struct{ err error }
+
+func (e errPublishFailedAfterDebit) Error() string {
+	return "publish failed after the payment, which was credited back: " + e.err.Error()
+}
+
+func (e errPublishFailedAfterDebit) Unwrap() error { return e.err }
+
+// startProcessPublish runs the post-preflight publish pipeline: atomic claim,
+// wallet debit, organization signer, census publication, job creation and enqueue.
 // The caller is responsible for preflight (publishPreflightProblems) and authorization.
-// Errors are errors.Error values carrying their HTTP semantics (write with
-// writeSubscriptionError), plain errors mapping to 500, or errProcessAlreadyPublished.
-// ctx bounds only the lock wait below, never the enqueued work.
+// It exists apart from the HTTP handler so payment fulfillment can trigger publication
+// server-side with the same guarantees. Errors are errors.Error values carrying their
+// HTTP semantics (write with writeSubscriptionError), plain errors mapping to 500, or
+// errProcessAlreadyPublished. ctx bounds only the lock waits below, never the enqueued work.
 func (a *API) startProcessPublish(ctx context.Context, t publishTarget) (string, error) {
-	vp, census, user := t.vp, t.census, t.user
+	vp, user := t.vp, t.user
 	oid := vp.ID
 	// atomically claim the process for publishing (duplicate-publish guard). The claim is
 	// conditional on the process not having been updated since this snapshot was read
@@ -317,15 +391,33 @@ func (a *API) startProcessPublish(ctx context.Context, t publishTarget) (string,
 		}
 		return "", errors.ErrPublishInProgress
 	}
-	committed := false
+	committed, debited := false, false
 	defer func() {
 		if committed {
 			return
+		}
+		// a failure after the wallet paid is final for this request: the money goes back, and a
+		// publish that is tried again charges again
+		if debited {
+			if e := a.reversePublishDebit(oid); e != nil {
+				log.Errorw(e, "could not credit back the wallet debit of a failed publish; "+
+					"it stays paid, or owes the credit to its next publish, checkout or delete")
+			}
 		}
 		if e := a.db.ClearVotingProcessPublishing(oid, owner); e != nil {
 			log.Warnw("could not clear voting process publishing state", "error", e)
 		}
 	}()
+	// under the claim: a teardown that started before it refuses the publish here, and one that
+	// starts after finds the draft claimed and stops (see deleteManagedOrganizationHandler)
+	if err := a.refuseTearingDown(vp.OrgAddress); err != nil {
+		return "", err
+	}
+	// again under the claim, which a delete takes too: one that refunded and failed between
+	// the payment gate and here would otherwise go on chain unpaid
+	if err := a.refuseRefundedDraft(vp); err != nil {
+		return "", err
+	}
 	// the snapshot's questions were loaded before the claim; a draft edit in that window bumped
 	// updatedAt and was caught above, but reload them under the claim anyway so the published
 	// elections can only be built from what is stored now.
@@ -341,50 +433,27 @@ func (a *API) startProcessPublish(ctx context.Context, t publishTarget) (string,
 	if err != nil {
 		return "", fmt.Errorf("failed to get organization: %w", err)
 	}
-	// a process is one billed unit; reserve a single managed slot when applicable. A resume (a
-	// re-publish of a process that already mined some elections) must NOT reserve again — the
-	// original reservation from the first attempt still stands.
+
+	// the census is read again under the organization's census growth lock, held until it is
+	// written back below: that one read is what the debit prices, what is stored and what the job
+	// publishes (maxCensusSize), so a member added concurrently is in all three or lands after
+	// them. Bounded like the growth paths (503 50302), and taken before the tx lock, in their order:
+	// they hold it while they may take the tx lock.
+	growthLock, err := a.censusGrowthLocks.lockOrBusy(ctx, org.Address)
+	if err != nil {
+		return "", err
+	}
+	releaseGrowth := sync.OnceFunc(growthLock.Unlock)
+	defer releaseGrowth()
+	census, err := a.db.Census(vp.CensusID.Hex())
+	if err != nil {
+		return "", fmt.Errorf("failed to reload the census: %w", err)
+	}
 	nonTestSized := uint64(census.Size) > uint64(db.TestMaxCensusSize)
-	var integratorAddr common.Address
-	var managedReserved bool
-	if !anyMined(questions) {
-		integratorAddr, managedReserved, err = a.reserveManagedProcessSlot(org, uint64(census.Size))
-		if err != nil {
-			return "", err
-		}
-	}
-	if managedReserved {
-		defer func() {
-			if !managedReserved {
-				return
-			}
-			if e := a.db.AddOrganizationManagedProcesses(integratorAddr, -1); e != nil {
-				log.Warnw("could not roll back managed processes counter", "error", e)
-			}
-		}()
-	}
 
-	orgSigner, err := account.OrganizationSigner(a.secret, org.SignerSeedValue(), org.Nonce)
-	if err != nil {
-		return "", errors.ErrGenericInternalServerError.Withf("could not restore organization signer: %v", err)
-	}
-	// root = CSP public key; the on-chain census authorization is delegated to the CSP for every
-	// question. A blind (anonymous) census publishes the CSP blind public key instead, so the
-	// Vochain verifies each ballot's blind ECDSA proof against it under census origin OFF_CHAIN_CA_V2.
-	cspPubKey, err := a.csp.PubKey()
-	if census.Anonymous {
-		cspPubKey, err = a.csp.BlindPubKey()
-	}
-	if err != nil {
-		return "", errors.ErrGenericInternalServerError.Withf("could not get csp public key: %v", err)
-	}
-	census.Published = db.PublishedCensus{Root: cspPubKey, URI: a.serverURL, CreatedAt: time.Now()}
-	if _, err := a.db.SetCensus(census); err != nil {
-		return "", fmt.Errorf("failed to publish census: %w", err)
-	}
-
-	// acquire the per-org tx lock with a bounded wait before the job exists: a worker may hold
-	// it through tx mining, and a caller is better served by a prompt 503 than a parked request.
+	// acquire the per-org tx lock with a bounded wait before anything is charged: a worker may hold
+	// it through tx mining, and a caller is better served by a prompt 503 than a parked request. A
+	// busy lock so refuses the publish with nothing debited, and nothing to give back.
 	orgLock, err := a.orgTxLocks.lockCtx(ctx, org.Address)
 	if err != nil {
 		return "", err
@@ -396,51 +465,159 @@ func (a *API) startProcessPublish(ctx context.Context, t publishTarget) (string,
 		}
 	}()
 
-	jobID, err := apicommon.NewJobID()
-	if err != nil {
-		return "", fmt.Errorf("failed to create job id: %w", err)
+	// payment: the process is charged to its payer's wallet here — the only debit of a
+	// publish — after the claim, so two concurrent publishes cannot both debit. A publish that
+	// then fails for good before mining anything — here, or in the worker once its retries run
+	// out — credits the payer's wallet back (reversePublishDebit), and publishing again charges
+	// again.
+	if err := a.debitProcessWalletUpTo(publishDebit{vp: vp, org: org, census: census, ceilingCents: t.ceilingCents}); err != nil {
+		return "", err
 	}
-	if err := a.db.CreateTxJob(jobID, db.JobTypePublishVotingProcess, org.Address); err != nil {
-		return "", fmt.Errorf("failed to create tx job: %w", err)
+	debited = true
+	// from here on a failure is credited back by the deferred reversal: reported apart, so the
+	// top-up webhook records it as the payment's refusal instead of having Stripe redeliver
+	afterDebit := func(err error) (string, error) { return "", errPublishFailedAfterDebit{err: err} }
+	if a.publishPreJobFault != nil {
+		if err := a.publishPreJobFault(); err != nil {
+			return afterDebit(err)
+		}
 	}
 
-	reserved := managedReserved
+	orgSigner, err := account.OrganizationSigner(a.secret, org.SignerSeedValue(), org.Nonce)
+	if err != nil {
+		return afterDebit(errors.ErrGenericInternalServerError.Withf("could not restore organization signer: %v", err))
+	}
+	// root = CSP public key; the on-chain census authorization is delegated to the CSP for every
+	// question. A blind (anonymous) census publishes the CSP blind public key instead, so the
+	// Vochain verifies each ballot's blind ECDSA proof against it under census origin OFF_CHAIN_CA_V2.
+	cspPubKey, err := a.csp.PubKey()
+	if census.Anonymous {
+		cspPubKey, err = a.csp.BlindPubKey()
+	}
+	if err != nil {
+		return afterDebit(errors.ErrGenericInternalServerError.Withf("could not get csp public key: %v", err))
+	}
+	census.Published = db.PublishedCensus{Root: cspPubKey, URI: a.serverURL, CreatedAt: time.Now()}
+	if _, err := a.db.SetCensus(census); err != nil {
+		return afterDebit(fmt.Errorf("failed to publish census: %w", err))
+	}
+	// stored and fixed in the worker's snapshot: a member added from here on is growth of this
+	// process, which the growth guard prices once its elections take votes
+	releaseGrowth()
+
+	jobID, err := apicommon.NewJobID()
+	if err != nil {
+		return afterDebit(fmt.Errorf("failed to create job id: %w", err))
+	}
+	// the job names its process, so GET /jobs finds it and a failure (its errors) is traced to it
+	if err := a.db.CreateTxJobWithResult(jobID, db.JobTypePublishVotingProcess, org.Address,
+		&db.JobResult{ProcessID: internal.HexBytes(vp.ID[:])}); err != nil {
+		return afterDebit(fmt.Errorf("failed to create tx job: %w", err))
+	}
+	// and the payment names the job: the top-up webhook's publish has no response to return it in
+	if err := a.db.SetProcessPaymentPublishJob(vp.ID, jobID); err != nil {
+		log.Warnw("could not record the publish job on the process payment", "processId", vp.ID.Hex(),
+			"jobId", jobID, "error", err)
+	}
+
 	worker := &publishWorker{
 		a: a, vp: vp, questions: questions, census: census, org: org, user: user,
-		orgSigner: orgSigner, cspPubKey: cspPubKey, integratorAddr: integratorAddr,
-		reserved: reserved, nonTestSized: nonTestSized, owner: owner,
+		orgSigner: orgSigner, cspPubKey: cspPubKey, nonTestSized: nonTestSized, jobID: jobID, owner: owner,
 		minedUnpersisted: make(map[bson.ObjectID]internal.HexBytes),
+		staleAfter:       db.PublishStaleAfter,
 	}
-	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
-		defer orgLock.Unlock()
-		return worker.run()
-	}}) {
-		if e := a.db.SetJobStatus(jobID, db.JobStatusFailed, nil, "tx queue full"); e != nil {
-			log.Warnw("could not mark job failed after full queue", "error", e)
-		}
-		return "", errors.ErrTxQueueFull
-	}
-	// the worker now owns the lock, the publishing claim and the managed reservation.
+	// the worker now owns the lock and the publishing claim, including through a full queue:
+	// that is retried like any transient failure, with the job pending meanwhile.
 	committed = true
-	managedReserved = false
 	lockHeld = false
+	// renewed while the first attempt's task waits in the queue, until run takes over
+	worker.holdClaim()
+	worker.submit(orgLock)
 	return jobID, nil
+}
+
+// submit hands one publish attempt to the tx queue. orgLock is held on entry and released by
+// the task once it has run, or right away when the queue is full, which is a transient failure:
+// finish schedules the next attempt. The lock is never held across the retry delay, so other
+// publishes and status changes of the organization proceed meanwhile.
+func (pw *publishWorker) submit(orgLock *orgTxLock) {
+	if pw.a.enqueueTx(txTask{jobID: pw.jobID, run: func() (*db.JobResult, error) {
+		defer orgLock.Unlock()
+		return pw.run()
+	}, record: pw.finish}) {
+		return
+	}
+	orgLock.Unlock()
+	pw.finish(nil, transient(errors.ErrTxQueueFull))
+}
+
+// retry runs the next attempt after its backoff. It takes the organization's tx lock first, like
+// any publish, on its own goroutine — never a tx worker's, which must not wait on a lock that a
+// task still queued behind it may hold.
+func (pw *publishWorker) retry() {
+	// the hold finish took for the backoff ends once the attempt is handed over
+	defer pw.a.heldTxJobs.release(pw.jobID)
+	pw.submit(pw.a.orgTxLocks.lock(pw.org.Address))
+}
+
+// finish records one attempt's outcome (it is the attempt's txTask.record, so a panic the worker
+// pool recovers lands here too). Success completes the job. A transient failure with attempts
+// left schedules the next one, the job staying pending and the claim held. Anything else, or the
+// last attempt failing, abandons the publish — crediting the payer's wallet back —
+// and fails the job; a lost claim only fails it, since the process is someone else's now, or, when
+// it went stale under this worker, the stale sweep's (standDown).
+func (pw *publishWorker) finish(result *db.JobResult, err error) {
+	a := pw.a
+	var te transientPublishError
+	if err != nil && errors.As(err, &te) && pw.attempt < publishRetryAttempts {
+		pw.attempt++
+		delay := publishRetryBackoff << (pw.attempt - 1)
+		log.Warnw("voting process publish failed, retrying", "processId", pw.vp.ID.Hex(),
+			"attempt", pw.attempt, "delay", delay.String(), "error", err)
+		// the job stays held through the backoff, so its heartbeat keeps it from being swept
+		// as interrupted (superviseTxJobs) while no queue holds it
+		a.heldTxJobs.hold(pw.jobID)
+		// and the claim stays fresh through the backoff and the retry's wait for the org tx lock,
+		// or the growth paths would stop answering 409 while the next attempt still mines from
+		// the census stored before them
+		pw.holdClaim()
+		time.AfterFunc(delay, pw.retry)
+		return
+	}
+	// the worker ends here: nothing is left to keep the claim for
+	pw.releaseClaimHold()
+	if err == nil {
+		if e := a.db.SetJobStatus(pw.jobID, db.JobStatusCompleted, result, ""); e != nil {
+			log.Warnw("could not record completed job", "jobId", pw.jobID, "error", e)
+		}
+		return
+	}
+	if errors.Is(err, errPublishClaimLost) {
+		pw.flushOrReportMined()
+		pw.standDown()
+	} else {
+		pw.abandon()
+	}
+	if e := a.db.SetJobStatus(pw.jobID, db.JobStatusFailed, nil, err.Error()); e != nil {
+		log.Warnw("could not record failed job", "jobId", pw.jobID, "error", e)
+	}
 }
 
 // publishWorker carries the state of an async voting-process publish across the batch +
 // retry rounds executed on the tx worker pool.
 type publishWorker struct {
-	a              *API
-	vp             *db.VotingProcess
-	questions      []db.VotingProcessQuestion
-	census         *db.Census
-	org            *db.Organization
-	user           *db.User
-	orgSigner      *ethereum.SignKeys
-	cspPubKey      []byte
-	integratorAddr common.Address
-	reserved       bool
-	nonTestSized   bool
+	a            *API
+	vp           *db.VotingProcess
+	questions    []db.VotingProcessQuestion
+	census       *db.Census
+	org          *db.Organization
+	user         *db.User
+	orgSigner    *ethereum.SignKeys
+	cspPubKey    []byte
+	nonTestSized bool
+	jobID        string
+	// attempt counts the retries already scheduled (0 on the first attempt)
+	attempt int
 	// owner is the publish-claim token returned by ClaimVotingProcessForPublish: the worker
 	// renews the claim with it while it runs and every state write it does on the process
 	// (clear, publish) is conditional on still holding it.
@@ -450,6 +627,88 @@ type publishWorker struct {
 	// (the election already exists — resubmitting would mint a duplicate); only the DB write is
 	// retried, until it succeeds or the attempt is abandoned.
 	minedUnpersisted map[bson.ObjectID]internal.HexBytes
+	// submitted is set right before any attempt (run) of this worker submits a batch, and stays set
+	// across retries: those txs may mine whatever happens to the claim afterwards, even after a later
+	// attempt failed, so the worker can no longer tell that nothing went on chain
+	submitted bool
+	// staleAfter is db.PublishStaleAfter as the worker was created with: its renewals use this
+	// window, so changing the package variable never affects a worker already running
+	staleAfter time.Duration
+	// claimHold stops the renewal that keeps the claim fresh while no attempt runs (holdClaim)
+	claimHoldMu sync.Mutex
+	claimHold   chan struct{}
+}
+
+// holdClaim keeps the publish claim fresh while no attempt runs: while an attempt's task waits
+// in the tx queue, through a retry's backoff and while the retry waits for the org tx lock. run
+// stops it once its own renewal takes over, and the worker's end (finish) stops it for good.
+// Starting it while it runs is a no-op.
+func (pw *publishWorker) holdClaim() {
+	pw.claimHoldMu.Lock()
+	defer pw.claimHoldMu.Unlock()
+	if pw.claimHold == nil {
+		pw.claimHold = make(chan struct{})
+		go pw.renewClaim(pw.claimHold)
+	}
+}
+
+// releaseClaimHold stops the renewal holdClaim started, if it runs.
+func (pw *publishWorker) releaseClaimHold() {
+	pw.claimHoldMu.Lock()
+	defer pw.claimHoldMu.Unlock()
+	if pw.claimHold != nil {
+		close(pw.claimHold)
+		pw.claimHold = nil
+	}
+}
+
+// standDown ends a worker whose claim is no longer its own. When the claim went stale under it and
+// the worker knows nothing of its publish is on chain (none of its attempts submitted anything and
+// every election it saw mine is recorded: call flushOrReportMined first), it reconciles the claim
+// as the stale sweep would (reconcileOwnStaleClaim). Otherwise it credits nothing back: the txs it submitted may mine,
+// so the stale claim is left to the startup sweep or the next publish, checkout or delete, which
+// can only go by what is stored (the accepted crash limit, #822).
+func (pw *publishWorker) standDown() {
+	if len(pw.minedUnpersisted) == 0 && !pw.submitted {
+		pw.reconcileOwnStaleClaim()
+		return
+	}
+	log.Errorw(fmt.Errorf("publish claim lost with elections possibly on chain"),
+		fmt.Sprintf("process %s stood down after its publish submitted or mined elections (submitted: %t, "+
+			"unrecorded: %d); nothing is credited back and its stale claim is left to the stale sweep",
+			pw.vp.ID.Hex(), pw.submitted, len(pw.minedUnpersisted)))
+}
+
+// flushOrReportMined retries the pending writes of elections that mined (flushMinedUnpersisted) and
+// logs each one that still could not be recorded: losing the pair means a later resume cannot know
+// the election exists and will mint a new one. It returns true when none remain.
+func (pw *publishWorker) flushOrReportMined() bool {
+	if pw.flushMinedUnpersisted() {
+		return true
+	}
+	for qid, upstreamID := range pw.minedUnpersisted {
+		log.Errorw(fmt.Errorf("mined election could not be persisted"),
+			fmt.Sprintf("question %s has unrecorded on-chain election %s; a republish will create a duplicate",
+				qid.Hex(), upstreamID.String()))
+	}
+	return false
+}
+
+// reconcileOwnStaleClaim hands a claim that went stale under this worker to the stale sweep: no
+// renewal could refresh it, so the worker stood down without touching the process, and the sweep
+// resets its unmined questions, credits back what nothing mined and clears it. A claim someone
+// else holds now, or one already cleared, is left alone.
+func (pw *publishWorker) reconcileOwnStaleClaim() {
+	claims, err := pw.a.db.StaleVotingProcesses()
+	if err != nil {
+		log.Warnw("could not scan for the stale publish claim", "processId", pw.vp.ID.Hex(), "error", err)
+		return
+	}
+	for _, claim := range claims {
+		if claim.ID == pw.vp.ID && claim.Owner == pw.owner {
+			pw.a.reconcileStaleClaim(claim)
+		}
+	}
 }
 
 // renewClaim refreshes the publish claim every PublishStaleAfter/3 until stop is closed, so a
@@ -458,7 +717,7 @@ type publishWorker struct {
 // logged, and the owner-conditional final writes are what actually keep a dispossessed worker
 // from overwriting the new claimant's state.
 func (pw *publishWorker) renewClaim(stop <-chan struct{}) {
-	interval := db.PublishStaleAfter / 3
+	interval := pw.staleAfter / 3
 	if interval < time.Second {
 		interval = time.Second
 	}
@@ -469,7 +728,7 @@ func (pw *publishWorker) renewClaim(stop <-chan struct{}) {
 		case <-stop:
 			return
 		case <-ticker.C:
-			ok, err := pw.a.db.RenewVotingProcessPublishClaim(pw.vp.ID, pw.owner)
+			ok, err := pw.a.db.RenewVotingProcessPublishClaim(pw.vp.ID, pw.owner, pw.staleAfter)
 			if err != nil {
 				log.Warnw("could not renew publish claim", "processId", pw.vp.ID.Hex(), "error", err)
 				continue
@@ -527,23 +786,30 @@ func (pw *publishWorker) flushMinedUnpersisted() bool {
 	return len(pw.minedUnpersisted) == 0
 }
 
-// run builds and submits one election per question in a single batch, confirms them on
-// chain, and retries the not-yet-confirmed ones with fresh nonces up to maxPublishRounds.
-// On success it marks the process published (one process counter unit); on failure it
-// abandons the attempt (questions reset so a later publish regenerates them).
+// run is one publish attempt: it builds and submits one election per question in a single
+// batch, confirms them on chain, and resubmits the not-yet-confirmed ones with fresh nonces up to
+// maxPublishRounds. On success it marks the process published (one process counter unit). A
+// failure is returned, marked transient when a later attempt may get past it, and finish decides
+// between retrying and abandoning; run itself never abandons.
 func (pw *publishWorker) run() (result *db.JobResult, err error) {
 	a := pw.a
-	// a panic mid-publish must not strand the publishing marker (or crash the process): recover,
-	// abandon the attempt, and surface it as a normal job failure.
+	// a panic mid-publish must not crash the process: surface it as a permanent failure, which
+	// finish abandons like any other.
 	defer func() {
 		if r := recover(); r != nil {
-			pw.abandon()
 			result, err = nil, fmt.Errorf("publish worker panicked: %v", r)
 		}
 	}()
-	// keep the publish claim fresh for as long as the worker runs: rounds of building, mining
+	if a.publishFault != nil {
+		if err := a.publishFault(); err != nil {
+			return nil, err
+		}
+	}
+	// keep the publish claim fresh for as long as the attempt runs: rounds of building, mining
 	// and confirming can legitimately outlast PublishStaleAfter, and losing the claim mid-run
-	// would let a concurrent publish mint duplicate elections.
+	// would let a concurrent publish mint duplicate elections. This renewal takes over from the
+	// one that kept it fresh while the attempt waited (holdClaim).
+	pw.releaseClaimHold()
 	stopRenew := make(chan struct{})
 	go pw.renewClaim(stopRenew)
 	defer close(stopRenew)
@@ -552,7 +818,6 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 	// that nothing else can be submitting for this organization: building from the older read
 	// would mint a second election for a question that already has one.
 	if err := pw.reloadQuestions(); err != nil {
-		pw.abandon()
 		return nil, err
 	}
 	confirmed := false
@@ -560,12 +825,8 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 		// a worker that no longer owns the publish claim must stop before submitting anything:
 		// someone else has taken the process over, and both submitting would mint duplicate
 		// elections. Renewing doubles as the check, and refreshes the claim on every round.
-		if owned, err := pw.confirmClaim(); err != nil || !owned {
-			pw.abandon()
-			if err != nil {
-				return nil, fmt.Errorf("could not confirm the publish claim, stopping: %w", err)
-			}
-			return nil, fmt.Errorf("publish claim lost to another publish, stopping")
+		if err := pw.refreshClaim(); err != nil {
+			return nil, err
 		}
 		// first retry any chain-confirmed election whose DB write is still pending: it must
 		// never be resubmitted, only re-persisted.
@@ -590,38 +851,52 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 		}
 		startNonce, err := a.account.AccountNonce(pw.vp.OrgAddress)
 		if err != nil {
-			pw.abandon()
-			return nil, fmt.Errorf("could not read account nonce: %w", err)
+			return nil, transient(fmt.Errorf("could not read account nonce: %w", err))
 		}
 		stxs, ok, err := pw.buildBatch(pending, startNonce)
 		if err != nil {
-			pw.abandon()
 			return nil, err
 		}
-		if !ok { // a permission/build error on a question: abandon (will regenerate)
-			break
+		if !ok {
+			return nil, fmt.Errorf("voting process publish not permitted")
 		}
+		pw.submitted = true
 		results, err := a.account.SubmitSignedTxBatch(stxs)
 		if err != nil {
 			log.Warnw("voting process batch submit failed, will retry", "error", err)
 			continue
 		}
+		if a.publishSubmittedHook != nil {
+			a.publishSubmittedHook()
+		}
+		if err := pw.refreshClaim(); err != nil {
+			return nil, err
+		}
 		confirmed = pw.confirmBatch(pending, results)
+		if a.publishMinedFault != nil {
+			if err := a.publishMinedFault(); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if !confirmed {
-		pw.abandon()
-		return nil, fmt.Errorf("publish did not confirm all questions after %d rounds", maxPublishRounds)
+		return nil, transient(fmt.Errorf("publish did not confirm all questions after %d rounds", maxPublishRounds))
 	}
 	if e := a.db.SetVotingProcessPublished(pw.vp.ID, pw.owner, pw.resolveStartDate()); e != nil {
-		// every election is already on-chain and its question persisted; clear the marker so a
-		// retry can re-run and simply re-mark the process published (pending is empty → no new
-		// elections). Leaving it set would make the process permanently unclaimable. Both writes
-		// are conditional on still owning the claim: a dispossessed worker must not touch the
-		// new claimant's state.
-		if ce := a.db.ClearVotingProcessPublishing(pw.vp.ID, pw.owner); ce != nil {
-			log.Warnw("could not clear publishing marker after late publish failure", "error", ce)
+		// every election is already on-chain and its question persisted: the next attempt finds
+		// nothing pending and only marks the process published again. The write is conditional
+		// on still owning the claim, so a dispossessed worker never touches the new claimant's state;
+		// a conflict means the claim is gone, which no retry can win back.
+		if errors.Is(e, db.ErrConflict) {
+			return nil, errPublishClaimLost
 		}
-		return nil, e
+		return nil, transient(e)
+	}
+	// what it paid beyond its ledger is nothing: the debit charged whatever its price was. The
+	// €0 base records that it is published, so its census grows against what it paid (the first
+	// growth check records it if this write fails)
+	if _, e := a.db.SetProcessPaymentBase(pw.vp.ID, pw.vp.OrgAddress, 0); e != nil {
+		log.Warnw("could not record the published process's payment base", "processId", pw.vp.ID.Hex(), "error", e)
 	}
 	if pw.nonTestSized {
 		if e := a.db.IncrementOrganizationProcessesCounter(pw.vp.OrgAddress); e != nil {
@@ -632,7 +907,7 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 	if pw.vp.InitialStatus == db.QuestionStatusPaused {
 		status = db.QuestionStatusPaused
 	}
-	return &db.JobResult{Status: status}, nil
+	return &db.JobResult{Status: status, ProcessID: internal.HexBytes(pw.vp.ID[:])}, nil
 }
 
 // reloadQuestions replaces the worker's questions with what is stored now, refusing a stored
@@ -662,6 +937,19 @@ func (pw *publishWorker) resolveStartDate() time.Time {
 	return time.Now()
 }
 
+// refreshClaim renews the publish claim, reporting errPublishClaimLost when this worker no
+// longer owns it. A failed write is transient: the claim is still ours, just not renewed.
+func (pw *publishWorker) refreshClaim() error {
+	owned, err := pw.confirmClaim()
+	if err != nil {
+		return transient(err)
+	}
+	if !owned {
+		return errPublishClaimLost
+	}
+	return nil
+}
+
 // confirmClaim renews the publish claim and reports whether the worker still owns it, retrying
 // a storage error a few times so a transient failure is not taken for a lost claim. An error
 // that persists is returned.
@@ -672,46 +960,43 @@ func (pw *publishWorker) confirmClaim() (bool, error) {
 			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
 		}
 		var owned bool
-		if owned, err = pw.a.db.RenewVotingProcessPublishClaim(pw.vp.ID, pw.owner); err == nil {
+		if owned, err = pw.a.db.RenewVotingProcessPublishClaim(pw.vp.ID, pw.owner, pw.staleAfter); err == nil {
 			return owned, nil
 		}
 	}
 	return false, err
 }
 
-// abandon rolls back a failed/aborted publish: it resets the not-yet-mined questions (so a later
-// publish resumes them), clears the publishing marker, and releases the managed-process
-// reservation only when nothing was mined. A partial-mine failure keeps the slot so the resume
-// (which skips a new reservation) consumes it, avoiding a leak or a double-reserve. The release
-// does not depend on still owning the claim: whoever claims the process next finds nothing mined
-// and reserves its own slot.
+// abandon rolls back a publish that failed for good: it resets the not-yet-mined questions (so a
+// later publish resumes them), credits the payer's wallet debit back when nothing was
+// mined, and clears the publishing marker — all only while this worker still owns the claim. A
+// credit-back that fails is logged and the marker cleared anyway: the draft then stays paid, the
+// state a delete refunds and a publish reuses.
 func (pw *publishWorker) abandon() {
 	a := pw.a
-	// last chance to persist elections that mined but whose DB write kept failing: losing the
-	// pair here means a later resume cannot know the election exists and will mint a new one.
-	if !pw.flushMinedUnpersisted() {
-		for qid, upstreamID := range pw.minedUnpersisted {
-			log.Errorw(fmt.Errorf("mined election could not be persisted"),
-				fmt.Sprintf("question %s has unrecorded on-chain election %s; a republish will create a duplicate",
-					qid.Hex(), upstreamID.String()))
-		}
-	}
+	// last chance to persist elections that mined but whose DB write kept failing
+	allRecorded := pw.flushOrReportMined()
 	// only roll back if this worker still owns the publish claim: a stale claim that got
 	// reclaimed means another publish is running and these resets would stomp its work.
 	if ok, err := pw.confirmClaim(); err != nil || !ok {
 		log.Warnw("publish claim not owned at abandon, skipping rollback",
 			"processId", pw.vp.ID.Hex(), "error", err)
+		if err == nil {
+			pw.standDown()
+		}
 	} else {
 		if e := a.db.ResetQuestionsPublish(pw.vp.ID); e != nil {
 			log.Warnw("could not reset questions after failed publish", "error", e)
 		}
+		// an election that mined but could not be recorded is still an election: never credit it back
+		if allRecorded {
+			if e := a.reversePublishDebit(pw.vp.ID); e != nil {
+				log.Errorw(e, "could not credit back the wallet debit of a failed publish; "+
+					"it stays paid, or owes the credit to its next publish, checkout or delete")
+			}
+		}
 		if e := a.db.ClearVotingProcessPublishing(pw.vp.ID, pw.owner); e != nil {
 			log.Warnw("could not clear publishing state after failed publish", "error", e)
-		}
-	}
-	if pw.reserved && !anyMined(pw.questions) && len(pw.minedUnpersisted) == 0 {
-		if e := a.db.AddOrganizationManagedProcesses(pw.integratorAddr, -1); e != nil {
-			log.Warnw("could not roll back managed processes counter", "error", e)
 		}
 	}
 }
@@ -769,7 +1054,7 @@ func (pw *publishWorker) buildBatch(
 		}
 		fundedTx, txType, err := a.account.FundTransaction(tx, pw.orgSigner.Address())
 		if err != nil {
-			return nil, false, err
+			return nil, false, transient(err) // funding reads the chain and the faucet
 		}
 		if txType == nil || *txType != models.TxType_NEW_PROCESS {
 			return nil, false, fmt.Errorf("unexpected tx type for publish")
@@ -1139,54 +1424,4 @@ func parseProcessStatus(s string) (models.ProcessStatus, bool) {
 	default:
 		return 0, false
 	}
-}
-
-// drawsManagedSlot reports whether publishing questions draws a slot from the integrator's
-// managed-process quota: a managed organization publishing a non-test-sized census, unless this
-// is a resume. A resume (some question already mined) consumes the reservation the first attempt
-// took — startProcessPublish does not reserve again — so probing the quota for it would refuse a
-// half-published process once the integrator is at its limit, leaving it stuck.
-func drawsManagedSlot(org *db.Organization, census *db.Census, questions []db.VotingProcessQuestion) bool {
-	return org.ManagedBy != (common.Address{}) &&
-		uint64(census.Size) > uint64(db.TestMaxCensusSize) &&
-		!anyMined(questions)
-}
-
-// reserveManagedProcessSlot reserves one process slot against the integrator's shared
-// ManagedProcesses quota when org is a managed organization publishing a non-test-sized
-// election. It returns the integrator address and reserved=true when a slot was taken — the
-// caller MUST roll it back with AddOrganizationManagedProcesses(integratorAddr, -1) if the
-// publish/sign later fails. For a standalone org or a test-sized election it is a no-op
-// (reserved=false, nil error).
-//
-// HasTxPermission skips the per-org process-count check for managed orgs precisely because
-// this integrator-level reservation enforces it instead.
-func (a *API) reserveManagedProcessSlot(org *db.Organization, maxCensusSize uint64) (common.Address, bool, error) {
-	// draft creation already rejects integrator top-level orgs; re-check at publish.
-	if org.ManagedBy == (common.Address{}) && a.subscriptions.IsIntegrator(org) {
-		return common.Address{}, false, errors.ErrIntegratorTopLevelOrgCannotOwnProcess
-	}
-	if org.ManagedBy == (common.Address{}) || maxCensusSize <= uint64(db.TestMaxCensusSize) {
-		return common.Address{}, false, nil
-	}
-	integrator, err := a.db.Organization(org.ManagedBy)
-	if err != nil {
-		// a managed org whose integrator no longer exists is a not-found condition, not a
-		// server fault — map it like subscriptions.limitsOwner does rather than 500.
-		if err == db.ErrNotFound {
-			return common.Address{}, false, errors.ErrOrganizationNotFound.WithErr(err)
-		}
-		return common.Address{}, false, errors.ErrGenericInternalServerError.Withf("could not get integrator organization: %v", err)
-	}
-	maxProcesses, err := a.subscriptions.ManagedPublishLimits(integrator)
-	if err != nil {
-		return common.Address{}, false, err
-	}
-	if err := a.db.ReserveManagedPublish(integrator.Address, maxProcesses); err != nil {
-		if err == db.ErrManagedQuotaReached {
-			return common.Address{}, false, errors.ErrIntegratorQuotaExceeded
-		}
-		return common.Address{}, false, errors.ErrGenericInternalServerError.WithErr(err)
-	}
-	return integrator.Address, true, nil
 }

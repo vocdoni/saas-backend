@@ -56,16 +56,37 @@ func (ms *MongoStorage) IsSoleOrgAdmin(address common.Address, userID uint64) (b
 
 // EraseUser removes a registered user and their personal data (right to
 // erasure). Organizations where the user is the sole admin are torn down
-// entirely (members, groups, censuses, participants, processes, bundles, CSP
-// tokens, jobs, invitations); in organizations with other admins only the
+// entirely (members, groups, censuses, participants, processes, voting processes
+// and their questions, bundles, CSP tokens, jobs, invitations); in organizations with other admins only the
 // user's membership is removed. Invitations addressed to or issued by the
 // user, their verification codes and the user document itself are deleted.
 // Each step is best-effort: failures are accumulated and returned joined, so a
-// single stuck collection cannot leave the erasure silently half-done.
+// single stuck collection cannot leave the erasure silently half-done. It refuses,
+// erasing nothing, while an organization it would tear down still has drafts: a
+// draft may hold money only the API layer can refund (api.DeleteOrgDrafts).
+// Payment rows are kept: they are the audit trail of money that moved.
 func (ms *MongoStorage) EraseUser(userID uint64) (*UserErasureReport, error) {
 	user, err := ms.User(userID)
 	if err != nil {
 		return nil, fmt.Errorf("could not fetch user: %w", err)
+	}
+	// refuse before erasing anything rather than strand a draft's money
+	for _, userOrg := range user.Organizations {
+		soleAdmin, err := ms.IsSoleOrgAdmin(userOrg.Address, user.ID)
+		if err != nil {
+			return nil, fmt.Errorf("classifying org %s: %w", userOrg.Address, err)
+		}
+		if !soleAdmin {
+			continue
+		}
+		drafts, err := ms.CountVotingProcesses(userOrg.Address, DraftOnly)
+		if err != nil {
+			return nil, fmt.Errorf("counting drafts of org %s: %w", userOrg.Address, err)
+		}
+		if drafts > 0 {
+			return nil, fmt.Errorf("org %s still has %d drafts: delete them (refunding the paid ones) first",
+				userOrg.Address, drafts)
+		}
 	}
 	report := &UserErasureReport{UserID: user.ID, Email: user.Email}
 	var errs []error
@@ -129,6 +150,15 @@ func (ms *MongoStorage) deleteAllVerificationCodes(userID uint64) error {
 // so one stuck collection does not abort the rest of the teardown.
 func (ms *MongoStorage) eraseOrgData(address common.Address) error {
 	var errs []error
+	// a managed organization's spending under its integrator's cap goes with it, as a managed
+	// organization's deletion drops it
+	if org, err := ms.Organization(address); err != nil {
+		errs = append(errs, fmt.Errorf("reading organization: %w", err))
+	} else if org.ManagedBy != (common.Address{}) {
+		if err := ms.DropManagedOrgSpend(org.ManagedBy, address); err != nil {
+			errs = append(errs, fmt.Errorf("dropping managed organization spend: %w", err))
+		}
+	}
 	bundles, err := ms.ProcessBundlesByOrg(address)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("listing process bundles: %w", err))
@@ -173,6 +203,10 @@ func (ms *MongoStorage) eraseOrgData(address common.Address) error {
 	}
 	if _, err := ms.DeleteProcessesByOrg(address); err != nil {
 		errs = append(errs, fmt.Errorf("deleting processes: %w", err))
+	}
+	// published voting processes and their questions; EraseUser refused while drafts remained
+	if _, err := ms.DeleteVotingProcessesByOrg(address); err != nil {
+		errs = append(errs, fmt.Errorf("deleting voting processes: %w", err))
 	}
 	if _, err := ms.DeleteAllOrgMemberGroups(address); err != nil {
 		errs = append(errs, fmt.Errorf("deleting member groups: %w", err))

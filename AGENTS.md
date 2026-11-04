@@ -85,7 +85,10 @@ Any endpoint that submits a transaction returns **202 + `{"jobId": ...}`** and t
 `GET /jobs/{jobId}`. The machinery is `api/jobqueue.go`:
 
 - `a.enqueueTx(txTask{...})` / `a.enqueueTxBatch(tasks)` push onto a buffered `txQueue`
-  (512 slots, 16 workers). `enqueueTxBatch` takes all the slots or none; a full queue is a 503.
+  (512 slots, 16 workers). `enqueueTxBatch` takes all the slots or none; a full queue is a 503 —
+  except for a voting-process publish, which treats it as a transient failure: the job stays
+  `pending` and `publishWorker.finish` re-enqueues with backoff (`publishRetryAttempts`), crediting the
+  payer's wallet back if the retries run out before anything is mined (`reversePublishDebit`).
 - A `txTask.run` closure does the submit *and* waits for the tx to be mined, so it blocks a worker
   the whole time — never spend one on work that isn't an on-chain submit.
 - `txTask.record` overrides how the outcome is written. Tasks sharing one job (the envelopes of a
@@ -127,7 +130,16 @@ Component packages (each is a focused service composed in `main.go`):
   `cmd/service/main.go` into `api.Config.StatusSyncer` (a nil enqueuer — as in tests — makes enqueues
   no-ops). The managed-org delete guard deliberately reads the chain *synchronously* rather than
   trusting the stored status.
-- **`subscriptions/`** — permission/quota manager enforcing what an organization's plan allows.
+- **`subscriptions/`** — roles and the fixed pay-per-process restrictions, the same for every
+  organization (5 admins/managers, 50 000 members, 20 drafts, 15 questions per process,
+  90-day processes). Subscription plans no longer limit anything; integrators are an `integrator`
+  flag on the organization and are bounded only by their wallet balance and the optional spend
+  cap they set per managed organization, except that one that never kept a wallet top-up manages a
+  single organization (402, 40184; enforced in `api/organizations_managed.go`). The flag is set when the organization is created with
+  `integrator: true` (`POST /organizations`); migration 0034 flagged the existing integrators (an
+  `integratorLimits` override granting managed orgs, or without one an active non-default integrator
+  plan; API keys alone do not count).
+  There is no command to switch it later.
 - **`stripe/`** — Stripe client, checkout/portal sessions, and webhook handling for billing.
 - **`objectstorage/`** — S3-like object storage (images) backed by Mongo, with upload/download handlers.
 - **`errors/`** — typed API `Error` (code + HTTP status + optional data), JSON-serializable; handlers
@@ -206,7 +218,7 @@ user's call.
 ## CI
 
 `.github/workflows/main.yml` gates PRs on: `golangci-lint` (v2.15.0, `only-new-issues`),
-`./scripts/check-qt-patterns.sh`, a clean `go mod tidy` diff, and `go test -failfast -timeout=30m ./...`
+`./scripts/check-qt-patterns.sh`, a clean `go mod tidy` diff, and `go test -failfast -timeout=45m ./...`
 with coverage (a diff report is posted as a PR comment). It runs on pull requests and on pushes to
 `main` only, so in practice every push to `main` builds and pushes a Docker image, while its `-race`
 step and the `stage`/`release*` Docker conditions never fire. The branch flow is

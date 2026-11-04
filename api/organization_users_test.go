@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/subscriptions"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func TestOrganizationUsers(t *testing.T) {
@@ -108,21 +111,6 @@ func TestOrganizationUsers(t *testing.T) {
 		// Create a new organization for this test
 		newOrgAddress := testCreateOrganization(t, adminToken)
 
-		// Subscribe the organization to a plan
-		plans, err := testDB.Plans()
-		c.Assert(err, qt.IsNil)
-		c.Assert(len(plans) > 0, qt.IsTrue)
-		premiumPlan := plans[1]
-		c.Assert(premiumPlan.Organization.Users > 1, qt.IsTrue)
-
-		err = testDB.SetOrganizationSubscription(newOrgAddress, &db.OrganizationSubscription{
-			PlanID:          premiumPlan.ID,
-			StartDate:       time.Now(),
-			RenewalDate:     time.Now().Add(time.Hour * 24),
-			LastPaymentDate: time.Now(),
-			Active:          true,
-		})
-		c.Assert(err, qt.IsNil)
 		// Get the initial organization to check the users counter
 		resp, code := testRequest(t, http.MethodGet, adminToken, nil, "organizations", newOrgAddress.String())
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
@@ -168,9 +156,8 @@ func TestOrganizationUsers(t *testing.T) {
 		var finalOrg apicommon.OrganizationInfo
 		c.Assert(json.Unmarshal(resp, &finalOrg), qt.IsNil)
 
-		// After our fix, we expect the counter to be correctly incremented by nInvites,
-		// but not exceed max allowed users of the subscribed plan
-		expectedCount := min(initialUserCount+nInvites, premiumPlan.Organization.Users)
+		// every invite must be counted exactly once: no plan caps the users counter anymore
+		expectedCount := initialUserCount + nInvites
 		t.Logf("Final users counter: %d (expected %d)",
 			finalOrg.Counters.Users, expectedCount)
 
@@ -193,9 +180,7 @@ func TestOrganizationUsers(t *testing.T) {
 
 		var pendingInvites apicommon.OrganizationInviteList
 		c.Assert(json.Unmarshal(resp, &pendingInvites), qt.IsNil)
-		expectedInvitesCount := min(nInvites, premiumPlan.Organization.Users)
-		c.Assert(pendingInvites.Invites, qt.HasLen, expectedInvitesCount,
-			qt.Commentf("expected %d pending invitations, got %d", expectedInvitesCount, len(pendingInvites.Invites)))
+		c.Assert(pendingInvites.Invites, qt.HasLen, nInvites)
 	})
 
 	t.Run("UpdateOrganizationUserRole", func(t *testing.T) {
@@ -934,21 +919,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 	})
 
-	t.Run("InviteRefusedForNonAdmin", func(t *testing.T) {
-		adminToken := testCreateUser(t, "adminpassword123")
-		orgAddress := testCreateOrganization(t, adminToken)
-		// a user with no role in the organization is refused as a non-admin, not as a server fault
-		strangerToken := testCreateUser(t, "strangerpassword123")
-
-		inviteRequest := &apicommon.OrganizationInvite{
-			Email: "nonadmin@example.com",
-			Role:  db.ViewerRole,
-		}
-		requestAndAssertError(errors.ErrUserHasNoAdminRole,
-			t, http.MethodPost, strangerToken, inviteRequest, "organizations", orgAddress.String(), "users")
-	})
-
-	t.Run("MaxUsersReached", func(t *testing.T) {
+	t.Run("UsersCounterNotCappedByPlan", func(t *testing.T) {
 		c := qt.New(t)
 
 		// Create an admin user
@@ -961,15 +932,14 @@ func TestOrganizationUsers(t *testing.T) {
 		org, err := testDB.Organization(orgAddress)
 		c.Assert(err, qt.IsNil)
 
-		// Set the organization's subscription plan to the free plan and set the user counter to
-		// the maximum allowed by the plan, so a further invite must be rejected.
+		// Set the user counter to the free plan's former users limit: no plan caps invites anymore.
 		org.Subscription.PlanID = mockFreePlan.ID
 		c.Assert(testDB.SetOrganizationSubscription(orgAddress, &org.Subscription), qt.IsNil)
 		org.Counters.Users = 10
 		err = testDB.SetOrganization(org)
 		c.Assert(err, qt.IsNil)
 
-		// Try to invite a user to the organization (should fail with "the organization's plan allows no more users")
+		// Inviting a further user still succeeds
 		inviteRequest := &apicommon.OrganizationInvite{
 			Email: "maxusers@example.com",
 			Role:  db.ViewerRole,
@@ -983,17 +953,10 @@ func TestOrganizationUsers(t *testing.T) {
 			orgAddress.String(),
 			"users",
 		)
-
-		// Verify the plan limit is reported as a 400 with its own error code
-		c.Assert(code, qt.Equals, http.StatusBadRequest, qt.Commentf("response: %s", resp))
-		var errorResp struct {
-			Error string `json:"error"`
-			Code  int    `json:"code"`
-		}
-		err = json.Unmarshal(resp, &errorResp)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+		org, err = testDB.Organization(orgAddress)
 		c.Assert(err, qt.IsNil)
-		c.Assert(errorResp.Code, qt.Equals, errors.ErrMaxUsersReached.Code)
-		c.Assert(errorResp.Error, qt.Contains, "the organization's plan allows no more users")
+		c.Assert(org.Counters.Users, qt.Equals, 11)
 	})
 
 	t.Run("OrganizationRoles", func(t *testing.T) {
@@ -1038,7 +1001,110 @@ func TestOrganizationUsers(t *testing.T) {
 	})
 }
 
-// invitedOrg is an organization owned by a fresh user, subscribed to a plan with enough seats for the scenarios.
+// TestOrganizationWriterCap drives the 5 admins/managers cap over HTTP: seats are taken by users and
+// pending invitations alike, viewers never take one, and only a promotion to a write role is checked.
+func TestOrganizationWriterCap(t *testing.T) {
+	c := qt.New(t)
+	adminToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	usersPath := []string{"organizations", orgAddress.String(), "users"}
+
+	invite := func(email string, role db.UserRole) {
+		requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken,
+			&apicommon.OrganizationInvite{Email: email, Role: role}, usersPath...)
+	}
+	// joinAsViewer creates a user, invites it as a viewer, accepts and returns its id
+	joinAsViewer := func() uint64 {
+		token := testCreateUser(t, "userpassword123")
+		info := requestAndParse[apicommon.UserInfo](t, http.MethodGet, token, nil, usersMeEndpoint)
+		invite(info.Email, db.ViewerRole)
+		code := apiTestVerificationCodeRgx.FindStringSubmatch(waitForEmail(t, info.Email))
+		c.Assert(len(code) > 1, qt.IsTrue)
+		requestAndAssertCode(http.StatusOK, t, http.MethodPost, token,
+			&apicommon.AcceptOrganizationInvitation{Code: code[1]}, append(usersPath, "accept")...)
+		return info.ID
+	}
+	setRole := func(userID uint64, role db.UserRole) func() {
+		return func() {
+			requestAndAssertCode(http.StatusOK, t, http.MethodPut, adminToken,
+				&apicommon.UpdateOrganizationUserRoleRequest{Role: string(role)},
+				append(usersPath, fmt.Sprint(userID))...)
+		}
+	}
+	randomEmail := func() string { return fmt.Sprintf("user-%s@example.com", uuid.New().String()) }
+
+	// the creator is the first writer; a second admin and a viewer join through invitations
+	secondAdmin, viewer := joinAsViewer(), joinAsViewer()
+	setRole(secondAdmin, db.AdminRole)() // 2 writers
+	for range 3 {
+		invite(randomEmail(), db.ManagerRole) // 5 writers, pending invitations included
+	}
+
+	requestAndAssertError(errors.ErrMaxWritersReached, t, http.MethodPost, adminToken,
+		&apicommon.OrganizationInvite{Email: randomEmail(), Role: db.ManagerRole}, usersPath...)
+	invite(randomEmail(), db.ViewerRole) // viewers are never capped
+	requestAndAssertError(errors.ErrMaxWritersReached, t, http.MethodPut, adminToken,
+		&apicommon.UpdateOrganizationUserRoleRequest{Role: string(db.ManagerRole)},
+		append(usersPath, fmt.Sprint(viewer))...)
+	// a swap between write roles takes no new seat
+	setRole(secondAdmin, db.ManagerRole)()
+
+	// an expired write invitation frees its seat, and reviving it must take one again
+	pending, err := testDB.PendingInvitations(orgAddress)
+	c.Assert(err, qt.IsNil)
+	var expired *db.OrganizationInvite
+	for i := range pending {
+		if pending[i].Role == db.ManagerRole {
+			expired = &pending[i]
+			break
+		}
+	}
+	c.Assert(expired, qt.Not(qt.IsNil))
+	_, err = testDB.DBClient.Database(testDBName).Collection("organizationInvites").UpdateOne(context.Background(),
+		bson.M{"_id": expired.ID}, bson.M{"$set": bson.M{"expiration": time.Now().Add(-time.Minute)}})
+	c.Assert(err, qt.IsNil)
+	invite(randomEmail(), db.ManagerRole) // the freed seat: 5 writers again
+	requestAndAssertError(errors.ErrMaxWritersReached, t, http.MethodPut, adminToken, nil,
+		append(usersPath, "pending", expired.ID.Hex())...)
+}
+
+// TestOrganizationWriterCapConcurrentInvites: write-role invitations racing at the cap are checked
+// and stored one at a time (writerLocks), so together they never take more than the free seats.
+func TestOrganizationWriterCapConcurrentInvites(t *testing.T) {
+	c := qt.New(t)
+	adminToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	usersPath := []string{"organizations", orgAddress.String(), "users"}
+
+	// the creator holds one seat
+	const racers = 10
+	statuses := make(chan int, racers)
+	var wg sync.WaitGroup
+	for range racers {
+		wg.Go(func() {
+			_, status := testRequest(t, http.MethodPost, adminToken, &apicommon.OrganizationInvite{
+				Email: fmt.Sprintf("user-%s@example.com", uuid.New().String()), Role: db.ManagerRole,
+			}, usersPath...)
+			statuses <- status
+		})
+	}
+	wg.Wait()
+	close(statuses)
+	invited := 0
+	for status := range statuses {
+		if status == http.StatusOK {
+			invited++
+			continue
+		}
+		c.Assert(status, qt.Equals, errors.ErrMaxWritersReached.HTTPstatus)
+	}
+	c.Assert(invited, qt.Equals, subscriptions.MaxWritersPerOrg-1)
+	pending, err := testDB.PendingInvitations(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(pending, qt.HasLen, subscriptions.MaxWritersPerOrg-1)
+}
+
+// invitedOrg is an organization owned by a fresh user; no plan is needed, seats are bounded only by the writer cap.
 type invitedOrg struct {
 	ownerToken string
 	address    common.Address
@@ -1049,17 +1115,6 @@ func newInvitedOrg(t *testing.T) invitedOrg {
 	t.Helper()
 	ownerToken := testCreateUser(t, "ownerpassword123")
 	address := testCreateOrganization(t, ownerToken)
-	plans, err := testDB.Plans()
-	qt.Assert(t, err, qt.IsNil)
-	qt.Assert(t, plans[1].Organization.Users >= 3, qt.IsTrue)
-	err = testDB.SetOrganizationSubscription(address, &db.OrganizationSubscription{
-		PlanID:          plans[1].ID,
-		StartDate:       time.Now(),
-		RenewalDate:     time.Now().Add(time.Hour * 24),
-		LastPaymentDate: time.Now(),
-		Active:          true,
-	})
-	qt.Assert(t, err, qt.IsNil)
 	return invitedOrg{
 		ownerToken: ownerToken,
 		address:    address,

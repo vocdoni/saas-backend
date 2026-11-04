@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -15,7 +16,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
-	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/types"
@@ -460,7 +461,7 @@ func TestVotingProcessAPIKeyAuth(t *testing.T) {
 	setOrganizationSubscription(t, orgAddr, mockEssentialPlan.ID)
 	org, err := testDB.Organization(orgAddr)
 	c.Assert(err, qt.IsNil)
-	org.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 2}
+	org.Integrator = true
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
 	// mint a voting:write key (managed:write is needed to create the managed org)
@@ -503,8 +504,8 @@ func TestVotingProcessAPIKeyAuth(t *testing.T) {
 
 // TestVotingProcessPublishPreflight verifies the publish-readiness dry-run now catches plan
 // denials that used to only surface as an async job failure: a process whose duration exceeds
-// the plan limit is reported invalid by GET .../check AND rejected 400 by publish (synchronously,
-// never enqueued).
+// the 90-day duration cap is reported invalid by GET .../check AND rejected 400 by publish (synchronously,
+// never enqueued). Drafts are capped too, so the over-long draft is one stored before the cap.
 func TestVotingProcessPublishPreflight(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
@@ -513,22 +514,25 @@ func TestVotingProcessPublishPreflight(t *testing.T) {
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
-	// a draft with a 120-day duration (over the plan's 90-day MaxDuration)
+	// a draft with a 120-day duration (over the 90-day cap), stored before drafts were capped
 	req := newVotingProcessRequest(orgAddress, ids)
 	req.StartDate = time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
-	req.EndDate = time.Now().Add(120 * 24 * time.Hour).UTC().Format(time.RFC3339)
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, req, processesCreateEndpoint,
 	)
 	pid := created.ProcessID
+	_, err := testDB.DBClient.Database(testDBName).Collection("votingProcesses").UpdateOne(context.Background(),
+		bson.M{"_id": objectID(c, pid)}, bson.M{"$set": bson.M{"endDate": time.Now().Add(120 * 24 * time.Hour).UTC()}})
+	c.Assert(err, qt.IsNil)
 
 	// the dry-run reports it not ready (previously it passed the structural-only check)
 	val := requestAndParse[apicommon.VotingProcessValidateResponse](t, http.MethodGet, token, nil, "processes", pid, "validation")
 	c.Assert(val.Valid, qt.IsFalse)
 	c.Assert(len(val.Errors) > 0, qt.IsTrue)
 
-	// publish rejects it synchronously with 400 (not a 202 that later fails as an opaque job)
-	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, token, nil, "processes", pid, "publish")
+	// publish rejects it synchronously with the cap's typed 400 (not a 202 that later fails as an
+	// opaque job)
+	requestAndAssertError(errors.ErrInvalidData, t, http.MethodPost, token, nil, "processes", pid, "publish")
 }
 
 // TestVotingProcessUpdateNoCensusOrphan verifies that editing a draft does not accumulate
@@ -1157,107 +1161,58 @@ func TestVotingProcessCumulativeBallotType(t *testing.T) {
 	c.Assert(validation.Valid, qt.IsTrue, qt.Commentf("errors: %v", validation.Errors))
 }
 
-// TestVotingProcessPlanGateOnEffectiveType covers the gate a raw ballotProtocol used to walk past:
-// the plan's voting-type limits apply to the ballot a question encodes, not the label it carries,
-// so an org whose plan forbids a type cannot mint one by describing it in raw terms. Ranked is a
-// named type now, so a raw ranked protocol is gated on plan.VotingTypes.Ranked like any other.
-func TestVotingProcessPlanGateOnEffectiveType(t *testing.T) {
+// TestVotingProcessDraftCapConcurrent: creations racing at the draft cap are counted and written
+// one at a time per organization, so exactly the free slot is taken.
+func TestVotingProcessDraftCapConcurrent(t *testing.T) {
 	c := qt.New(t)
-	token := testCreateUser(t, "adminpassword123")
+	token := testCreateUser(t, "draftcaprace1234")
 	orgAddress := testCreateOrganization(t, token)
-
-	singleOnlyPlan := *mockEssentialPlan
-	singleOnlyPlan.ID = "prod_test_single_only"
-	singleOnlyPlan.Name = "Single Choice Only Plan"
-	singleOnlyPlan.StripeMonthlyPriceID = "price_month_test_single_only"
-	singleOnlyPlan.StripeYearlyPriceID = "price_year_test_single_only"
-	singleOnlyPlan.Public = false
-	singleOnlyPlan.VotingTypes.Multiple = false
-	singleOnlyPlan.VotingTypes.Ranked = false
-	c.Assert(testDB.SetPlan(&singleOnlyPlan), qt.IsNil)
-	setOrganizationSubscription(t, orgAddress, singleOnlyPlan.ID)
-
-	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
-	ids := memberIDs(members)
-
-	// a multichoice ballot, stated in raw terms and with no type at all, is gated on multiple
-	rawMulti := newVotingProcessRequest(orgAddress, ids)
-	rawMulti.Questions = rawMulti.Questions[:1]
-	rawMulti.Questions[0].Type = ""
-	rawMulti.Questions[0].TypeSetup = db.QuestionTypeSetup{}
-	rawMulti.Questions[0].BallotProtocol = &db.BallotProtocol{
-		MaxCount: 2, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2,
+	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(2)...))
+	for range subscriptions.MaxDraftsPerOrg - 1 {
+		_, err := testDB.SetVotingProcess(&db.VotingProcess{OrgAddress: orgAddress})
+		c.Assert(err, qt.IsNil)
 	}
-	created := requestAndParse[apicommon.CreateVotingProcessResponse](
-		t, http.MethodPost, token, rawMulti, processesCreateEndpoint)
-	val := requestAndParse[apicommon.VotingProcessValidateResponse](
-		t, http.MethodGet, token, nil, "processes", created.ProcessID, "validation")
-	c.Assert(val.Valid, qt.IsFalse, qt.Commentf("a plan without multiple-choice must not mint one"))
 
-	// a ranked ballot stated the same way is gated on ranked: the raw protocol is recognised as
-	// the named type, so dropping the label no longer evades the plan
-	rawRanked := newVotingProcessRequest(orgAddress, ids)
-	rawRanked.Questions = rawRanked.Questions[:1]
-	rawRanked.Questions[0].Type = ""
-	rawRanked.Questions[0].TypeSetup = db.QuestionTypeSetup{}
-	rawRanked.Questions[0].BallotProtocol = &db.BallotProtocol{MaxCount: 2, MaxValue: 1, UniqueValues: true}
-	created = requestAndParse[apicommon.CreateVotingProcessResponse](
-		t, http.MethodPost, token, rawRanked, processesCreateEndpoint)
-	val = requestAndParse[apicommon.VotingProcessValidateResponse](
-		t, http.MethodGet, token, nil, "processes", created.ProcessID, "validation")
-	c.Assert(val.Valid, qt.IsFalse, qt.Commentf("a plan without ranked must not mint a ranked ballot: %v", val.Errors))
+	const racers = 5
+	statuses := make(chan int, racers)
+	var wg sync.WaitGroup
+	for range racers {
+		wg.Go(func() {
+			_, status := testRequest(t, http.MethodPost, token, newVotingProcessRequest(orgAddress, ids), processesCreateEndpoint)
+			statuses <- status
+		})
+	}
+	wg.Wait()
+	close(statuses)
+	created := 0
+	for status := range statuses {
+		if status == http.StatusOK {
+			created++
+			continue
+		}
+		c.Assert(status, qt.Equals, errors.ErrMaxDraftsReached.HTTPstatus)
+	}
+	c.Assert(created, qt.Equals, 1)
+	drafts, err := testDB.CountVotingProcesses(orgAddress, db.DraftOnly)
+	c.Assert(err, qt.IsNil)
+	c.Assert(drafts, qt.Equals, int64(subscriptions.MaxDraftsPerOrg))
 }
 
-// TestVotingProcessPublishGateSkipsMinted covers the resume case: a question that already mined
-// (UpstreamID set) is immutable on chain, so the voting-type gate must skip it. Otherwise a plan
-// change after a partial publish wedges the process — the remaining questions can never be minted
-// while the mined one's election is live.
-func TestVotingProcessPublishGateSkipsMinted(t *testing.T) {
-	c := qt.New(t)
-	token := testCreateUser(t, "adminpassword123")
+// TestVotingProcessDurationCapOnDraft: a draft running past the publish duration limit is refused
+// on create and on update, with the error publish gives.
+func TestVotingProcessDurationCapOnDraft(t *testing.T) {
+	token := testCreateUser(t, "draftduration123")
 	orgAddress := testCreateOrganization(t, token)
+	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(2)...))
+	tooLong := func() *apicommon.CreateVotingProcessRequest {
+		req := newVotingProcessRequest(orgAddress, ids)
+		req.EndDate = time.Now().Add(time.Duration(subscriptions.MaxProcessDurationDays+1) * 24 * time.Hour).
+			UTC().Format(time.RFC3339)
+		return req
+	}
 
-	singleOnlyPlan := *mockEssentialPlan
-	singleOnlyPlan.ID = "prod_test_single_only_minted"
-	singleOnlyPlan.Name = "Single Only (minted)"
-	singleOnlyPlan.StripeMonthlyPriceID = "price_month_test_single_only_minted"
-	singleOnlyPlan.StripeYearlyPriceID = "price_year_test_single_only_minted"
-	singleOnlyPlan.Public = false
-	singleOnlyPlan.VotingTypes.Multiple = false
-	singleOnlyPlan.VotingTypes.Ranked = false
-	c.Assert(testDB.SetPlan(&singleOnlyPlan), qt.IsNil)
-	setOrganizationSubscription(t, orgAddress, singleOnlyPlan.ID)
-
-	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
-	ids := memberIDs(members)
-
-	// a ranked ballot over 2 choices; create does not gate voting type, only publish preflight does
-	req := newVotingProcessRequest(orgAddress, ids)
-	req.Questions = req.Questions[:1]
-	req.Questions[0].Type = ""
-	req.Questions[0].TypeSetup = db.QuestionTypeSetup{}
-	req.Questions[0].BallotProtocol = &db.BallotProtocol{MaxCount: 2, MaxValue: 1, UniqueValues: true}
+	requestAndAssertError(errors.ErrInvalidData, t, http.MethodPost, token, tooLong(), processesCreateEndpoint)
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
-		t, http.MethodPost, token, req, processesCreateEndpoint)
-
-	// before mining: the plan has no Ranked flag, so the unmined question is gated
-	val := requestAndParse[apicommon.VotingProcessValidateResponse](
-		t, http.MethodGet, token, nil, "processes", created.ProcessID, "validation")
-	c.Assert(val.Valid, qt.IsFalse, qt.Commentf("unmined ranked question must be gated"))
-
-	// simulate the question having already mined on chain (UpstreamID set)
-	oid, err := bson.ObjectIDFromHex(created.ProcessID)
-	c.Assert(err, qt.IsNil)
-	stored, err := testDB.QuestionsByProcess(oid)
-	c.Assert(err, qt.IsNil)
-	c.Assert(stored, qt.HasLen, 1)
-	stored[0].UpstreamID = internal.HexBytes{0xab, 0xcd, 0xef, 0x01}
-	_, err = testDB.SetQuestion(&stored[0])
-	c.Assert(err, qt.IsNil)
-
-	// after mining: the gate skips it (immutable), so validation no longer reports the type — a
-	// resume can still mint the remaining questions
-	val = requestAndParse[apicommon.VotingProcessValidateResponse](
-		t, http.MethodGet, token, nil, "processes", created.ProcessID, "validation")
-	c.Assert(val.Valid, qt.IsTrue, qt.Commentf("a minted question must not block the process: %v", val.Errors))
+		t, http.MethodPost, token, newVotingProcessRequest(orgAddress, ids), processesCreateEndpoint)
+	requestAndAssertError(errors.ErrInvalidData, t, http.MethodPut, token, tooLong(), "processes", created.ProcessID)
 }

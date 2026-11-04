@@ -252,42 +252,6 @@ func ValidateBallotProtocol(bp *db.BallotProtocol) error {
 	return nil
 }
 
-// EffectiveQuestionType returns the named ballot type a stored question actually encodes: the one
-// inferred from its protocol when it has one — which is empty for a shape with no named type —
-// and otherwise its stored Type.
-//
-// A stored Type is only a label. Questions written before the two halves were reconciled may
-// carry one that contradicts their protocol, and it is the protocol that reaches the chain, so
-// anything deciding on the ballot's identity (the plan's voting-type gate) has to ask this rather
-// than read q.Type.
-//
-// Unlike QuestionTypeFromBallotProtocol, which storage needs to be exact, this classifies the
-// ballot layout alone. Vote overwrites and weighted cost are orthogonal to the layout and gated by
-// their own plan flags (Features.Overwrite, VotingTypes.Weighted), so they are set aside before
-// recognising the shape: a singlechoice ballot that allows overwrites is still a singlechoice
-// ballot. A weighted budget (costFromWeight with neither maxValue nor maxTotalCost) is a
-// cumulative ballot whose budget is the voter's weight, and is recognised as cumulative.
-//
-// An empty result for a question with a protocol is a hand-crafted layout matching no named type.
-// The plan gate (subscriptions.OrgAllowsVotingType) treats it as able to express any of them.
-func EffectiveQuestionType(q *db.VotingProcessQuestion) string {
-	if q.BallotProtocol == nil {
-		return q.Type
-	}
-	layout := *q.BallotProtocol
-	layout.MaxVoteOverwrites = 0
-	if layout.CostFromWeight {
-		layout.CostFromWeight = false
-		if layout.MaxValue == 0 && layout.MaxTotalCost == 0 {
-			// the budget comes from the census weight; a non-zero stand-in lets the canonical
-			// cumulative shape match without changing which type the layout is
-			layout.MaxTotalCost = 1
-		}
-	}
-	qType, _, _ := QuestionTypeFromBallotProtocol(&layout, q.Choices)
-	return qType
-}
-
 // BallotShapeInput is a question's ballot specification as a client supplied it: either half may
 // be missing, and when both are present they may disagree.
 type BallotShapeInput struct {

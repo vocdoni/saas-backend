@@ -7,6 +7,8 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -24,11 +26,14 @@ type censusPropagation struct {
 // ordered so that a failure can only ever degrade in one direction:
 //
 //  1. resolve the target censuses     (read-only)
-//  2. plan quota, per census          (read-only) — a refusal here means zero writes
+//  2. price paid                      (per process taking votes) — a refusal here means no
+//     memberbase or census write; the only write it may make is grandfathering a pre-payg
+//     process's payment, which is idempotent and records what any later check would record anyway
 //  3. chain signer preflight          (read-only) — a failure here means zero writes
 //  4. the memberbase write            (done by the caller, before calling this)
 //  5. participants + census size      (additive and idempotent)
-//  6. SET_PROCESS_CENSUS enqueue      (the only surviving failure window)
+//  6. SET_PROCESS_CENSUS enqueue      (the only surviving failure window) — each process priced
+//     again at the recounted size, a refusal reported and its questions left unresized
 //
 // Steps 2 and 3 therefore run before the caller's memberbase write, through
 // preflightCensusGrowth; this function performs 5 and 6.
@@ -71,9 +76,26 @@ func (a *API) propagateMembersToCensuses(
 			out.Errors = append(out.Errors, fmt.Sprintf("census %s: %v", censusID, err))
 			continue
 		}
+		// a census grown past what its process paid for is not put on chain, which the preflight
+		// should already have kept from happening; the question stays at its size, reported.
+		// Checked once per process, at the recounted size.
+		refused := make(map[bson.ObjectID]error)
 		for i := range questions {
 			// a question restricted to a named subset is unaffected by who else joined the census
 			if len(questions[i].EligibleMemberIDs) > 0 {
+				continue
+			}
+			pid := questions[i].ProcessID
+			refusal, checked := refused[pid]
+			if !checked {
+				refusal = a.resizePaymentError(pid, census)
+				refused[pid] = refusal
+			}
+			if refusal != nil {
+				// logged too: the async import reports no propagation errors (#628)
+				log.Warnw("census resize refused: process not paid for the size",
+					"question", questions[i].ID.Hex(), "process", pid.Hex(), "error", refusal)
+				out.Errors = append(out.Errors, fmt.Sprintf("question %s: %v", questions[i].ID.Hex(), refusal))
 				continue
 			}
 			targets = append(targets, censusSizeTarget{
@@ -95,30 +117,83 @@ func (a *API) propagateMembersToCensuses(
 	return out
 }
 
+// resizePaymentError is censusGrowthPaymentError at census's current size for the process
+// processID: the refusal of a resize pushing that size on chain.
+func (a *API) resizePaymentError(processID bson.ObjectID, census *db.Census) error {
+	vp, err := a.db.VotingProcess(processID)
+	if err != nil {
+		log.Warnw("could not load the process of an ongoing question", "process", processID.Hex(), "error", err)
+		return err
+	}
+	return a.censusGrowthPaymentError(censusGrowth{vp: vp, census: census})
+}
+
 // preflightCensusGrowth runs the read-only checks that must pass before the memberbase write:
-// the plan's census quota for each target census, and restoring the organization's chain signer.
-// Both are refusals that have to leave the memberbase and the censuses untouched, so an over-quota
-// request changes nothing at all.
+// the price already paid for every process built on it that takes votes (pay-per-process), and
+// restoring the organization's chain signer. All are refusals that have to leave the memberbase
+// and the censuses untouched, so an underpaid request changes nothing at all.
 //
 // The signer is not returned: enqueueSetProcessCensus restores its own. This only proves it can be.
 //
-// The quota is a soft limit. Counting participants is a read, so concurrent requests can each pass
-// against the same count and overshoot it by up to the number in flight. Making it hard would take
-// the check inside the locked write path, which would put a subscriptions dependency in the db
-// layer; the overshoot is small, bounded, and refused on the next request.
+// Callers hold the organization's censusGrowthLocks from this check through the propagation, so
+// the price check is hard: parallel changes cannot each pass it against the same census size.
 //
 // count is an upper bound on the growth, not the growth itself: adding a member who is already a
 // census participant is a no-op, and callers that cannot cheaply tell (the bulk import, which
 // learns what was net-new only from the insert) pass the submitted count. Erring toward refusal is
-// the safe direction for a quota. Callers that already hold the current membership pass the net-new
-// count instead — see the group update.
+// the safe direction for the price check: it refuses, it never charges. Callers that already hold
+// the current membership pass the net-new count instead — see the group update.
 func (a *API) preflightCensusGrowth(org *db.Organization, censusIDs []string, count int) error {
 	if len(censusIDs) == 0 || count == 0 {
 		return nil
 	}
+	// the processes built on these censuses, and which still take votes, read once for all of them.
+	// Only what the growth reaches on chain is priced: a process with a question accepting votes,
+	// the ones propagation resizes. An ended election never grows, and pricing it would refuse
+	// every member from then on. A draft — paid or not, held by a credit-back — is never priced
+	// here: its publish debit prices the census it publishes, under this same lock, and charges the
+	// difference from what it already paid (debitProcessWallet). Its mined questions, if an earlier
+	// publish got that far, take votes and are priced.
+	processes, err := a.db.VotingProcessesByCensus(censusIDs)
+	if err != nil {
+		return fmt.Errorf("could not resolve the processes of the censuses: %w", err)
+	}
+	// A publish in flight builds every election it has yet to mine from the census it stored
+	// before releasing this lock, and nothing resizes those once mined: a member added now would be
+	// in the census and the CSP, but not in their maxCensusSize. The worker only drops the claim
+	// once every question is persisted live (SetVotingProcessPublished after the last
+	// SetQuestionPublished), so "claimed" covers the whole window, mined questions included.
+	for i := range processes {
+		if processes[i].PublishInProgress() {
+			return errors.ErrPublishInProgress.Withf(
+				"a publish of process %s is in progress; retry once it completes", processes[i].ID.Hex())
+		}
+	}
+	ongoing, err := a.db.OngoingQuestionsOfProcesses(processes)
+	if err != nil {
+		return fmt.Errorf("could not resolve the ongoing questions of the censuses: %w", err)
+	}
+	live := make(map[bson.ObjectID]bool, len(ongoing))
+	for _, q := range ongoing {
+		live[q.ProcessID] = true
+	}
+	priced := make(map[bson.ObjectID][]*db.VotingProcess, len(censusIDs))
+	for i := range processes {
+		if live[processes[i].ID] {
+			priced[processes[i].CensusID] = append(priced[processes[i].CensusID], &processes[i])
+		}
+	}
 	for _, censusID := range censusIDs {
-		if err := a.subscriptions.OrgCanAddCensusParticipants(org.Address, censusID, count); err != nil {
-			return err
+		census, err := a.db.Census(censusID)
+		if err != nil {
+			return fmt.Errorf("could not load census %s: %w", censusID, err)
+		}
+		// the refusal is the 402 the census routes answer, naming the process: the organization
+		// buys the headroom with POST /processes/{processId}/census/checkout and retries
+		for _, vp := range priced[census.ID] {
+			if err := a.censusGrowthPaymentError(censusGrowth{vp: vp, census: census, org: org, by: int64(count)}); err != nil {
+				return err
+			}
 		}
 	}
 	if _, err := account.OrganizationSigner(a.secret, org.SignerSeedValue(), org.Nonce); err != nil {

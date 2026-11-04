@@ -51,9 +51,8 @@ func validateDefaultLang(w http.ResponseWriter, lang string) bool {
 //	@Description
 //	@Description	Two optional opt-in fields support the chain-abstracted flow (both default false, preserving the legacy
 //	@Description	behavior): `provisionAccount` forges the organization's on-chain account eagerly at creation time
-//	@Description	(idempotent) instead of leaving it to the legacy SDK createAccount path; `integrator` subscribes the
-//	@Description	new organization to the free integrator plan so it becomes an integrator on the free tier with no
-//	@Description	checkout.
+//	@Description	(idempotent) instead of leaving it to the legacy SDK createAccount path; `integrator` flags the
+//	@Description	new organization as an integrator, so it may create managed organizations.
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -62,7 +61,7 @@ func validateDefaultLang(w http.ResponseWriter, lang string) bool {
 //	@Success		200		{object}	apicommon.OrganizationInfo
 //	@Failure		400		{object}	errors.Error	"Invalid input data, or the user has reached the maximum number of organizations"
 //	@Failure		401		{object}	errors.Error	"Unauthorized, or the user is not an admin of the parent organization"
-//	@Failure		404		{object}	errors.Error	"Parent org not found, or free integrator plan unavailable (integrator=true)"
+//	@Failure		404		{object}	errors.Error	"Parent org not found"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/organizations [post]
 func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) {
@@ -106,17 +105,6 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	if err != nil || defaultPlan == nil {
 		errors.ErrNoDefaultPlan.WithErr(err).Write(w)
 		return
-	}
-	// integrator portal opt-in: subscribe the new org to the free integrator plan so it
-	// becomes an integrator on the free tier with no checkout (see Subscriptions.IsIntegrator).
-	selectedPlan := defaultPlan
-	if orgInfo.Integrator {
-		freePlan, err := a.db.FreeIntegratorPlan()
-		if err != nil || freePlan == nil {
-			errors.ErrPlanNotFound.Withf("free integrator plan not available").Write(w)
-			return
-		}
-		selectedPlan = freePlan
 	}
 	// check if the user has permission to create new organizations
 	hasPermission, err := a.subscriptions.HasDBPermission(user.Email, common.Address{}, subscriptions.CreateOrg)
@@ -170,36 +158,32 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		parentOrg = orgInfo.Parent.Address
 		// update the parent organization counter
 		if err := a.db.IncrementOrganizationSubOrgsCounter(parentOrg); err != nil {
-			if errors.Is(err, db.ErrMaxSubOrgsReached) {
-				errors.ErrMaxSubOrgsReached.Write(w)
-				return
-			}
 			errors.ErrGenericInternalServerError.Withf("increment suborgs: %v", err).Write(w)
 			return
 		}
 	}
 	// create the organization
 	dbOrg := &db.Organization{
-		Address:         signer.Address(),
-		Website:         orgInfo.Website,
-		Creator:         user.Email,
-		SignerSeed:      user.Email,
-		CreatedAt:       time.Now(),
-		Nonce:           nonce,
-		Type:            db.OrganizationType(orgInfo.Type),
-		Size:            orgInfo.Size,
-		Color:           orgInfo.Color,
-		Country:         orgInfo.Country,
-		Subdomain:       orgInfo.Subdomain,
-		Timezone:        orgInfo.Timezone,
-		DefaultLang:     cmp.Or(orgInfo.DefaultLang, apicommon.DefaultLang),
-		Communications:  orgInfo.Communications,
-		Meta:            apicommon.BuildOrgMeta(nil, orgInfo.Name, orgInfo.Logo, orgInfo.Description, orgInfo.Meta),
-		TokensPurchased: 0,
-		TokensRemaining: 0,
-		Parent:          parentOrg,
+		Address:        signer.Address(),
+		Website:        orgInfo.Website,
+		Creator:        user.Email,
+		SignerSeed:     user.Email,
+		CreatedAt:      time.Now(),
+		Nonce:          nonce,
+		Type:           db.OrganizationType(orgInfo.Type),
+		Size:           orgInfo.Size,
+		Color:          orgInfo.Color,
+		Country:        orgInfo.Country,
+		Subdomain:      orgInfo.Subdomain,
+		Timezone:       orgInfo.Timezone,
+		DefaultLang:    cmp.Or(orgInfo.DefaultLang, apicommon.DefaultLang),
+		Communications: orgInfo.Communications,
+		Meta:           apicommon.BuildOrgMeta(nil, orgInfo.Name, orgInfo.Logo, orgInfo.Description, orgInfo.Meta),
+		Parent:         parentOrg,
+		// integrator portal opt-in: the new organization pays for its managed ones from its wallet
+		Integrator: orgInfo.Integrator,
 		Subscription: db.OrganizationSubscription{
-			PlanID:    selectedPlan.ID,
+			PlanID:    defaultPlan.ID,
 			StartDate: time.Now(),
 			Active:    true,
 		},

@@ -39,13 +39,6 @@ var (
 	ErrAutoGroupCannotBeDeleted = fmt.Errorf("auto-generated group cannot be deleted")
 	// ErrAutoGroupMembersCannotBeModified is returned when trying to manually add/remove members from the auto group
 	ErrAutoGroupMembersCannotBeModified = fmt.Errorf("auto-generated group membership cannot be manually modified")
-	// ErrManagedQuotaReached is returned when an atomic integrator-quota reservation would
-	// exceed the integrator's managed-orgs, managed-processes or managed-census-size limit.
-	ErrManagedQuotaReached = fmt.Errorf("integrator managed quota reached")
-	// ErrMaxSubOrgsReached is returned when the organization's plan allows no more suborganizations.
-	ErrMaxSubOrgsReached = fmt.Errorf("max suborganizations reached")
-	// ErrMaxUsersReached is returned when the organization's plan allows no more users.
-	ErrMaxUsersReached = fmt.Errorf("max users reached")
 	// ErrInvalidMetaPath is returned when MongoDB refuses a meta update path, such as a sub-key of a
 	// meta value that is not an object, or two paths where one is a prefix of the other.
 	ErrInvalidMetaPath = fmt.Errorf("invalid meta path")

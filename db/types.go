@@ -7,11 +7,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/pricing"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -109,19 +111,46 @@ type Organization struct {
 	// DefaultLang is the language of the notifications sent on behalf of the organization
 	// (see apicommon.NotificationLang). Every organization has one, defaulting to "en".
 	// It can be changed but not cleared, dynamicUpdateDocument skipping zero-valued fields.
-	DefaultLang     string                   `json:"defaultLang,omitempty" bson:"defaultLang,omitempty"`
-	Communications  bool                     `json:"communications" bson:"communications"`
-	TokensPurchased uint64                   `json:"tokensPurchased" bson:"tokensPurchased"`
-	TokensRemaining uint64                   `json:"tokensRemaining" bson:"tokensRemaining"`
-	Parent          common.Address           `json:"parent" bson:"parent"`
-	Meta            map[string]any           `json:"meta" bson:"meta"`
-	Subscription    OrganizationSubscription `json:"subscription" bson:"subscription"`
-	Counters        OrganizationCounters     `json:"counters" bson:"counters"`
-	ManagedBy       common.Address           `json:"managedBy,omitempty" bson:"managedBy,omitempty"`
-	// IntegratorLimits, when set, is a per-organization override that both enables
-	// integrator status (manual/admin path) and caps its managed resources. When unset,
-	// integrator status and limits derive from the active subscription plan instead.
-	IntegratorLimits *IntegratorLimits `json:"integratorLimits,omitempty" bson:"integratorLimits,omitempty"`
+	DefaultLang    string `json:"defaultLang,omitempty" bson:"defaultLang,omitempty"`
+	Communications bool   `json:"communications" bson:"communications"`
+	// CustomURLPaidAt is when the once-per-organization custom URL add-on was paid, and
+	// CustomURLClaimedBy/At the process allowed to charge it before then: the same mechanism as
+	// branding below (see OrgAddOn), never written by SetOrganization.
+	CustomURLPaidAt    time.Time     `json:"customUrlPaidAt,omitzero" bson:"customUrlPaidAt,omitempty"`
+	CustomURLClaimedBy bson.ObjectID `json:"-" bson:"customUrlClaimedBy,omitempty"`
+	CustomURLClaimedAt time.Time     `json:"-" bson:"customUrlClaimedAt,omitempty"`
+
+	// BrandingPaidAt is when the once-per-organization branding add-on was paid; zero means unpaid.
+	BrandingPaidAt time.Time `json:"brandingPaidAt,omitzero" bson:"brandingPaidAt,omitempty"`
+	// BrandingClaimedBy is the one process allowed to charge branding before it is paid, so two
+	// drafts are not both charged (ClaimOrganizationAddOn). omitempty: claim filters match
+	// on absence. Never written by SetOrganization.
+	BrandingClaimedBy bson.ObjectID            `json:"-" bson:"brandingClaimedBy,omitempty"`
+	BrandingClaimedAt time.Time                `json:"-" bson:"brandingClaimedAt,omitempty"`
+	Parent            common.Address           `json:"parent" bson:"parent"`
+	Meta              map[string]any           `json:"meta" bson:"meta"`
+	Subscription      OrganizationSubscription `json:"subscription" bson:"subscription"`
+	Counters          OrganizationCounters     `json:"counters" bson:"counters"`
+	ManagedBy         common.Address           `json:"managedBy,omitempty" bson:"managedBy,omitempty"`
+	// Integrator enables the organization to create and pay for managed organizations
+	// (ignored on a managed organization itself).
+	Integrator bool `json:"integrator,omitempty" bson:"integrator,omitempty"`
+	// ManagedOrgsCreated counts every managed organization this integrator ever created, deleted
+	// ones included: each one is an on-chain account the service funded. Only ever incremented
+	// (IncrementManagedOrgsCreated); SetOrganization never writes it.
+	ManagedOrgsCreated int `json:"-" bson:"managedOrgsCreated,omitempty"`
+	// AddOnsDelivered are the once-per-organization add-ons a published process of the
+	// organization, or one with elections mined, received: what an organization teardown records
+	// before it drops any draft (RecordOrganizationAddOnsDelivered), so a retry after the drafts
+	// or published processes are gone still knows them. Only ever grows; never written by
+	// SetOrganization.
+	AddOnsDelivered []OrgAddOn `json:"-" bson:"addOnsDelivered,omitempty"`
+	// AddOnsOwedCredit are the credit keys (TeardownAddOnCreditKey: one per withholding row) of
+	// the withheld once-per-organization add-on prices an organization teardown owes back:
+	// recorded with the removal of the stamp (OweOrganizationAddOnCredit), so a teardown cut
+	// before its credit applies it on retry, and removed once credited
+	// (SettleOrganizationAddOnCredit). Never written by SetOrganization.
+	AddOnsOwedCredit []string `json:"-" bson:"addOnsOwedCredit,omitempty"`
 }
 
 // metaDefaultString extracts the "default" locale value from a meta entry, stored
@@ -180,21 +209,12 @@ func (o *Organization) LogoURL() string {
 	return metaDefaultString(o.Meta["logo"])
 }
 
-// IntegratorLimits caps how many organizations an integrator may manage. The
-// aggregate process and census-size caps across those managed orgs are taken from
-// the integrator's plan top-level limits (Plan.Organization.MaxProcesses /
-// MaxCensus), not duplicated here.
-type IntegratorLimits struct {
-	MaxManagedOrgs int `json:"maxManagedOrgs" bson:"maxManagedOrgs"`
-}
-
 type PlanLimits struct {
 	Users        int `json:"teamMembers" bson:"users"`
 	SubOrgs      int `json:"subOrgs" bson:"subOrgs"`
 	MaxProcesses int `json:"maxProcesses" bson:"maxProcesses"`
 	MaxCensus    int `json:"maxCensus" bson:"maxCensus"`
-	// Max votes that may be relayed; 0 means unlimited. For managed orgs this is the
-	// integrator's shared pool, summed across all its managed orgs.
+	// Max votes that may be relayed; 0 means unlimited.
 	MaxVotes int `json:"maxVotes" bson:"maxVotes"`
 	// Max process duration in days
 	MaxDuration int  `json:"maxDaysDuration" bson:"maxDuration"`
@@ -239,12 +259,11 @@ type Plan struct {
 	// Public reports whether the plan is listed on the public /plans catalog. Private plans
 	// (custom per-customer contracts and the internal free integrator tier) are hidden from
 	// the listing but remain visible to their own subscriber via the subscription payload.
-	Public           bool             `json:"public" bson:"public"`
-	FreeTrialDays    int              `json:"freeTrialDays" bson:"freeTrialDays"`
-	Organization     PlanLimits       `json:"organization" bson:"organization"`
-	VotingTypes      VotingTypes      `json:"votingTypes" bson:"votingTypes"`
-	Features         Features         `json:"features" bson:"features"`
-	IntegratorLimits IntegratorLimits `json:"integratorLimits" bson:"integratorLimits"`
+	Public        bool        `json:"public" bson:"public"`
+	FreeTrialDays int         `json:"freeTrialDays" bson:"freeTrialDays"`
+	Organization  PlanLimits  `json:"organization" bson:"organization"`
+	VotingTypes   VotingTypes `json:"votingTypes" bson:"votingTypes"`
+	Features      Features    `json:"features" bson:"features"`
 }
 
 type BillingPeriod string
@@ -268,14 +287,12 @@ type OrganizationSubscription struct {
 }
 
 type OrganizationCounters struct {
-	SentSMS          int `json:"sentSMS" bson:"sentSMS"`
-	SentEmails       int `json:"sentEmails" bson:"sentEmails"`
-	SentVotes        int `json:"sentVotes" bson:"sentVotes"`
-	SubOrgs          int `json:"subOrgs" bson:"subOrgs"`
-	Users            int `json:"users" bson:"users"`
-	Processes        int `json:"processes" bson:"processes"`
-	ManagedOrgs      int `json:"managedOrgs" bson:"managedOrgs"`
-	ManagedProcesses int `json:"managedProcesses" bson:"managedProcesses"`
+	SentSMS    int `json:"sentSMS" bson:"sentSMS"`
+	SentEmails int `json:"sentEmails" bson:"sentEmails"`
+	SentVotes  int `json:"sentVotes" bson:"sentVotes"`
+	SubOrgs    int `json:"subOrgs" bson:"subOrgs"`
+	Users      int `json:"users" bson:"users"`
+	Processes  int `json:"processes" bson:"processes"`
 }
 
 type OrganizationInvite struct {
@@ -810,6 +827,8 @@ type VotingProcess struct {
 	InitialStatus string          `json:"initialStatus,omitempty" bson:"initialStatus,omitempty"`
 	CensusID      bson.ObjectID   `json:"-" bson:"censusId"`    // internal ref to a db.Census
 	QuestionIDs   []bson.ObjectID `json:"-" bson:"questionIds"` // ordered question references
+	// AddOns are the paid per-process options; 2FA add-ons derive from the census instead.
+	AddOns ProcessAddOns `json:"addOns,omitzero" bson:"addOns,omitempty"`
 	// Publishing is the transient claim a publish worker holds on this process (see
 	// ClaimVotingProcessForPublish). It is a struct field rather than only a raw $set so that
 	// SetVotingProcess's ReplaceOne stops wiping a live claim, and so handlers can refuse to
@@ -839,6 +858,248 @@ type VotingProcess struct {
 func (vp *VotingProcess) PublishInProgress() bool {
 	return !vp.Publishing.IsZero() && time.Since(vp.Publishing) < PublishStaleAfter
 }
+
+// ProcessAddOns are the paid per-process options of the pay-per-process pricing model.
+type ProcessAddOns struct {
+	SignedCertificate bool `json:"signedCertificate,omitempty" bson:"signedCertificate,omitempty"`
+	CustomURL         bool `json:"customUrl,omitempty" bson:"customUrl,omitempty"`
+	Branding          bool `json:"branding,omitempty" bson:"branding,omitempty"`
+}
+
+// Has reports whether the draft selects the once-per-organization add-on.
+func (p ProcessAddOns) Has(addOn OrgAddOn) bool {
+	switch addOn {
+	case OrgAddOnBranding:
+		return p.Branding
+	case OrgAddOnCustomURL:
+		return p.CustomURL
+	default:
+		return false
+	}
+}
+
+// OrgAddOn is an add-on paid once per organization: the first process that pays it stamps the
+// organization, and the organization's later processes get it for free. Its value is the add-on's
+// bson name in ProcessAddOns and ProcessPayment, and the prefix of its Organization fields.
+type OrgAddOn string
+
+// Once-per-organization add-ons.
+const (
+	OrgAddOnBranding  OrgAddOn = "branding"
+	OrgAddOnCustomURL OrgAddOn = "customUrl"
+)
+
+// OrgAddOns lists every once-per-organization add-on.
+var OrgAddOns = []OrgAddOn{OrgAddOnBranding, OrgAddOnCustomURL}
+
+// IsValid reports whether a is a declared once-per-organization add-on.
+func (a OrgAddOn) IsValid() bool { return a == OrgAddOnBranding || a == OrgAddOnCustomURL }
+
+func (a OrgAddOn) paidAtField() string    { return string(a) + "PaidAt" }
+func (a OrgAddOn) claimedByField() string { return string(a) + "ClaimedBy" }
+func (a OrgAddOn) claimedAtField() string { return string(a) + "ClaimedAt" }
+
+// AddOnPaidAt is when the organization paid addOn; zero means unpaid.
+func (o *Organization) AddOnPaidAt(addOn OrgAddOn) time.Time {
+	if addOn == OrgAddOnCustomURL {
+		return o.CustomURLPaidAt
+	}
+	return o.BrandingPaidAt
+}
+
+// AddOnClaim is the process holding the organization's claim on addOn, and when it took it.
+func (o *Organization) AddOnClaim(addOn OrgAddOn) (bson.ObjectID, time.Time) {
+	if addOn == OrgAddOnCustomURL {
+		return o.CustomURLClaimedBy, o.CustomURLClaimedAt
+	}
+	return o.BrandingClaimedBy, o.BrandingClaimedAt
+}
+
+// ProcessPaymentStatus is the lifecycle state of a voting process payment.
+type ProcessPaymentStatus string
+
+// Process payment statuses. A process with no payment document is free or not quoted yet. Pending
+// is the checkout state machine's (a compare-and-set on the session); paid, failed and refunded
+// are a display cache of the wallet ledger, refreshed by every money path under the payer's
+// wallet lock, and may lag it after a crash until the next one.
+const (
+	// ProcessPaymentPending: a wallet top-up checkout is open for the process (CheckoutSessionID).
+	// Consumed once that top-up was credited; it then only holds the add-on claims until the
+	// publish it paid for debits the wallet.
+	ProcessPaymentPending ProcessPaymentStatus = "pending"
+	// ProcessPaymentFailed: a wallet payment a failed publish reverted; the process is payable again.
+	ProcessPaymentFailed ProcessPaymentStatus = "failed"
+	// ProcessPaymentPaid: debited from the payer's wallet. Only a refund leaves it.
+	ProcessPaymentPaid ProcessPaymentStatus = "paid"
+	// ProcessPaymentRefunded: credited back on draft delete, which then drops the row with the draft.
+	ProcessPaymentRefunded ProcessPaymentStatus = "refunded"
+)
+
+// ProcessPayment is the payment state of a voting process, keyed by process id. It lives in its
+// own collection so a draft save (a full replace) cannot wipe it. Every payment is a wallet
+// debit: the card only ever tops a wallet up.
+type ProcessPayment struct {
+	ProcessID  bson.ObjectID        `json:"-" bson:"_id"`
+	OrgAddress common.Address       `json:"-" bson:"orgAddress"`
+	Status     ProcessPaymentStatus `json:"status" bson:"status"`
+	// CheckoutSessionID is the wallet top-up checkout opened for this process, if any: the open
+	// one while pending, the one that funded the debit once paid.
+	CheckoutSessionID string `json:"-" bson:"checkoutSessionId,omitempty"`
+	// Consumed marks a pending payment whose top-up the webhook credited: the session is spent,
+	// and the publish it was opened for pays from the wallet like any other.
+	Consumed bool `json:"-" bson:"consumed,omitempty"`
+	// AmountCents is the net total in EUR cents, VAT excluded: while pending, the price the top-up
+	// was opened for. Otherwise a display cache of what the process paid, refreshed by every money
+	// path under the payer's wallet lock: what it paid is read off the wallet ledger
+	// (ProcessLedgerState) plus BaseCents, never off this field.
+	AmountCents pricing.Cents `json:"amountCents" bson:"amountCents"`
+	// TopUpCents is what the pending top-up checkout charges (the shortfall, at least the
+	// minimum charge).
+	TopUpCents pricing.Cents `json:"-" bson:"topUpCents,omitempty"`
+	// BaseCents is what a published process paid outside the wallet, written once when it is
+	// published: 0 for a process published with no price left to pay, the census price for one
+	// published before pay-per-process. Nil while it is a draft. What the process paid is its
+	// ledger (ProcessLedgerState.PaidCents) plus this.
+	BaseCents *pricing.Cents `json:"-" bson:"baseCents,omitempty"`
+	Currency  string         `json:"currency" bson:"currency"`
+	// RequestedBy is the checkout user's email; the top-up webhook publishes as this user.
+	RequestedBy string `json:"-" bson:"requestedBy,omitempty"`
+	// PublishJobID is the job of the latest publish of the process (by hand or by the top-up
+	// webhook), so its payment status can point at it.
+	PublishJobID string `json:"-" bson:"publishJobId,omitempty"`
+	// TopUpRefusal is why the top-up webhook did not publish the process once its checkout was
+	// credited; the credit stays in the wallet and the process is published by hand. Written over
+	// by the next payment record (a publish, a new checkout), which drops it.
+	TopUpRefusal *TopUpRefusal `json:"-" bson:"topUpRefusal,omitempty"`
+	// Branding and CustomURL are whether a pending payment's checkout priced each
+	// once-per-organization add-on in. Once charged, the ledger's payment row carries the add-ons
+	// (WalletLedgerEntry.AddOns).
+	Branding  bool      `json:"-" bson:"branding,omitempty"`
+	CustomURL bool      `json:"-" bson:"customUrl,omitempty"`
+	PaidAt    time.Time `json:"paidAt,omitzero" bson:"paidAt,omitempty"`
+	CreatedAt time.Time `json:"-" bson:"createdAt"`
+	UpdatedAt time.Time `json:"-" bson:"updatedAt"`
+}
+
+// TopUpRefusal is the refusal the top-up webhook met publishing a process: the API error code
+// and message a manual publish would have answered.
+type TopUpRefusal struct {
+	Code    int    `json:"code" bson:"code"`
+	Message string `json:"message" bson:"message"`
+}
+
+// Charged reports whether the pending payment's checkout priced the once-per-organization add-on in.
+func (p *ProcessPayment) Charged(addOn OrgAddOn) bool {
+	switch addOn {
+	case OrgAddOnBranding:
+		return p.Branding
+	case OrgAddOnCustomURL:
+		return p.CustomURL
+	default:
+		return false
+	}
+}
+
+// Wallet is a payer's prepaid EUR balance (1 credit = 1 euro, VAT excluded). AppliedKeys is a
+// bounded window of recent idempotency keys that makes each write atomic; walletLedger is the
+// permanent record. BalanceCents is negative only after a Stripe refund of a top-up already spent.
+type Wallet struct {
+	OrgAddress   common.Address `json:"orgAddress" bson:"_id"`
+	BalanceCents pricing.Cents  `json:"balanceCents" bson:"balanceCents"`
+	AppliedKeys  []string       `json:"-" bson:"appliedKeys"`
+	// Unposted holds the movements applied to the balance whose walletLedger row may not be
+	// written yet: each movement is pushed here in the same write that moves the balance, then
+	// copied to the ledger and pulled, by the movement itself or by whatever touches the wallet
+	// next (drain). So a movement is never in the balance without its record.
+	Unposted []WalletLedgerEntry `json:"-" bson:"unposted,omitempty"`
+	// OrgSpend is what each managed organization may spend and has spent from this wallet, keyed
+	// by the managed organization's lowercase hex address (see ManagedOrgSpend). It lives on the
+	// wallet so the cap is checked in the same conditional write as the balance.
+	OrgSpend  map[string]ManagedOrgSpend `json:"-" bson:"orgSpend,omitempty"`
+	UpdatedAt time.Time                  `json:"updatedAt" bson:"updatedAt"`
+}
+
+// ManagedOrgSpend is one managed organization's spending from its integrator's wallet. CapCents
+// is the most it may have debited at once, set by the integrator; nil is unlimited. SpentCents is
+// what its processes hold debited now: debits add to it, and credits returning a process's money
+// (a delete's refund, a failed publish's credit-back) take it off again, so withheld branding
+// stays counted.
+type ManagedOrgSpend struct {
+	CapCents   *pricing.Cents `json:"capCents" bson:"capCents,omitempty"`
+	SpentCents pricing.Cents  `json:"spentCents" bson:"spentCents"`
+}
+
+// Wallet ledger entry kinds.
+const (
+	// WalletEntryTopUp is a credit bought through a Stripe checkout (key: session id).
+	WalletEntryTopUp = "topup"
+	// WalletEntryPayment is a debit for a process: its publish or census headroom.
+	WalletEntryPayment = "payment"
+	// WalletEntryCreditBack returns a payment to the wallet: a deleted paid draft, a failed publish.
+	WalletEntryCreditBack = "creditBack"
+	// WalletEntryRefund is money a top-up's payer got back through Stripe (a refund made by hand
+	// in the dashboard, or a dispute's withdrawn funds), negative; and, positive, its reversal when
+	// Stripe undoes it (a refund that failed or was canceled, a dispute reinstated).
+	WalletEntryRefund = "refund"
+)
+
+// WalletLedgerEntry is one append-only wallet balance change, signed as applied (negative for
+// payments and refunds). IdempotencyKey is unique, so a replay is not recorded twice.
+type WalletLedgerEntry struct {
+	ID          bson.ObjectID  `json:"id" bson:"_id"`
+	OrgAddress  common.Address `json:"orgAddress" bson:"orgAddress"`
+	AmountCents pricing.Cents  `json:"amountCents" bson:"amountCents"`
+	Kind        string         `json:"kind" bson:"kind"`
+	// IdempotencyKey is unique, so a replay is not recorded twice.
+	IdempotencyKey string        `json:"-" bson:"idempotencyKey"`
+	ProcessID      bson.ObjectID `json:"processId,omitzero" bson:"processId,omitempty"`
+	// ProcessOrgAddress is the organization owning ProcessID: a managed one for an integrator.
+	ProcessOrgAddress common.Address `json:"processOrgAddress,omitzero" bson:"processOrgAddress,omitempty"`
+	// PaymentIntentID is the Stripe payment intent of a top-up, which a refund names.
+	PaymentIntentID string `json:"-" bson:"paymentIntentId,omitempty"`
+	// GrossCents is what a top-up charged VAT included, to take a refund's VAT back out.
+	GrossCents pricing.Cents `json:"-" bson:"grossCents,omitempty"`
+	// WithheldCents and WithheldAddOns are what a creditBack kept back of the payment it returns:
+	// the once-per-organization add-ons another process of the organization relies on, which stay
+	// the organization's.
+	WithheldCents  pricing.Cents `json:"withheldCents,omitempty" bson:"withheldCents,omitempty"`
+	WithheldAddOns []OrgAddOn    `json:"withheldAddOns,omitempty" bson:"withheldAddOns,omitempty"`
+	// PriceCents is the process price a payment brought the process to, and Attempt the attempt
+	// its key was built with (the number of publishfail credit-backs before it).
+	PriceCents pricing.Cents `json:"-" bson:"priceCents,omitempty"`
+	Attempt    int           `json:"-" bson:"attempt,omitempty"`
+	// AddOns are the once-per-organization add-ons a payment priced in and stamped.
+	AddOns []OrgAddOn `json:"-" bson:"addOns,omitempty"`
+	// ReleaseAddOns are the add-ons a creditBack gives back to the organization (charged and not
+	// withheld): released by whatever touches the process next until a later payment follows.
+	ReleaseAddOns []OrgAddOn `json:"-" bson:"releaseAddOns,omitempty"`
+	CreatedAt     time.Time  `json:"createdAt" bson:"createdAt"`
+}
+
+// ProcessLedgerState is what a process's payer's wallet ledger says about it (ProcessLedgerState):
+// the one source of what the process paid, its attempt, its add-ons and what it is still owed.
+type ProcessLedgerState struct {
+	Payer common.Address
+	// PaidCents is the process's envelope: −Σ(amountCents + withheldCents) over its payment and
+	// creditBack rows. A credit-back settles what it returned and what it withheld, since a
+	// withheld add-on stays the organization's stamp, not the process's.
+	PaidCents pricing.Cents
+	// Attempt is the number of publishfail credit-backs: the attempt segment of the next debit key.
+	Attempt int
+	// AddOns are the once-per-organization add-ons the live attempt's payments priced in.
+	AddOns []OrgAddOn
+	// Refunded: a delete credited the process back ("refund:<process>"); it can only be deleted.
+	Refunded bool
+	// OwedRelease are the add-ons the last credit-back gives back, while no payment follows it,
+	// and OwedSince that row's time: the release only touches claims taken before it.
+	OwedRelease []OrgAddOn
+	OwedSince   time.Time
+	// CreditedBackAt is the time of the last credit-back, whatever followed it.
+	CreditedBackAt time.Time
+}
+
+// Charged reports whether the live attempt's payments priced the add-on in.
+func (s *ProcessLedgerState) Charged(addOn OrgAddOn) bool { return slices.Contains(s.AddOns, addOn) }
 
 // VotingProcessQuestion is one question of a VotingProcess. Each question maps to
 // exactly one on-chain election, identified after publish by UpstreamID. OrgAddress is

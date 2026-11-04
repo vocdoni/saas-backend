@@ -629,7 +629,7 @@ func TestOrganizationMetaManagedOrgDottedKeys(t *testing.T) {
 	integratorAddr := testCreateOrganization(t, adminToken)
 	integratorOrg, err := testDB.Organization(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	integratorOrg.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 1}
+	integratorOrg.Integrator = true
 	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
 
 	requestAndAssertError(errors.ErrInvalidUserData, t, http.MethodPost, adminToken,
