@@ -105,7 +105,8 @@ func verifierMatches(verifier, challenge string) bool {
 	return subtle.ConstantTimeCompare([]byte(base64.RawURLEncoding.EncodeToString(sum[:])), []byte(challenge)) == 1
 }
 
-// loadProcess reads the attempt's process and census.
+// loadProcess reads the attempt's process and census, and refuses a census that no longer signs in
+// with a certificate: its token would skip a typed-field census' second factor.
 func (s *Service) loadProcess(rd *redemption) *apierrors.Error {
 	vp, _, err := s.store.ProcessWithQuestions(rd.tx.ProcessID)
 	if err != nil {
@@ -114,6 +115,9 @@ func (s *Service) loadProcess(rd *redemption) *apierrors.Error {
 	census, err := s.store.Census(vp.CensusID.Hex())
 	if err != nil {
 		return apierrors.Ptr(s.internalFailure("reading the census", err, "transaction", rd.tx.ID.Hex()))
+	}
+	if census.AuthMethod != db.CensusAuthMethodCertificate {
+		return apierrors.Ptr(apierrors.ErrInvalidData.Withf("the process census does not sign in with a certificate"))
 	}
 	rd.vp, rd.census = vp, census
 	return nil

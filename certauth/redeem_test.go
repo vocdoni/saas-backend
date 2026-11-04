@@ -172,6 +172,26 @@ func TestCertAuthRedeemFlow(t *testing.T) {
 		c.Assert(failure.Data.Reason, qt.Equals, "invalid_chain")
 	})
 
+	c.Run("not a certificate census", func(c *qt.C) {
+		// an attempt authenticated while the census took certificates, redeemed after it switched to
+		// typed fields with an email second factor: a pre-verified token would skip that factor
+		e := newTestEnv(c, nil)
+		e.store.addMember("12345678Z", 1)
+		code, verifier := e.signIn(c, "vote", e.issue(c, maria))
+		e.store.census.AuthMethod = ""
+		e.store.census.TwoFaFields = db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail}
+		status, _, failure := e.redeem(c, code, verifier)
+		c.Assert(status, qt.Equals, http.StatusBadRequest)
+		c.Assert(failure.Code, qt.Equals, 40037)
+		c.Assert(failure.Data.Holder, qt.IsNil)
+		c.Assert(e.tokens.count(), qt.Equals, 0)
+		// the code is burnt all the same
+		e.store.census.AuthMethod = db.CensusAuthMethodCertificate
+		status, _, failure = e.redeem(c, code, verifier)
+		c.Assert(status, qt.Equals, http.StatusConflict)
+		c.Assert(failure.Data.Reason, qt.Equals, "code_used")
+	})
+
 	c.Run("budget", func(c *qt.C) {
 		e := newTestEnv(c, nil)
 		e.store.addMember("12345678Z", 1)
