@@ -69,7 +69,9 @@ const (
 
 // testProviderAPIHosts are the --vocdoniApi hosts the synthetic test provider may run against
 // besides --certAuthTestProviderAllowedAPIs: an allowlist, so an unknown API fails closed.
-var testProviderAPIHosts = []string{"localhost", "127.0.0.1", "api-dev.vocdoni.net", "api-stg.vocdoni.net"}
+// Stage and production share the Vochain LTS, so api-stg.vocdoni.net is not in the default list;
+// it must be added explicitly via --certAuthTestProviderAllowedAPIs.
+var testProviderAPIHosts = []string{"localhost", "127.0.0.1", "api-dev.vocdoni.net"}
 
 // providerConstructors are the cert-check providers a deployment may enable: natural persons only
 // (owner decisions 1 and 4). The representative and employee constructors are never referenced.

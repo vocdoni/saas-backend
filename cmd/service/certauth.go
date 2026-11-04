@@ -32,7 +32,8 @@ func defineCertAuthFlags() {
 		"cloudflare mode opt-in: set only after the blockers in the spec section 3b are verified and the AOP CA is a per-zone or per-hostname certificate, never Cloudflare's global one")
 	flag.Bool("certAuthTestProvider", false, "enable the synthetic certificate provider (dev and e2e only)")
 	flag.String("certAuthTestProviderCA", "", "PEM file of the synthetic certificate provider CA")
-	flag.String("certAuthTestProviderAllowedAPIs", "", "comma list of extra --vocdoniApi hosts the synthetic provider allows")
+	flag.String("certAuthTestProviderAllowedAPIs", "",
+		"comma list of extra --vocdoniApi hosts the synthetic provider allows (stage must be listed here explicitly)")
 }
 
 // certAuthConfig reads the --certAuth* configuration and its PEM files. certauth.New validates it.

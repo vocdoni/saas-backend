@@ -47,6 +47,9 @@ func TestCertAuthStartupValidation(t *testing.T) {
 			cfg.ProxyProtocol, cfg.ProxyFrontCIDRs = true, []string{"10.0.0.0/8"}
 		},
 		"test provider against production": func(cfg *Config) { cfg.VocdoniAPI = "https://api.vocdoni.io/v2" },
+		"test provider against stage": func(cfg *Config) {
+			cfg.VocdoniAPI = "https://api-stg.vocdoni.net/v2"
+		},
 		"test provider against an unknown": func(cfg *Config) { cfg.VocdoniAPI = "https://api-lts.example.org/v2" },
 		"test provider without CA":         func(cfg *Config) { cfg.TestProviderCAPEM = nil },
 		"no root key":                      func(cfg *Config) { cfg.RootKey = nil },
@@ -57,13 +60,17 @@ func TestCertAuthStartupValidation(t *testing.T) {
 		c.Assert(err, qt.Not(qt.IsNil), qt.Commentf("%s", name))
 	}
 
-	// accepted variations: localhost dev origins, an extra allowlisted test API, cloudflare with its CA
+	// accepted variations: localhost dev origins, an extra allowlisted test API, cloudflare with its CA;
+	// stage requires an explicit --certAuthTestProviderAllowedAPIs entry
 	for name, mutate := range map[string]func(*Config){
 		"localhost origin": func(cfg *Config) { cfg.AllowedOrigins = append(cfg.AllowedOrigins, "http://127.0.0.1:5173") },
 		"extra test api": func(cfg *Config) {
 			cfg.VocdoniAPI, cfg.TestProviderAllowedAPIs = "https://api-e2e.internal/v2", []string{"api-e2e.internal"}
 		},
 		"dev api": func(cfg *Config) { cfg.VocdoniAPI = "https://api-dev.vocdoni.net/v2" },
+		"stage api explicit opt-in": func(cfg *Config) {
+			cfg.VocdoniAPI, cfg.TestProviderAllowedAPIs = "https://api-stg.vocdoni.net/v2", []string{"api-stg.vocdoni.net"}
+		},
 		"cloudflare": func(cfg *Config) {
 			cfg.Mode, cfg.CFOriginPullCAPEM, cfg.CFAcknowledged = ModeCloudflare, pki.CertPEM(), true
 		},
