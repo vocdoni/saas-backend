@@ -210,9 +210,10 @@ definitions:
           rules as Name.
       integrator:
         description: |-
-          Whether the new organization is an integrator (opt-in, used by the integrator
-          portal): it may create managed organizations and pay for their processes from
-          its wallet.
+          Whether to subscribe the new organization to the free integrator plan at
+          creation time (opt-in). Used by the integrator portal so a newly created org
+          becomes an integrator on the free tier with no checkout. Default false uses
+          the regular default plan.
         type: boolean
       logo:
         allOf:
@@ -326,9 +327,10 @@ definitions:
           rules as Name.
       integrator:
         description: |-
-          Whether the new organization is an integrator (opt-in, used by the integrator
-          portal): it may create managed organizations and pay for their processes from
-          its wallet.
+          Whether to subscribe the new organization to the free integrator plan at
+          creation time (opt-in). Used by the integrator portal so a newly created org
+          becomes an integrator on the free tier with no checkout. Default false uses
+          the regular default plan.
         type: boolean
       logo:
         allOf:
@@ -404,13 +406,6 @@ definitions:
     type: object
   apicommon.CreateVotingProcessRequest:
     properties:
-      addOns:
-        allOf:
-        - $ref: '#/definitions/db.ProcessAddOns'
-        description: |-
-          AddOns are the paid per-process options (signed results certificate, custom URL,
-          branding). The 2FA add-ons are not here: they derive from census.twoFaFields.
-          They change the process price, so editing them invalidates an open checkout session.
       census:
         $ref: '#/definitions/apicommon.CensusSpec'
       description:
@@ -521,26 +516,31 @@ definitions:
     type: object
   apicommon.IntegratorInfoResponse:
     properties:
-      canCreateManagedOrg:
-        description: 'CanCreateManagedOrg: one more managed organization would be
-          allowed now.'
-        type: boolean
       enabled:
         type: boolean
-      managedOrgsCreated:
-        description: ManagedOrgsCreated counts the managed organizations it ever created,
-          deleted ones included.
-        type: integer
-      netTopUpCents:
-        description: NetTopUpCents is what its wallet kept from Stripe top-ups (refunds
-          and disputes subtract).
-        type: integer
+      limits:
+        $ref: '#/definitions/apicommon.IntegratorLimits'
       usage:
         $ref: '#/definitions/apicommon.IntegratorUsage'
+    type: object
+  apicommon.IntegratorLimits:
+    properties:
+      maxEmails:
+        type: integer
+      maxManagedOrgs:
+        type: integer
+      maxManagedProcesses:
+        type: integer
+      maxSMS:
+        type: integer
+      maxVotes:
+        type: integer
     type: object
   apicommon.IntegratorUsage:
     properties:
       managedOrgs:
+        type: integer
+      managedProcesses:
         type: integer
       sentEmails:
         type: integer
@@ -584,7 +584,7 @@ definitions:
     properties:
       organizations:
         items:
-          $ref: '#/definitions/apicommon.ManagedOrganizationInfo'
+          $ref: '#/definitions/apicommon.OrganizationInfo'
         type: array
       pagination:
         $ref: '#/definitions/apicommon.Pagination'
@@ -608,111 +608,6 @@ definitions:
         type: string
       token:
         description: JWT authentication token
-        type: string
-    type: object
-  apicommon.ManagedOrganizationInfo:
-    properties:
-      address:
-        description: The organization's blockchain address
-        items:
-          type: integer
-        type: array
-      color:
-        description: The organization's brand color in hex format
-        type: string
-      communications:
-        description: Whether the organization has enabled communications
-        type: boolean
-      counters:
-        allOf:
-        - $ref: '#/definitions/apicommon.SubscriptionUsage'
-        description: Usage counters for the organization
-      country:
-        description: The country where the organization is based
-        type: string
-      createdAt:
-        description: Creation timestamp in RFC3339 format
-        type: string
-      defaultLang:
-        description: |-
-          Language of the notifications sent on behalf of the organization. It wins on
-          authenticated endpoints; on public ones an explicit lang param wins instead.
-          Optional on creation, where it defaults to en; empty on update means unchanged
-        type: string
-      description:
-        allOf:
-        - $ref: '#/definitions/apicommon.MultilingualText'
-        description: Description is a shorthand for meta["description"]. Same encoding
-          rules as Name.
-      integrator:
-        description: |-
-          Whether the new organization is an integrator (opt-in, used by the integrator
-          portal): it may create managed organizations and pay for their processes from
-          its wallet.
-        type: boolean
-      logo:
-        allOf:
-        - $ref: '#/definitions/apicommon.MultilingualText'
-        description: Logo is a shorthand for meta["logo"]. Same encoding rules as
-          Name.
-      managedBy:
-        description: |-
-          Integrator organization that manages this org, when it was created through
-          the integrator portal. Nil for regular organizations. Lets clients tell
-          managed orgs apart from the user's own orgs (e.g. to hide them from the org
-          switcher), a distinction Parent does not capture (managed orgs set ManagedBy,
-          not Parent).
-
-          A pointer so it is omitted rather than emitted as the zero address: json's
-          omitempty does not skip the fixed-size common.Address array.
-        example: deadbeef
-        format: hex
-        type: string
-      meta:
-        additionalProperties: {}
-        description: Arbitrary key value fields with metadata regarding the organization
-        type: object
-      name:
-        allOf:
-        - $ref: '#/definitions/apicommon.MultilingualText'
-        description: |-
-          Name is a shorthand for meta["name"]. On write accepts a plain string
-          (stored as {"default": "<string>"}) or a locale map; on read it mirrors
-          whatever is stored in meta["name"]. If both Name and meta["name"] are
-          provided on a create request, meta["name"] takes precedence.
-      parent:
-        allOf:
-        - $ref: '#/definitions/apicommon.OrganizationInfo'
-        description: Parent organization if this is a sub-organization
-      size:
-        description: The size category of the organization
-        type: string
-      spendCapCents:
-        description: |-
-          SpendCapCents is the most the organization's processes may hold debited from the wallet at
-          once, in EUR cents; null is unlimited.
-        type: integer
-        x-nullable: true
-      spentCents:
-        description: |-
-          SpentCents is what its processes hold debited now: refunds and failed-publish credit-backs
-          take their amount off again.
-        type: integer
-      subdomain:
-        description: The organization's subdomain
-        type: string
-      subscription:
-        allOf:
-        - $ref: '#/definitions/apicommon.SubscriptionDetails'
-        description: Subscription details for the organization
-      timezone:
-        description: The organization's timezone
-        type: string
-      type:
-        description: The type of organization
-        type: string
-      website:
-        description: The organization's website URL
         type: string
     type: object
   apicommon.MultilingualText:
@@ -921,9 +816,10 @@ definitions:
           rules as Name.
       integrator:
         description: |-
-          Whether the new organization is an integrator (opt-in, used by the integrator
-          portal): it may create managed organizations and pay for their processes from
-          its wallet.
+          Whether to subscribe the new organization to the free integrator plan at
+          creation time (opt-in). Used by the integrator portal so a newly created org
+          becomes an integrator on the free tier with no checkout. Default false uses
+          the regular default plan.
         type: boolean
       logo:
         allOf:
@@ -1169,70 +1065,6 @@ definitions:
       totalItems:
         type: integer
     type: object
-  apicommon.ProcessCensusCheckoutRequest:
-    properties:
-      censusSize:
-        description: CensusSize is the census size to buy room for; it must exceed
-          what is already paid.
-        type: integer
-      locale:
-        type: string
-      returnURL:
-        description: ReturnURL is where Stripe redirects after checkout; the session
-          id is appended.
-        type: string
-    type: object
-  apicommon.ProcessCensusGrowthQuote:
-    properties:
-      balanceCents:
-        description: BalanceCents is the payer's wallet balance, ShortfallCents what
-          DueCents exceeds it by.
-        type: integer
-      censusSize:
-        description: CensusSize is the projected size the quote was computed for.
-        type: integer
-      currency:
-        type: string
-      dueCents:
-        type: integer
-      lines:
-        items:
-          $ref: '#/definitions/pricing.QuoteLine'
-        type: array
-      paidCents:
-        description: PaidCents is the envelope already bought, DueCents the difference
-          to TotalCents.
-        type: integer
-      processId:
-        description: |-
-          ProcessID is the process whose envelope is exceeded. A memberbase change can reach the
-          census of several processes, so it names the one to buy headroom for.
-        type: string
-      shortfallCents:
-        type: integer
-      totalCents:
-        type: integer
-    type: object
-  apicommon.ProcessCheckoutRequest:
-    properties:
-      locale:
-        type: string
-      returnURL:
-        description: ReturnURL is where Stripe redirects after checkout; the session
-          id is appended.
-        type: string
-    type: object
-  apicommon.ProcessCheckoutResponse:
-    properties:
-      amountCents:
-        type: integer
-      clientSecret:
-        type: string
-      currency:
-        type: string
-      sessionId:
-        type: string
-    type: object
   apicommon.ProcessParticipantEntry:
     properties:
       email:
@@ -1272,94 +1104,14 @@ definitions:
           $ref: '#/definitions/apicommon.ProcessParticipantEntry'
         type: array
     type: object
-  apicommon.ProcessPaymentRequired:
-    properties:
-      balanceCents:
-        type: integer
-      censusSize:
-        type: integer
-      lines:
-        items:
-          $ref: '#/definitions/pricing.QuoteLine'
-        type: array
-      paidCents:
-        description: |-
-          PaidCents and CensusSize are set for a process that already paid part of the price (its
-          census grew since): it buys the difference with POST /processes/{processId}/census/checkout
-          for CensusSize, not with a process checkout.
-        type: integer
-      quoteRecommended:
-        description: 'census above 15 000: suggest a custom quote'
-        type: boolean
-      quoteRequired:
-        description: |-
-          QuoteRequired: census above 50 000. The quote has no price (no lines, a zero total that
-          is never "free") and nothing may be paid or published through self-service.
-        type: boolean
-      shortfallCents:
-        type: integer
-      totalCents:
-        type: integer
-    type: object
-  apicommon.ProcessPaymentStatusResponse:
-    properties:
-      amountCents:
-        type: integer
-      consumed:
-        description: |-
-          Consumed: the top-up was credited to the wallet and the publish it was opened for has not
-          been recorded yet (the webhook runs it).
-        type: boolean
-      currency:
-        type: string
-      jobId:
-        description: |-
-          JobID is the latest publish job of the process, the top-up webhook's included: poll
-          GET /jobs/{jobId}, whose errors say why a failed publish failed.
-        type: string
-      paidAt:
-        type: string
-      refusal:
-        allOf:
-        - $ref: '#/definitions/db.TopUpRefusal'
-        description: |-
-          Refusal is why the webhook did not publish the process once its top-up was credited; the
-          credit stays in the wallet and the process is published by hand.
-      sessionPaymentStatus:
-        description: |-
-          SessionPaymentStatus is the live Stripe payment state of that session (paid,
-          unpaid, no_payment_required).
-        type: string
-      sessionStatus:
-        description: |-
-          SessionStatus is the live Stripe session state (open, complete, expired) of the top-up
-          checkout opened for the process, when there is one.
-        type: string
-      status:
-        $ref: '#/definitions/db.ProcessPaymentStatus'
-    type: object
   apicommon.ProcessPriceResponse:
     properties:
-      addOnsHeldBy:
-        additionalProperties:
-          type: string
-        description: |-
-          AddOnsHeldBy names, per once-per-organization add-on the draft selects (branding,
-          customUrl), the other process of the organization whose payment holds it. It is priced in,
-          and publish and checkout answer 409 (40177) until that payment completes or is cancelled.
-        type: object
       currency:
         type: string
       lines:
         items:
           $ref: '#/definitions/pricing.QuoteLine'
         type: array
-      paymentStatus:
-        allOf:
-        - $ref: '#/definitions/db.ProcessPaymentStatus'
-        description: |-
-          PaymentStatus is the process's current payment state (pending, failed, paid, refunded);
-          empty when no payment exists yet.
       quoteRecommended:
         description: 'QuoteRecommended: census above 15 000 voters — suggest requesting
           a custom quote.'
@@ -1370,7 +1122,7 @@ definitions:
           which is not free) and no self-service payment.
         type: boolean
       totalCents:
-        type: integer
+        $ref: '#/definitions/pricing.Cents'
     type: object
   apicommon.PublicQuestionResponse:
     properties:
@@ -1559,6 +1311,15 @@ definitions:
         description: Whether white labeling is available
         type: boolean
     type: object
+  apicommon.SubscriptionIntegratorLimits:
+    properties:
+      maxManagedOrgs:
+        description: |-
+          Maximum number of organizations the integrator may manage. The aggregate
+          process and census-size caps across managed orgs come from the plan's
+          top-level limits (maxProcesses / maxCensus).
+        type: integer
+    type: object
   apicommon.SubscriptionPlan:
     properties:
       default:
@@ -1571,6 +1332,11 @@ definitions:
       id:
         description: Unique identifier for the plan (its Stripe product ID)
         type: string
+      integratorLimits:
+        allOf:
+        - $ref: '#/definitions/apicommon.SubscriptionIntegratorLimits'
+        description: Integrator limits for this plan (zero when the plan is not an
+          integrator plan)
       monthlyPrice:
         description: Monthly price
         type: integer
@@ -1701,16 +1467,6 @@ definitions:
         items:
           $ref: '#/definitions/db.VoteJobResult'
         type: array
-    type: object
-  apicommon.UpdateManagedOrganizationRequest:
-    properties:
-      spendCapCents:
-        description: |-
-          SpendCapCents caps what the organization's processes may hold debited from the
-          integrator's wallet, in EUR cents; null lifts the cap. Required: a body without it (or
-          with any other key) is refused.
-        type: integer
-        x-nullable: true
     type: object
   apicommon.UpdateOrganizationMemberGroupResponse:
     properties:
@@ -1901,8 +1657,9 @@ definitions:
     properties:
       isIntegrator:
         description: |-
-          Whether this organization is enabled as an integrator (see
-          Subscriptions.IsIntegrator). Populated by GET /users/me; omitted when false.
+          Whether this organization is enabled as an integrator. Computed from the
+          organization's integrator limits / active plan (see Subscriptions.IsIntegrator),
+          not stored. Populated by GET /users/me; omitted when false.
         type: boolean
       organization:
         allOf:
@@ -2071,10 +1828,6 @@ definitions:
     type: object
   apicommon.VotingProcessResponse:
     properties:
-      addOns:
-        allOf:
-        - $ref: '#/definitions/db.ProcessAddOns'
-        description: AddOns echoes the paid per-process options selected on the draft.
       census:
         $ref: '#/definitions/apicommon.CensusSpec'
       chainId:
@@ -2151,28 +1904,6 @@ definitions:
       valid:
         type: boolean
     type: object
-  apicommon.WalletResponse:
-    properties:
-      balanceCents:
-        type: integer
-      currency:
-        type: string
-      history:
-        items:
-          $ref: '#/definitions/db.WalletLedgerEntry'
-        type: array
-      pagination:
-        $ref: '#/definitions/apicommon.Pagination'
-    type: object
-  apicommon.WalletTopUpRequest:
-    properties:
-      amountCents:
-        type: integer
-      locale:
-        type: string
-      returnURL:
-        type: string
-    type: object
   db.BallotProtocol:
     properties:
       costExponent:
@@ -2246,6 +1977,11 @@ definitions:
       whiteLabel:
         type: boolean
     type: object
+  db.IntegratorLimits:
+    properties:
+      maxManagedOrgs:
+        type: integer
+    type: object
   db.JobStatus:
     enum:
     - pending
@@ -2282,14 +2018,6 @@ definitions:
     additionalProperties:
       type: string
     type: object
-  db.OrgAddOn:
-    enum:
-    - branding
-    - customUrl
-    type: string
-    x-enum-varnames:
-    - OrgAddOnBranding
-    - OrgAddOnCustomURL
   db.OrgMemberAuthField:
     enum:
     - name
@@ -2324,6 +2052,8 @@ definitions:
         type: integer
       id:
         type: string
+      integratorLimits:
+        $ref: '#/definitions/db.IntegratorLimits'
       monthlyPrice:
         type: integer
       name:
@@ -2361,34 +2091,15 @@ definitions:
       maxProcesses:
         type: integer
       maxVotes:
-        description: Max votes that may be relayed; 0 means unlimited.
+        description: |-
+          Max votes that may be relayed; 0 means unlimited. For managed orgs this is the
+          integrator's shared pool, summed across all its managed orgs.
         type: integer
       subOrgs:
         type: integer
       teamMembers:
         type: integer
     type: object
-  db.ProcessAddOns:
-    properties:
-      branding:
-        type: boolean
-      customUrl:
-        type: boolean
-      signedCertificate:
-        type: boolean
-    type: object
-  db.ProcessPaymentStatus:
-    enum:
-    - pending
-    - failed
-    - paid
-    - refunded
-    type: string
-    x-enum-varnames:
-    - ProcessPaymentPending
-    - ProcessPaymentFailed
-    - ProcessPaymentPaid
-    - ProcessPaymentRefunded
   db.QuestionJobResult:
     properties:
       error:
@@ -2441,13 +2152,6 @@ definitions:
         type: integer
       uniqueChoices:
         type: boolean
-    type: object
-  db.TopUpRefusal:
-    properties:
-      code:
-        type: integer
-      message:
-        type: string
     type: object
   db.UserRole:
     enum:
@@ -2555,39 +2259,6 @@ definitions:
       weighted:
         type: boolean
     type: object
-  db.WalletLedgerEntry:
-    properties:
-      amountCents:
-        type: integer
-      createdAt:
-        type: string
-      id:
-        type: string
-      kind:
-        type: string
-      orgAddress:
-        items:
-          type: integer
-        type: array
-      processId:
-        type: string
-      processOrgAddress:
-        description: 'ProcessOrgAddress is the organization owning ProcessID: a managed
-          one for an integrator.'
-        items:
-          type: integer
-        type: array
-      withheldAddOns:
-        items:
-          $ref: '#/definitions/db.OrgAddOn'
-        type: array
-      withheldCents:
-        description: |-
-          WithheldCents and WithheldAddOns are what a creditBack kept back of the payment it returns:
-          the once-per-organization add-ons another process of the organization relies on, which stay
-          the organization's.
-        type: integer
-    type: object
   errors.Error:
     properties:
       code:
@@ -2608,11 +2279,6 @@ definitions:
   github_com_vocdoni_saas-backend_stripe.CheckoutSessionStatus:
     properties:
       customer_email:
-        type: string
-      payment_status:
-        description: |-
-          PaymentStatus is the payment outcome of the session, in every mode: "paid",
-          "unpaid" or "no_payment_required" (e.g. a subscription that starts with a trial).
         type: string
       status:
         type: string
@@ -2892,10 +2558,37 @@ definitions:
         format: hex
         type: string
     type: object
+  pricing.Cents:
+    enum:
+    - 1
+    - 100
+    - 1
+    - 5
+    - 3900
+    - 14900
+    - 9900
+    - 100
+    format: int64
+    type: integer
+    x-enum-comments:
+      signedCertPrice: per process
+      smsTwoFAPerVoter: per eligible voter
+    x-enum-descriptions:
+    - per eligible voter
+    - per process
+    x-enum-varnames:
+    - Cent
+    - Euro
+    - integratorEmailTwoFAPerVoter
+    - smsTwoFAPerVoter
+    - signedCertPrice
+    - BrandingCents
+    - CustomURLCents
+    - MinimumChargeCents
   pricing.QuoteLine:
     properties:
       amountCents:
-        type: integer
+        $ref: '#/definitions/pricing.Cents'
       description:
         type: string
       kind:
@@ -3094,15 +2787,10 @@ paths:
     get:
       description: |-
         Returns whether the caller's organization (resolved from the API key's org or the user
-        session — no address in the URL) is enabled as an integrator, along with the usage summed
-        across its managed organizations. The caller must be an admin or manager of the
-        organization. Its spending is bounded by its wallet balance
-        (GET /organizations/{orgAddress}/wallet). Until its wallet keeps a top-up
-        (`netTopUpCents` > 0) it creates one managed organization, deleted ones included, and the
-        next creation answers 402 (40184); then there is no limit. `managedOrgsCreated` counts the
-        creations and `canCreateManagedOrg` says whether one more is allowed now. An integrator
-        migrated with managed organizations counts at least those, so it tops up before adding
-        another. When the organization is not an integrator, `enabled` is false.
+        session — no address in the URL) is enabled as an integrator, along with its effective
+        managed-resource limits and current usage. The caller must be an admin or manager of the
+        organization. When the organization is not an integrator, `enabled` is false and `limits`
+        is omitted (usage counters are still returned). A 0 in any limit field means unlimited.
 
         Also callable with a scoped API key (scope: `quota:read`).
       produces:
@@ -3130,7 +2818,7 @@ paths:
             $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
-      summary: Get integrator status and usage
+      summary: Get integrator quota and usage
       tags:
       - integrator
   /integrator/organizations:
@@ -3138,9 +2826,7 @@ paths:
       description: |-
         Returns a paginated list of organizations managed by the caller's integrator
         organization (resolved from the API key's org or the user session — no address in the
-        URL). The caller must be an admin or manager of the integrator organization. Each item
-        carries its spend cap (`spendCapCents`, null when unlimited) and what its processes hold
-        debited from the integrator wallet (`spentCents`).
+        URL). The caller must be an admin or manager of the integrator organization.
 
         Also callable with a scoped API key (scope: `managed:read`).
       parameters:
@@ -3183,11 +2869,8 @@ paths:
         Create a new organization managed by the caller's integrator organization. The
         integrator is resolved from the authenticated principal (the API key's org, or the
         user's organization for a session) — no address is passed in the URL. The caller must
-        be an admin of that integrator organization, which must be enabled as an integrator.
-        Until the integrator has topped up its wallet (top-ups less Stripe refunds and disputes
-        above zero) it may manage one organization: the next is refused with 402 (40184, data:
-        managedOrgs, managedOrgsCreated, netTopUpCents). Once it has, there is no limit on how many it manages,
-        whatever its current balance. The managed org's on-chain account is always
+        be an admin of that integrator organization, which must be enabled as an integrator and
+        within its managed-organizations quota. The managed org's on-chain account is always
         provisioned eagerly. The optional `ownerEmail` designates the managed org's owner/admin
         (defaults to the calling user); the per-user MaxOrgsPerUser cap is bypassed for managed orgs.
 
@@ -3214,13 +2897,8 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
-        "402":
-          description: Top up the integrator wallet to create another managed organization
-            (40184)
-          schema:
-            $ref: '#/definitions/errors.Error'
         "403":
-          description: Not an integrator
+          description: Not an integrator or quota reached
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
@@ -3229,10 +2907,6 @@ paths:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "503":
-          description: Busy (50302), retry after Retry-After
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -3244,18 +2918,11 @@ paths:
     delete:
       description: |-
         Delete the managed organization at {orgAddress} together with every piece of data
-        tied to it (memberbase, censuses + participants, processes and their questions,
-        bundles, CSP tokens, jobs, pending invites), and unlink it from its members. Drafts
-        are deleted first, exactly as DELETE /processes/{processId} does: a paid draft is
-        credited back to the payer's wallet before it goes, and its payment record goes with
-        it (the credit-back row in the payer's wallet history is the audit trail). Every
-        once-per-organization add-on price (branding, custom URL) an earlier credit-back
-        withheld that no published or mined process of the organization received is
-        credited back too, once. If any draft cannot be deleted (a publish holds it, or its
-        credit-back failed), the deletion stops with that draft's error (its message names the draft) and nothing else is
-        removed; retry once it settles. The caller must be an admin
+        tied to it (memberbase, censuses + participants, processes, bundles, CSP tokens,
+        jobs, pending invites), and unlink it from its members. The caller must be an admin
         of their integrator organization (resolved from the API key's org or the user session
-        — no address in the URL), and the target must be managed by it.
+        — no address in the URL), and the target must be managed by it. The integrator's usage
+        counters are rolled back accordingly.
 
         Deletion is blocked with 409 when any of the managed org's published elections is
         still active on-chain (READY/PAUSED); end them (or wait for them to end) first.
@@ -3293,81 +2960,16 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Managed organization has active elections, or a draft cannot
-            be deleted yet
+          description: Managed organization has active elections
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "503":
-          description: Busy (50302), retry after Retry-After
           schema:
             $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
       summary: Delete a managed organization and all its data
-      tags:
-      - integrator
-    put:
-      consumes:
-      - application/json
-      description: |-
-        Caps what the managed organization at {orgAddress} may spend from the caller's integrator
-        wallet: the most its processes may hold debited at once, in EUR cents (VAT excluded).
-        The body must hold exactly `spendCapCents`: `null` lifts the cap, and a missing key or
-        any other key is a 400, so a typo never lifts it. Organizations start unlimited.
-        The cap is checked in the same write as the wallet balance, so a publish or census
-        top-up that would pass it is refused with 402
-        (40183, data: capCents, spentCents, requiredCents) without charging anything. Refunds of
-        deleted drafts and credit-backs of failed publishes free their amount again. A cap below
-        what is already spent only refuses further debits. The caller must be an admin of their
-        integrator organization, and the target must be managed by it.
-
-        Also callable with a scoped API key (scope: `managed:write`).
-      parameters:
-      - description: Managed organization address
-        in: path
-        name: orgAddress
-        required: true
-        type: string
-      - description: Spend cap
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.UpdateManagedOrganizationRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.ManagedOrganizationInfo'
-        "400":
-          description: Invalid address, negative cap, or a body without exactly spendCapCents
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "403":
-          description: Not an integrator
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Managed organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Set a managed organization's spend cap
       tags:
       - integrator
   /integrator/organizations/{orgAddress}/apikeys:
@@ -3641,8 +3243,9 @@ paths:
 
         Two optional opt-in fields support the chain-abstracted flow (both default false, preserving the legacy
         behavior): `provisionAccount` forges the organization's on-chain account eagerly at creation time
-        (idempotent) instead of leaving it to the legacy SDK createAccount path; `integrator` flags the
-        new organization as an integrator, so it may create managed organizations.
+        (idempotent) instead of leaving it to the legacy SDK createAccount path; `integrator` subscribes the
+        new organization to the free integrator plan so it becomes an integrator on the free tier with no
+        checkout.
       parameters:
       - description: Organization info (+ optional provisionAccount / integrator)
         in: body
@@ -3667,7 +3270,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
-          description: Parent org not found
+          description: Parent org not found, or free integrator plan unavailable (integrator=true)
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -3990,17 +3593,6 @@ paths:
         membership modified.
 
         Also callable with a scoped API key (scope: `members:write`).
-
-        402 when the change would grow a published process's census beyond what it paid for:
-        40178 with the quote in data (its processId names the process to buy headroom for with
-        POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
-        integrator's wallet falls short (data: requiredCents, availableCents), or 40183 past the
-        spend cap its integrator set (data: capCents, spentCents, requiredCents).
-        422 when the grown census needs a custom quote.
-        409 (40903) while a process built on a census the change grows holds its publish claim:
-        nothing is written; retry once the claim is released: when its publish job ends, or up to 15
-        minutes after a service restart (PublishStaleAfter), as for POST /processes/{processId}/publish.
-        A checkout, a checkout cancel or an eligibility update of the draft holds the claim briefly too.
       parameters:
       - description: Organization address
         in: path
@@ -4022,7 +3614,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: Census resize jobs and errors; bare OK if neither
+          description: Census resize jobs and errors; bare OK when neither
           schema:
             $ref: '#/definitions/apicommon.UpdateOrganizationMemberGroupResponse'
         "400":
@@ -4033,33 +3625,12 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
-        "402":
-          description: Census growth beyond the price paid
-          schema:
-            allOf:
-            - $ref: '#/definitions/errors.Error'
-            - properties:
-                data:
-                  $ref: '#/definitions/apicommon.ProcessCensusGrowthQuote'
-              type: object
         "403":
           description: Auto-generated group membership cannot be modified
           schema:
             $ref: '#/definitions/errors.Error'
-        "409":
-          description: A process on the census is being published (40903)
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "422":
-          description: Census size requires a custom quote
-          schema:
-            $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "503":
-          description: Busy (50302), retry after Retry-After
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -4245,9 +3816,8 @@ paths:
       consumes:
       - application/json
       description: |-
-        Add multiple members to an organization. Requires Manager/Admin role; the organization's
-        memberbase is capped at 50 000 members (40145).
-        With `async=true` the import runs in the background and the response
+        Add multiple members to an organization. Requires Manager/Admin role and is subject to the
+        plan's member quota. With `async=true` the import runs in the background and the response
         carries a `jobId` to poll via GET /jobs/{jobId}; otherwise it
         completes synchronously. A synchronous import whose members carry more than 150 phones and
         passwords in total (each one is an expensive hash) runs as if `async=true` had been sent: the
@@ -4255,17 +3825,6 @@ paths:
         empty members list is a no-op that returns added=0.
 
         Also callable with a scoped API key (scope: `members:write`).
-
-        402 when the change would grow a published process's census beyond what it paid for:
-        40178 with the quote in data (its processId names the process to buy headroom for with
-        POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
-        integrator's wallet falls short (data: requiredCents, availableCents), or 40183 past the
-        spend cap its integrator set (data: capCents, spentCents, requiredCents).
-        422 when the grown census needs a custom quote.
-        409 (40903) while a process built on a census the change grows holds its publish claim:
-        nothing is written; retry once the claim is released: when its publish job ends, or up to 15
-        minutes after a service restart (PublishStaleAfter), as for POST /processes/{processId}/publish.
-        A checkout, a checkout cancel or an eligibility update of the draft holds the claim briefly too.
       parameters:
       - description: Organization address
         in: path
@@ -4297,33 +3856,12 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
-        "402":
-          description: Census growth beyond the price paid
-          schema:
-            allOf:
-            - $ref: '#/definitions/errors.Error'
-            - properties:
-                data:
-                  $ref: '#/definitions/apicommon.ProcessCensusGrowthQuote'
-              type: object
         "403":
-          description: Organization members limit exceeded
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "409":
-          description: A process on the census is being published (40903)
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "422":
-          description: Census size requires a custom quote
+          description: Plan member quota exceeded
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "503":
-          description: Busy (50302), retry after Retry-After
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -4343,25 +3881,6 @@ paths:
         to keep them.
 
         Also callable with a scoped API key (scope: `members:write`).
-
-        402 when the change would grow a published process's census beyond what it paid for:
-        40178 with the quote in data (its processId names the process to buy headroom for with
-        POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
-        integrator's wallet falls short (data: requiredCents, availableCents), or 40183 past the
-        spend cap its integrator set (data: capCents, spentCents, requiredCents).
-        422 when the grown census needs a custom quote.
-        409 (40903) while a process built on a census the change grows holds its publish claim:
-        nothing is written (except for an edit turned into a creation, below); retry once the claim is
-        released: when its publish job ends, or up to 15 minutes after a service restart
-        (PublishStaleAfter), as for POST /processes/{processId}/publish. A checkout, a checkout cancel
-        or an eligibility update of the draft holds the claim briefly too.
-
-        An edit whose member was deleted concurrently turns into a creation. When that creation's
-        growth is refused (409, 402, 422 or a busy lock), the member is written anyway: the answer is
-        a 200 with its id and an error "member created but not added to its censuses", and it is in no
-        census. Re-sending the upsert will not add it: add it with PUT /processes/{processId}/census
-        {memberIds:[id]} for a published process, or by editing the draft's census (PUT
-        /processes/{processId}).
       parameters:
       - description: Organization address
         in: path
@@ -4389,29 +3908,12 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
-        "402":
-          description: Census growth beyond the price paid
-          schema:
-            allOf:
-            - $ref: '#/definitions/errors.Error'
-            - properties:
-                data:
-                  $ref: '#/definitions/apicommon.ProcessCensusGrowthQuote'
-              type: object
-        "409":
-          description: A process on the census is being published (40903)
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "422":
-          description: Census size requires a custom quote
-          schema:
-            $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
         "503":
-          description: Server busy hashing or locked, retry after Retry-After (50302)
+          description: Server busy hashing, retry after Retry-After (50302)
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -4789,10 +4291,6 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
-        "503":
-          description: Busy (50302), retry after Retry-After
-          schema:
-            $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
       summary: Invite a new user to an organization
@@ -4886,10 +4384,6 @@ paths:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "503":
-          description: Busy (50302), retry after Retry-After
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -5069,130 +4563,9 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
-        "503":
-          description: Busy (50302), retry after Retry-After
-          schema:
-            $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
       summary: Update a pending invitation to an organization
-      tags:
-      - organizations
-  /organizations/{orgAddress}/wallet:
-    get:
-      description: |-
-        Prepaid EUR balance (1 credit = €1, VAT excluded) and paged history, newest first,
-        of an organization's wallet — a standard organization's or an integrator's. History
-        kinds: topup (Stripe checkout credit), payment (a process publish or census
-        headroom; processOrgAddress names the managed organization that spent it),
-        creditBack (a paid draft deleted, a publish that failed for good, or an organization
-        teardown returning an add-on price no process received) and refund (a
-        top-up refunded through Stripe). amountCents is signed. The balance is negative only
-        after a refund of credit already spent; the next top-up pays that first. 403 (40181)
-        for a managed organization, which has no wallet. Requires Admin or Manager.
-
-        Also callable with a scoped API key (scope: `quota:read`) of this same organization.
-      parameters:
-      - description: Organization address
-        in: path
-        name: orgAddress
-        required: true
-        type: string
-      - description: Page number, starting at 1
-        in: query
-        name: page
-        type: string
-      - description: Items per page
-        in: query
-        name: limit
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.WalletResponse'
-        "400":
-          description: Invalid page or limit
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "403":
-          description: Managed organization, or an API key of another organization
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Get an organization's wallet
-      tags:
-      - organizations
-  /organizations/{orgAddress}/wallet/topup:
-    post:
-      consumes:
-      - application/json
-      description: |-
-        Opens a one-time Stripe checkout session that credits the organization's wallet once
-        the payment is verified by webhook — never before. The amount is EUR cents, VAT
-        excluded (Stripe Tax adds VAT at checkout), between €1 and €100 000. 403 (40181) for
-        a managed organization. Requires an Admin user session; not callable with an API key.
-        GET /subscriptions/checkout/{sessionId} reports the session's Stripe state; the money
-        is in once GET /organizations/{orgAddress}/wallet shows the `topup` row: poll that. A
-        delayed payment (SEPA) shows nothing until it is paid; one that fails or expires never
-        shows a row, and a new top-up is needed.
-      parameters:
-      - description: Organization address
-        in: path
-        name: orgAddress
-        required: true
-        type: string
-      - description: Top-up parameters
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.WalletTopUpRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.ProcessCheckoutResponse'
-        "400":
-          description: Amount out of bounds
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "403":
-          description: Managed organization
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Top up an organization's wallet
       tags:
       - organizations
   /organizations/languages:
@@ -5432,14 +4805,6 @@ paths:
           description: Forbidden
           schema:
             $ref: '#/definitions/errors.Error'
-        "409":
-          description: The organization is being deleted (40901)
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "503":
-          description: Busy (50302), retry after Retry-After
-          schema:
-            $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
       summary: Create a voting process draft
@@ -5451,16 +4816,6 @@ paths:
         Delete an unpublished voting process draft together with its inline census. A
         published process has on-chain elections and cannot be deleted. Requires
         Manager/Admin role of the organization that owns the process.
-
-        A paid draft is credited back to the wallet that paid it before it is deleted (the
-        organization's own, or its integrator's for a managed organization); nothing is ever
-        refunded to a card. The payment record goes with the draft: the credit-back row in the
-        wallet history (GET /organizations/{orgAddress}/wallet) is the audit trail. The
-        once-per-organization add-ons it paid (branding, custom URL) are released so the
-        organization's next process can buy them — except one another process relies on,
-        which is withheld from the credit and stays the organization's. An open top-up
-        checkout of the draft is expired first; one already completed still credits the
-        wallet when its webhook arrives.
 
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
@@ -5485,16 +4840,12 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Already published, partially published (40904), being published,
-            or payment changed
+          description: Process already published, partially published (40904), or
+            being published
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "503":
-          description: Busy (50302), retry after Retry-After
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -5536,8 +4887,6 @@ paths:
         Update a voting process while it is still a draft (not published). 409 if already published,
         and 409 (40904) if partially published — an earlier publish already mined some of its
         questions on-chain, so the draft can only be published again (resuming the rest), not edited.
-        409 (40177) when the edit turns a once-per-organization add-on on for a draft that was paid
-        without it, since an add-on cannot be added after payment.
         The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
         as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
         `typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
@@ -5907,14 +5256,7 @@ paths:
         and raise each affected on-chain election's maxCensusSize so the new members can vote. Members are
         added synchronously; the maxCensusSize update runs as an async job (poll GET /jobs/{jobId}).
         Questions with an eligibility subset keep their fixed size and are unaffected. Requires
-        Manager/Admin role.
-
-        402 when the change would grow a published process's census beyond what it paid for:
-        40178 with the quote in data (its processId names the process to buy headroom for with
-        POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
-        integrator's wallet falls short (data: requiredCents, availableCents), or 40183 past the
-        spend cap its integrator set (data: capCents, spentCents, requiredCents).
-        422 when the grown census needs a custom quote.
+        Manager/Admin role and is subject to the plan's census quota.
       parameters:
       - description: Process ID
         in: path
@@ -5946,15 +5288,6 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
-        "402":
-          description: Census growth beyond the price paid
-          schema:
-            allOf:
-            - $ref: '#/definitions/errors.Error'
-            - properties:
-                data:
-                  $ref: '#/definitions/apicommon.ProcessCensusGrowthQuote'
-              type: object
         "404":
           description: Process not found
           schema:
@@ -5963,105 +5296,13 @@ paths:
           description: Process is not published
           schema:
             $ref: '#/definitions/errors.Error'
-        "422":
-          description: Census size requires a custom quote
-          schema:
-            $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "503":
-          description: Busy (50302), retry after Retry-After
           schema:
             $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
       summary: Add members to a published process's census
-      tags:
-      - processes
-  /processes/{processId}/census/checkout:
-    post:
-      consumes:
-      - application/json
-      description: |-
-        Debits the payer's wallet for the difference between what the process already paid
-        and what its census would cost at censusSize, so a census that outgrew its price can
-        be grown (or a paid draft republished) instead of being stuck behind a 402. Add-ons are
-        priced exactly as the original payment priced them, so a once-per-organization add-on
-        (branding, custom URL) is never charged twice. When the wallet covers it the paid
-        amount is raised at once and the response carries no checkout session (amountCents is
-        what was debited). When it does not: a managed organization gets 402 (40175); any other
-        gets a wallet top-up checkout for the shortfall (at least €1), and the headroom is
-        debited once that payment is verified by webhook — never before, so a published process's
-        census stays refused until then; if the process changed meanwhile the credit stays in the
-        wallet.
-        There is no status of its own for that checkout: poll GET /processes/{processId}/checkout,
-        whose amountCents reaches the new price once the headroom is debited, and the wallet
-        history (GET /organizations/{orgAddress}/wallet), which shows the topup credit and then a
-        payment row for the process. A topup with no payment row after it means the debit was
-        refused: for a published process, retry the growth and, on its 402 (shortfallCents 0),
-        call this endpoint again to debit the wallet; for a draft, publish it again: the publish
-        debits the difference from the wallet.
-        400 when the process has no completed payment, or when the target does not cost more
-        than was already paid. Requires Admin role.
-        Also callable with a scoped API key (scope: `voting:write`).
-      parameters:
-      - description: Process ID
-        in: path
-        name: processId
-        required: true
-        type: string
-      - description: Census headroom to buy
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.ProcessCensusCheckoutRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.ProcessCheckoutResponse'
-        "400":
-          description: No completed payment, or nothing left to buy
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "402":
-          description: Integrator wallet does not cover the difference (40175), or
-            spend cap reached (40183)
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "409":
-          description: Payment changed or being refunded (40177), or organization
-            being deleted (40901)
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "422":
-          description: Census size requires a custom quote
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "503":
-          description: Busy (50302), retry after Retry-After
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Buy census headroom for a paid process
       tags:
       - processes
   /processes/{processId}/check:
@@ -6116,193 +5357,6 @@ paths:
       summary: Check a voter's status for a voting process
       tags:
       - processes
-  /processes/{processId}/checkout:
-    delete:
-      description: |-
-        Expires the draft's open top-up checkout so it can no longer be paid, drops its pending
-        payment and releases the add-on claims the checkout took. It is how a draft whose
-        checkout is open is published from the wallet instead (publish refuses it with 409
-        while the session is payable). A checkout already completed is not expired: its money
-        lands in the wallet regardless. 404 (40179) when there is no payment; 409 (40177) when
-        the payment is paid, refunded or failed, or when the checkout's top-up was already spent
-        on the process's publish (its ledger shows it paid): publish it again instead, which
-        charges nothing. Requires Admin role.
-      parameters:
-      - description: Process ID
-        in: path
-        name: processId
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Process not found (40038), or no payment or checkout for it
-            (40179)
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "409":
-          description: Paid, refunded or failed, top-up spent on its publish, checkout
-            changed, or draft busy
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Stripe could not verify or expire the session
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Cancel the open top-up checkout of a voting process
-      tags:
-      - processes
-    get:
-      description: |-
-        The payment state (pending while a top-up checkout is open, paid, failed, refunded)
-        combined with the live Stripe state of the top-up checkout opened for the process, if
-        any. What a process paid is its payer's wallet ledger (GET
-        /organizations/{orgAddress}/wallet); status here is refreshed from it by every payment path
-        and can lag it briefly after a failure, while the amountCents of a paid process is read off
-        it (its wallet payments plus what it paid outside the wallet). This endpoint is for polling
-        the outcome, it never fulfills. consumed is true while a top-up credited to the wallet waits for the
-        publish the webhook then runs. refusal is set when it could not (price rose,
-        wallet short, the draft cannot publish, the requester is no longer an admin...): the
-        credit stays in the wallet and the process is published by hand. consumed with no
-        refusal and status still pending means the webhook will retry the publish: the credit
-        is already in the wallet, so POST /processes/{processId}/publish may be called at once
-        instead of waiting, and the retry then finds the process published. status paid means
-        the process is published or its publish job is running; jobId names the latest publish
-        job (the webhook's included): poll GET /jobs/{jobId}. status failed means the publish
-        failed after the payment and was credited back; that job's errors say why, and a failed
-        payment may carry no jobId when the failure came before the job existed (the publish
-        response said why). status paid with a failed job means the publish failed but the
-        payment was kept: either some of its elections were mined (the draft can then only be
-        published again, which resumes the rest; it cannot be edited or deleted, 40904; the job's
-        errors and the questions' upstreamId in GET /processes/{processId} show it) or its add-ons
-        are in use by another process. Either way publish again: it charges nothing. The one
-        exception is a job failed as interrupted by a service restart (its error says so): the
-        dead worker's publish claim is reclaimed only once it is PublishStaleAfter (15 minutes,
-        from its last renewal) old, so until then publish answers 409 (40903). After that,
-        whichever comes first wins: the stale sweep credits the debit back, status turns failed
-        and publishing again charges again; or a publish takes the claim first, charges nothing
-        and resumes the publish.
-        404 with 40179 means the draft exists but has no payment: none was opened, or a top-up
-        checkout that expired or whose delayed payment failed was dropped (open a new one); 404
-        with 40038 means the process itself is gone.
-        Requires Manager/Admin of the organization.
-      parameters:
-      - description: Process ID
-        in: path
-        name: processId
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.ProcessPaymentStatusResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Process not found (40038), or no payment or checkout for it
-            (40179)
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Get the payment status of a voting process
-      tags:
-      - processes
-    post:
-      consumes:
-      - application/json
-      description: |-
-        Opens a one-time Stripe checkout that tops up the organization's wallet by what it
-        lacks to pay the draft's server-calculated price (the shortfall, at least the €1
-        minimum; VAT added by Stripe Tax at checkout), and returns its client secret. Once the
-        payment is verified by webhook the wallet is credited and the process is published as
-        the requesting user, paid from the wallet; if it cannot be (its price rose, it changed
-        or was deleted) the credit stays in the wallet and the process is published by hand.
-        An open session for the same price and shortfall is reused; an obsolete one is
-        expired and replaced. A draft publish would refuse is refused here first, with the same
-        error, before any money is taken. 400 when the process is free, the wallet already
-        covers it (publish directly; an open checkout of the draft is expired and dropped
-        first), or it is not ready to publish. 403 (40181) for a managed
-        organization: its integrator's wallet pays at publish. 409 (40177) when the draft is
-        already paid (buy census headroom instead), a delete refunded it and did not finish
-        (delete it again), its last checkout completed and is being credited, or another
-        draft's payment holds a once-per-organization add-on it selects.
-        422 (40176) above 50 000 voters (quote-only). Requires Admin role.
-      parameters:
-      - description: Process ID
-        in: path
-        name: processId
-        required: true
-        type: string
-      - description: Checkout parameters
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.ProcessCheckoutRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.ProcessCheckoutResponse'
-        "400":
-          description: Free process, wallet covers the price, empty census, or not
-            ready to publish
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "403":
-          description: Managed organization (no wallet), or an integrator's own organization
-            (40174)
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "409":
-          description: Paid, checkout completing, add-on held by another draft, questions
-            out of sync, or busy
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "422":
-          description: Census size requires a custom quote
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Top up the wallet to publish a voting process
-      tags:
-      - processes
   /processes/{processId}/endDate:
     put:
       consumes:
@@ -6312,7 +5366,7 @@ paths:
         (RFC 3339, any offset; stored in UTC, truncated to seconds), as an async job; closed questions
         keep their outcome and are skipped. Admin only (JWT, or an API key with `voting:write` whose
         user is Admin); free. Extend only: the new end must be at least 5 minutes after the current end
-        (the current end itself is accepted as a no-op job) and at most 90 days after the process's start date. Request
+        (the current end itself is accepted as a no-op job) and at most the plan's maximum process duration after the process's start date. Request
         the extension at least 5 minutes plus 1 minute per open question before the current end; the one
         exception is a repair: an endDate that an open question's election already ends at on chain (left
         by a partially failed job) is accepted even after the current end, and finishes the rest:
@@ -6350,8 +5404,8 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.EnqueuedResponse'
         "400":
-          description: Bad endDate, over 90 days, unpublished, ended or near its end,
-            no open question
+          description: Bad endDate, over the plan duration, unpublished, ended or
+            near its end, no open question
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -6472,50 +5526,6 @@ paths:
       summary: Get a voting process participant
       tags:
       - processes
-  /processes/{processId}/price:
-    get:
-      description: |-
-        Server-side price of the draft in EUR cents, VAT excluded: base price from the
-        census size plus the selected add-ons, with the current payment status. Branding
-        and custom URL are once per organization: not priced once the organization paid
-        them. While another draft's payment holds one the draft selects, it stays priced in,
-        addOnsHeldBy names that draft, and publish and checkout answer 409 (40177) until its
-        payment completes (the add-on is then free) or is cancelled. Above 15 000 voters a custom
-        quote is recommended; above 50 000 the process is quote-only: no price (empty
-        lines, totalCents 0, quoteRequired true), and publish and checkout answer 422
-        (40176). Requires Manager/Admin of the organization.
-
-        Also callable with a scoped API key (scope: `voting:write`).
-      parameters:
-      - description: Process ID
-        in: path
-        name: processId
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.ProcessPriceResponse'
-        "400":
-          description: Census is empty or invalid
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Get the price of a voting process
-      tags:
-      - processes
   /processes/{processId}/publish:
     post:
       consumes:
@@ -6524,36 +5534,11 @@ paths:
         Publish a voting process: one on-chain election per question, submitted as a batch.
         Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
         GET /jobs/{jobId}. Idempotent once published.
-        Transient failures (the chain not answering or confirming, a full tx queue) are retried
-        by the service up to 5 times, with about 2.5 minutes of backoff between attempts; the job
-        stays pending meanwhile. Each attempt runs up to 3 rounds, each waiting up to 40 s per
-        question for its election to be mined, so on a stalled chain the job can stay pending for
-        6 attempts × 3 rounds × 40 s × questions + 2.5 minutes: about 15 minutes for one question,
-        over 3 hours for 15. Poll GET /jobs/{jobId} until it is completed or failed.
-        If the publish finally fails before any election is mined, a failed publish credits the
-        payer's wallet back (a `creditBack` history row) and publishing again charges again.
         409 (40172) means the stored questions do not match the process and the draft has to be
         saved again before it can be published.
         400 (40004) "process is not ready to publish: ..." lists every problem found, including
         "anonymous voting is temporarily unavailable" for an anonymous process while the service has
         anonymous voting off. A process some of whose questions are already on chain still resumes.
-        409 (40177) while a top-up checkout opened for the draft is still open: pay it, or, when
-        the draft's price changed since, call POST /processes/{processId}/checkout again to
-        replace it (or cancel it with DELETE /processes/{processId}/checkout) and publish again.
-        A priced process is paid from its payer's wallet (the organization's own, or its
-        integrator's when managed) at publish. 402 (40178) means the organization's wallet does
-        not cover it: the error data carries the quote, balanceCents and shortfallCents; top it
-        up via POST /processes/{processId}/checkout, which publishes once paid. A draft that already
-        paid part of its price (its census grew since) gets the data's paidCents and censusSize
-        too, and buys the difference with POST /processes/{processId}/census/checkout. For a managed
-        organization, 402 (40175) means its integrator's wallet does not cover the price (data:
-        requiredCents, availableCents), and 402 (40183) that the price would take it past the
-        spend cap its integrator set (data: capCents, spentCents, requiredCents).
-        409 (40177) also answers while another draft is paying for a once-per-organization add-on
-        (branding, custom URL) this one selects, and while it selects one its payment does not
-        include that the organization has not paid for either: deselect it, or publish once
-        another process pays for it.
-        422 (40176) means the census is above 50 000 voters: quote-only, no self-service price.
       parameters:
       - description: Process ID
         in: path
@@ -6579,35 +5564,17 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
-        "402":
-          description: Wallet short or spend cap reached
-          schema:
-            allOf:
-            - $ref: '#/definitions/errors.Error'
-            - properties:
-                data:
-                  $ref: '#/definitions/apicommon.ProcessPaymentRequired'
-              type: object
-        "403":
-          description: An integrator's own organization cannot own processes (40174)
-          schema:
-            $ref: '#/definitions/errors.Error'
         "404":
           description: Not Found
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Publish in progress, out of sync, checkout open, add-on held,
-            org being deleted (40901)
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "422":
-          description: Census size requires a custom quote
+          description: Publish in progress, or the stored questions do not match the
+            process
           schema:
             $ref: '#/definitions/errors.Error'
         "503":
-          description: Busy (50302 wallet or census growth, 50303 org tx), retry after
-            Retry-After
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -6674,13 +5641,6 @@ paths:
         `data.signedMemberIds`.
 
         Also callable with a scoped API key (scope: `voting:write`).
-
-        402 when the change would grow a published process's census beyond what it paid for:
-        40178 with the quote in data (its processId names the process to buy headroom for with
-        POST /processes/{processId}/census/checkout); for a managed organization, 40175 when its
-        integrator's wallet falls short (data: requiredCents, availableCents), or 40183 past the
-        spend cap its integrator set (data: capCents, spentCents, requiredCents).
-        422 when the grown census needs a custom quote.
       parameters:
       - description: Process ID
         in: path
@@ -6717,25 +5677,12 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
-        "402":
-          description: Census growth beyond the price paid
-          schema:
-            allOf:
-            - $ref: '#/definitions/errors.Error'
-            - properties:
-                data:
-                  $ref: '#/definitions/apicommon.ProcessCensusGrowthQuote'
-              type: object
         "404":
           description: Process or question not found
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
           description: Publish in progress, member already signed for, or list changed
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "422":
-          description: Census size requires a custom quote
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -7029,11 +5976,8 @@ paths:
       - processes
   /processes/{processId}/validation:
     get:
-      description: |-
-        Publish-readiness dry-run. Returns { valid, errors } without changing anything. For a draft it
-        also lists the payment refusals a publish would give: a wallet that does not cover the price,
-        an add-on another draft holds, or a census that cannot be priced.
-        Also callable with a scoped API key (scope: `voting:write`).
+      description: Publish-readiness dry-run. Returns { valid, errors } without changing
+        anything.
       parameters:
       - description: Process ID
         in: path
