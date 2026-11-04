@@ -1,6 +1,6 @@
 # DNI/NIE canonical form and login-hash migration (SP1): design
 
-Status: amended (2026-11-04), awaiting owner approval   Class: architectural
+Status: approved as amended (2026-11-04)   Class: architectural
 Owner decisions so far:
 - 2026-11-03 (umbrella plan §7/§12 + progress.md): letterless DNI/NIE: derive the check letter.
   ~~Derived entries are a warning-level bucket the organizer must explicitly confirm.~~
@@ -122,12 +122,13 @@ Hash plumbing facts the amended design builds on (verified at 7568326):
   `db/census_participant.go:169` → `calculateParticipantHashesBson`), and the blocking
   duplicate detection (`classifyCensusMembers`, `db/census_missing_data.go:151`) — funnels
   through **one** function, `calculateParticipantHashes` (`db/census_participant.go:874`).
-- Every migration/repair-side hash funnels through two sibling builders over raw bson docs:
+- Every migration/repair-side hash funnels through one builder over raw bson docs:
   `recomputeParticipantHashes` (`migrations/0015_normalize_member_emails.go:30`, used by 0015
-  and 0034) and `computeParticipantHashes` (`migrations/repair_login_hashes.go:417`, used by
-  `RepairLoginHashes`/`scripts/repairlogins`). Both call `hashMemberFields`
-  (`migrations/login_hash.go:46`), the byte-for-byte mirror of `db.HashAuthTwoFaFields`
-  guarded by `db.TestRepairMatchesCanonicalHash` (`db/repair_login_hashes_test.go:419`).
+  and 0034) **delegates to** `computeParticipantHashes`
+  (`migrations/repair_login_hashes.go:417`, used by `RepairLoginHashes`/
+  `scripts/repairlogins`), which calls `hashMemberFields` (`migrations/login_hash.go:46`),
+  the byte-for-byte mirror of `db.HashAuthTwoFaFields` guarded by
+  `db.TestRepairMatchesCanonicalHash` (`db/repair_login_hashes_test.go:419`).
 - `auth/0` builds an `inputMember` from the request, `.Normalized()`s it and resolves the
   participant via `participantByLogin` (`csp/handlers/auth.go:207,410`).
 - Migration ledger: one `MigrationRecord{Version, AppliedAt}` per applied migration — **no
@@ -180,9 +181,11 @@ grow DNI logic" does not apply):
   Because participant writes, the login lookup and the blocking duplicate detection all call
   `calculateParticipantHashes`, every stored-member side of the comparison is canonical with
   this one change, while stored documents stay raw.
-- `migrations`: `recomputeParticipantHashes` (`migrations/0015_normalize_member_emails.go:30`)
-  and `computeParticipantHashes` (`migrations/repair_login_hashes.go:417`) apply the same
-  one-liner to `m.NationalID` before calling `hashMemberFields`. The repair tooling
+- `migrations`: the same one-liner is applied to `m.NationalID` at the top of
+  `computeParticipantHashes` (`migrations/repair_login_hashes.go:417`) **only** —
+  `recomputeParticipantHashes` (`migrations/0015_normalize_member_emails.go:30`) delegates to
+  it, so one site covers 0015, 0034, `RepairLoginHashes` and `scripts/repairlogins`, and there
+  is no second canonicalisation point to drift. The repair tooling
   (`RepairLoginHashes`, `scripts/repairlogins`) therefore recomputes the same canonical hashes
   the login path matches — on a migrated database it is a no-op, as before. (0015 re-run on a
   fresh/replayed database now also writes canonical nationalId hashes; 0034 then finds them
@@ -236,8 +239,13 @@ authentication (their auth-only token, or a 2FA code sent to the twin's contact)
 - Order and semantics as audited at 0ef30bc: verbatim first; a real lookup error returns; only
   `ErrNotFound` falls through to the canonical lookup. One rate-limit unit covers both lookups
   (the claim is taken once, before them). Migrated members match via the canonical lookup; a
-  collision-skipped member keeps matching their own stored value exactly as on `main`; a
-  letterless input never resolves to the lettered twin.
+  collision-skipped member keeps matching their own stored value exactly as on `main`: an
+  input typed exactly as the survivor's stored variant (case-folded) never resolves to the
+  twin. A *different* variant of the shared digits (e.g. `12.345.678` for a survivor stored
+  `12345678`) fails the verbatim lookup and resolves canonically — to the twin. That input
+  never matched the survivor on `main` either, both members claim the same canonical DNI, and
+  validation reports the pair as `duplicate_after_normalization`: owner-accepted ambiguity,
+  not a regression.
 - A participant created **after** this change always holds a canonical hash (§2), so the
   verbatim lookup finds nothing for them and the canonical fallback matches: the verbatim path
   only ever resolves pre-migration collision survivors.
@@ -344,7 +352,11 @@ What changes:
    any recomputed hash); on collision **skip that participant only** (not the whole member —
    with no member write there is nothing to keep consistent across censuses), log member and
    census IDs only, count `skipped`. Otherwise `$set` the hashes + `updatedAt`, count
-   `rehashed`.
+   `rehashed`. Note on who survives: when **both** twins are stored non-canonically (e.g.
+   `12.345.678-Z` and `12345678` in one census), both are candidates and the first processed
+   (in `_id` order) gets the canonical hash; the other — whichever variant it holds, lettered
+   included — is skipped and becomes the verbatim survivor. §3's lookup is correct either way;
+   the prose elsewhere uses "the letterless twin" only as the archetype.
 4. **Counters**: `rehashed`, `skipped` (the `normalized`/`derived` member counters go away
    with the member write).
 5. **Idempotent and resumable for free**: member documents never change, so candidates are
@@ -399,7 +411,16 @@ hashes" instead of "stored nationalIds".
   (old code hashes the typed value raw; the stored participant hash is canonical) **except**
   the canonical form itself, which old code hashes to the same bytes. Voters of
   canonical-stored members are unaffected. The window is the deploy's duration; same accepted
-  pattern as 0015/0025.
+  pattern as 0015/0025. Stragglers outlive the window: a member/census write served by an old
+  replica *after* 0034 ran stores raw hashes that nothing rehashes (0034 is already recorded),
+  so a variant-stored member in that set matches only verbatim forever and SP2's certificate
+  would not match them even though `MigrationApplied(34)` is true. Therefore, **after the
+  deploy completes, run the new `scripts/repairlogins` once** (dry-run, then `--apply` if it
+  reports changes) to canonicalise participants written during the window — an ops step
+  needing the owner's go-ahead, added to the merge/release checklist (rework-plan.md). Safe
+  for survivors: `rehashCensus` skips collision groups
+  (`collisionSkips`, `migrations/repair_login_hashes.go:313-321`). The publish guard cannot
+  see these stragglers.
 - **Old binary on migrated data (rollback by redeploy)**: canonical-typed logins keep
   matching; variant-typed input fails until the new binary returns. If a longer rollback must
   restore variant logins, `scripts/repairlogins` **built at the old version** recomputes raw
@@ -423,13 +444,16 @@ hashes" instead of "stored nationalIds".
 ## Failure modes and security
 
 - **Migration collision (letterless vs lettered twin)**: members `12345678` and `12345678Z`
-  in one `nationalId` census collide after canonical hashing. 0034 skips the letterless
-  participant (keeps its raw hash) and logs IDs. §3's exact-first lookup keeps each voter
-  matching their own member — the letterless input hashes verbatim first and finds the skipped
-  participant, never the twin. Validation reports the pair as
+  in one `nationalId` census collide after canonical hashing. 0034 skips the colliding
+  participant (keeps its raw hash — the letterless one in the archetype; when both twins are
+  stored non-canonically, whichever loses the `_id`-order race, §5) and logs IDs. §3's
+  exact-first lookup keeps each voter matching their own member: an input typed exactly as the
+  survivor's stored variant finds the skipped participant, never the twin; other variants of
+  the shared DNI resolve canonically to the twin (owner-accepted ambiguity, §3 — they never
+  matched the survivor on `main` either). Validation reports the pair as
   `duplicate_after_normalization`. Note for SP2: certificate redeem only has the canonical
-  value, so a collision-skipped letterless member cannot match by certificate; the warning is
-  how the organizer learns that.
+  value, so a collision-skipped participant (whichever variant it holds) cannot match by
+  certificate; the warning is how the organizer learns that.
 - **Derived-letter typo admits the wrong real person**: a digit typo in a letterless DNI
   (`12345679` for `12345678`) canonical-hashes to a different, possibly real, person
   (`12345679S`), and matches them at login or certificate redeem. **Owner-accepted
@@ -538,8 +562,8 @@ exists anywhere; AC3, AC6 and AC13 pin its absence.)
   classes and IDs/lines only. Migration logs IDs and counters only.
 - Do not touch `db.HashAuthTwoFaFields`, `internal.HashLoginFields` or
   `migrations/login_hash.go`: canonicalisation lives one level up, in
-  `calculateParticipantHashes` / `recomputeParticipantHashes` / `computeParticipantHashes`,
-  so the mirrored hash pair stays frozen.
+  `calculateParticipantHashes` (db) and `computeParticipantHashes` (migrations, which
+  `recomputeParticipantHashes` delegates to), so the mirrored hash pair stays frozen.
 - Do not import cert-check; its semantics enter only as test vectors (provenance commented).
 - Migration number must exceed the highest registered migration on **both** `main` and
   `origin/lts` at merge time (both 33 today — re-verify on rebase); never renumber after it
