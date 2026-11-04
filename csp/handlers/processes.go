@@ -88,7 +88,7 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 		return errors.Ptr(errors.ErrUnauthorized.Withf("question is not open for voting"))
 	}
 	// publish always persists a StartDate, while EndDate is optional.
-	if !vp.StartDate.IsZero() && time.Now().Add(startGrace).Before(vp.StartDate) {
+	if ProcessBeforeStart(vp) {
 		return errors.Ptr(errors.ErrUnauthorized.Withf("process has not started yet"))
 	}
 	if processEnded(vp) {
