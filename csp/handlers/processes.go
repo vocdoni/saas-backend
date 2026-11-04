@@ -120,6 +120,8 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 //	@Description	data.retryAfter gives the seconds left.
 //	@Description	A member's challenge sends (new tokens + resends) are capped per UTC day, also answering
 //	@Description	40017 with data.retryAfter.
+//	@Description	Step 0 for an anonymous census is refused (400, 40037, "anonymous voting is temporarily
+//	@Description	unavailable") while the service has anonymous voting off.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -127,7 +129,7 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 //	@Param			step		path		string					true	"Authentication step (0 or 1)"
 //	@Param			request		body		handlers.AuthRequest	true	"Step 0 body; step 1 uses AuthChallengeRequest (see description)"
 //	@Success		200			{object}	handlers.AuthResponse
-//	@Failure		400			{object}	errors.Error	"Invalid input data, or failed-attempt or daily send limit reached (40017)"
+//	@Failure		400			{object}	errors.Error	"Invalid input data, attempt or send limit (40017), or anonymous voting unavailable"
 //	@Failure		401			{object}	errors.Error	"Invalid authentication data, cooldown not reached, or invalid challenge"
 //	@Failure		404			{object}	errors.Error	"Process, census, or organization not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
@@ -162,7 +164,8 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 //	@Description	process. The request must include the auth token and a valid contact method for the
 //	@Description	census type (email/phone). The same token is returned if the challenge is queued.
 //	@Description	A token can be resent at most 3 times, and a contact that does not match the member spends
-//	@Description	one of them too.
+//	@Description	one of them too. For an anonymous census it is refused (400, 40037, "anonymous voting is
+//	@Description	temporarily unavailable") while the service has anonymous voting off.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -204,6 +207,11 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 	census, err := c.mainDB.Census(vp.CensusID.Hex())
 	if err != nil {
 		errors.ErrCensusNotFound.WithErr(err).Write(w)
+		return
+	}
+	// before a resend is claimed or sent: the token could not be blind-signed anyway
+	if c.anonymousCensusRefused(census) {
+		errors.ErrInvalidData.With(csp.AnonymousVotingUnavailable).Write(w)
 		return
 	}
 	org, err := c.mainDB.Organization(vp.OrgAddress)
@@ -592,19 +600,23 @@ type blindBallotAuth struct {
 //	@Description	batch is authorized as a unit (each election must belong to the process and the member
 //	@Description	be eligible, else 401); per-election issuance failures are reported inline with a code.
 //	@Description	Public endpoint: the verified auth token authenticates the voter. Rejected (400) for a
-//	@Description	non-anonymous process — use the sign endpoints there.
+//	@Description	non-anonymous process — use the sign endpoints there. Refused (400, "anonymous voting is
+//	@Description	temporarily unavailable") while the service has anonymous voting off.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
 //	@Param			processId	path		string						true	"Process ID"
 //	@Param			request		body		handlers.BlindPointRequest	true	"Auth token and one election id per question"
 //	@Success		200			{object}	handlers.BlindPointResponse
-//	@Failure		400			{object}	errors.Error	"Invalid input data or non-anonymous process"
+//	@Failure		400			{object}	errors.Error	"Invalid input data, non-anonymous process, or anonymous voting temporarily unavailable"
 //	@Failure		401			{object}	errors.Error	"Unauthorized, unverified token, election not in process, or member not eligible"
 //	@Failure		413			{object}	errors.Error	"Request body too large"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/blind-point [post]
 func (c *CSPHandlers) ProcessBlindPointHandler(w http.ResponseWriter, r *http.Request) {
+	if c.blindCSPRefused(w) {
+		return
+	}
 	oid, _, ok := parseProcessID(w, r)
 	if !ok {
 		return
@@ -696,19 +708,23 @@ func (c *CSPHandlers) ProcessBlindPointHandler(w http.ResponseWriter, r *http.Re
 //	@Description	consuming that election's slot; the response is always 200 with one entry per item, in
 //	@Description	order, carrying the raw blind-signature scalar or a stable code (blind_request_missing if
 //	@Description	no round-1 point was issued; the other signing codes as usual). Public endpoint. Rejected
-//	@Description	(400) for a non-anonymous process — use the sign endpoints there.
+//	@Description	(400) for a non-anonymous process — use the sign endpoints there. Refused (400, "anonymous
+//	@Description	voting is temporarily unavailable") while the service has anonymous voting off.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
 //	@Param			processId	path		string						true	"Process ID"
 //	@Param			request		body		handlers.BlindSignRequest	true	"Auth token and one blinded ballot per question"
 //	@Success		200			{object}	handlers.BlindSignResponse
-//	@Failure		400			{object}	errors.Error	"Invalid input data or non-anonymous process"
+//	@Failure		400			{object}	errors.Error	"Invalid input data, non-anonymous process, or anonymous voting temporarily unavailable"
 //	@Failure		401			{object}	errors.Error	"Unauthorized, unverified token, election not in process, or member not eligible"
 //	@Failure		413			{object}	errors.Error	"Request body too large"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/blind-sign [post]
 func (c *CSPHandlers) ProcessBlindSignHandler(w http.ResponseWriter, r *http.Request) {
+	if c.blindCSPRefused(w) {
+		return
+	}
 	oid, _, ok := parseProcessID(w, r)
 	if !ok {
 		return
@@ -790,6 +806,22 @@ func (c *CSPHandlers) ProcessBlindSignHandler(w http.ResponseWriter, r *http.Req
 		res.Weight = pinnedWeight
 	}
 	apicommon.HTTPWriteJSON(w, resp)
+}
+
+// blindCSPRefused writes the refusal and returns true while anonymous voting is temporarily off.
+// It runs first in both blind rounds, so nothing is read, stored or signed for a refused request.
+func (c *CSPHandlers) blindCSPRefused(w http.ResponseWriter) bool {
+	if !c.csp.BlindCSPDisabled() {
+		return false
+	}
+	errors.ErrInvalidData.With(csp.AnonymousVotingUnavailable).Write(w)
+	return true
+}
+
+// anonymousCensusRefused reports whether a voter of an anonymous census must be refused a challenge
+// because anonymous voting is temporarily off.
+func (c *CSPHandlers) anonymousCensusRefused(census *db.Census) bool {
+	return census.Anonymous && c.csp.BlindCSPDisabled()
 }
 
 // questionsByUpstream loads a process's questions indexed by their on-chain election id, writing

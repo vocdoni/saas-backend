@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -118,4 +119,19 @@ func (ms *MongoStorage) TouchAPIKey(id string, when time.Time) error {
 	defer cancel()
 	_, err := ms.apiKeys.UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": bson.M{"lastUsedAt": when}})
 	return err
+}
+
+// DeleteAPIKeysByOrg removes every API key of the organization, revoked or not, returning how many
+// went. It is a step of an organization teardown.
+func (ms *MongoStorage) DeleteAPIKeysByOrg(orgAddress common.Address) (int64, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return 0, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.apiKeys.DeleteMany(ctx, bson.M{"orgAddress": orgAddress})
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete API keys: %w", err)
+	}
+	return res.DeletedCount, nil
 }

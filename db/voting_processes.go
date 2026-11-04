@@ -447,3 +447,45 @@ func (ms *MongoStorage) SetVotingProcessPublished(id bson.ObjectID, owner string
 	}
 	return nil
 }
+
+// SetVotingProcessEndDate stores a new end date on a published voting process, once every open
+// question's election has been moved to it on chain. It returns ErrNotFound when no published
+// process has that id.
+func (ms *MongoStorage) SetVotingProcessEndDate(id bson.ObjectID, endDate time.Time) error {
+	if id == bson.NilObjectID || endDate.IsZero() {
+		return ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.votingProcesses.UpdateOne(ctx,
+		bson.M{"_id": id, "published": true},
+		bson.M{"$set": bson.M{"endDate": endDate, "updatedAt": time.Now()}})
+	if err != nil {
+		return fmt.Errorf("failed to set voting process end date: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteVotingProcessesByOrg removes every voting process of an organization, drafts included,
+// and all their questions, returning how many processes went. It is the bulk step of an
+// organization teardown and must run after DeleteVotingProcessCSPByOrg, which reads their ids.
+func (ms *MongoStorage) DeleteVotingProcessesByOrg(orgAddress common.Address) (int64, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return 0, ErrInvalidData
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	if _, err := ms.processesQuestions.DeleteMany(ctx, bson.M{"orgAddress": orgAddress}); err != nil {
+		return 0, fmt.Errorf("failed to delete voting process questions: %w", err)
+	}
+	res, err := ms.votingProcesses.DeleteMany(ctx, bson.M{"orgAddress": orgAddress})
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete voting processes: %w", err)
+	}
+	return res.DeletedCount, nil
+}

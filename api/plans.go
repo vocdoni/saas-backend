@@ -31,9 +31,20 @@ func (a *API) plansHandler(w http.ResponseWriter, _ *http.Request) {
 	visible := make([]*db.Plan, 0, len(plans))
 	for _, p := range plans {
 		if p != nil && p.Public {
-			visible = append(visible, p)
+			visible = append(visible, a.planForResponse(p))
 		}
 	}
 	// send the plans back to the user
 	apicommon.HTTPWriteJSON(w, visible)
+}
+
+// planForResponse returns the plan as clients see it. While anonymous voting is temporarily off it is
+// a copy with Features.Anonymous forced to false; otherwise it is the stored plan, its value unchanged.
+func (a *API) planForResponse(plan *db.Plan) *db.Plan {
+	if plan == nil || !a.csp.BlindCSPDisabled() {
+		return plan
+	}
+	shown := *plan
+	shown.Features.Anonymous = false
+	return &shown
 }

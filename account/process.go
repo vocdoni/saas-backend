@@ -286,6 +286,31 @@ func (a *Account) BuildSetProcessStatusTx(
 	}, nil
 }
 
+// BuildSetProcessDurationTx builds an unsigned SET_PROCESS_DURATION transaction that sets the
+// on-chain election identified by processID to last duration seconds from its start time. It reads
+// the organization account's current nonce so the funder/signer can complete it.
+func (a *Account) BuildSetProcessDurationTx(
+	orgAddress common.Address, processID []byte, duration uint32,
+) (*models.Tx, error) {
+	if len(processID) == 0 {
+		return nil, fmt.Errorf("empty process id")
+	}
+	acc, err := a.client.Account(orgAddress.String())
+	if err != nil {
+		return nil, fmt.Errorf("could not fetch organization account: %w", err)
+	}
+	return &models.Tx{
+		Payload: &models.Tx_SetProcess{
+			SetProcess: &models.SetProcessTx{
+				Txtype:    models.TxType_SET_PROCESS_DURATION,
+				Nonce:     acc.Nonce,
+				ProcessId: processID,
+				Duration:  &duration,
+			},
+		},
+	}, nil
+}
+
 // BuildSetProcessCensusTx builds an unsigned SET_PROCESS_CENSUS transaction that raises a published
 // election's maxCensusSize (keeping its census root/URI). The chain accepts a size increase without
 // DynamicCensus as long as the new size is not smaller than the current one; resend the existing

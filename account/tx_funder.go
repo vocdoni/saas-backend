@@ -5,6 +5,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/errors"
+	"go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/vochain/state/electionprice"
 	"go.vocdoni.io/proto/build/go/models"
 )
@@ -173,6 +174,31 @@ func (a *Account) calculateSetProcessElectionPrice(
 	}
 }
 
+// durationPriceIncrease mirrors the chain's txCostIncreaseDuration: what the election costs with
+// newDuration (seconds) minus what it costs now, both priced from its on-chain parameters, or zero
+// when the new duration is not dearer. The chain moves the whole faucet amount into the
+// organization account, so the amount must be exact: more leaks faucet tokens, less is rejected.
+func (a *Account) durationPriceIncrease(election *api.Election, newDuration uint32) uint64 {
+	price := func(durationSeconds uint32) uint64 {
+		params := &electionprice.ElectionParameters{
+			ElectionDurationSeconds: durationSeconds,
+			EncryptedVotes:          election.VoteMode.GetEncryptedVotes(),
+			AnonymousVotes:          election.VoteMode.GetAnonymous(),
+			MaxVoteOverwrite:        election.TallyMode.GetMaxVoteOverwrites(),
+		}
+		if election.Census != nil {
+			params.MaxCensusSize = election.Census.MaxCensusSize
+		}
+		return a.ElectionPriceCalc.Price(params)
+	}
+	oldPrice := price(uint32(election.EndDate.Sub(election.StartDate).Seconds()))
+	newPrice := price(newDuration)
+	if newPrice <= oldPrice {
+		return 0
+	}
+	return newPrice - oldPrice
+}
+
 // validateSetProcessTx validates a SetProcess transaction.
 func (*Account) validateSetProcessTx(txSetProcess *models.SetProcessTx) error {
 	if txSetProcess == nil || txSetProcess.ProcessId == nil {
@@ -188,14 +214,21 @@ func (*Account) validateSetProcessTx(txSetProcess *models.SetProcessTx) error {
 		if (txSetProcess.CensusRoot == nil || txSetProcess.CensusURI == nil) && txSetProcess.CensusSize == nil {
 			return errors.ErrInvalidTxFormat.With("missing census fields")
 		}
+	case models.TxType_SET_PROCESS_DURATION:
+		if txSetProcess.Duration == nil {
+			return errors.ErrInvalidTxFormat.With("missing duration field")
+		}
 	default:
 		return errors.ErrInvalidTxFormat.With("unsupported txtype")
 	}
 	return nil
 }
 
-// handleSetProcessTx handles a SetProcess transaction.
-func (a *Account) handleSetProcessTx(tx *models.Tx, targetAddr common.Address) (*models.Tx, *models.TxType, error) {
+// handleSetProcessTx handles a SetProcess transaction. The census and duration types are priced from
+// the election, which is fetched from the chain unless the caller passes it already read.
+func (a *Account) handleSetProcessTx(
+	tx *models.Tx, targetAddr common.Address, election *api.Election,
+) (*models.Tx, *models.TxType, error) {
 	txSetProcess := tx.GetSetProcess()
 
 	// Validate the transaction
@@ -209,15 +242,20 @@ func (a *Account) handleSetProcessTx(tx *models.Tx, targetAddr common.Address) (
 		return nil, nil, err
 	}
 
-	// For certain types, we need to get the current process and calculate additional costs
-	if txSetProcess.Txtype == models.TxType_SET_PROCESS_CENSUS {
-		election, err := a.client.Election(txSetProcess.ProcessId)
-		if err != nil {
-			return nil, nil, errors.ErrVochainRequestFailed.WithErr(err)
+	// For certain types, we need the current process to calculate additional costs
+	if t := txSetProcess.Txtype; t == models.TxType_SET_PROCESS_CENSUS || t == models.TxType_SET_PROCESS_DURATION {
+		if election == nil {
+			if election, err = a.client.Election(txSetProcess.ProcessId); err != nil {
+				return nil, nil, errors.ErrVochainRequestFailed.WithErr(err)
+			}
+		} else if !bytes.Equal(election.ElectionID, txSetProcess.ProcessId) {
+			return nil, nil, errors.ErrInvalidTxFormat.With("election does not match the tx process id")
 		}
-
-		// Add election price
-		amount += a.calculateSetProcessElectionPrice(txSetProcess, election)
+		if txSetProcess.Txtype == models.TxType_SET_PROCESS_CENSUS {
+			amount += a.calculateSetProcessElectionPrice(txSetProcess, election)
+		} else {
+			amount += a.durationPriceIncrease(election, txSetProcess.GetDuration())
+		}
 	}
 
 	// Create faucet package
@@ -241,13 +279,22 @@ func (a *Account) handleSetProcessTx(tx *models.Tx, targetAddr common.Address) (
 // and returns the tx with the faucet package included.
 // Returns the tx, the type and an error if any.
 func (a *Account) FundTransaction(tx *models.Tx, targetAddr common.Address) (*models.Tx, *models.TxType, error) {
+	return a.FundTransactionWith(tx, targetAddr, nil)
+}
+
+// FundTransactionWith is FundTransaction for a caller that already read the tx's election from the
+// chain: a SetProcess tx priced from its election (census, duration) uses it instead of fetching it
+// again, and is refused if it is another election. A nil election is fetched, as FundTransaction does.
+func (a *Account) FundTransactionWith(
+	tx *models.Tx, targetAddr common.Address, election *api.Election,
+) (*models.Tx, *models.TxType, error) {
 	switch tx.Payload.(type) {
 	case *models.Tx_SetAccount:
 		return a.handleSetAccountTx(tx, targetAddr)
 	case *models.Tx_NewProcess:
 		return a.handleNewProcessTx(tx, targetAddr)
 	case *models.Tx_SetProcess:
-		return a.handleSetProcessTx(tx, targetAddr)
+		return a.handleSetProcessTx(tx, targetAddr, election)
 	default:
 		return nil, nil, errors.ErrTxTypeNotAllowed
 	}

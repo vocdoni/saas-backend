@@ -27,10 +27,10 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/db"
 )
 
@@ -77,7 +77,7 @@ func run(opts *options) error {
 		return fmt.Errorf("could not find user: %w", err)
 	}
 
-	if err := printPlan(ms, user); err != nil {
+	if err := showPlan(os.Stdout, ms, user.ID); err != nil {
 		return err
 	}
 	if opts.dryRun {
@@ -108,91 +108,70 @@ func run(opts *options) error {
 	return nil
 }
 
-// printPlan prints a human-readable report of everything the erasure will
-// touch: the user's identity, each organization with its classification (full
-// teardown vs membership removal) and, for organizations about to be deleted,
-// how much data they hold.
-func printPlan(ms *db.MongoStorage, user *db.User) error {
-	name := strings.TrimSpace(user.FirstName + " " + user.LastName)
-	fmt.Printf("\nThis will erase user #%d: %s <%s>\n", user.ID, name, user.Email)
-	if len(user.Organizations) == 0 {
-		fmt.Println("\nThe user belongs to no organization.")
+// showPlan prints the user's erasure plan and fails when it is blocked, so that neither a dry run
+// nor a real one goes on (to the prompt or any deletion) with a sub-org or managed
+// org that the erasure would orphan.
+func showPlan(w io.Writer, ms *db.MongoStorage, userID uint64) error {
+	plan, err := ms.UserErasurePlan(userID)
+	if err != nil {
+		return err
 	}
-	for _, userOrg := range user.Organizations {
-		org, err := ms.Organization(userOrg.Address)
-		if err != nil {
-			return fmt.Errorf("could not fetch org %s: %w", userOrg.Address, err)
-		}
-		orgName := org.DisplayName()
-		if orgName == "" {
-			orgName = "unnamed"
-		}
-		fmt.Printf("\nOrganization %s (%q, role: %s)\n", userOrg.Address, orgName, userOrg.Role)
-		soleAdmin, err := ms.IsSoleOrgAdmin(userOrg.Address, user.ID)
-		if err != nil {
-			return fmt.Errorf("could not classify org %s: %w", userOrg.Address, err)
-		}
-		if !soleAdmin {
-			fmt.Println("  KEPT: other admins exist, only this user's membership is removed.")
-			if org.Creator == user.Email {
-				fmt.Println("  NOTE: the creator email stays (the org signing key is derived from it);")
-				fmt.Println("        follow up manually if it must be redacted.")
-			}
-			continue
-		}
-		fmt.Println("  DELETED ENTIRELY: this user is its only admin. This removes:")
-		if err := printOrgContents(ms, userOrg.Address); err != nil {
-			return err
-		}
+	if err := printPlan(w, plan); err != nil {
+		return fmt.Errorf("could not print the plan: %w", err)
 	}
-	fmt.Println("\nAlso deleted: invitations sent to or issued by the user,")
-	fmt.Println("pending verification codes, and the user account itself.")
-	fmt.Println("Not touched: Stripe billing data and database backups.")
+	if len(plan.Blocked) > 0 {
+		return fmt.Errorf("erasure blocked: orgs %v have sub-orgs or managed orgs that would survive them", plan.Blocked)
+	}
 	return nil
 }
 
-// printOrgContents prints how much data an organization about to be torn down
-// currently holds.
-func printOrgContents(ms *db.MongoStorage, address common.Address) error {
-	members, err := ms.CountOrgMembers(address)
-	if err != nil {
-		return fmt.Errorf("could not count members of org %s: %w", address, err)
+// printPlan writes a human-readable report of everything the erasure will
+// touch: the user's identity, each organization with its classification (full
+// teardown vs membership removal) and, for organizations about to be deleted,
+// how much data they hold and which of their sub-orgs block the erasure.
+func printPlan(w io.Writer, plan *db.UserErasurePlan) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nThis will erase user #%d: %s <%s>\n", plan.UserID, plan.Name, plan.Email)
+	if len(plan.Orgs) == 0 {
+		fmt.Fprintln(&b, "\nThe user belongs to no organization.")
 	}
-	groups, _, err := ms.OrganizationMemberGroups(address, 1, 1)
-	if err != nil {
-		return fmt.Errorf("could not count groups of org %s: %w", address, err)
-	}
-	censuses, err := ms.CensusesByOrg(address)
-	if err != nil {
-		return fmt.Errorf("could not list censuses of org %s: %w", address, err)
-	}
-	var participants int64
-	for _, census := range censuses {
-		n, err := ms.CountCensusParticipants(census.ID.Hex())
-		if err != nil {
-			return fmt.Errorf("could not count participants of census %s: %w", census.ID.Hex(), err)
+	for _, org := range plan.Orgs {
+		orgName := org.Name
+		if orgName == "" {
+			orgName = "unnamed"
 		}
-		participants += n
+		fmt.Fprintf(&b, "\nOrganization %s (%q, role: %s)\n", org.Address, orgName, org.Role)
+		if !org.DeletedEntirely {
+			fmt.Fprintln(&b, "  KEPT: other admins exist, only this user's membership is removed.")
+			if org.CreatorEmailRetained {
+				fmt.Fprintln(&b, "  NOTE: the creator email stays (the org signing key is derived from it);")
+				fmt.Fprintln(&b, "        follow up manually if it must be redacted.")
+			}
+			continue
+		}
+		fmt.Fprintln(&b, "  DELETED ENTIRELY: this user is its only admin. This removes:")
+		fmt.Fprintf(&b, "    the organization and its voting history metadata (%d processes, %d bundles)\n",
+			org.LegacyProcesses, org.Bundles)
+		fmt.Fprintf(&b, "    %d voting processes, %d of them drafts\n",
+			org.VotingProcesses, org.Drafts)
+		fmt.Fprintf(&b, "    %d members in %d groups\n", org.Members, org.Groups)
+		fmt.Fprintf(&b, "    %d censuses with %d participants (incl. their CSP auth tokens)\n",
+			org.Censuses, org.CensusParticipants)
+		fmt.Fprintf(&b, "    %d pending invitations, plus import jobs\n", org.PendingInvitations)
+		fmt.Fprintf(&b, "    %d API keys\n", org.APIKeys)
+		if len(org.SurvivingChildren) > 0 {
+			fmt.Fprintln(&b, "  BLOCKED: these sub-orgs or managed orgs would survive it; delete them or move them first:")
+			for _, child := range org.SurvivingChildren {
+				fmt.Fprintf(&b, "    %s\n", child)
+			}
+		}
 	}
-	processes, err := ms.CountProcesses(address, db.AllProcesses)
-	if err != nil {
-		return fmt.Errorf("could not count processes of org %s: %w", address, err)
-	}
-	bundles, err := ms.ProcessBundlesByOrg(address)
-	if err != nil {
-		return fmt.Errorf("could not list bundles of org %s: %w", address, err)
-	}
-	invites, err := ms.PendingInvitations(address)
-	if err != nil {
-		return fmt.Errorf("could not list invitations of org %s: %w", address, err)
-	}
-	fmt.Printf("    the organization and its voting history metadata (%d processes, %d bundles)\n",
-		processes, len(bundles))
-	fmt.Printf("    %d members in %d groups\n", members, groups)
-	fmt.Printf("    %d censuses with %d participants (incl. their CSP auth tokens)\n",
-		len(censuses), participants)
-	fmt.Printf("    %d pending invitations, plus import jobs\n", len(invites))
-	return nil
+	fmt.Fprintln(&b, "\nAlso deleted: invitations sent to or issued by the user,")
+	fmt.Fprintln(&b, "pending verification codes, and the user account itself.")
+	fmt.Fprintf(&b, "Kept with the user's email removed: %d uploaded objects (images, election metadata).\n", plan.Objects)
+	fmt.Fprintln(&b, "Not touched: Stripe billing data and database backups.")
+	_, err := io.WriteString(w, b.String())
+	return err
 }
 
 // resolveUser looks the user up by ID when provided, otherwise by email.

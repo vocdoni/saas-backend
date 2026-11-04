@@ -1211,6 +1211,12 @@ definitions:
           $ref: '#/definitions/apicommon.RelayVoteRequest'
         type: array
     type: object
+  apicommon.SetProcessEndDateRequest:
+    properties:
+      endDate:
+        example: "2026-12-31T23:59:59Z"
+        type: string
+    type: object
   apicommon.SetProcessStatusRequest:
     properties:
       status:
@@ -1279,8 +1285,9 @@ definitions:
         description: Two-factor authentication sms limit
         type: integer
       anonymous:
-        description: Whether zk-SNARK anonymous voting is available. Blind-CSP anonymous
-          voting (census.anonymous) is available on every plan.
+        description: |-
+          The plan's stored zk-SNARK anonymous voting flag, which does not gate census.anonymous. It is forced
+          to false while the service has anonymous voting temporarily off, and passed through unchanged otherwise.
         type: boolean
       emailReminder:
         description: Whether email reminders are available
@@ -1995,6 +2002,7 @@ definitions:
     - relay_vote
     - relay_votes
     - publish_voting_process
+    - set_process_end_date
     type: string
     x-enum-varnames:
     - JobTypeOrgMembers
@@ -2005,6 +2013,7 @@ definitions:
     - JobTypeRelayVote
     - JobTypeRelayVotes
     - JobTypePublishVotingProcess
+    - JobTypeSetProcessEndDate
   db.MultiLangString:
     additionalProperties:
       type: string
@@ -4758,6 +4767,9 @@ paths:
         `typeSetup`** — responses always carry a protocol, so echoing one back unchanged
         re-applies it.
 
+        While the service has anonymous voting temporarily off, a census with `anonymous: true` is
+        a 400 (40037) "anonymous voting is temporarily unavailable".
+
         `typeSetup.minChoices` has no on-chain counterpart and is a validation hint for
         clients. It is stored as sent for multichoice, and is always `1` for singlechoice,
         whose ballot is the single field a voter fills.
@@ -4781,7 +4793,8 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.CreateVotingProcessResponse'
         "400":
-          description: Bad Request
+          description: Invalid input data, or anonymous voting temporarily unavailable
+            (40037)
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -4885,7 +4898,8 @@ paths:
 
         Census members are handled as on create: those missing required auth data are left out
         and listed in `missingData`, and those the census cannot tell apart are a 400 (40037)
-        whose `data.duplicates` lists them.
+        whose `data.duplicates` lists them. While the service has anonymous voting temporarily off,
+        a census with `anonymous: true` is a 400 (40037) "anonymous voting is temporarily unavailable".
       parameters:
       - description: Process ID
         in: path
@@ -4906,7 +4920,8 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.CreateVotingProcessResponse'
         "400":
-          description: Bad Request
+          description: Invalid input data, or anonymous voting temporarily unavailable
+            (40037)
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -4951,6 +4966,8 @@ paths:
         data.retryAfter gives the seconds left.
         A member's challenge sends (new tokens + resends) are capped per UTC day, also answering
         40017 with data.retryAfter.
+        Step 0 for an anonymous census is refused (400, 40037, "anonymous voting is temporarily
+        unavailable") while the service has anonymous voting off.
       parameters:
       - description: Process ID
         in: path
@@ -4976,8 +4993,8 @@ paths:
           schema:
             $ref: '#/definitions/handlers.AuthResponse'
         "400":
-          description: Invalid input data, or failed-attempt or daily send limit reached
-            (40017)
+          description: Invalid input data, attempt or send limit (40017), or anonymous
+            voting unavailable
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -5010,7 +5027,8 @@ paths:
         process. The request must include the auth token and a valid contact method for the
         census type (email/phone). The same token is returned if the challenge is queued.
         A token can be resent at most 3 times, and a contact that does not match the member spends
-        one of them too.
+        one of them too. For an anonymous census it is refused (400, 40037, "anonymous voting is
+        temporarily unavailable") while the service has anonymous voting off.
       parameters:
       - description: Process ID
         in: path
@@ -5067,7 +5085,8 @@ paths:
         batch is authorized as a unit (each election must belong to the process and the member
         be eligible, else 401); per-election issuance failures are reported inline with a code.
         Public endpoint: the verified auth token authenticates the voter. Rejected (400) for a
-        non-anonymous process — use the sign endpoints there.
+        non-anonymous process — use the sign endpoints there. Refused (400, "anonymous voting is
+        temporarily unavailable") while the service has anonymous voting off.
       parameters:
       - description: Process ID
         in: path
@@ -5088,7 +5107,8 @@ paths:
           schema:
             $ref: '#/definitions/handlers.BlindPointResponse'
         "400":
-          description: Invalid input data or non-anonymous process
+          description: Invalid input data, non-anonymous process, or anonymous voting
+            temporarily unavailable
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -5119,7 +5139,8 @@ paths:
         consuming that election's slot; the response is always 200 with one entry per item, in
         order, carrying the raw blind-signature scalar or a stable code (blind_request_missing if
         no round-1 point was issued; the other signing codes as usual). Public endpoint. Rejected
-        (400) for a non-anonymous process — use the sign endpoints there.
+        (400) for a non-anonymous process — use the sign endpoints there. Refused (400, "anonymous
+        voting is temporarily unavailable") while the service has anonymous voting off.
       parameters:
       - description: Process ID
         in: path
@@ -5140,7 +5161,8 @@ paths:
           schema:
             $ref: '#/definitions/handlers.BlindSignResponse'
         "400":
-          description: Invalid input data or non-anonymous process
+          description: Invalid input data, non-anonymous process, or anonymous voting
+            temporarily unavailable
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -5335,6 +5357,79 @@ paths:
       summary: Check a voter's status for a voting process
       tags:
       - processes
+  /processes/{processId}/endDate:
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Moves the end date of every open (READY or PAUSED) published question's election to `endDate`
+        (RFC 3339, any offset; stored in UTC, truncated to seconds), as an async job; closed questions
+        keep their outcome and are skipped. Admin only (JWT, or an API key with `voting:write` whose
+        user is Admin); free. Extend only: the new end must be at least 5 minutes after the current end
+        (the current end itself is accepted as a no-op job) and at most the plan's maximum process duration after the process's start date. Request
+        the extension at least 5 minutes plus 1 minute per open question before the current end; the one
+        exception is a repair: an endDate that an open question's election already ends at on chain (left
+        by a partially failed job) is accepted even after the current end, and finishes the rest:
+        questions already ended on chain are skipped, and if one is still open but too close to its end
+        the job fails with nothing sent until it has ended.
+        Poll GET /jobs/{jobId}: `result.status` is the requested end date (applied
+        only if the job completed) and `result.questions[]` gives each open question's
+        `status`/`error`/`noOp`. The stored end date (used by voter
+        authentication) changes only when every question succeeded; on a partial failure the job
+        fails with "n of m questions failed; send the same endDate again to finish the rest" and calling
+        again with the same endDate finishes the rest
+        (done questions are no-ops). A question found closed on chain is skipped (`noOp`, with the reason
+        in `error`) and its stored status corrected. If the stored end date changed after the request was
+        validated, the job fails before sending anything and names the current end date. The job can also
+        fail before sending anything ("...; nothing was changed"), including "no open question left to
+        extend" when every question is closed on chain.
+        A 500 is an internal error or a failed blockchain check of a repair; no job was created, so retrying is safe.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: New end date
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.SetProcessEndDateRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/apicommon.EnqueuedResponse'
+        "400":
+          description: Bad endDate, over the plan duration, unpublished, ended or
+            near its end, no open question
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: User is not admin of the organization
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal error or blockchain check failed; no job was created,
+            retry
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Organization transaction in progress (50303), or tx queue full
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Extend the end date of a published process
+      tags:
+      - processes
   /processes/{processId}/participants:
     get:
       description: |-
@@ -5441,6 +5536,9 @@ paths:
         GET /jobs/{jobId}. Idempotent once published.
         409 (40172) means the stored questions do not match the process and the draft has to be
         saved again before it can be published.
+        400 (40004) "process is not ready to publish: ..." lists every problem found, including
+        "anonymous voting is temporarily unavailable" for an anonymous process while the service has
+        anonymous voting off. A process some of whose questions are already on chain still resumes.
       parameters:
       - description: Process ID
         in: path
@@ -5459,7 +5557,7 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.EnqueuedResponse'
         "400":
-          description: Not ready to publish
+          description: Not ready to publish (lists every problem)
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -5964,7 +6062,9 @@ paths:
         otherwise 200. A field that is empty or only whitespace counts as missing data, and
         members with missing data are never reported as duplicates. The `password` auth field
         never identifies a member on its own: a census with no other auth field and no 2FA field
-        is a 400. Requires Manager/Admin role of the organization.
+        is a 400. Requires Manager/Admin role of the organization. While the service has anonymous
+        voting temporarily off, an `anonymous: true` spec is a 400 (40037) "anonymous voting is
+        temporarily unavailable".
 
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
@@ -5982,7 +6082,8 @@ paths:
           schema:
             type: string
         "400":
-          description: Invalid census (duplicates or missing data)
+          description: Invalid census (duplicates, missing data), or anonymous voting
+            unavailable
           schema:
             $ref: '#/definitions/errors.Error'
         "401":

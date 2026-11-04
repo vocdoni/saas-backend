@@ -72,7 +72,22 @@ type Options struct {
 	Database string
 }
 
+// ConnectOptions tunes how NewWithOptions opens the storage.
+type ConnectOptions struct {
+	// SkipMigrations opens the storage without running migrations and without
+	// honouring VOCDONI_MONGO_RESET_DB. The caller checks the migration version
+	// itself before writing.
+	SkipMigrations bool
+}
+
+// New connects to the database and runs the pending migrations (see NewWithOptions).
 func New(url, database string) (*MongoStorage, error) {
+	return NewWithOptions(url, database, ConnectOptions{})
+}
+
+// NewWithOptions connects to the database like New. With SkipMigrations set it performs no write
+// on connect: it neither resets the database nor runs migrations.
+func NewWithOptions(url, database string, connOpts ConnectOptions) (*MongoStorage, error) {
 	var err error
 	ms := &MongoStorage{instanceID: internal.RandomHex(16)}
 	if url == "" {
@@ -134,14 +149,17 @@ func New(url, database string) (*MongoStorage, error) {
 	// init the database client
 	ms.DBClient = client
 	// if reset flag is enabled, drop all collections before init
-	if reset := os.Getenv("VOCDONI_MONGO_RESET_DB"); reset != "" {
+	if reset := os.Getenv("VOCDONI_MONGO_RESET_DB"); reset != "" && !connOpts.SkipMigrations {
 		if err := ms.dropAllCollections(); err != nil {
 			return nil, err
 		}
 	}
-	// init the collections and migrations
-	if err := ms.init(); err != nil {
-		return nil, err
+	// init the collections and, unless skipped, the migrations
+	ms.init()
+	if !connOpts.SkipMigrations {
+		if err := ms.RunMigrationsUp(); err != nil {
+			return nil, err
+		}
 	}
 
 	return ms, nil
