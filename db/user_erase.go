@@ -163,33 +163,36 @@ func (ms *MongoStorage) countOrgContents(planOrg *ErasurePlanOrg) error {
 	if planOrg.LegacyProcesses, err = ms.CountProcesses(address, AllProcesses); err != nil {
 		return fmt.Errorf("could not count processes of org %s: %w", address, err)
 	}
-	bundles, err := ms.ProcessBundlesByOrg(address)
-	if err != nil {
-		return fmt.Errorf("could not list bundles of org %s: %w", address, err)
+	// the filters of ProcessBundlesByOrg, PendingInvitations and APIKeysByOrg
+	if planOrg.Bundles, err = countDocuments(ms.processBundles, bson.M{"orgAddress": address}); err != nil {
+		return fmt.Errorf("could not count bundles of org %s: %w", address, err)
 	}
-	planOrg.Bundles = int64(len(bundles))
-	invites, err := ms.PendingInvitations(address)
-	if err != nil {
-		return fmt.Errorf("could not list invitations of org %s: %w", address, err)
+	if planOrg.PendingInvitations, err = countDocuments(ms.organizationInvites,
+		bson.M{"organizationAddress": address}); err != nil {
+		return fmt.Errorf("could not count invitations of org %s: %w", address, err)
 	}
-	planOrg.PendingInvitations = int64(len(invites))
 	if planOrg.VotingProcesses, err = ms.CountVotingProcesses(address, AllProcesses); err != nil {
 		return fmt.Errorf("could not count voting processes of org %s: %w", address, err)
 	}
 	if planOrg.Drafts, err = ms.CountVotingProcesses(address, DraftOnly); err != nil {
 		return fmt.Errorf("could not count drafts of org %s: %w", address, err)
 	}
-	keys, err := ms.APIKeysByOrg(address)
-	if err != nil {
-		return fmt.Errorf("could not list API keys of org %s: %w", address, err)
+	if planOrg.APIKeys, err = countDocuments(ms.apiKeys, bson.M{"orgAddress": address}); err != nil {
+		return fmt.Errorf("could not count API keys of org %s: %w", address, err)
 	}
-	planOrg.APIKeys = int64(len(keys))
 	if planOrg.ManagedBy == (common.Address{}) {
 		if planOrg.WalletBalanceCents, err = ms.storedWalletBalance(address); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// countDocuments counts the documents of coll matching filter.
+func countDocuments(coll *mongo.Collection, filter bson.M) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	return coll.CountDocuments(ctx, filter)
 }
 
 // storedWalletBalance reads the balance stored on the organization's wallet without draining it
