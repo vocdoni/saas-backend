@@ -185,12 +185,28 @@ func TestOrganizationDataSummary(t *testing.T) {
 	})
 	c.Assert(err, qt.IsNil)
 
+	// a draft being published, a draft with mined elections, a plain draft, a published legacy
+	// /process and an organization orgA manages
+	_, err = testDB.SetVotingProcess(&VotingProcess{OrgAddress: orgA, Publishing: time.Now()})
+	c.Assert(err, qt.IsNil)
+	_, err = testDB.SetVotingProcess(&VotingProcess{OrgAddress: orgA, HasMinedElections: true})
+	c.Assert(err, qt.IsNil)
+	_, err = testDB.SetVotingProcess(&VotingProcess{OrgAddress: orgA})
+	c.Assert(err, qt.IsNil)
+	_, err = testDB.processes.InsertOne(context.Background(), bson.M{"_id": "legacy", "orgAddress": orgA, "address": "aabb"})
+	c.Assert(err, qt.IsNil)
+	c.Assert(testDB.SetOrganization(&Organization{Address: common.Address{0x2C}, ManagedBy: orgA}), qt.IsNil)
+
 	s, err := testDB.OrganizationDataSummary(orgA)
 	c.Assert(err, qt.IsNil)
-	c.Assert(s.VotingProcesses, qt.Equals, int64(1))
+	c.Assert(s.VotingProcesses, qt.Equals, int64(4))
+	c.Assert(s.Drafts, qt.Equals, int64(3))
 	c.Assert(s.Questions, qt.Equals, int64(3))
 	c.Assert(s.Keys, qt.Equals, int64(1))
 	c.Assert(s.ActiveQuestions, qt.Equals, int64(1))
+	c.Assert(s.MidPublish, qt.Equals, int64(2))
+	c.Assert(s.LegacyPublished, qt.Equals, int64(1))
+	c.Assert(s.ManagedOrgs, qt.Equals, int64(1))
 }
 
 // TestEraseOrganizationDataRefuses: an organization with drafts, or managing others, is refused

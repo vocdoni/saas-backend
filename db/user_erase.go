@@ -306,10 +306,17 @@ type OrgDataSummary struct {
 	Members, Groups, Censuses, Participants                   int64
 	Processes, Bundles, Invitations                           int64
 	VotingProcesses, Drafts, Questions, ActiveQuestions, Keys int64
+	// MidPublish and LegacyPublished overlap the counts above (a forced teardown removes them too)
+	// and ManagedOrgs is never removed: all three flag a teardown that should not run (see
+	// OrganizationDataSummary).
+	MidPublish, LegacyPublished, ManagedOrgs int64
 }
 
 // OrganizationDataSummary counts the data EraseOrganizationData would remove.
 // ActiveQuestions are those whose stored status is READY or PAUSED (possibly live on-chain).
+// MidPublish are drafts a publish holds or has mined elections for, LegacyPublished the published
+// legacy /process elections (possibly live on-chain too), and ManagedOrgs the organizations it
+// manages, which make EraseOrganizationData refuse. Stored state only: the chain is not read.
 func (ms *MongoStorage) OrganizationDataSummary(address common.Address) (*OrgDataSummary, error) {
 	s := &OrgDataSummary{}
 	var err error
@@ -360,6 +367,22 @@ func (ms *MongoStorage) OrganizationDataSummary(address common.Address) (*OrgDat
 		"status":     bson.M{"$in": []string{QuestionStatusReady, QuestionStatusPaused}},
 	}); err != nil {
 		return nil, fmt.Errorf("could not count active questions of org %s: %w", address, err)
+	}
+	if s.MidPublish, err = ms.votingProcesses.CountDocuments(ctx, bson.M{
+		"orgAddress": address,
+		"published":  false,
+		"$or": bson.A{
+			bson.M{"publishing": bson.M{"$exists": true}},
+			bson.M{"hasMinedElections": true},
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("could not count processes being published of org %s: %w", address, err)
+	}
+	if s.LegacyPublished, err = ms.CountProcesses(address, PublishedOnly); err != nil {
+		return nil, fmt.Errorf("could not count published processes of org %s: %w", address, err)
+	}
+	if s.ManagedOrgs, _, err = ms.ListManagedOrganizations(address, 1, 1); err != nil {
+		return nil, fmt.Errorf("could not count organizations managed by org %s: %w", address, err)
 	}
 	keys, err := ms.APIKeysByOrg(address)
 	if err != nil {
