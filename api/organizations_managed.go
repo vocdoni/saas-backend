@@ -13,7 +13,6 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
-	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/pricing"
 	"go.vocdoni.io/dvote/log"
 )
@@ -555,87 +554,14 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// cascade: each step is best-effort. Failures are logged but do not abort the teardown, so a
-	// single stuck collection can't leave the org half-deleted. The org doc itself is deleted last.
-	bundles, err := a.db.ProcessBundlesByOrg(managedAddr)
-	if err != nil {
-		log.Warnw("could not list bundles for managed org teardown",
-			"org", managedAddr.Hex(), "error", err)
-	}
-	for _, b := range bundles {
-		// match the encoding used by csp/handlers parseBundleID (hex-decoded ObjectID bytes).
-		bundleID := new(internal.HexBytes)
-		if err := bundleID.ParseString(b.ID.Hex()); err != nil {
-			log.Warnw("could not encode bundle id for CSP cleanup",
-				"org", managedAddr.Hex(), "bundle", b.ID.Hex(), "error", err)
-			continue
+	// cascade: EraseOrganizationData is best-effort per step, drops the managed org's spend entry
+	// (its drafts were credited back above) and deletes the org doc last.
+	if err := a.db.EraseOrganizationData(managedAddr); err != nil {
+		log.Warnw("managed org teardown incomplete", "org", managedAddr.Hex(), "error", err)
+		if _, getErr := a.db.Organization(managedAddr); !errors.Is(getErr, db.ErrNotFound) {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
 		}
-		if _, err := a.db.DeleteCSPAuthByAnchor(*bundleID); err != nil {
-			log.Warnw("could not delete CSP auth tokens for bundle",
-				"org", managedAddr.Hex(), "bundle", b.ID.Hex(), "error", err)
-		}
-	}
-	for _, p := range published {
-		if p.Address.Equals(nil) {
-			continue
-		}
-		if _, err := a.db.DeleteCSPProcessByProcess(p.Address); err != nil {
-			log.Warnw("could not delete CSP process status",
-				"org", managedAddr.Hex(), "process", p.Address.String(), "error", err)
-		}
-	}
-	if _, err := a.db.DeleteProcessBundlesByOrg(managedAddr); err != nil {
-		log.Warnw("could not delete process bundles", "org", managedAddr.Hex(), "error", err)
-	}
-	censuses, err := a.db.CensusesByOrg(managedAddr)
-	if err != nil {
-		log.Warnw("could not list censuses for managed org teardown",
-			"org", managedAddr.Hex(), "error", err)
-	}
-	for _, c := range censuses {
-		if _, err := a.db.DeleteCensusParticipantsByCensus(c.ID.Hex()); err != nil {
-			log.Warnw("could not delete census participants",
-				"org", managedAddr.Hex(), "census", c.ID.Hex(), "error", err)
-		}
-		if err := a.db.DelCensus(c.ID.Hex()); err != nil {
-			log.Warnw("could not delete census", "org", managedAddr.Hex(), "census", c.ID.Hex(), "error", err)
-		}
-	}
-	if _, err := a.db.DeleteProcessesByOrg(managedAddr); err != nil {
-		log.Warnw("could not delete processes", "org", managedAddr.Hex(), "error", err)
-	}
-	// what is left are published voting processes; their payment rows stay as the audit trail
-	if _, err := a.db.DeleteVotingProcessesByOrg(managedAddr); err != nil {
-		log.Warnw("could not delete voting processes", "org", managedAddr.Hex(), "error", err)
-	}
-	if _, err := a.db.DeleteAllOrgMemberGroups(managedAddr); err != nil {
-		log.Warnw("could not delete org member groups", "org", managedAddr.Hex(), "error", err)
-	}
-	// the emptied questions are ignored on purpose: this is an org teardown, so there is no
-	// election left to resize.
-	if _, _, err := a.db.DeleteAllOrgMembers(managedAddr); err != nil {
-		log.Warnw("could not delete org members", "org", managedAddr.Hex(), "error", err)
-	}
-	if _, err := a.db.DeleteJobsByOrg(managedAddr); err != nil {
-		log.Warnw("could not delete jobs", "org", managedAddr.Hex(), "error", err)
-	}
-	if _, err := a.db.DeleteMeteredVotesByOrg(managedAddr); err != nil {
-		log.Warnw("could not delete metered votes", "org", managedAddr.Hex(), "error", err)
-	}
-	if _, err := a.db.DeleteInvitationsByOrg(managedAddr); err != nil {
-		log.Warnw("could not delete invitations", "org", managedAddr.Hex(), "error", err)
-	}
-	if err := a.db.RemoveOrganizationFromAllUsers(managedAddr); err != nil {
-		log.Warnw("could not unlink organization from users", "org", managedAddr.Hex(), "error", err)
-	}
-	if err := a.db.DelOrganization(managed); err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-	// its drafts were credited back above; what is left of its spend entry describes an
-	// organization that no longer exists
-	if err := a.db.DropManagedOrgSpend(integratorAddr, managedAddr); err != nil {
-		log.Warnw("could not drop the spend entry of a deleted managed org", "org", managedAddr.Hex(), "error", err)
 	}
 
 	log.Infow("deleted managed organization", "integrator", integratorAddr.Hex(), "org", managedAddr.Hex())
