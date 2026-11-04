@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // UserErasureReport summarizes what EraseUser removed or kept, so the operator
@@ -30,6 +33,210 @@ type UserErasureReport struct {
 	// and redacting either would change the derived key and break the
 	// organization's on-chain account.
 	CreatorEmailRetained []common.Address
+	// ObjectsScrubbed is how many uploaded objects had the user's email removed from their userId.
+	ObjectsScrubbed int64
+}
+
+// ErasurePlanOrg describes what erasing a user does to one of their organizations.
+type ErasurePlanOrg struct {
+	Address common.Address
+	// Name is the organization's display name, "" when unnamed.
+	Name string
+	Role UserRole
+	// DeletedEntirely is set when the user is the sole admin: the organization is torn down.
+	DeletedEntirely bool
+	// CreatorEmailRetained is set on a kept organization whose creator is the user's email.
+	CreatorEmailRetained bool
+	// ManagedBy is the integrator of a managed organization, zero otherwise.
+	ManagedBy common.Address
+	// The counts are set only when DeletedEntirely.
+	LegacyProcesses, Bundles, VotingProcesses, Drafts, Members, Groups,
+	Censuses, CensusParticipants, PendingInvitations, APIKeys int64
+	// WalletBalanceCents is the balance of the organization's own wallet, kept by the erasure: the
+	// stored balance before any drain or draft credit-back (the plan never writes). It is set only
+	// when DeletedEntirely, and 0 for managed organizations (their integrator pays).
+	WalletBalanceCents int64
+	// SurvivingChildren are the organizations whose parent or managedBy is this one and that the
+	// erasure does not tear down. Set only when DeletedEntirely.
+	SurvivingChildren []common.Address
+}
+
+// UserErasurePlan describes what EraseUser would do for a user, without changing anything.
+type UserErasurePlan struct {
+	UserID      uint64
+	Name, Email string
+	Orgs        []ErasurePlanOrg
+	// Blocked lists the torn-down orgs with SurvivingChildren. EraseUser refuses while it is
+	// non-empty. Drafts do not block: they are deleted first by api.DeleteUserOrgDrafts.
+	Blocked []common.Address
+	// Objects is how many uploaded objects (images, election metadata) carry the user's email as their
+	// userId. EraseUser keeps them and only removes the email.
+	Objects int64
+}
+
+// UserErasurePlan returns what erasing the user would remove and keep, organization by
+// organization, in the order of the user's organizations.
+func (ms *MongoStorage) UserErasurePlan(userID uint64) (*UserErasurePlan, error) {
+	user, err := ms.User(userID)
+	if err != nil {
+		return nil, fmt.Errorf("could not fetch user: %w", err)
+	}
+	plan := &UserErasurePlan{
+		UserID: user.ID,
+		Name:   strings.TrimSpace(user.FirstName + " " + user.LastName),
+		Email:  user.Email,
+	}
+	tornDown := map[common.Address]bool{}
+	for _, userOrg := range user.Organizations {
+		org, err := ms.Organization(userOrg.Address)
+		if err != nil {
+			return nil, fmt.Errorf("could not fetch org %s: %w", userOrg.Address, err)
+		}
+		soleAdmin, err := ms.IsSoleOrgAdmin(userOrg.Address, user.ID)
+		if err != nil {
+			return nil, fmt.Errorf("could not classify org %s: %w", userOrg.Address, err)
+		}
+		planOrg := ErasurePlanOrg{
+			Address:         userOrg.Address,
+			Name:            org.DisplayName(),
+			Role:            userOrg.Role,
+			DeletedEntirely: soleAdmin,
+			ManagedBy:       org.ManagedBy,
+		}
+		if soleAdmin {
+			tornDown[userOrg.Address] = true
+			if err := ms.countOrgContents(&planOrg); err != nil {
+				return nil, err
+			}
+		} else {
+			planOrg.CreatorEmailRetained = org.Creator == user.Email
+		}
+		plan.Orgs = append(plan.Orgs, planOrg)
+	}
+	// a child survives unless the same erasure tears it down
+	for i := range plan.Orgs {
+		planOrg := &plan.Orgs[i]
+		if !planOrg.DeletedEntirely {
+			continue
+		}
+		children, err := ms.childOrganizations(planOrg.Address)
+		if err != nil {
+			return nil, err
+		}
+		for _, child := range children {
+			if !tornDown[child] {
+				planOrg.SurvivingChildren = append(planOrg.SurvivingChildren, child)
+			}
+		}
+		if len(planOrg.SurvivingChildren) > 0 {
+			plan.Blocked = append(plan.Blocked, planOrg.Address)
+		}
+	}
+	if plan.Objects, err = ms.countObjectsByOwner(user.Email); err != nil {
+		return nil, err
+	}
+	return plan, nil
+}
+
+// countOrgContents fills the counts and the wallet balance of an organization to be torn down.
+func (ms *MongoStorage) countOrgContents(planOrg *ErasurePlanOrg) error {
+	address := planOrg.Address
+	var err error
+	if planOrg.Members, err = ms.CountOrgMembers(address); err != nil {
+		return fmt.Errorf("could not count members of org %s: %w", address, err)
+	}
+	if planOrg.Groups, _, err = ms.OrganizationMemberGroups(address, 1, 1); err != nil {
+		return fmt.Errorf("could not count groups of org %s: %w", address, err)
+	}
+	censuses, err := ms.CensusesByOrg(address)
+	if err != nil {
+		return fmt.Errorf("could not list censuses of org %s: %w", address, err)
+	}
+	planOrg.Censuses = int64(len(censuses))
+	for _, census := range censuses {
+		n, err := ms.CountCensusParticipants(census.ID.Hex())
+		if err != nil {
+			return fmt.Errorf("could not count participants of census %s: %w", census.ID.Hex(), err)
+		}
+		planOrg.CensusParticipants += n
+	}
+	if planOrg.LegacyProcesses, err = ms.CountProcesses(address, AllProcesses); err != nil {
+		return fmt.Errorf("could not count processes of org %s: %w", address, err)
+	}
+	// the filters of ProcessBundlesByOrg, PendingInvitations and APIKeysByOrg
+	if planOrg.Bundles, err = countDocuments(ms.processBundles, bson.M{"orgAddress": address}); err != nil {
+		return fmt.Errorf("could not count bundles of org %s: %w", address, err)
+	}
+	if planOrg.PendingInvitations, err = countDocuments(ms.organizationInvites,
+		bson.M{"organizationAddress": address}); err != nil {
+		return fmt.Errorf("could not count invitations of org %s: %w", address, err)
+	}
+	if planOrg.VotingProcesses, err = ms.CountVotingProcesses(address, AllProcesses); err != nil {
+		return fmt.Errorf("could not count voting processes of org %s: %w", address, err)
+	}
+	if planOrg.Drafts, err = ms.CountVotingProcesses(address, DraftOnly); err != nil {
+		return fmt.Errorf("could not count drafts of org %s: %w", address, err)
+	}
+	if planOrg.APIKeys, err = countDocuments(ms.apiKeys, bson.M{"orgAddress": address}); err != nil {
+		return fmt.Errorf("could not count API keys of org %s: %w", address, err)
+	}
+	if planOrg.ManagedBy == (common.Address{}) {
+		if planOrg.WalletBalanceCents, err = ms.storedWalletBalance(address); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// countDocuments counts the documents of coll matching filter.
+func countDocuments(coll *mongo.Collection, filter bson.M) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	return coll.CountDocuments(ctx, filter)
+}
+
+// storedWalletBalance reads the balance stored on the organization's wallet without draining it
+// (Wallet would post the unposted movements, a write), so building a plan never writes. It is the
+// balance before any drain or draft credit-back; unposted movements are already part of it, since
+// each one moves the balance in the same write that queues it. A missing wallet reads 0.
+func (ms *MongoStorage) storedWalletBalance(address common.Address) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	var wallet struct {
+		BalanceCents int64 `bson:"balanceCents"`
+	}
+	err := ms.wallets.FindOne(ctx, bson.M{"_id": address},
+		options.FindOne().SetProjection(bson.M{"balanceCents": 1})).Decode(&wallet)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("could not read the wallet of org %s: %w", address, err)
+	}
+	return wallet.BalanceCents, nil
+}
+
+// childOrganizations returns the organizations whose parent or managedBy is the given one.
+func (ms *MongoStorage) childOrganizations(address common.Address) ([]common.Address, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	cursor, err := ms.organizations.Find(ctx, bson.M{"$or": bson.A{
+		bson.M{"parent": address}, bson.M{"managedBy": address},
+	}}, options.Find().SetProjection(bson.M{"_id": 1}))
+	if err != nil {
+		return nil, fmt.Errorf("could not list the sub-orgs of org %s: %w", address, err)
+	}
+	var children []struct {
+		Address common.Address `bson:"_id"`
+	}
+	if err := cursor.All(ctx, &children); err != nil {
+		return nil, fmt.Errorf("could not decode the sub-orgs of org %s: %w", address, err)
+	}
+	addresses := make([]common.Address, 0, len(children))
+	for _, child := range children {
+		addresses = append(addresses, child.Address)
+	}
+	return addresses, nil
 }
 
 // IsSoleOrgAdmin reports whether the user holds the admin role in the
@@ -57,64 +264,61 @@ func (ms *MongoStorage) IsSoleOrgAdmin(address common.Address, userID uint64) (b
 // EraseUser removes a registered user and their personal data (right to
 // erasure). Organizations where the user is the sole admin are torn down
 // entirely (members, groups, censuses, participants, processes, voting processes
-// and their questions, bundles, CSP tokens, jobs, invitations); in organizations with other admins only the
-// user's membership is removed. Invitations addressed to or issued by the
-// user, their verification codes and the user document itself are deleted.
+// and their questions, bundles, CSP tokens and statuses, jobs, metered votes, API keys, invitations); in
+// organizations with other admins only the user's membership is removed. Invitations addressed to or
+// issued by the user, their verification codes and the user document itself are deleted. The objects
+// they uploaded are kept with the email removed from their userId: they hold images and the metadata
+// on-chain elections point at, even for torn-down orgs, and being content-addressed one may be shared.
 // Each step is best-effort: failures are accumulated and returned joined, so a
 // single stuck collection cannot leave the erasure silently half-done. It refuses,
-// erasing nothing, while an organization it would tear down still has drafts: a
-// draft may hold money only the API layer can refund (api.DeleteOrgDrafts).
+// erasing nothing, while its UserErasurePlan is Blocked (a sub-org or managed org would
+// be orphaned), and while an organization it would tear down still has drafts: a
+// draft may hold money only the API layer can refund (api.DeleteUserOrgDrafts).
 // Payment rows are kept: they are the audit trail of money that moved.
 func (ms *MongoStorage) EraseUser(userID uint64) (*UserErasureReport, error) {
 	user, err := ms.User(userID)
 	if err != nil {
 		return nil, fmt.Errorf("could not fetch user: %w", err)
 	}
-	// refuse before erasing anything rather than strand a draft's money
-	for _, userOrg := range user.Organizations {
-		soleAdmin, err := ms.IsSoleOrgAdmin(userOrg.Address, user.ID)
-		if err != nil {
-			return nil, fmt.Errorf("classifying org %s: %w", userOrg.Address, err)
-		}
-		if !soleAdmin {
-			continue
-		}
-		drafts, err := ms.CountVotingProcesses(userOrg.Address, DraftOnly)
-		if err != nil {
-			return nil, fmt.Errorf("counting drafts of org %s: %w", userOrg.Address, err)
-		}
-		if drafts > 0 {
+	// refuse before erasing anything rather than orphan a sub-org or strand a draft's money
+	plan, err := ms.UserErasurePlan(userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(plan.Blocked) > 0 {
+		return nil, fmt.Errorf("orgs %v have sub-orgs or managed orgs that would survive them: resolve those first",
+			plan.Blocked)
+	}
+	for _, planOrg := range plan.Orgs {
+		if planOrg.DeletedEntirely && planOrg.Drafts > 0 {
 			return nil, fmt.Errorf("org %s still has %d drafts: delete them (refunding the paid ones) first",
-				userOrg.Address, drafts)
+				planOrg.Address, planOrg.Drafts)
 		}
 	}
 	report := &UserErasureReport{UserID: user.ID, Email: user.Email}
 	var errs []error
-	for _, userOrg := range user.Organizations {
-		soleAdmin, err := ms.IsSoleOrgAdmin(userOrg.Address, user.ID)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("classifying org %s: %w", userOrg.Address, err))
-			continue
-		}
-		if soleAdmin {
-			if err := ms.eraseOrgData(userOrg.Address); err != nil {
-				errs = append(errs, fmt.Errorf("tearing down org %s: %w", userOrg.Address, err))
+	// erase what the plan checked, not a fresh classification: an admin change in between must not
+	// tear down a kept org unchecked, nor keep a child whose parent goes
+	for _, planOrg := range plan.Orgs {
+		if planOrg.DeletedEntirely {
+			if err := ms.eraseOrgData(planOrg.Address); err != nil {
+				errs = append(errs, fmt.Errorf("tearing down org %s: %w", planOrg.Address, err))
 			}
-			report.DeletedOrgs = append(report.DeletedOrgs, userOrg.Address)
+			report.DeletedOrgs = append(report.DeletedOrgs, planOrg.Address)
 			continue
 		}
-		removed, err := ms.RemoveOrganizationUser(userOrg.Address, user.ID)
+		removed, err := ms.RemoveOrganizationUser(planOrg.Address, user.ID)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("removing membership in org %s: %w", userOrg.Address, err))
+			errs = append(errs, fmt.Errorf("removing membership in org %s: %w", planOrg.Address, err))
 		}
 		if removed {
-			if err := ms.DecrementOrganizationUsersCounter(userOrg.Address); err != nil {
-				errs = append(errs, fmt.Errorf("decrementing users counter of org %s: %w", userOrg.Address, err))
+			if err := ms.DecrementOrganizationUsersCounter(planOrg.Address); err != nil {
+				errs = append(errs, fmt.Errorf("decrementing users counter of org %s: %w", planOrg.Address, err))
 			}
 		}
-		report.KeptOrgs = append(report.KeptOrgs, userOrg.Address)
-		if org, err := ms.Organization(userOrg.Address); err == nil && org.Creator == user.Email {
-			report.CreatorEmailRetained = append(report.CreatorEmailRetained, userOrg.Address)
+		report.KeptOrgs = append(report.KeptOrgs, planOrg.Address)
+		if planOrg.CreatorEmailRetained {
+			report.CreatorEmailRetained = append(report.CreatorEmailRetained, planOrg.Address)
 		}
 	}
 	// invitations addressed to the user or issued by them
@@ -125,6 +329,12 @@ func (ms *MongoStorage) EraseUser(userID uint64) (*UserErasureReport, error) {
 	if err := ms.deleteAllVerificationCodes(user.ID); err != nil {
 		errs = append(errs, fmt.Errorf("deleting verification codes: %w", err))
 	}
+	// uploaded objects (images, election metadata) stamped with the user's email: kept, email removed
+	scrubbed, err := ms.scrubObjectsOwner(user.Email)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("removing the email from objects: %w", err))
+	}
+	report.ObjectsScrubbed = scrubbed
 	// the user document itself (email, names, password hash, oauth data, roles)
 	if err := ms.DelUser(user); err != nil {
 		errs = append(errs, fmt.Errorf("deleting user document: %w", err))
@@ -141,6 +351,31 @@ func (ms *MongoStorage) deleteAllVerificationCodes(userID uint64) error {
 	defer cancel()
 	_, err := ms.verifications.DeleteMany(ctx, bson.M{"userId": userID})
 	return err
+}
+
+// countObjectsByOwner counts the stored objects whose userId is the given user email.
+func (ms *MongoStorage) countObjectsByOwner(email string) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	n, err := ms.objects.CountDocuments(ctx, bson.M{"userId": email})
+	if err != nil {
+		return 0, fmt.Errorf("could not count the objects of %s: %w", email, err)
+	}
+	return n, nil
+}
+
+// scrubObjectsOwner empties the userId of every stored object whose userId is the given user email,
+// keeping the objects, and returns how many it changed. The userId is never read for authorization.
+func (ms *MongoStorage) scrubObjectsOwner(email string) (int64, error) {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
+	defer cancel()
+	res, err := ms.objects.UpdateMany(ctx, bson.M{"userId": email}, bson.M{"$set": bson.M{"userId": ""}})
+	if err != nil {
+		return 0, err
+	}
+	return res.ModifiedCount, nil
 }
 
 // eraseOrgData tears down every collection owned by the organization and
@@ -204,6 +439,10 @@ func (ms *MongoStorage) eraseOrgData(address common.Address) error {
 	if _, err := ms.DeleteProcessesByOrg(address); err != nil {
 		errs = append(errs, fmt.Errorf("deleting processes: %w", err))
 	}
+	// the CSP rows of the voting processes go first: they are found through the processes' ids
+	if err := ms.DeleteVotingProcessCSPByOrg(address); err != nil {
+		errs = append(errs, fmt.Errorf("deleting CSP data of voting processes: %w", err))
+	}
 	// published voting processes and their questions; EraseUser refused while drafts remained
 	if _, err := ms.DeleteVotingProcessesByOrg(address); err != nil {
 		errs = append(errs, fmt.Errorf("deleting voting processes: %w", err))
@@ -221,6 +460,9 @@ func (ms *MongoStorage) eraseOrgData(address common.Address) error {
 	}
 	if _, err := ms.DeleteMeteredVotesByOrg(address); err != nil {
 		errs = append(errs, fmt.Errorf("deleting metered votes: %w", err))
+	}
+	if _, err := ms.DeleteAPIKeysByOrg(address); err != nil {
+		errs = append(errs, fmt.Errorf("deleting API keys: %w", err))
 	}
 	if _, err := ms.DeleteInvitationsByOrg(address); err != nil {
 		errs = append(errs, fmt.Errorf("deleting invitations: %w", err))

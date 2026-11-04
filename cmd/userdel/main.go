@@ -42,7 +42,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/api"
 	"github.com/vocdoni/saas-backend/db"
 )
@@ -90,7 +89,7 @@ func run(opts *options) error {
 		return fmt.Errorf("could not find user: %w", err)
 	}
 
-	if err := printPlan(ms, user); err != nil {
+	if err := showPlan(os.Stdout, ms, user.ID); err != nil {
 		return err
 	}
 	if opts.dryRun {
@@ -124,161 +123,98 @@ func run(opts *options) error {
 	return nil
 }
 
-// deleteDrafts deletes, crediting the paid ones back, the drafts of every organization the
-// erasure will tear down, and then prints the balance each of those organizations' own wallet
-// keeps. Every draft goes before any balance is printed: a managed organization's paid draft is
-// credited to its integrator's wallet, which may be printed first otherwise. EraseUser refuses
-// while any draft is left, so a failure here stops the erasure before anything else is erased.
-// Movements a crash left unposted are posted first, so the balances printed match the ledger.
-func deleteDrafts(w io.Writer, ms *db.MongoStorage, user *db.User) error {
-	if err := ms.DrainUnpostedWalletEntries(); err != nil {
-		return fmt.Errorf("could not post unposted wallet movements, nothing was erased: %w", err)
+// showPlan prints the user's erasure plan and fails when it is blocked, so that neither a dry run
+// nor a real one goes on (to the prompt, the wallet drain or any deletion) with a sub-org or managed
+// org that the erasure would orphan.
+func showPlan(w io.Writer, ms *db.MongoStorage, userID uint64) error {
+	plan, err := ms.UserErasurePlan(userID)
+	if err != nil {
+		return err
 	}
-	var tornDown []common.Address
+	if err := printPlan(w, plan); err != nil {
+		return fmt.Errorf("could not print the plan: %w", err)
+	}
+	if len(plan.Blocked) > 0 {
+		return fmt.Errorf("erasure blocked: orgs %v have sub-orgs or managed orgs that would survive them", plan.Blocked)
+	}
+	return nil
+}
+
+// deleteDrafts deletes, crediting the paid ones back, the drafts of every organization the
+// erasure will tear down (api.DeleteUserOrgDrafts), and then prints, in the user's organization
+// order, the balance each of those organizations' own wallet keeps when it is not zero. The wallet
+// and its history are kept by the erasure, so that money is returned by hand; it never blocks the
+// erasure. A managed organization has no wallet of its own (its integrator pays) and is not listed.
+// EraseUser refuses while any draft is left, so a failure here stops the erasure before anything
+// else is erased.
+func deleteDrafts(w io.Writer, ms *db.MongoStorage, user *db.User) error {
+	balances, err := api.DeleteUserOrgDrafts(ms, user.ID)
+	if err != nil {
+		return err
+	}
 	for _, userOrg := range user.Organizations {
-		soleAdmin, err := ms.IsSoleOrgAdmin(userOrg.Address, user.ID)
-		if err != nil {
-			return fmt.Errorf("could not classify org %s: %w", userOrg.Address, err)
-		}
-		if !soleAdmin {
+		balance := balances[userOrg.Address]
+		if balance == 0 {
 			continue
 		}
-		if err := api.DeleteOrgDrafts(ms, userOrg.Address); err != nil {
-			return fmt.Errorf("could not delete the drafts of org %s, nothing else was erased: %w", userOrg.Address, err)
-		}
-		tornDown = append(tornDown, userOrg.Address)
-	}
-	for _, address := range tornDown {
-		if err := printWalletBalance(w, ms, address); err != nil {
-			return err
+		if _, err := fmt.Fprintf(w, "  org %s\n    wallet balance: %d eur cents (kept; return it by hand)\n",
+			userOrg.Address, balance); err != nil {
+			return fmt.Errorf("could not print the wallet balance of org %s: %w", userOrg.Address, err)
 		}
 	}
 	return nil
 }
 
-// printWalletBalance prints the balance of an organization's own wallet when it is not zero. The
-// wallet and its history are kept by the erasure, so that money is returned by hand; it never
-// blocks the erasure. A managed organization has no wallet of its own (its integrator pays).
-func printWalletBalance(w io.Writer, ms *db.MongoStorage, address common.Address) error {
-	org, err := ms.Organization(address)
-	if err != nil {
-		return fmt.Errorf("could not fetch org %s: %w", address, err)
-	}
-	if org.ManagedBy != (common.Address{}) {
-		return nil
-	}
-	wallet, err := ms.Wallet(address)
-	if err != nil {
-		return fmt.Errorf("could not read the wallet of org %s: %w", address, err)
-	}
-	if wallet.BalanceCents == 0 {
-		return nil
-	}
-	if _, err := fmt.Fprintf(w, "  org %s\n    wallet balance: %d eur cents (kept; return it by hand)\n",
-		address, wallet.BalanceCents); err != nil {
-		return fmt.Errorf("could not print the wallet balance of org %s: %w", address, err)
-	}
-	return nil
-}
-
-// printPlan prints a human-readable report of everything the erasure will
+// printPlan writes a human-readable report of everything the erasure will
 // touch: the user's identity, each organization with its classification (full
 // teardown vs membership removal) and, for organizations about to be deleted,
-// how much data they hold.
-func printPlan(ms *db.MongoStorage, user *db.User) error {
-	name := strings.TrimSpace(user.FirstName + " " + user.LastName)
-	fmt.Printf("\nThis will erase user #%d: %s <%s>\n", user.ID, name, user.Email)
-	if len(user.Organizations) == 0 {
-		fmt.Println("\nThe user belongs to no organization.")
+// how much data they hold and which of their sub-orgs block the erasure.
+func printPlan(w io.Writer, plan *db.UserErasurePlan) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nThis will erase user #%d: %s <%s>\n", plan.UserID, plan.Name, plan.Email)
+	if len(plan.Orgs) == 0 {
+		fmt.Fprintln(&b, "\nThe user belongs to no organization.")
 	}
-	for _, userOrg := range user.Organizations {
-		org, err := ms.Organization(userOrg.Address)
-		if err != nil {
-			return fmt.Errorf("could not fetch org %s: %w", userOrg.Address, err)
-		}
-		orgName := org.DisplayName()
+	for _, org := range plan.Orgs {
+		orgName := org.Name
 		if orgName == "" {
 			orgName = "unnamed"
 		}
-		fmt.Printf("\nOrganization %s (%q, role: %s)\n", userOrg.Address, orgName, userOrg.Role)
-		soleAdmin, err := ms.IsSoleOrgAdmin(userOrg.Address, user.ID)
-		if err != nil {
-			return fmt.Errorf("could not classify org %s: %w", userOrg.Address, err)
-		}
-		if !soleAdmin {
-			fmt.Println("  KEPT: other admins exist, only this user's membership is removed.")
-			if org.Creator == user.Email {
-				fmt.Println("  NOTE: the creator email stays (the org signing key is derived from it);")
-				fmt.Println("        follow up manually if it must be redacted.")
+		fmt.Fprintf(&b, "\nOrganization %s (%q, role: %s)\n", org.Address, orgName, org.Role)
+		if !org.DeletedEntirely {
+			fmt.Fprintln(&b, "  KEPT: other admins exist, only this user's membership is removed.")
+			if org.CreatorEmailRetained {
+				fmt.Fprintln(&b, "  NOTE: the creator email stays (the org signing key is derived from it);")
+				fmt.Fprintln(&b, "        follow up manually if it must be redacted.")
 			}
 			continue
 		}
-		fmt.Println("  DELETED ENTIRELY: this user is its only admin. This removes:")
-		if err := printOrgContents(ms, userOrg.Address); err != nil {
-			return err
+		fmt.Fprintln(&b, "  DELETED ENTIRELY: this user is its only admin. This removes:")
+		fmt.Fprintf(&b, "    the organization and its voting history metadata (%d processes, %d bundles)\n",
+			org.LegacyProcesses, org.Bundles)
+		fmt.Fprintf(&b, "    %d voting processes, %d of them drafts (paid drafts are credited back first)\n",
+			org.VotingProcesses, org.Drafts)
+		fmt.Fprintf(&b, "    %d members in %d groups\n", org.Members, org.Groups)
+		fmt.Fprintf(&b, "    %d censuses with %d participants (incl. their CSP auth tokens)\n",
+			org.Censuses, org.CensusParticipants)
+		fmt.Fprintf(&b, "    %d pending invitations, plus import jobs\n", org.PendingInvitations)
+		fmt.Fprintf(&b, "    %d API keys\n", org.APIKeys)
+		if len(org.SurvivingChildren) > 0 {
+			fmt.Fprintln(&b, "  BLOCKED: these sub-orgs or managed orgs would survive it; delete them or move them first:")
+			for _, child := range org.SurvivingChildren {
+				fmt.Fprintf(&b, "    %s\n", child)
+			}
 		}
 	}
-	fmt.Println("\nAlso deleted: invitations sent to or issued by the user,")
-	fmt.Println("pending verification codes, and the user account itself.")
-	fmt.Println("Kept: payment records of published and partially published processes (a draft's goes")
-	fmt.Println("with it; the wallet ledger records its credit-back), and")
-	fmt.Println("wallets and their history (a torn-down organization's balance is returned by hand).")
-	fmt.Println("Not touched: Stripe billing data and database backups.")
-	return nil
-}
-
-// printOrgContents prints how much data an organization about to be torn down
-// currently holds.
-func printOrgContents(ms *db.MongoStorage, address common.Address) error {
-	members, err := ms.CountOrgMembers(address)
-	if err != nil {
-		return fmt.Errorf("could not count members of org %s: %w", address, err)
-	}
-	groups, _, err := ms.OrganizationMemberGroups(address, 1, 1)
-	if err != nil {
-		return fmt.Errorf("could not count groups of org %s: %w", address, err)
-	}
-	censuses, err := ms.CensusesByOrg(address)
-	if err != nil {
-		return fmt.Errorf("could not list censuses of org %s: %w", address, err)
-	}
-	var participants int64
-	for _, census := range censuses {
-		n, err := ms.CountCensusParticipants(census.ID.Hex())
-		if err != nil {
-			return fmt.Errorf("could not count participants of census %s: %w", census.ID.Hex(), err)
-		}
-		participants += n
-	}
-	processes, err := ms.CountProcesses(address, db.AllProcesses)
-	if err != nil {
-		return fmt.Errorf("could not count processes of org %s: %w", address, err)
-	}
-	bundles, err := ms.ProcessBundlesByOrg(address)
-	if err != nil {
-		return fmt.Errorf("could not list bundles of org %s: %w", address, err)
-	}
-	invites, err := ms.PendingInvitations(address)
-	if err != nil {
-		return fmt.Errorf("could not list invitations of org %s: %w", address, err)
-	}
-	votingProcesses, err := ms.CountVotingProcesses(address, db.AllProcesses)
-	if err != nil {
-		return fmt.Errorf("could not count voting processes of org %s: %w", address, err)
-	}
-	drafts, err := ms.CountVotingProcesses(address, db.DraftOnly)
-	if err != nil {
-		return fmt.Errorf("could not count drafts of org %s: %w", address, err)
-	}
-	fmt.Printf("    the organization and its voting history metadata (%d processes, %d bundles)\n",
-		processes, len(bundles))
-	fmt.Printf("    %d voting processes, %d of them drafts (paid drafts are credited back first)\n",
-		votingProcesses, drafts)
-	fmt.Printf("    %d members in %d groups\n", members, groups)
-	fmt.Printf("    %d censuses with %d participants (incl. their CSP auth tokens)\n",
-		len(censuses), participants)
-	fmt.Printf("    %d pending invitations, plus import jobs\n", len(invites))
-	return nil
+	fmt.Fprintln(&b, "\nAlso deleted: invitations sent to or issued by the user,")
+	fmt.Fprintln(&b, "pending verification codes, and the user account itself.")
+	fmt.Fprintf(&b, "Kept with the user's email removed: %d uploaded objects (images, election metadata).\n", plan.Objects)
+	fmt.Fprintln(&b, "Kept: payment records of published and partially published processes (a draft's goes")
+	fmt.Fprintln(&b, "with it; the wallet ledger records its credit-back), and")
+	fmt.Fprintln(&b, "wallets and their history (a torn-down organization's balance is returned by hand).")
+	fmt.Fprintln(&b, "Not touched: Stripe billing data and database backups.")
+	_, err := io.WriteString(w, b.String())
+	return err
 }
 
 // resolveUser looks the user up by ID when provided, otherwise by email.

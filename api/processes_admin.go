@@ -342,6 +342,49 @@ func DeleteOrgDrafts(database *db.MongoStorage, org common.Address) error {
 	return a.deleteOrgDrafts(org)
 }
 
+// DeleteUserOrgDrafts posts the unposted wallet movements, then deletes the drafts of every org the
+// erasure of userID will tear down (sole admin), crediting the paid ones back (DeleteOrgDrafts). It
+// returns the balance each torn-down org's own wallet keeps (managed orgs are omitted: their
+// integrator pays). It refuses while the user's db.UserErasurePlan is Blocked, since EraseUser would
+// then tear nothing down, and stops at the first failure; nothing but drafts is deleted. Every draft
+// goes before any balance is read: a managed org's paid draft is credited to its integrator's wallet.
+func DeleteUserOrgDrafts(database *db.MongoStorage, userID uint64) (map[common.Address]int64, error) {
+	if database == nil {
+		return nil, fmt.Errorf("a database is required")
+	}
+	if err := database.DrainUnpostedWalletEntries(); err != nil {
+		return nil, fmt.Errorf("could not post unposted wallet movements, nothing was erased: %w", err)
+	}
+	plan, err := database.UserErasurePlan(userID)
+	if err != nil {
+		return nil, fmt.Errorf("could not plan the erasure, nothing was erased: %w", err)
+	}
+	if len(plan.Blocked) > 0 {
+		return nil, fmt.Errorf("orgs %v have sub-orgs or managed orgs that would survive them, nothing was erased",
+			plan.Blocked)
+	}
+	for _, planOrg := range plan.Orgs {
+		if !planOrg.DeletedEntirely {
+			continue
+		}
+		if err := DeleteOrgDrafts(database, planOrg.Address); err != nil {
+			return nil, fmt.Errorf("could not delete the drafts of org %s, nothing else was erased: %w", planOrg.Address, err)
+		}
+	}
+	balances := map[common.Address]int64{}
+	for _, planOrg := range plan.Orgs {
+		if !planOrg.DeletedEntirely || planOrg.ManagedBy != (common.Address{}) {
+			continue
+		}
+		wallet, err := database.Wallet(planOrg.Address)
+		if err != nil {
+			return nil, fmt.Errorf("could not read the wallet of org %s: %w", planOrg.Address, err)
+		}
+		balances[planOrg.Address] = int64(wallet.BalanceCents)
+	}
+	return balances, nil
+}
+
 // votingProcessParticipantsHandler godoc
 //
 //	@Summary		List voted participants of a voting process

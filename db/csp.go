@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -570,4 +571,42 @@ func (ms *MongoStorage) DeleteCSPProcessByProcess(processID internal.HexBytes) (
 		return 0, fmt.Errorf("failed to delete CSP process status by process: %w", err)
 	}
 	return res.DeletedCount, nil
+}
+
+// DeleteVotingProcessCSPByOrg removes the CSP auth tokens anchored to any voting process of the
+// organization (the anchor is the process ObjectID bytes, see csp/handlers parseProcessID) and the
+// CSP status rows of their questions' elections (keyed by the question UpstreamID). It is a step
+// of an organization teardown and must run before DeleteVotingProcessesByOrg, which drops the ids
+// it reads.
+func (ms *MongoStorage) DeleteVotingProcessCSPByOrg(orgAddress common.Address) error {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return ErrInvalidData
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
+	defer cancel()
+	var processIDs []bson.ObjectID
+	if err := ms.votingProcesses.Distinct(ctx, "_id", bson.M{"orgAddress": orgAddress}).Decode(&processIDs); err != nil {
+		return fmt.Errorf("failed to list voting processes: %w", err)
+	}
+	anchors := make([]internal.HexBytes, 0, len(processIDs))
+	for _, id := range processIDs {
+		anchors = append(anchors, internal.HexBytes(id[:]))
+	}
+	if len(anchors) > 0 {
+		if _, err := ms.cspTokens.DeleteMany(ctx, bson.M{"bundleid": bson.M{"$in": anchors}}); err != nil {
+			return fmt.Errorf("failed to delete CSP auth tokens of voting processes: %w", err)
+		}
+	}
+	var upstreamIDs []internal.HexBytes
+	if err := ms.processesQuestions.Distinct(ctx, "upstreamId", bson.M{"orgAddress": orgAddress}).Decode(&upstreamIDs); err != nil {
+		return fmt.Errorf("failed to list question elections: %w", err)
+	}
+	if len(upstreamIDs) > 0 {
+		if _, err := ms.cspTokensStatus.DeleteMany(ctx, bson.M{"processid": bson.M{"$in": upstreamIDs}}); err != nil {
+			return fmt.Errorf("failed to delete CSP status of question elections: %w", err)
+		}
+	}
+	return nil
 }
