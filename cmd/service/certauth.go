@@ -29,7 +29,8 @@ func defineCertAuthFlags() {
 	flag.String("certAuthCFOriginPullCA", "", "PEM file of the Cloudflare Authenticated Origin Pulls CA (cloudflare mode)")
 	flag.String("certAuthCFAllowedIPs", "", "comma list of the CIDRs the auth listener accepts in cloudflare mode")
 	flag.Bool("certAuthCloudflareAcknowledged", false,
-		"cloudflare mode opt-in: set only after the blockers in the spec section 3b are verified and the AOP CA is a per-zone or per-hostname certificate, never Cloudflare's global one")
+		"cloudflare mode opt-in: set only after the blockers in the spec section 3b are verified and"+
+			" the AOP CA is a per-zone or per-hostname certificate, never Cloudflare's global one")
 	flag.Bool("certAuthTestProvider", false, "enable the synthetic certificate provider (dev and e2e only)")
 	flag.String("certAuthTestProviderCA", "", "PEM file of the synthetic certificate provider CA")
 	flag.String("certAuthTestProviderAllowedAPIs", "",

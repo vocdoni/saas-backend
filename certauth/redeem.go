@@ -47,11 +47,11 @@ func (s *Service) Redeem(w http.ResponseWriter, r *http.Request) {
 func (s *Service) redeemCode(r *http.Request) (*apicommon.CertAuthRedeemResponse, *apierrors.Error) {
 	pid, err := bson.ObjectIDFromHex(chi.URLParam(r, "processId"))
 	if err != nil {
-		return nil, s.fail(apicommon.CertAuthReasonAttemptExpired)
+		return nil, apierrors.Ptr(apierrors.ErrMalformedURLParam.Withf("invalid process ID"))
 	}
 	var req apicommon.CertAuthRedeemRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !tokenRe.MatchString(req.Code) {
-		return nil, s.fail(apicommon.CertAuthReasonAttemptExpired)
+		return nil, apierrors.Ptr(apierrors.ErrMalformedBody)
 	}
 	now := s.now()
 	tx, err := s.store.ConsumeCertAuthCode(req.Code, now.Add(-codeTTL))
@@ -117,7 +117,7 @@ func (s *Service) loadProcess(rd *redemption) *apierrors.Error {
 		return apierrors.Ptr(s.internalFailure("reading the census", err, "transaction", rd.tx.ID.Hex()))
 	}
 	if census.AuthMethod != db.CensusAuthMethodCertificate {
-		return apierrors.Ptr(apierrors.ErrInvalidData.Withf("the process census does not sign in with a certificate"))
+		return s.fail(apicommon.CertAuthReasonAttemptExpired)
 	}
 	rd.vp, rd.census = vp, census
 	return nil

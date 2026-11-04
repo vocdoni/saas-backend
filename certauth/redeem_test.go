@@ -120,18 +120,21 @@ func TestCertAuthRedeemFlow(t *testing.T) {
 		c.Assert(status, qt.Equals, http.StatusConflict)
 		c.Assert(failure.Data.Reason, qt.Equals, "code_used")
 
-		// an expired code, an unknown one and a malformed one are attempt_expired
+		// an expired code and an unknown one are attempt_expired; a grammar-failing one is 400
 		code, verifier = e.signIn(c, "vote", cert)
 		for _, tx := range e.store.txs {
 			if tx.Code == code {
 				tx.AuthenticatedAt = time.Now().Add(-6 * time.Minute)
 			}
 		}
-		for _, candidate := range []string{code, randomToken(), "short"} {
+		for _, candidate := range []string{code, randomToken()} {
 			status, _, failure = e.redeem(c, candidate, verifier)
 			c.Assert(status, qt.Equals, http.StatusGone)
 			c.Assert(failure.Data.Reason, qt.Equals, "attempt_expired")
 		}
+		status, _, failure = e.redeem(c, "short", verifier)
+		c.Assert(status, qt.Equals, http.StatusBadRequest)
+		c.Assert(failure.Code, qt.Equals, 40004)
 
 		// a code is bound to its process
 		code, verifier = e.signIn(c, "vote", cert)
@@ -181,8 +184,9 @@ func TestCertAuthRedeemFlow(t *testing.T) {
 		e.store.census.AuthMethod = ""
 		e.store.census.TwoFaFields = db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail}
 		status, _, failure := e.redeem(c, code, verifier)
-		c.Assert(status, qt.Equals, http.StatusBadRequest)
-		c.Assert(failure.Code, qt.Equals, 40037)
+		c.Assert(status, qt.Equals, http.StatusGone)
+		c.Assert(failure.Code, qt.Equals, 40950)
+		c.Assert(failure.Data.Reason, qt.Equals, apicommon.CertAuthReasonAttemptExpired)
 		c.Assert(failure.Data.Holder, qt.IsNil)
 		c.Assert(e.tokens.count(), qt.Equals, 0)
 		// the code is burnt all the same
@@ -190,6 +194,36 @@ func TestCertAuthRedeemFlow(t *testing.T) {
 		status, _, failure = e.redeem(c, code, verifier)
 		c.Assert(status, qt.Equals, http.StatusConflict)
 		c.Assert(failure.Data.Reason, qt.Equals, "code_used")
+	})
+
+	c.Run("malformed input", func(c *qt.C) {
+		// a non-hex processId and an undecodable body both return a plain 400, not the cert envelope
+		e := newTestEnv(c, nil)
+		e.store.addMember("12345678Z", 1)
+		code, verifier := e.signIn(c, "vote", e.issue(c, maria))
+		body, err := json.Marshal(apicommon.CertAuthRedeemRequest{Code: code, Verifier: verifier})
+		c.Assert(err, qt.IsNil)
+
+		r := chi.NewRouter()
+		r.Post("/processes/{processId}/auth/cert/redeem", e.s.Redeem)
+
+		// non-hex processId: plain 40010 (ErrMalformedURLParam)
+		req := httptest.NewRequest(http.MethodPost, "/processes/notahex/auth/cert/redeem", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		c.Assert(rec.Code, qt.Equals, http.StatusBadRequest)
+		var out errorBody
+		c.Assert(json.Unmarshal(rec.Body.Bytes(), &out), qt.IsNil)
+		c.Assert(out.Code, qt.Equals, 40010)
+
+		// undecodable JSON body: plain 40004 (ErrMalformedBody)
+		req = httptest.NewRequest(http.MethodPost, "/processes/"+e.store.vp.ID.Hex()+"/auth/cert/redeem",
+			bytes.NewReader([]byte("not json")))
+		rec = httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		c.Assert(rec.Code, qt.Equals, http.StatusBadRequest)
+		c.Assert(json.Unmarshal(rec.Body.Bytes(), &out), qt.IsNil)
+		c.Assert(out.Code, qt.Equals, 40004)
 	})
 
 	c.Run("budget", func(c *qt.C) {
