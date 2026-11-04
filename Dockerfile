@@ -6,7 +6,6 @@ ENV CGO_ENABLED=1
 RUN go env -w GOCACHE=/go-cache
 COPY . .
 RUN --mount=type=cache,target=/go-cache go mod download
-RUN --mount=type=cache,target=/go-cache go run scripts/circuits/main.go
 RUN --mount=type=cache,target=/go-cache go build -o=backend -ldflags="-s -w" cmd/service/main.go
 
 FROM debian:bookworm-slim AS base
@@ -33,15 +32,10 @@ ARG APP_GID=10001
 RUN groupadd --system --gid ${APP_GID} vocdoni && \
     useradd --system --uid ${APP_UID} --gid ${APP_GID} --home-dir /home/vocdoni \
         --create-home --shell /usr/sbin/nologin vocdoni
-# The zk circuit cache path derives from $HOME (~/.cache/vocdoni/zkCircuits); pin it so
-# the prefetched artifacts are found even if the runtime overrides the user.
-ENV HOME=/home/vocdoni
 
 WORKDIR /app
-# The binary stays root-owned (read-only for the service user). Only the circuit cache is
-# owned by the service user, since it is downloaded there at runtime if a version is missing.
+# The binary stays root-owned (read-only for the service user).
 COPY --from=builder /src/backend ./
-COPY --from=builder --chown=${APP_UID}:${APP_GID} /root/.cache/vocdoni/zkCircuits /home/vocdoni/.cache/vocdoni/zkCircuits
 
 USER ${APP_UID}:${APP_GID}
 

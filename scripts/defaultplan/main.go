@@ -73,7 +73,6 @@ func main() {
 			Weighted:   true,
 		},
 		Features: db.Features{
-			Anonymous:       true,
 			Overwrite:       true,
 			LiveResults:     true,
 			Personalization: true,

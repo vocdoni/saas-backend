@@ -1,4 +1,4 @@
-# Base stage — install deps, modules, circuits (shared by all targets)
+# Base stage — install deps and modules (shared by all targets)
 FROM golang:1.26 AS base
 
 WORKDIR /src
@@ -16,7 +16,6 @@ COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go-cache go mod download
 
 COPY . .
-RUN go run scripts/circuits/main.go
 
 ENV WASMER_PATH=/go/pkg/mod/github.com/wasmerio/wasmer-go@v1.0.4/wasmer/packaged/lib/linux-amd64
 ENV LD_LIBRARY_PATH=${WASMER_PATH}

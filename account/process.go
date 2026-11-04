@@ -86,8 +86,7 @@ type NewProcessParams struct {
 	CensusURI  string // census endpoint (SaaS CSP base URL)
 	// Anonymous selects blind CSP: the election is published with census origin OFF_CHAIN_CA_V2
 	// (the CSP blind-signs ballots so it cannot link a signature to the voter). CensusRoot must then
-	// be the CSP blind public key. This is unrelated to EnvelopeType.Anonymous (the zk-SNARK flag),
-	// which stays false — the Vochain routes both CA origins to the CSP verifier regardless of it.
+	// be the CSP blind public key. Zk-SNARK anonymous voting (EnvelopeType.Anonymous) is never used.
 	Anonymous   bool
 	MetadataURL string // public https URL of the stored ElectionMetadata JSON
 	// Nonce, when set, is used as the tx account nonce instead of reading the current
@@ -217,8 +216,7 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 	}
 
 	// blind CSP publishes under the V2 origin (weight-binding salt); the plain ECDSA CSP stays on
-	// the legacy origin. Both are verified on-chain by the CSP verifier; the flag never touches
-	// EnvelopeType.Anonymous.
+	// the legacy origin. Both are verified on-chain by the CSP verifier.
 	censusOrigin := models.CensusOrigin_OFF_CHAIN_CA
 	if p.Anonymous {
 		censusOrigin = models.CensusOrigin_OFF_CHAIN_CA_V2
@@ -236,7 +234,6 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 		Metadata:      &metadataURL,
 		EnvelopeType: &models.EnvelopeType{
 			Serial:         false,
-			Anonymous:      ep.ElectionType.Anonymous,
 			EncryptedVotes: ep.ElectionType.SecretUntilTheEnd,
 			UniqueValues:   ep.VoteType.UniqueChoices,
 			CostFromWeight: ep.VoteType.CostFromWeight,

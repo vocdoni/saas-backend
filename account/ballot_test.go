@@ -85,7 +85,6 @@ func TestElectionTypeFromQuestion(t *testing.T) {
 	c.Assert(et.Autostart, qt.IsTrue)
 	c.Assert(et.Interruptible, qt.IsTrue)
 	c.Assert(et.DynamicCensus, qt.IsFalse)
-	c.Assert(et.Anonymous, qt.IsFalse)
 	c.Assert(et.SecretUntilTheEnd, qt.IsTrue)
 }
 
