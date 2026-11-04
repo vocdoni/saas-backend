@@ -22,6 +22,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/mongodb v0.44.0
 	github.com/twilio/twilio-go v1.32.0
+	github.com/vocdoni/cert-check v0.1.1
 	github.com/vocdoni/go-blindsecp256k1 v0.2.0
 	github.com/xlzd/gotp v0.1.0
 	go.mongodb.org/mongo-driver/v2 v2.9.2

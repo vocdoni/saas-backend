@@ -1441,6 +1441,8 @@ github.com/valyala/fasttemplate v1.0.1/go.mod h1:UQGH1tvbgY+Nz5t2n7tXsz52dQxojPU
 github.com/valyala/fasttemplate v1.2.1/go.mod h1:KHLXt3tVN2HBp8eijSv/kGJopbvo7S+qRAEEKiv+SiQ=
 github.com/valyala/histogram v1.2.0 h1:wyYGAZZt3CpwUiIb9AU/Zbllg1llXyrtApRS815OLoQ=
 github.com/valyala/histogram v1.2.0/go.mod h1:Hb4kBwb4UxsaNbbbh+RRz8ZR6pdodR57tzWUS3BUzXY=
+github.com/vocdoni/cert-check v0.1.1 h1:uPMNlDOT9d2R8xqYUMW3NvSPuPlOHP4Tqv+FrSEGEdg=
+github.com/vocdoni/cert-check v0.1.1/go.mod h1:aG5iglQkldU5s+g9gEbJJRZJ/Bm9pQzB/53Ztwrd35g=
 github.com/vocdoni/go-blindsecp256k1 v0.2.0 h1:UZ5htrmZ0RnJXA+9MjhKAie1Tpm/lt+l2W0GXUgVbTM=
 github.com/vocdoni/go-blindsecp256k1 v0.2.0/go.mod h1:ivL5WWib9JZkUYYve5PEVJnHGjInSJy2f70OFGkw6t0=
 github.com/vocdoni/storage-proofs-eth-go v0.1.6 h1:mF6VNGudgCjjgjxs5Z2GGMM2tS79+xFBWcr7BnPuhAY=
