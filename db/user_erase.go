@@ -294,31 +294,28 @@ func (ms *MongoStorage) EraseUser(userID uint64) (*UserErasureReport, error) {
 	}
 	report := &UserErasureReport{UserID: user.ID, Email: user.Email}
 	var errs []error
-	for _, userOrg := range user.Organizations {
-		soleAdmin, err := ms.IsSoleOrgAdmin(userOrg.Address, user.ID)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("classifying org %s: %w", userOrg.Address, err))
-			continue
-		}
-		if soleAdmin {
-			if err := ms.eraseOrgData(userOrg.Address); err != nil {
-				errs = append(errs, fmt.Errorf("tearing down org %s: %w", userOrg.Address, err))
+	// erase what the plan checked, not a fresh classification: an admin change in between must not
+	// tear down a kept org unchecked, nor keep a child whose parent goes
+	for _, planOrg := range plan.Orgs {
+		if planOrg.DeletedEntirely {
+			if err := ms.eraseOrgData(planOrg.Address); err != nil {
+				errs = append(errs, fmt.Errorf("tearing down org %s: %w", planOrg.Address, err))
 			}
-			report.DeletedOrgs = append(report.DeletedOrgs, userOrg.Address)
+			report.DeletedOrgs = append(report.DeletedOrgs, planOrg.Address)
 			continue
 		}
-		removed, err := ms.RemoveOrganizationUser(userOrg.Address, user.ID)
+		removed, err := ms.RemoveOrganizationUser(planOrg.Address, user.ID)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("removing membership in org %s: %w", userOrg.Address, err))
+			errs = append(errs, fmt.Errorf("removing membership in org %s: %w", planOrg.Address, err))
 		}
 		if removed {
-			if err := ms.DecrementOrganizationUsersCounter(userOrg.Address); err != nil {
-				errs = append(errs, fmt.Errorf("decrementing users counter of org %s: %w", userOrg.Address, err))
+			if err := ms.DecrementOrganizationUsersCounter(planOrg.Address); err != nil {
+				errs = append(errs, fmt.Errorf("decrementing users counter of org %s: %w", planOrg.Address, err))
 			}
 		}
-		report.KeptOrgs = append(report.KeptOrgs, userOrg.Address)
-		if org, err := ms.Organization(userOrg.Address); err == nil && org.Creator == user.Email {
-			report.CreatorEmailRetained = append(report.CreatorEmailRetained, userOrg.Address)
+		report.KeptOrgs = append(report.KeptOrgs, planOrg.Address)
+		if planOrg.CreatorEmailRetained {
+			report.CreatorEmailRetained = append(report.CreatorEmailRetained, planOrg.Address)
 		}
 	}
 	// invitations addressed to the user or issued by them
