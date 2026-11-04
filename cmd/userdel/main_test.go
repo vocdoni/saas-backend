@@ -52,7 +52,10 @@ func TestDeleteDrafts(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(stored, qt.IsTrue)
 
-	c.Assert(deleteDrafts(&bytes.Buffer{}, ms, user), qt.IsNil)
+	// an empty wallet prints nothing
+	var out bytes.Buffer
+	c.Assert(deleteDrafts(&out, ms, user), qt.IsNil)
+	c.Assert(out.String(), qt.Equals, "")
 	n, err := ms.CountVotingProcesses(org, db.DraftOnly)
 	c.Assert(err, qt.IsNil)
 	c.Assert(n, qt.Equals, int64(0))
@@ -61,14 +64,11 @@ func TestDeleteDrafts(t *testing.T) {
 	_, err = ms.ProcessPayment(checkoutDraft)
 	c.Assert(err, qt.Equals, db.ErrNotFound)
 
-	// an empty wallet prints nothing; a funded one prints its balance
-	var out bytes.Buffer
-	c.Assert(printWalletBalance(&out, ms, org), qt.IsNil)
-	c.Assert(out.String(), qt.Equals, "")
+	// a funded one prints its balance
 	c.Assert(ms.CreditWallet(db.WalletCredit{
 		OrgAddress: org, AmountCents: 2_500, IdempotencyKey: "cs_userdel_topup",
 	}), qt.IsNil)
-	c.Assert(printWalletBalance(&out, ms, org), qt.IsNil)
+	c.Assert(deleteDrafts(&out, ms, user), qt.IsNil)
 	c.Assert(out.String(), qt.Contains, "wallet balance: 2500 eur cents (kept; return it by hand)")
 }
 

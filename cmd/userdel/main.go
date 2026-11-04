@@ -42,7 +42,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/api"
 	"github.com/vocdoni/saas-backend/db"
 )
@@ -143,45 +142,25 @@ func showPlan(w io.Writer, ms *db.MongoStorage, userID uint64) error {
 
 // deleteDrafts deletes, crediting the paid ones back, the drafts of every organization the
 // erasure will tear down (api.DeleteUserOrgDrafts), and then prints, in the user's organization
-// order, the balance each of those organizations' own wallet keeps. EraseUser refuses while any
-// draft is left, so a failure here stops the erasure before anything else is erased.
+// order, the balance each of those organizations' own wallet keeps when it is not zero. The wallet
+// and its history are kept by the erasure, so that money is returned by hand; it never blocks the
+// erasure. A managed organization has no wallet of its own (its integrator pays) and is not listed.
+// EraseUser refuses while any draft is left, so a failure here stops the erasure before anything
+// else is erased.
 func deleteDrafts(w io.Writer, ms *db.MongoStorage, user *db.User) error {
 	balances, err := api.DeleteUserOrgDrafts(ms, user.ID)
 	if err != nil {
 		return err
 	}
 	for _, userOrg := range user.Organizations {
-		if _, tornDown := balances[userOrg.Address]; !tornDown {
+		balance := balances[userOrg.Address]
+		if balance == 0 {
 			continue
 		}
-		if err := printWalletBalance(w, ms, userOrg.Address); err != nil {
-			return err
+		if _, err := fmt.Fprintf(w, "  org %s\n    wallet balance: %d eur cents (kept; return it by hand)\n",
+			userOrg.Address, balance); err != nil {
+			return fmt.Errorf("could not print the wallet balance of org %s: %w", userOrg.Address, err)
 		}
-	}
-	return nil
-}
-
-// printWalletBalance prints the balance of an organization's own wallet when it is not zero. The
-// wallet and its history are kept by the erasure, so that money is returned by hand; it never
-// blocks the erasure. A managed organization has no wallet of its own (its integrator pays).
-func printWalletBalance(w io.Writer, ms *db.MongoStorage, address common.Address) error {
-	org, err := ms.Organization(address)
-	if err != nil {
-		return fmt.Errorf("could not fetch org %s: %w", address, err)
-	}
-	if org.ManagedBy != (common.Address{}) {
-		return nil
-	}
-	wallet, err := ms.Wallet(address)
-	if err != nil {
-		return fmt.Errorf("could not read the wallet of org %s: %w", address, err)
-	}
-	if wallet.BalanceCents == 0 {
-		return nil
-	}
-	if _, err := fmt.Fprintf(w, "  org %s\n    wallet balance: %d eur cents (kept; return it by hand)\n",
-		address, wallet.BalanceCents); err != nil {
-		return fmt.Errorf("could not print the wallet balance of org %s: %w", address, err)
 	}
 	return nil
 }
