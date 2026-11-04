@@ -1,16 +1,18 @@
 package db
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-// TestPrepareOrgMemberNationalID pins how a member's nationalId is stored: canonicalized, with the
-// imported value kept in NationalIDOriginal only when the check letter was derived, and that marker
-// surviving every write that does not carry a new nationalId.
+// TestPrepareOrgMemberNationalID pins that a member's nationalId is stored as entered, only trimmed:
+// DNI/NIE variants are canonicalised in the login-hash layer (calculateParticipantHashes), never at
+// rest, and no derivation marker is written.
 func TestPrepareOrgMemberNationalID(t *testing.T) {
 	c := qt.New(t)
 	org := &Organization{Address: common.Address{0x42}, Country: "ES"}
@@ -21,55 +23,91 @@ func TestPrepareOrgMemberNationalID(t *testing.T) {
 		return member
 	}
 
-	for _, tc := range []struct{ in, stored, original string }{
-		{"12345678", "12345678Z", "12345678"},
-		{" 2345678 ", "02345678T", "2345678"},
-		{"y1234567", "Y1234567X", "y1234567"},
-		{"12.345.678-z", "12345678Z", ""},
-		{"2345678t", "02345678T", ""},
-		{"12345678A", "12345678A", ""},
-		{" PAB123456 ", "PAB123456", ""},
-		{"", "", ""},
-	} {
+	inputs := []struct{ in, stored string }{
+		{"12.345.678-z", "12.345.678-z"},
+		{" 12345678 ", "12345678"},
+		{"12345678A", "12345678A"},
+		{" 2345678 ", "2345678"},
+		{"y1234567", "y1234567"},
+		{"2345678t", "2345678t"},
+		{" PAB123456 ", "PAB123456"},
+		{"", ""},
+	}
+	for _, tc := range inputs {
 		got := prepare(&OrgMember{NationalID: tc.in})
 		c.Assert(got.NationalID, qt.Equals, tc.stored, qt.Commentf("input %q", tc.in))
-		c.Assert(got.NationalIDOriginal, qt.Equals, tc.original, qt.Commentf("input %q", tc.in))
 	}
 
-	stored := *prepare(&OrgMember{NationalID: "12345678", Name: "Ana"})
-	c.Assert(stored.NationalIDOriginal, qt.Equals, "12345678")
+	c.Run("stored documents keep the value and carry no marker", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		c.Assert(testDB.SetOrganization(&Organization{Address: testOrgAddress, CreatedAt: time.Now()}), qt.IsNil)
+		for _, tc := range inputs {
+			if tc.in == "" {
+				continue // an empty nationalId is not written at all
+			}
+			id, err := testDB.SetOrgMember("salt", &OrgMember{OrgAddress: testOrgAddress, NationalID: tc.in})
+			c.Assert(err, qt.IsNil)
+			doc := rawMemberDoc(c, id)
+			c.Assert(doc["nationalId"], qt.Equals, tc.stored, qt.Commentf("input %q", tc.in))
+			assertNoNationalIDMarker(c, doc)
+		}
+	})
 
-	c.Run("an update not carrying nationalId keeps the marker", func(c *qt.C) {
-		name := "Ana Maria"
-		got := prepare((&OrgMemberUpdate{ID: stored.ID, Name: &name}).applyTo(stored))
-		c.Assert(got.NationalID, qt.Equals, "12345678Z")
-		c.Assert(got.NationalIDOriginal, qt.Equals, "12345678")
+	c.Run("updates store the value as sent, and echoing it back changes nothing", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		org := &Organization{Address: testOrgAddress, CreatedAt: time.Now()}
+		c.Assert(testDB.SetOrganization(org), qt.IsNil)
+		id, err := testDB.SetOrgMember("salt", &OrgMember{OrgAddress: testOrgAddress, NationalID: "12345678", Name: "Ana"})
+		c.Assert(err, qt.IsNil)
+		memberID, err := bson.ObjectIDFromHex(id)
+		c.Assert(err, qt.IsNil)
+		upsert := func(update *OrgMemberUpdate) bson.M {
+			update.ID = memberID
+			_, created, err := testDB.UpsertOrgMemberAndCensusParticipants(context.Background(), org, update, "salt")
+			c.Assert(err, qt.IsNil)
+			c.Assert(created, qt.IsFalse)
+			return rawMemberDoc(c, id)
+		}
+
+		// an update not carrying the nationalId, then one echoing the stored value as the app's
+		// editor does: the stored document is unchanged but for updatedAt
+		before := upsert(&OrgMemberUpdate{Name: new("Ana Maria")})
+		after := upsert(&OrgMemberUpdate{NationalID: new("12345678")})
+		delete(before, "updatedAt")
+		delete(after, "updatedAt")
+		c.Assert(after, qt.DeepEquals, before)
+		c.Assert(after["nationalId"], qt.Equals, "12345678")
+
+		// a new value, letterless or with separators, is stored exactly trimmed
+		for _, tc := range []struct{ in, stored string }{
+			{" 87654321 ", "87654321"},
+			{"87.654.321-x", "87.654.321-x"},
+		} {
+			doc := upsert(&OrgMemberUpdate{NationalID: new(tc.in)})
+			c.Assert(doc["nationalId"], qt.Equals, tc.stored)
+			assertNoNationalIDMarker(c, doc)
+		}
 	})
-	c.Run("an explicit lettered update to a different DNI clears the marker", func(c *qt.C) {
-		lettered := "87654321X"
-		got := prepare((&OrgMemberUpdate{ID: stored.ID, NationalID: &lettered}).applyTo(stored))
-		c.Assert(got.NationalID, qt.Equals, "87654321X")
-		c.Assert(got.NationalIDOriginal, qt.Equals, "")
-	})
-	c.Run("an explicit letterless update records the new value", func(c *qt.C) {
-		letterless := "87654321"
-		got := prepare((&OrgMemberUpdate{ID: stored.ID, NationalID: &letterless}).applyTo(stored))
-		c.Assert(got.NationalID, qt.Equals, "87654321X")
-		c.Assert(got.NationalIDOriginal, qt.Equals, "87654321")
-	})
-	c.Run("clearing the nationalId clears the marker", func(c *qt.C) {
-		empty := ""
-		got := prepare((&OrgMemberUpdate{ID: stored.ID, NationalID: &empty}).applyTo(stored))
-		c.Assert(got.NationalID, qt.Equals, "")
-		c.Assert(got.NationalIDOriginal, qt.Equals, "")
-	})
-	c.Run("re-sending the canonical value when only email changes keeps the marker", func(c *qt.C) {
-		email := "ana@example.com"
-		canonical := stored.NationalID // "12345678Z", same value the app always echoes back
-		got := prepare((&OrgMemberUpdate{ID: stored.ID, Email: &email, NationalID: &canonical}).applyTo(stored))
-		c.Assert(got.NationalID, qt.Equals, "12345678Z")
-		c.Assert(got.NationalIDOriginal, qt.Equals, "12345678")
-	})
+}
+
+// rawMemberDoc returns the stored orgMembers document of the member as raw bson, so assertions see
+// every key it holds, not only those OrgMember decodes.
+func rawMemberDoc(c *qt.C, id string) bson.M {
+	memberID, err := bson.ObjectIDFromHex(id)
+	c.Assert(err, qt.IsNil)
+	var doc bson.M
+	c.Assert(testDB.orgMembers.FindOne(context.Background(), bson.M{"_id": memberID}).Decode(&doc), qt.IsNil)
+	return doc
+}
+
+// assertNoNationalIDMarker asserts the stored member document holds no nationalIdOriginal key, the
+// derivation marker of the superseded canonical-storage design.
+func assertNoNationalIDMarker(c *qt.C, doc bson.M) {
+	c.Helper()
+	_, ok := doc["nationalIdOriginal"]
+	c.Assert(ok, qt.IsFalse, qt.Commentf("nationalId %q", doc["nationalId"]))
 }
 
 // TestOrgMembersByFieldAnyOf pins the []string form of OrgMembersByField: a member matching any of
@@ -100,34 +138,99 @@ func TestOrgMembersByFieldAnyOf(t *testing.T) {
 	}
 }
 
-// TestCensusParticipantNationalIDVariants pins end-to-end hash equality: a member imported in one
-// DNI variant is found by the login lookup from any other variant of the same document, because
-// both sides go through OrgMember.Normalized (umbrella plan Appendix B, last row).
+// TestCensusParticipantNationalIDVariants pins end-to-end hash equality: a member stored in one DNI
+// variant (as entered, never rewritten) is found by the login lookup from any other variant of the
+// same document, because calculateParticipantHashes canonicalises both sides (umbrella plan
+// Appendix B, last row). CensusParticipantByVerbatimLoginHash, in contrast, matches only the hash
+// of the member exactly as given.
 func TestCensusParticipantNationalIDVariants(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 	c.Assert(testDB.SetOrganization(&Organization{Address: testOrgAddress, CreatedAt: time.Now()}), qt.IsNil)
+	authByNationalID := OrgMemberAuthFields{OrgMemberAuthFieldsNationalID}
+	lookup := func(census Census, typed string) (*CensusParticipant, error) {
+		input := (&OrgMember{OrgAddress: testOrgAddress, NationalID: typed}).Normalized()
+		return testDB.CensusParticipantByLoginHash(census, *input)
+	}
 
 	// one census per row, so rows sharing a canonical value never meet in a census
-	for _, tc := range []struct{ stored, typed string }{
-		{"2.345.678-t", "02345678T"},
-		{"02345678T", "2.345.678-t"},
-		{"2345678T", " 02.345.678 t "},
-		{"12345678", "12345678Z"},
-		{"12345678Z", "12345678"},
+	for _, tc := range []struct {
+		stored string
+		typed  []string
+	}{
+		{"2.345.678-t", []string{"02345678T", "2345678T", "2.345.678-t", " 02.345.678 t "}},
+		{"02345678T", []string{"2.345.678-t", "2345678", "02345678t"}},
+		{"2345678T", []string{" 02.345.678 t ", "02345678T"}},
+		{"12345678", []string{"12345678Z", "12345678", "12.345.678-z"}},
+		{"12345678Z", []string{"12345678", "12.345.678"}},
 	} {
 		memberID, err := testDB.SetOrgMember("salt", &OrgMember{
 			OrgAddress: testOrgAddress, NationalID: tc.stored, Weight: 1,
 		})
 		c.Assert(err, qt.IsNil)
-		census := &Census{OrgAddress: testOrgAddress, AuthFields: OrgMemberAuthFields{OrgMemberAuthFieldsNationalID}}
+		c.Assert(rawMemberDoc(c, memberID)["nationalId"], qt.Equals, tc.stored)
+		census := &Census{OrgAddress: testOrgAddress, AuthFields: authByNationalID}
 		_, _, err = testDB.PopulateMembersCensus(census, []string{memberID})
 		c.Assert(err, qt.IsNil)
 
-		input := (&OrgMember{OrgAddress: testOrgAddress, NationalID: tc.typed}).Normalized()
-		found, err := testDB.CensusParticipantByLoginHash(*census, *input)
-		c.Assert(err, qt.IsNil, qt.Commentf("stored %q, typed %q", tc.stored, tc.typed))
-		c.Assert(found.ParticipantID, qt.Equals, memberID)
+		for _, typed := range tc.typed {
+			found, err := lookup(*census, typed)
+			c.Assert(err, qt.IsNil, qt.Commentf("stored %q, typed %q", tc.stored, typed))
+			c.Assert(found.ParticipantID, qt.Equals, memberID)
+		}
+		// the member document is still as entered after the census build
+		c.Assert(rawMemberDoc(c, memberID)["nationalId"], qt.Equals, tc.stored)
 	}
+
+	c.Run("the verbatim lookup matches only the exact raw hash", func(c *qt.C) {
+		census := &Census{OrgAddress: testOrgAddress, AuthFields: authByNationalID, CreatedAt: time.Now()}
+		censusID, err := testDB.SetCensus(census)
+		c.Assert(err, qt.IsNil)
+		census.ID, err = bson.ObjectIDFromHex(censusID)
+		c.Assert(err, qt.IsNil)
+		verbatim := func(typed string) (*CensusParticipant, error) {
+			input := (&OrgMember{OrgAddress: testOrgAddress, NationalID: typed}).Normalized()
+			return testDB.CensusParticipantByVerbatimLoginHash(*census, *input)
+		}
+
+		// a participant still on its raw hash, as migration 0034 leaves a collision survivor
+		survivor := OrgMember{ID: bson.NewObjectID(), OrgAddress: testOrgAddress, NationalID: "12345678"}
+		_, err = testDB.censusParticipants.InsertOne(context.Background(), &CensusParticipant{
+			ParticipantID: survivor.ID.Hex(), CensusID: censusID,
+			LoginHash: HashAuthTwoFaFields(survivor, census.AuthFields, census.TwoFaFields), CreatedAt: time.Now(),
+		})
+		c.Assert(err, qt.IsNil)
+		// a participant written now, on its canonical hash, stored as "2.345.678-t"
+		memberID, err := testDB.SetOrgMember("salt", &OrgMember{OrgAddress: testOrgAddress, NationalID: "2.345.678-t"})
+		c.Assert(err, qt.IsNil)
+		added, memberErrs, err := testDB.AddCensusParticipantsByMemberIDs(censusID, []string{memberID})
+		c.Assert(err, qt.IsNil)
+		c.Assert(memberErrs, qt.HasLen, 0)
+		c.Assert(added, qt.Equals, 1)
+
+		for _, typed := range []string{"12345678", " 12345678 "} {
+			found, err := verbatim(typed)
+			c.Assert(err, qt.IsNil, qt.Commentf("typed %q", typed))
+			c.Assert(found.ParticipantID, qt.Equals, survivor.ID.Hex())
+		}
+		// the raw hash folds case, as HashAuthTwoFaFields does: a canonical value typed in
+		// lowercase is still the same raw hash
+		found, err := verbatim("02345678t")
+		c.Assert(err, qt.IsNil)
+		c.Assert(found.ParticipantID, qt.Equals, memberID)
+
+		for _, typed := range []string{
+			"12345678Z",   // the survivor's canonical form: not its raw hash
+			"12.345.678",  // another variant of the survivor's value
+			"2.345.678-t", // the stored variant of a canonical-hashed participant
+			"2345678T",
+		} {
+			_, err := verbatim(typed)
+			c.Assert(err, qt.ErrorIs, ErrNotFound, qt.Commentf("typed %q", typed))
+		}
+		// and the canonical lookup does not reach the raw-hashed survivor
+		_, err = lookup(*census, "12345678")
+		c.Assert(err, qt.ErrorIs, ErrNotFound)
+	})
 }

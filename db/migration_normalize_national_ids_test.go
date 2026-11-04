@@ -98,7 +98,6 @@ func TestMigration0034NormalizeNationalIDs(t *testing.T) {
 	} {
 		got := storedMember(c, tc.member.ID)
 		c.Assert(got.NationalID, qt.Equals, tc.stored)
-		c.Assert(got.NationalIDOriginal, qt.Equals, tc.original)
 		// the stored hash is the canonical one, and the real login lookup resolves any variant
 		c.Assert(storedLoginHash(c, byID, got), qt.DeepEquals, HashAuthTwoFaFields(got, byID.AuthFields, byID.TwoFaFields))
 		input := (&OrgMember{NationalID: tc.typed, Email: got.Email}).Normalized()
@@ -133,7 +132,6 @@ func TestMigration0034Collision(t *testing.T) {
 	// the letterless member is skipped whole: value, marker and hash as before
 	got := storedMember(c, letterless.ID)
 	c.Assert(got.NationalID, qt.Equals, "12345678")
-	c.Assert(got.NationalIDOriginal, qt.Equals, "")
 	c.Assert(storedLoginHash(c, census, got), qt.DeepEquals, letterlessHash)
 	c.Assert(storedMember(c, lettered.ID).NationalID, qt.Equals, "12345678Z")
 
@@ -226,6 +224,5 @@ func TestMigration0034ResumesInterruptedMember(t *testing.T) {
 
 	got := storedMember(c, interrupted.ID)
 	c.Assert(got.NationalID, qt.Equals, "12345678Z")
-	c.Assert(got.NationalIDOriginal, qt.Equals, "12345678")
 	c.Assert(storedLoginHash(c, census, got), qt.DeepEquals, HashAuthTwoFaFields(got, census.AuthFields, census.TwoFaFields))
 }

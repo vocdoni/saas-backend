@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.vocdoni.io/dvote/log"
@@ -413,8 +414,13 @@ type participantHashSet struct {
 
 // computeParticipantHashes mirrors db.calculateParticipantHashesBson: it produces
 // exactly the hash fields that were originally stored for a participant, so the
-// repair never adds or removes keys.
+// repair never adds or removes keys. Like db.calculateParticipantHashes it hashes
+// the nationalId in its canonical DNI/NIE form, leaving the member document as it
+// is; recomputeParticipantHashes delegates here, so this is the one migrations-side
+// canonicalisation point (db.TestRepairMatchesCanonicalHash pins the parity).
 func computeParticipantHashes(m memberHashDoc, c censusHashDoc) participantHashSet {
+	// m is a copy: canonicalise only the hash input, as db.calculateParticipantHashes does
+	m.NationalID = internal.NormalizeNationalID(m.NationalID).Normalized
 	set := participantHashSet{
 		LoginHash: hashMemberFields(m, c.AuthFields, c.TwoFaFields),
 	}

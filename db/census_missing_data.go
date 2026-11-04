@@ -141,7 +141,7 @@ func classifyCensusMembers(
 			return nil, fmt.Errorf("decoding member: %w", err)
 		}
 		if nationalIDs != nil {
-			nationalIDs.add(NationalIDWarning{MemberID: m.ID.Hex()}, m.NationalID, m.NationalIDOriginal)
+			nationalIDs.add(NationalIDWarning{MemberID: m.ID.Hex()}, m.NationalID, "")
 		}
 		if m.MissingLoginData(census.AuthFields, census.TwoFaFields) {
 			cm.missing = append(cm.missing, m.ID)

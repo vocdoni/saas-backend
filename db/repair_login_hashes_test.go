@@ -415,7 +415,9 @@ func TestRepairLoginHashes(t *testing.T) {
 // If the two ever disagree, the repair writes hashes the login path can never
 // match and locks out every voter it "repaired". This drives a matrix of field
 // combinations through the real repair and asserts each hash it wrote equals the
-// canonical one, then resolves it through the real login lookup.
+// canonical one, then resolves it through the real login lookup. The matrix holds
+// raw-stored nationalId variants too, so the migrations-side canonicalisation
+// (computeParticipantHashes) cannot drift from db.calculateParticipantHashes.
 func TestRepairMatchesCanonicalHash(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
@@ -426,10 +428,11 @@ func TestRepairMatchesCanonicalHash(t *testing.T) {
 	phone, err := NewHashedPhone(testPlaintextPhone, org)
 	c.Assert(err, qt.IsNil)
 
-	combos := []struct {
+	type combo struct {
 		auth  OrgMemberAuthFields
 		twoFa OrgMemberTwoFaFields
-	}{
+	}
+	combos := []combo{
 		{OrgMemberAuthFields{OrgMemberAuthFieldsName}, OrgMemberTwoFaFields{}},
 		{OrgMemberAuthFields{OrgMemberAuthFieldsName, OrgMemberAuthFieldsSurname}, OrgMemberTwoFaFields{}},
 		{OrgMemberAuthFields{OrgMemberAuthFieldsMemberNumber}, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail}},
@@ -440,17 +443,26 @@ func TestRepairMatchesCanonicalHash(t *testing.T) {
 			OrgMemberAuthFields{OrgMemberAuthFieldsName, OrgMemberAuthFieldsSurname},
 			OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail, OrgMemberTwoFaFieldPhone},
 		},
-		{OrgMemberAuthFields{OrgMemberAuthFieldsNationalID}, OrgMemberTwoFaFields{}},
-		{OrgMemberAuthFields{OrgMemberAuthFieldsNationalID}, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail}},
 	}
-	// the last two combos hold a canonical DNI and a letterless one as stored before migration 34:
-	// both must hash through the mirrored code exactly as through HashAuthTwoFaFields
-	nationalIDs := map[int]string{len(combos) - 2: "12345678Z", len(combos) - 1: "12345678"}
+	// nationalId values as organizers enter them, stored raw (separators and case, missing
+	// padding, letterless, lowercase canonical, canonical, not a DNI): one census each, alternating
+	// with and without the email 2FA. The repair must hash them in the canonical form the login
+	// lookup uses, leaving the member documents as they are.
+	nationalIDs := map[int]string{}
+	for i, id := range []string{"12.345.678-z", "2345678T", "12345678", "12345678z", "12345678Z", "PAB 123456"} {
+		twoFa := OrgMemberTwoFaFields{}
+		if i%2 == 1 {
+			twoFa = OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail}
+		}
+		nationalIDs[len(combos)] = id
+		combos = append(combos, combo{OrgMemberAuthFields{OrgMemberAuthFieldsNationalID}, twoFa})
+	}
 
 	type seeded struct {
-		memberID bson.ObjectID
-		censusID string
-		census   Census
+		memberID   bson.ObjectID
+		censusID   string
+		census     Census
+		nationalID string // the raw nationalId of a nationalId row, empty otherwise
 	}
 	var all []seeded
 	for i, combo := range combos {
@@ -481,7 +493,7 @@ func TestRepairMatchesCanonicalHash(t *testing.T) {
 			LoginHash: unfoldedHash(member, combo.auth, combo.twoFa), CreatedAt: time.Now(),
 		})
 		c.Assert(err, qt.IsNil)
-		all = append(all, seeded{memberID: member.ID, censusID: censusID, census: *census})
+		all = append(all, seeded{memberID: member.ID, censusID: censusID, census: *census, nationalID: nationalIDs[i]})
 	}
 
 	runRepair(t, migrations.RepairOptions{Apply: true})
@@ -497,10 +509,21 @@ func TestRepairMatchesCanonicalHash(t *testing.T) {
 		c.Assert(testDB.censusParticipants.FindOne(context.Background(),
 			bson.M{"participantID": s.memberID.Hex(), "censusId": s.censusID}).Decode(&got), qt.IsNil)
 
-		c.Assert(got.LoginHash, qt.DeepEquals,
-			HashAuthTwoFaFields(stored, s.census.AuthFields, s.census.TwoFaFields),
-			qt.Commentf("repair and db disagree for auth=%v twoFa=%v",
-				s.census.AuthFields, s.census.TwoFaFields))
+		c.Assert(got.LoginHash, qt.DeepEquals, calculateParticipantHashes(s.census, stored)["loginHash"],
+			qt.Commentf("repair and db disagree for auth=%v twoFa=%v nationalId=%q",
+				s.census.AuthFields, s.census.TwoFaFields, s.nationalID))
+
+		if s.nationalID != "" {
+			// the member keeps its value as entered, and a variant really was rehashed canonical
+			c.Assert(stored.NationalID, qt.Equals, s.nationalID)
+			canonical := internal.NormalizeNationalID(s.nationalID).Normalized
+			raw := HashAuthTwoFaFields(stored, s.census.AuthFields, s.census.TwoFaFields)
+			if strings.EqualFold(canonical, s.nationalID) {
+				c.Assert(got.LoginHash, qt.DeepEquals, raw, qt.Commentf("nationalId %q", s.nationalID))
+			} else {
+				c.Assert(got.LoginHash, qt.Not(qt.DeepEquals), raw, qt.Commentf("nationalId %q", s.nationalID))
+			}
+		}
 
 		found, err := testDB.CensusParticipantByLoginHash(s.census, stored)
 		c.Assert(err, qt.IsNil)
