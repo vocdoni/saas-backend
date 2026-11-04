@@ -98,7 +98,6 @@ var (
 			Weighted:   true,
 		},
 		Features: db.Features{
-			Anonymous:       true,
 			Overwrite:       true,
 			LiveResults:     true,
 			Personalization: false,
@@ -138,7 +137,6 @@ var (
 			Weighted:   true,
 		},
 		Features: db.Features{
-			Anonymous:       true,
 			Overwrite:       true,
 			LiveResults:     true,
 			Personalization: true,
@@ -177,7 +175,6 @@ var (
 			Weighted:   true,
 		},
 		Features: db.Features{
-			Anonymous:       true,
 			Overwrite:       true,
 			LiveResults:     true,
 			Personalization: true,

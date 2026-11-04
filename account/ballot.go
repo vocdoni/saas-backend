@@ -331,15 +331,13 @@ func ResolveBallotShape(in BallotShapeInput) (BallotShape, error) {
 }
 
 // ElectionTypeFromQuestion builds the on-chain election flags for a question. autostart and
-// interruptible are always on, dynamicCensus off; anonymous is deferred (always false);
-// secretUntilTheEnd comes from the question.
+// interruptible are always on, dynamicCensus off; secretUntilTheEnd comes from the question.
 func ElectionTypeFromQuestion(q *db.VotingProcessQuestion) db.ElectionType {
 	return db.ElectionType{
 		Autostart:         true,
 		Interruptible:     true,
 		DynamicCensus:     false,
 		SecretUntilTheEnd: q.SecretUntilTheEnd,
-		Anonymous:         false,
 	}
 }
 

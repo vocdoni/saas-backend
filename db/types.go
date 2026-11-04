@@ -233,7 +233,6 @@ type VotingTypes struct {
 }
 
 type Features struct {
-	Anonymous       bool `json:"anonymous" bson:"anonymous"`
 	Overwrite       bool `json:"overwrite" bson:"overwrite"`
 	LiveResults     bool `json:"liveResults" bson:"liveResults"`
 	Personalization bool `json:"personalization" bson:"personalization"`
@@ -683,7 +682,6 @@ type ElectionType struct {
 	Interruptible     bool `json:"interruptible" bson:"interruptible"`
 	DynamicCensus     bool `json:"dynamicCensus" bson:"dynamicCensus"`
 	SecretUntilTheEnd bool `json:"secretUntilTheEnd" bson:"secretUntilTheEnd"`
-	Anonymous         bool `json:"anonymous" bson:"anonymous"`
 }
 
 // EncryptionKey is a single election encryption public key for an encrypted
