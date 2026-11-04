@@ -110,6 +110,9 @@ func TestEraseIntegratorWithManagedOrgs(t *testing.T) {
 		ManagedOrg: managed,
 	}), qt.IsNil)
 
+	// the run refuses before any draft goes while the integrator manages the other organization
+	c.Assert(refuseManagingOrgs(ms, user), qt.ErrorMatches, ".*manages 1 organizations.*")
+
 	var out bytes.Buffer
 	c.Assert(deleteDrafts(&out, ms, user), qt.IsNil)
 	c.Assert(out.String(), qt.Contains, "org "+integrator.String()+"\n    wallet balance: 10000 eur cents")

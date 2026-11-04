@@ -98,6 +98,11 @@ func run(opts *options) error {
 		return nil
 	}
 
+	// EraseUser refuses while an organization it would tear down manages others: refused here,
+	// before the drafts go, so a refused run erases nothing
+	if err := refuseManagingOrgs(ms, user); err != nil {
+		return err
+	}
 	if !opts.yes && !confirm() {
 		return fmt.Errorf("aborted")
 	}
@@ -120,6 +125,29 @@ func run(opts *options) error {
 	}
 	if err != nil {
 		return fmt.Errorf("erasure finished with errors: %w", err)
+	}
+	return nil
+}
+
+// refuseManagingOrgs returns an error when an organization the erasure would tear down manages
+// other organizations: EraseUser refuses those, so nothing (not even the drafts) must go first.
+func refuseManagingOrgs(ms *db.MongoStorage, user *db.User) error {
+	for _, userOrg := range user.Organizations {
+		soleAdmin, err := ms.IsSoleOrgAdmin(userOrg.Address, user.ID)
+		if err != nil {
+			return fmt.Errorf("could not classify org %s: %w", userOrg.Address, err)
+		}
+		if !soleAdmin {
+			continue
+		}
+		managed, _, err := ms.ListManagedOrganizations(userOrg.Address, 1, 1)
+		if err != nil {
+			return fmt.Errorf("could not list the organizations managed by org %s: %w", userOrg.Address, err)
+		}
+		if managed > 0 {
+			return fmt.Errorf("org %s manages %d organizations, erase them with orgdel first; nothing was erased",
+				userOrg.Address, managed)
+		}
 	}
 	return nil
 }
@@ -243,6 +271,9 @@ func printOrgContents(ms *db.MongoStorage, address common.Address) error {
 	fmt.Printf("    %d pending invitations, plus import jobs\n", s.Invitations)
 	if s.ActiveQuestions > 0 {
 		fmt.Printf("    WARNING: %d questions are READY or PAUSED and may still be live on-chain\n", s.ActiveQuestions)
+	}
+	if s.ManagedOrgs > 0 {
+		fmt.Printf("    REFUSED: the organization manages %d organizations; erase them with orgdel first\n", s.ManagedOrgs)
 	}
 	return nil
 }
