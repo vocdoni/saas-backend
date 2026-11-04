@@ -234,7 +234,8 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 		census, &AuthRequest{Email: req.Email, Phone: req.Phone}, phone, member,
 	)
 	if err != nil {
-		if apiErr, ok := err.(errors.Error); ok {
+		var apiErr errors.Error
+		if errors.As(err, &apiErr) {
 			apiErr.Write(w)
 		} else {
 			errors.ErrUnauthorized.WithErr(err).Write(w)
@@ -414,10 +415,10 @@ func authorizeLoadedQuestion(
 
 // maxSignBatchBodyBytes bounds a POST /processes/{processId}/sign-batch body. One ballot is an
 // election id plus a voter address, ~200 characters of JSON once hex-encoded and quoted, so 512
-// bytes each leaves ample headroom. The cap tracks db.MaxQuestionsPerProcess (a voter holds at
+// bytes each leaves ample headroom. The cap tracks db.MaxBallotsPerBatch (a voter holds at
 // most one ballot per question); like the relay endpoints this one is public, so the body has to
 // be bounded before it is buffered.
-const maxSignBatchBodyBytes = db.MaxQuestionsPerProcess*512 + 4*internal.KiB
+const maxSignBatchBodyBytes = db.MaxBallotsPerBatch*512 + 4*internal.KiB
 
 // authorizedBallot is one item of a sign batch that survived the authorization pass: the
 // question's on-chain election id, resolved from the request, and the voter address.
@@ -483,9 +484,9 @@ func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Req
 	case len(req.Ballots) == 0:
 		errors.ErrVoteBatchEmpty.Write(w)
 		return
-	case len(req.Ballots) > db.MaxQuestionsPerProcess:
+	case len(req.Ballots) > db.MaxBallotsPerBatch:
 		errors.ErrVoteBatchTooLarge.Withf("%d ballots, the maximum is %d",
-			len(req.Ballots), db.MaxQuestionsPerProcess).Write(w)
+			len(req.Ballots), db.MaxBallotsPerBatch).Write(w)
 		return
 	}
 	sc, ok := c.resolveSignContext(w, oid, req.AuthToken)
@@ -501,7 +502,7 @@ func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Req
 	// that cannot be given back, so a rejected batch must leave the voter with nothing signed
 	// rather than with a signed prefix. Every ballot must name a question of this process, so
 	// all of them are loaded in one query and each ballot resolved against the map — a
-	// per-ballot QuestionByUpstreamID would cost up to db.MaxQuestionsPerProcess sequential
+	// per-ballot QuestionByUpstreamID would cost up to db.MaxBallotsPerBatch sequential
 	// round trips on a public endpoint.
 	questions, err := c.mainDB.QuestionsByProcess(oid)
 	if err != nil {
@@ -622,9 +623,9 @@ func (c *CSPHandlers) ProcessBlindPointHandler(w http.ResponseWriter, r *http.Re
 	case len(req.Elections) == 0:
 		errors.ErrVoteBatchEmpty.Write(w)
 		return
-	case len(req.Elections) > db.MaxQuestionsPerProcess:
+	case len(req.Elections) > db.MaxBallotsPerBatch:
 		errors.ErrVoteBatchTooLarge.Withf("%d elections, the maximum is %d",
-			len(req.Elections), db.MaxQuestionsPerProcess).Write(w)
+			len(req.Elections), db.MaxBallotsPerBatch).Write(w)
 		return
 	}
 	sc, ok := c.resolveSignContext(w, oid, req.AuthToken)
@@ -726,9 +727,9 @@ func (c *CSPHandlers) ProcessBlindSignHandler(w http.ResponseWriter, r *http.Req
 	case len(req.Ballots) == 0:
 		errors.ErrVoteBatchEmpty.Write(w)
 		return
-	case len(req.Ballots) > db.MaxQuestionsPerProcess:
+	case len(req.Ballots) > db.MaxBallotsPerBatch:
 		errors.ErrVoteBatchTooLarge.Withf("%d ballots, the maximum is %d",
-			len(req.Ballots), db.MaxQuestionsPerProcess).Write(w)
+			len(req.Ballots), db.MaxBallotsPerBatch).Write(w)
 		return
 	}
 	sc, ok := c.resolveSignContext(w, oid, req.AuthToken)
@@ -1042,7 +1043,7 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-	// one goroutine per signed question (at most db.MaxQuestionsPerProcess); only uncached,
+	// one goroutine per signed question (at most db.MaxBallotsPerBatch); only uncached,
 	// non-blind rows reach the chain, and the lookup bounds node reads across requests. Each
 	// goroutine writes only its own index.
 	resolver := VoteStatusResolver{Store: c.mainDB, Lookup: c.voteOnChain}
@@ -1110,7 +1111,8 @@ func orgNameAndLogo(org *db.Organization) (name, logo string) {
 
 // writeResendError maps a ResendChallenge error to the proper HTTP error.
 func writeResendError(w http.ResponseWriter, err error) {
-	if apiErr, ok := err.(errors.Error); ok {
+	var apiErr errors.Error
+	if errors.As(err, &apiErr) {
 		apiErr.Write(w)
 		return
 	}

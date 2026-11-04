@@ -10,7 +10,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
-	stripeapi "github.com/stripe/stripe-go/v82"
+	stripeapi "github.com/stripe/stripe-go/v87"
 )
 
 // subscriptionEvent builds a subscription webhook event whose payload is the given JSON.

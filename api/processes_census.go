@@ -31,8 +31,7 @@ func censusBuildError(err error) error {
 
 // resolveOrCreateDefaultCensus materializes the inline census spec of a voting process into
 // a db.Census (auth/2FA policy + participants) and returns it. The census type is inferred
-// from the 2FA fields (SetCensus does this). Census/vote quotas are enforced, mirroring
-// addCensusParticipantsHandler. The census is created unpublished; publishing happens at
+// from the 2FA fields (SetCensus does this). The census is created unpublished; publishing happens at
 // process publish time. Members missing the auth data the census requires are left out of it and
 // returned, as hex IDs, for the caller to report.
 func (a *API) resolveOrCreateDefaultCensus(
@@ -69,13 +68,7 @@ func (a *API) resolveOrCreateDefaultCensus(
 		if _, missing, err = a.db.PopulateGroupCensus(census, spec.GroupID); err != nil {
 			return nil, nil, censusBuildError(err)
 		}
-		if err := a.subscriptions.OrgCanAddCensusParticipants(orgAddress, censusID, 0); err != nil {
-			return nil, nil, err
-		}
 	case len(spec.MemberIDs) > 0:
-		if err := a.subscriptions.OrgCanAddCensusParticipants(orgAddress, censusID, len(spec.MemberIDs)); err != nil {
-			return nil, nil, err
-		}
 		if _, missing, err = a.db.PopulateMembersCensus(census, spec.MemberIDs); err != nil {
 			return nil, nil, censusBuildError(err)
 		}

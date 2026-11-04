@@ -15,6 +15,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -484,11 +485,9 @@ func TestOrganizationMembers(t *testing.T) {
 		"organizations", orgAddress.String(), "members")
 	c.Assert(membersResponse.Members, qt.HasLen, 7, qt.Commentf("expected 7 members remaining (9 total - 2 deleted)"))
 
-	// Test 8: Verify that the members/census limit is enforced
-	// reduce limit of freePlan to allow exactly orgMembers
-	reducedFreePlan := *mockFreePlan
-	reducedFreePlan.Organization.MaxCensus = len(membersResponse.Members)
-	qt.Assert(t, testDB.SetPlan(&reducedFreePlan), qt.IsNil)
+	// Test 8: Verify that the memberbase limit is enforced: lower it to exactly the members held
+	defer func(prev int64) { subscriptions.MaxMembersPerOrg = prev }(subscriptions.MaxMembersPerOrg)
+	subscriptions.MaxMembersPerOrg = int64(len(membersResponse.Members))
 	// Now try adding another member, should fail due to limit
 	overLimitMembers := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
@@ -504,9 +503,6 @@ func TestOrganizationMembers(t *testing.T) {
 	requestAndAssertCode(http.StatusUnauthorized,
 		t, http.MethodPost, adminToken, overLimitMembers,
 		"organizations", orgAddress.String(), "members")
-
-	// revert plan changes
-	qt.Assert(t, testDB.SetPlan(mockFreePlan), qt.IsNil)
 }
 
 func TestUpsertOrganizationMember(t *testing.T) {
@@ -797,18 +793,17 @@ func TestUpsertOrganizationMember(t *testing.T) {
 	})
 }
 
-// TestUpsertMemberEditAtCensusQuota pins that the census quota gates creations only. The limit is
-// on census size and an edit does not change it, so preflighting every upsert would lock an
-// organization sitting exactly at its plan limit out of editing any of its own members.
-func TestUpsertMemberEditAtCensusQuota(t *testing.T) {
+// TestUpsertMemberEditAtMemberLimit pins that the memberbase limit gates creations only. An edit
+// does not change the memberbase size, so preflighting every upsert would lock an organization
+// sitting exactly at its limit out of editing any of its own members.
+func TestUpsertMemberEditAtMemberLimit(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockFreePlan.ID)
-
-	// fill the organization to its plan limit, and build the auto group's census from it: the
-	// census a newly created member would join is now exactly at quota
-	limit := mockFreePlan.Organization.MaxCensus
+	// fill the organization to its memberbase limit, and build the auto group's census from it
+	const limit = 3
+	defer func(prev int64) { subscriptions.MaxMembersPerOrg = prev }(subscriptions.MaxMembersPerOrg)
+	subscriptions.MaxMembersPerOrg = limit
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(limit)...)
 	c.Assert(members, qt.HasLen, limit)
 

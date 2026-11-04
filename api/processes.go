@@ -17,6 +17,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/log"
@@ -79,6 +80,8 @@ func parseProcessDates(req *apicommon.CreateVotingProcessRequest) (start, end ti
 //	@Failure		400		{object}	errors.Error
 //	@Failure		401		{object}	errors.Error
 //	@Failure		403		{object}	errors.Error
+//	@Failure		409		{object}	errors.Error	"The organization is being deleted (40901)"
+//	@Failure		503		{object}	errors.Error	"Busy (50302), retry after Retry-After"
 //	@Router			/processes [post]
 func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
 	req := &apicommon.CreateVotingProcessRequest{}
@@ -107,13 +110,30 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrMalformedBody.Withf("questions must be between 1 and %d", db.MaxQuestionsPerProcess).Write(w)
 		return
 	}
+	// the draft cap is counted and the draft written under the organization's draft lock, held
+	// until the draft and its questions are stored, so parallel creations cannot pass one count
+	draftLock, err := a.draftLocks.lockOrBusy(r.Context(), orgAddr)
+	if err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+	defer draftLock.Unlock()
 	if err := a.subscriptions.OrgCanCreateVotingProcessDraft(orgAddr); err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+	if err := a.refuseTearingDown(orgAddr); err != nil {
 		writeSubscriptionError(w, err)
 		return
 	}
 	start, end, err := parseProcessDates(req)
 	if err != nil {
 		errors.ErrMalformedBody.WithErr(err).Write(w)
+		return
+	}
+	// a draft that runs longer than publish allows could never be published
+	if err := subscriptions.DraftDurationAllowed(start, end); err != nil {
+		writeSubscriptionError(w, err)
 		return
 	}
 	initialStatus, err := account.NormalizeInitialStatus(req.InitialStatus)
@@ -145,6 +165,7 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		StartDate:     start,
 		EndDate:       end,
 		InitialStatus: initialStatus,
+		AddOns:        req.AddOns,
 		CensusID:      census.ID,
 	}
 	vpID, err := a.db.SetVotingProcess(vp)
@@ -363,6 +384,8 @@ func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id bson.ObjectID, u
 //	@Description	Update a voting process while it is still a draft (not published). 409 if already published,
 //	@Description	and 409 (40904) if partially published — an earlier publish already mined some of its
 //	@Description	questions on-chain, so the draft can only be published again (resuming the rest), not edited.
+//	@Description	409 (40177) when the edit turns a once-per-organization add-on on for a draft that was paid
+//	@Description	without it, since an add-on cannot be added after payment.
 //	@Description	The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
 //	@Description	as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
 //	@Description	`typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
@@ -417,6 +440,12 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization").Write(w)
 		return
 	}
+	// after the role check, so a non-member reads 401 rather than learning from a 409
+	// whether someone is paying for this process. Editing a paid draft is how a draft stranded
+	// by publish preflight is repaired, and every publish path re-prices what the edit produced.
+	if a.refuseOrgAddOnsAfterPayment(w, vp, req.AddOns) {
+		return
+	}
 	// a partially published draft (an earlier publish mined some elections before failing) is not
 	// editable: replacing its questions would erase their on-chain ids and orphan the mined
 	// elections. Publishing again resumes the remaining questions instead.
@@ -436,6 +465,11 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	start, end, err := parseProcessDates(req)
 	if err != nil {
 		errors.ErrMalformedBody.WithErr(err).Write(w)
+		return
+	}
+	// a draft that runs longer than publish allows could never be published
+	if err := subscriptions.DraftDurationAllowed(start, end); err != nil {
+		writeSubscriptionError(w, err)
 		return
 	}
 	// a draft update re-resolves the census into a fresh unpublished db.Census; the previous
@@ -469,6 +503,7 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	vp.Title, vp.Description, vp.Header, vp.StreamURI = req.Title, req.Description, req.Header, req.StreamURI
 	vp.StartDate, vp.EndDate, vp.CensusID = start, end, census.ID
 	vp.InitialStatus = initialStatus
+	vp.AddOns = req.AddOns
 	// a stale marker got us past the guard above: editing the draft releases it rather than
 	// writing it back, matching what ClaimVotingProcessForPublish would reclaim anyway. A marker
 	// that went live *after* that guard read is a different matter — the write's own precondition
@@ -734,7 +769,10 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 // validateVotingProcessHandler godoc
 //
 //	@Summary		Validate a voting process for publishing
-//	@Description	Publish-readiness dry-run. Returns { valid, errors } without changing anything.
+//	@Description	Publish-readiness dry-run. Returns { valid, errors } without changing anything. For a draft it
+//	@Description	also lists the payment refusals a publish would give: a wallet that does not cover the price,
+//	@Description	an add-on another draft holds, or a census that cannot be priced.
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
 //	@Produce		json
 //	@Security		BearerAuth
@@ -769,7 +807,14 @@ func (a *API) validateVotingProcessHandler(w http.ResponseWriter, r *http.Reques
 	census, _ := a.db.Census(vp.CensusID.Hex())
 	// the dry-run reports every problem the same way: a mismatched question set is just one more
 	// entry in errors, so the mismatch flag publish acts on is irrelevant here.
-	problems, _ := a.publishPreflightProblems(publishTarget{vp: vp, questions: questions, census: census, user: user})
+	problems, _, _ := a.publishPreflightProblems(publishTarget{vp: vp, questions: questions, census: census, user: user})
+	// a wallet that does not cover the price, an add-on another draft holds, or a census that
+	// cannot be priced is one more reason a publish would be refused; a server error is not
+	if !vp.Published {
+		if err := a.paymentDueForPublish(vp); refusedForUser(err) {
+			problems = append(problems, err.Error())
+		}
+	}
 	apicommon.HTTPWriteJSON(w, &apicommon.VotingProcessValidateResponse{
 		Valid:  len(problems) == 0,
 		Errors: problems,
@@ -997,7 +1042,7 @@ func (a *API) resolveQuestionMemos(ctx context.Context, q *db.VotingProcessQuest
 		return nil
 	}
 	defer a.electionReads.releaseSlot()
-	memos, err := a.account.ElectionMemos(q.UpstreamID, selectsOpen)
+	memos, err := a.account.ElectionMemos(ctx, q.UpstreamID, selectsOpen)
 	if err != nil {
 		log.Warnw("results: memos fetch failed",
 			"question", q.ID.Hex(), "upstreamId", q.UpstreamID.String(), "error", err)
@@ -1296,7 +1341,8 @@ func questionSetProblem(vp *db.VotingProcess, questions []db.VotingProcessQuesti
 
 // writeSubscriptionError writes a typed API error verbatim, falling back to 500.
 func writeSubscriptionError(w http.ResponseWriter, err error) {
-	if apiErr, ok := err.(errors.Error); ok {
+	var apiErr errors.Error
+	if errors.As(err, &apiErr) {
 		apiErr.Write(w)
 		return
 	}
