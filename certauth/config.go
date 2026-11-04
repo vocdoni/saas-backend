@@ -64,7 +64,7 @@ const (
 	codeTTL  = 5 * time.Minute
 	// verifyTimeout bounds Handler.Verify (revocation): the main listener times out at 45 s and the
 	// app waits 45 s.
-	verifyTimeout = 40 * time.Second //nolint:unused
+	verifyTimeout = 40 * time.Second
 )
 
 // testProviderAPIHosts are the --vocdoniApi hosts the synthetic test provider may run against

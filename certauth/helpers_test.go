@@ -55,7 +55,7 @@ func newMemStore() *memStore {
 }
 
 // addMember adds a census member whose nationalId canonicalises to the given number.
-func (m *memStore) addMember(nationalID string, weight uint64) *db.OrgMember { //nolint:unused
+func (m *memStore) addMember(nationalID string, weight uint64) *db.OrgMember {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	member := &db.OrgMember{ID: bson.NewObjectID(), OrgAddress: m.census.OrgAddress, NationalID: nationalID, Weight: weight}
@@ -222,7 +222,7 @@ func (f *fakeTokens) AuthToken(anchorID, uID internal.HexBytes, to string, ctype
 	return internal.HexBytes{byte(len(f.issued))}, nil
 }
 
-func (f *fakeTokens) count() int { //nolint:unused
+func (f *fakeTokens) count() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.issued)

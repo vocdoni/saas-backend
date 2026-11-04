@@ -17,7 +17,7 @@ var (
 	// nonceRe is the grammar of a nonce host label.
 	nonceRe = regexp.MustCompile(`^[a-z2-7]{26}$`)
 	// verifierRe is the RFC 7636 code verifier grammar.
-	verifierRe = regexp.MustCompile(`^[A-Za-z0-9._~-]{43,128}$`) //nolint:unused
+	verifierRe = regexp.MustCompile(`^[A-Za-z0-9._~-]{43,128}$`)
 )
 
 // randomToken returns 32 random bytes as base64url without padding (43 characters): a state or a code.

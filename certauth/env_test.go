@@ -52,7 +52,7 @@ func (e *testEnv) attempt(c *qt.C, returnURL string) (state, authURL string) {
 }
 
 // portString is the listener port as text.
-func (e *testEnv) portString() string { return strconv.Itoa(e.port) } //nolint:unused
+func (e *testEnv) portString() string { return strconv.Itoa(e.port) }
 
 // authURL is the auth listener URL of a nonce host and a state.
 func (e *testEnv) authURL(nonce, state string) string {
