@@ -110,6 +110,15 @@ definitions:
         items:
           $ref: '#/definitions/db.OrgMemberAuthField'
         type: array
+      authMethod:
+        allOf:
+        - $ref: '#/definitions/db.CensusAuthMethod'
+        description: |-
+          AuthMethod "certificate" makes voters sign in only with a digital certificate (FNMT, idCAT)
+          whose DNI/NIE matches their nationalId: authFields must be exactly ["nationalId"] and
+          twoFaFields empty. Absent: today's typed member details. Echoed on process reads.
+        enum:
+        - certificate
       groupId:
         description: |-
           GroupID is the org member group the census was built from. Round-trips: it is echoed back on
@@ -2321,6 +2330,12 @@ definitions:
       uniqueValues:
         type: boolean
     type: object
+  db.CensusAuthMethod:
+    enum:
+    - certificate
+    type: string
+    x-enum-varnames:
+    - CensusAuthMethodCertificate
   db.CensusType:
     enum:
     - auth
