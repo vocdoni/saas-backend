@@ -41,6 +41,9 @@ func (ms *MongoStorage) collectionsMap() map[string]**mongo.Collection {
 		"meteredVotes":        &ms.meteredVotes,
 		"migrations":          &ms.migrations,
 		"counters":            &ms.counters,
+
+		// certificate sign-in attempts (indexed by migration 37)
+		"certAuthTransactions": &ms.certAuthTransactions,
 	}
 }
 
