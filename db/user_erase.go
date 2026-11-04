@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // UserErasureReport summarizes what EraseUser removed or kept, so the operator
@@ -30,6 +33,199 @@ type UserErasureReport struct {
 	// and redacting either would change the derived key and break the
 	// organization's on-chain account.
 	CreatorEmailRetained []common.Address
+}
+
+// ErasurePlanOrg describes what erasing a user does to one of their organizations.
+type ErasurePlanOrg struct {
+	Address common.Address
+	// Name is the organization's display name, "" when unnamed.
+	Name string
+	Role UserRole
+	// DeletedEntirely is set when the user is the sole admin: the organization is torn down.
+	DeletedEntirely bool
+	// CreatorEmailRetained is set on a kept organization whose creator is the user's email.
+	CreatorEmailRetained bool
+	// ManagedBy is the integrator of a managed organization, zero otherwise.
+	ManagedBy common.Address
+	// The counts are set only when DeletedEntirely.
+	LegacyProcesses, Bundles, VotingProcesses, Drafts, Members, Groups,
+	Censuses, CensusParticipants, PendingInvitations, APIKeys int64
+	// WalletBalanceCents is the balance of the organization's own wallet, kept by the erasure: the
+	// stored balance before any drain or draft credit-back (the plan never writes). It is set only
+	// when DeletedEntirely, and 0 for managed organizations (their integrator pays).
+	WalletBalanceCents int64
+	// SurvivingChildren are the organizations whose parent or managedBy is this one and that the
+	// erasure does not tear down. Set only when DeletedEntirely.
+	SurvivingChildren []common.Address
+}
+
+// UserErasurePlan describes what EraseUser would do for a user, without changing anything.
+type UserErasurePlan struct {
+	UserID      uint64
+	Name, Email string
+	Orgs        []ErasurePlanOrg
+	// Blocked lists the torn-down orgs with SurvivingChildren. EraseUser refuses while it is
+	// non-empty. Drafts do not block: they are deleted first by api.DeleteUserOrgDrafts.
+	Blocked []common.Address
+}
+
+// UserErasurePlan returns what erasing the user would remove and keep, organization by
+// organization, in the order of the user's organizations.
+func (ms *MongoStorage) UserErasurePlan(userID uint64) (*UserErasurePlan, error) {
+	user, err := ms.User(userID)
+	if err != nil {
+		return nil, fmt.Errorf("could not fetch user: %w", err)
+	}
+	plan := &UserErasurePlan{
+		UserID: user.ID,
+		Name:   strings.TrimSpace(user.FirstName + " " + user.LastName),
+		Email:  user.Email,
+	}
+	tornDown := map[common.Address]bool{}
+	for _, userOrg := range user.Organizations {
+		org, err := ms.Organization(userOrg.Address)
+		if err != nil {
+			return nil, fmt.Errorf("could not fetch org %s: %w", userOrg.Address, err)
+		}
+		soleAdmin, err := ms.IsSoleOrgAdmin(userOrg.Address, user.ID)
+		if err != nil {
+			return nil, fmt.Errorf("could not classify org %s: %w", userOrg.Address, err)
+		}
+		planOrg := ErasurePlanOrg{
+			Address:         userOrg.Address,
+			Name:            org.DisplayName(),
+			Role:            userOrg.Role,
+			DeletedEntirely: soleAdmin,
+			ManagedBy:       org.ManagedBy,
+		}
+		if soleAdmin {
+			tornDown[userOrg.Address] = true
+			if err := ms.countOrgContents(&planOrg); err != nil {
+				return nil, err
+			}
+		} else {
+			planOrg.CreatorEmailRetained = org.Creator == user.Email
+		}
+		plan.Orgs = append(plan.Orgs, planOrg)
+	}
+	// a child survives unless the same erasure tears it down
+	for i := range plan.Orgs {
+		planOrg := &plan.Orgs[i]
+		if !planOrg.DeletedEntirely {
+			continue
+		}
+		children, err := ms.childOrganizations(planOrg.Address)
+		if err != nil {
+			return nil, err
+		}
+		for _, child := range children {
+			if !tornDown[child] {
+				planOrg.SurvivingChildren = append(planOrg.SurvivingChildren, child)
+			}
+		}
+		if len(planOrg.SurvivingChildren) > 0 {
+			plan.Blocked = append(plan.Blocked, planOrg.Address)
+		}
+	}
+	return plan, nil
+}
+
+// countOrgContents fills the counts and the wallet balance of an organization to be torn down.
+func (ms *MongoStorage) countOrgContents(planOrg *ErasurePlanOrg) error {
+	address := planOrg.Address
+	var err error
+	if planOrg.Members, err = ms.CountOrgMembers(address); err != nil {
+		return fmt.Errorf("could not count members of org %s: %w", address, err)
+	}
+	if planOrg.Groups, _, err = ms.OrganizationMemberGroups(address, 1, 1); err != nil {
+		return fmt.Errorf("could not count groups of org %s: %w", address, err)
+	}
+	censuses, err := ms.CensusesByOrg(address)
+	if err != nil {
+		return fmt.Errorf("could not list censuses of org %s: %w", address, err)
+	}
+	planOrg.Censuses = int64(len(censuses))
+	for _, census := range censuses {
+		n, err := ms.CountCensusParticipants(census.ID.Hex())
+		if err != nil {
+			return fmt.Errorf("could not count participants of census %s: %w", census.ID.Hex(), err)
+		}
+		planOrg.CensusParticipants += n
+	}
+	if planOrg.LegacyProcesses, err = ms.CountProcesses(address, AllProcesses); err != nil {
+		return fmt.Errorf("could not count processes of org %s: %w", address, err)
+	}
+	bundles, err := ms.ProcessBundlesByOrg(address)
+	if err != nil {
+		return fmt.Errorf("could not list bundles of org %s: %w", address, err)
+	}
+	planOrg.Bundles = int64(len(bundles))
+	invites, err := ms.PendingInvitations(address)
+	if err != nil {
+		return fmt.Errorf("could not list invitations of org %s: %w", address, err)
+	}
+	planOrg.PendingInvitations = int64(len(invites))
+	if planOrg.VotingProcesses, err = ms.CountVotingProcesses(address, AllProcesses); err != nil {
+		return fmt.Errorf("could not count voting processes of org %s: %w", address, err)
+	}
+	if planOrg.Drafts, err = ms.CountVotingProcesses(address, DraftOnly); err != nil {
+		return fmt.Errorf("could not count drafts of org %s: %w", address, err)
+	}
+	keys, err := ms.APIKeysByOrg(address)
+	if err != nil {
+		return fmt.Errorf("could not list API keys of org %s: %w", address, err)
+	}
+	planOrg.APIKeys = int64(len(keys))
+	if planOrg.ManagedBy == (common.Address{}) {
+		if planOrg.WalletBalanceCents, err = ms.storedWalletBalance(address); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// storedWalletBalance reads the balance stored on the organization's wallet without draining it
+// (Wallet would post the unposted movements, a write), so building a plan never writes. It is the
+// balance before any drain or draft credit-back; unposted movements are already part of it, since
+// each one moves the balance in the same write that queues it. A missing wallet reads 0.
+func (ms *MongoStorage) storedWalletBalance(address common.Address) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	var wallet struct {
+		BalanceCents int64 `bson:"balanceCents"`
+	}
+	err := ms.wallets.FindOne(ctx, bson.M{"_id": address},
+		options.FindOne().SetProjection(bson.M{"balanceCents": 1})).Decode(&wallet)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("could not read the wallet of org %s: %w", address, err)
+	}
+	return wallet.BalanceCents, nil
+}
+
+// childOrganizations returns the organizations whose parent or managedBy is the given one.
+func (ms *MongoStorage) childOrganizations(address common.Address) ([]common.Address, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	cursor, err := ms.organizations.Find(ctx, bson.M{"$or": bson.A{
+		bson.M{"parent": address}, bson.M{"managedBy": address},
+	}}, options.Find().SetProjection(bson.M{"_id": 1}))
+	if err != nil {
+		return nil, fmt.Errorf("could not list the sub-orgs of org %s: %w", address, err)
+	}
+	var children []struct {
+		Address common.Address `bson:"_id"`
+	}
+	if err := cursor.All(ctx, &children); err != nil {
+		return nil, fmt.Errorf("could not decode the sub-orgs of org %s: %w", address, err)
+	}
+	addresses := make([]common.Address, 0, len(children))
+	for _, child := range children {
+		addresses = append(addresses, child.Address)
+	}
+	return addresses, nil
 }
 
 // IsSoleOrgAdmin reports whether the user holds the admin role in the
@@ -63,30 +259,28 @@ func (ms *MongoStorage) IsSoleOrgAdmin(address common.Address, userID uint64) (b
 // itself are deleted.
 // Each step is best-effort: failures are accumulated and returned joined, so a
 // single stuck collection cannot leave the erasure silently half-done. It refuses,
-// erasing nothing, while an organization it would tear down still has drafts: a
-// draft may hold money only the API layer can refund (api.DeleteOrgDrafts).
+// erasing nothing, while its UserErasurePlan is Blocked (a sub-org or managed org would
+// be orphaned), and while an organization it would tear down still has drafts: a
+// draft may hold money only the API layer can refund (api.DeleteUserOrgDrafts).
 // Payment rows are kept: they are the audit trail of money that moved.
 func (ms *MongoStorage) EraseUser(userID uint64) (*UserErasureReport, error) {
 	user, err := ms.User(userID)
 	if err != nil {
 		return nil, fmt.Errorf("could not fetch user: %w", err)
 	}
-	// refuse before erasing anything rather than strand a draft's money
-	for _, userOrg := range user.Organizations {
-		soleAdmin, err := ms.IsSoleOrgAdmin(userOrg.Address, user.ID)
-		if err != nil {
-			return nil, fmt.Errorf("classifying org %s: %w", userOrg.Address, err)
-		}
-		if !soleAdmin {
-			continue
-		}
-		drafts, err := ms.CountVotingProcesses(userOrg.Address, DraftOnly)
-		if err != nil {
-			return nil, fmt.Errorf("counting drafts of org %s: %w", userOrg.Address, err)
-		}
-		if drafts > 0 {
+	// refuse before erasing anything rather than orphan a sub-org or strand a draft's money
+	plan, err := ms.UserErasurePlan(userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(plan.Blocked) > 0 {
+		return nil, fmt.Errorf("orgs %v have sub-orgs or managed orgs that would survive them: resolve those first",
+			plan.Blocked)
+	}
+	for _, planOrg := range plan.Orgs {
+		if planOrg.DeletedEntirely && planOrg.Drafts > 0 {
 			return nil, fmt.Errorf("org %s still has %d drafts: delete them (refunding the paid ones) first",
-				userOrg.Address, drafts)
+				planOrg.Address, planOrg.Drafts)
 		}
 	}
 	report := &UserErasureReport{UserID: user.ID, Email: user.Email}
