@@ -58,13 +58,13 @@ func TestChainRequestThrottleKeepsSlotsForOtherRoutes(t *testing.T) {
 	release := make(chan struct{})
 	var chainInFlight atomic.Int64
 	entered := make(chan struct{}, maxInFlightChainRequests)
-	chainRoute := newChainRequestThrottle()(throttle(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	chainRoute := newChainRequestThrottle(throttle)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		chainInFlight.Add(1)
 		entered <- struct{}{}
 		<-release
 		chainInFlight.Add(-1)
 		w.WriteHeader(http.StatusOK)
-	})))
+	}))
 	otherRoute := throttle(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
