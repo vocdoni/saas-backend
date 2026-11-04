@@ -8,6 +8,7 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/proto/build/go/models"
 )
@@ -152,6 +153,15 @@ func TestDeleteManagedOrgQuestionGuard(t *testing.T) {
 	})
 	c.Assert(err, qt.IsNil)
 
+	// CSP rows of the voting process and of its question's election, and an API key of the managed
+	// org: the teardown must remove them all
+	cspUser := internal.HexBytes("qguard-voter")
+	c.Assert(testDB.SetCSPAuth(internal.HexBytes("qguard-token"), cspUser, internal.HexBytes(vpID[:]), ""), qt.IsNil)
+	insertLegacyDoc(t, "cspTokensStatus", db.CSPProcess{
+		ID: internal.HexBytes("qguard-status"), UserID: cspUser, ProcessID: election,
+	})
+	c.Assert(testDB.SetAPIKey(&db.APIKey{ID: "qguard-key", OrgAddress: managed.Address, Hash: "qguard-hash"}), qt.IsNil)
+
 	// READY question election → blocked with 409, nothing deleted.
 	_, code := testRequest(t, http.MethodDelete, token, nil, "integrator", "organizations", managed.Address.String())
 	c.Assert(code, qt.Equals, http.StatusConflict)
@@ -165,6 +175,13 @@ func TestDeleteManagedOrgQuestionGuard(t *testing.T) {
 		t, http.MethodDelete, token, nil, "integrator", "organizations", managed.Address.String(),
 	)
 	c.Assert(resp.Address, qt.Equals, managed.Address.String())
+	_, err = testDB.LastCSPAuth(cspUser, internal.HexBytes(vpID[:]))
+	c.Assert(err, qt.ErrorIs, db.ErrTokenNotFound)
+	_, err = testDB.CSPProcessByUserAndProcess(cspUser, election)
+	c.Assert(err, qt.ErrorIs, db.ErrTokenNotFound)
+	keys, err := testDB.APIKeysByOrg(managed.Address)
+	c.Assert(err, qt.IsNil)
+	c.Assert(keys, qt.HasLen, 0)
 }
 
 // enableProcessPlan subscribes the managed org to a process-capable plan so publish is allowed.
