@@ -19,15 +19,15 @@ func TestNationalIDWarnings(t *testing.T) {
 
 	n := newNationalIDWarnings()
 	for _, m := range []struct{ id, value string }{
-		{"a", "12345678Z"},  // canonical — no individual warning
-		{"b", "12345678"},   // derived_letter (letterless) — no individual warning
-		{"c", "12345678A"},  // letter_mismatch
-		{"d", "K1234567L"},  // unsupported_document
-		{"e", "PAB123456"},  // invalid
-		{"f", ""},           // missing
-		{"g", "02345678T"},  // canonical
-		{"h", "2345678T"},   // canonical (padded form of g)
-		{"i", "X1234567L"},  // canonical — singleton, no duplicate
+		{"a", "12345678Z"}, // canonical — no individual warning
+		{"b", "12345678"},  // derived_letter (letterless) — no individual warning
+		{"c", "12345678A"}, // letter_mismatch
+		{"d", "K1234567L"}, // unsupported_document
+		{"e", "PAB123456"}, // invalid
+		{"f", ""},          // missing
+		{"g", "02345678T"}, // canonical
+		{"h", "2345678T"},  // canonical (padded form of g)
+		{"i", "X1234567L"}, // canonical — singleton, no duplicate
 	} {
 		n.add(NationalIDWarning{MemberID: m.id}, m.value)
 	}

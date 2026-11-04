@@ -809,13 +809,8 @@ definitions:
         type: string
       nationalId:
         description: |-
-          Member's National ID No. A Spanish DNI/NIE is stored in its canonical form: 9 characters,
-          uppercase, leading zeros kept, separators dropped, a missing check letter derived.
-        type: string
-      nationalIdOriginal:
-        description: |-
-          NationalIDOriginal is the nationalId as imported when its DNI/NIE check letter was derived
-          rather than supplied, so the derivation can be reviewed. Read-only: ignored on writes.
+          Member's National ID No, stored as entered (trimmed); DNI/NIE variants are matched by their
+          canonical form at login
         type: string
       other:
         additionalProperties: {}
@@ -2316,15 +2311,11 @@ definitions:
     properties:
       class:
         type: string
-      derived:
-        type: string
       line:
         description: Line is the 1-based position of the member in the submitted import
           list.
         type: integer
       memberId:
-        type: string
-      original:
         type: string
     type: object
   db.OrgAddOn:
@@ -6432,7 +6423,8 @@ paths:
         the chain cannot be asked about a signed question, that question is reported with
         hasVotedUnknown=true (and hasVoted=false) instead of failing the whole list. For `phone`
         pass the plaintext number; it is hashed server-side. For `nationalId` a Spanish DNI/NIE
-        also matches its canonical form, so separator, case and padding variants find the member.
+        also matches its canonical form when the member is stored in canonical form; a member stored
+        verbatim with separators or non-canonical casing is found only by that exact value.
         Requires Manager/Admin of the owning organization.
 
         Also callable with a scoped API key (scope: `voting:write`).
@@ -7171,9 +7163,8 @@ paths:
         When `nationalId` is an auth field, both answers carry `nationalIdWarnings` (in the 400 under
         `data`): one entry per member whose nationalId is missing, a DNI/NIE with a wrong check
         letter (`letter_mismatch`), another tax id (`unsupported_document`), not a DNI/NIE at all
-        (`invalid`) or letterless with a derived letter (`derived_letter`, with `original` and
-        `derived`), plus a `duplicate_after_normalization` entry for every member sharing a canonical
-        DNI/NIE with another. Warnings never make the census invalid.
+        (`invalid`), plus a `duplicate_after_normalization` entry for every member sharing a
+        canonical DNI/NIE with another. Warnings never make the census invalid.
 
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
