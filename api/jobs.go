@@ -19,9 +19,10 @@ import (
 //	@Description	`failed`) and `result` carries only the attributes the job produced (import counters
 //	@Description	`added`/`total`/`progress`, or tx `address`/`voteID`/`status`), each omitted when empty.
 //	@Description	Public endpoint: the 32-byte job id is the capability and results carry only public
-//	@Description	data. Per-row import error detail and nationalId warnings (which may reference member
-//	@Description	data) are returned only to an authenticated manager/admin of the job's organization (as on
-//	@Description	GET /jobs); anonymous callers get status and counters only.
+//	@Description	data. Per-row import error detail (which may reference member data) and nationalId warnings
+//	@Description	(which carry no values, gated like the errors for a consistent shape) are returned only to
+//	@Description	an authenticated manager/admin of the job's organization (as on GET /jobs); anonymous
+//	@Description	callers get status and counters only.
 //	@Tags			jobs
 //	@Produce		json
 //	@Param			jobId	path		string					true	"Job id returned by the async endpoint (hex)"
@@ -49,10 +50,11 @@ func (a *API) jobStatusHandler(w http.ResponseWriter, r *http.Request) {
 
 	resp := apicommon.JobResponseFromDB(job)
 	// Member-import error strings can embed row PII (emails/phones/birthdates of the failing
-	// members), and the nationalId warnings carry DNI values. Reveal that per-row detail only to an
-	// authenticated manager/admin of the job's org (the same gate as GET /jobs); anonymous callers
-	// (e.g. tx-job pollers, which use this endpoint without a token) and non-members get status +
-	// counters only. tx-job errors are chain failures (no PII) and are always kept.
+	// members). Reveal that per-row detail only to an authenticated manager/admin of the job's org
+	// (the same gate as GET /jobs); the nationalId warnings carry no values but are gated like the
+	// errors for a consistent shape. Anonymous callers (e.g. tx-job pollers, which use this endpoint
+	// without a token) and non-members get status + counters only. tx-job errors are chain failures
+	// (no PII) and are always kept.
 	if job.Type == db.JobTypeOrgMembers || job.Type == db.JobTypeCensusParticipants {
 		u := a.optionalUser(r)
 		if u == nil || (!u.HasRoleFor(job.OrgAddress, db.ManagerRole) && !u.HasRoleFor(job.OrgAddress, db.AdminRole)) {

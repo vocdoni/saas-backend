@@ -3596,9 +3596,10 @@ paths:
         `failed`) and `result` carries only the attributes the job produced (import counters
         `added`/`total`/`progress`, or tx `address`/`voteID`/`status`), each omitted when empty.
         Public endpoint: the 32-byte job id is the capability and results carry only public
-        data. Per-row import error detail and nationalId warnings (which may reference member
-        data) are returned only to an authenticated manager/admin of the job's organization (as on
-        GET /jobs); anonymous callers get status and counters only.
+        data. Per-row import error detail (which may reference member data) and nationalId warnings
+        (which carry no values, gated like the errors for a consistent shape) are returned only to
+        an authenticated manager/admin of the job's organization (as on GET /jobs); anonymous
+        callers get status and counters only.
       parameters:
       - description: Job id returned by the async endpoint (hex)
         in: path

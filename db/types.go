@@ -1369,6 +1369,7 @@ type Job struct {
 	HeartbeatAt time.Time `json:"-" bson:"heartbeatAt,omitempty"`
 
 	// NationalIDWarnings are the nationalId warnings of a member import job (JobTypeOrgMembers).
-	// They carry DNI values: GET /jobs/{jobId} hides them from anonymous callers, like Errors.
+	// They carry no values (member id, line and class only); GET /jobs/{jobId} still hides them from
+	// anonymous callers like Errors, for shape consistency.
 	NationalIDWarnings []NationalIDWarning `json:"nationalIdWarnings,omitempty" bson:"nationalIdWarnings,omitempty"`
 }
