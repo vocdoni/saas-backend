@@ -184,6 +184,7 @@ Flags on `cmd/service/main.go` (Viper ⇄ `VOCDONI_` env), all read into a
 | `--certAuthProxyFrontIPs` | comma list of CIDRs allowed to send PROXY protocol headers (origin mode; required when `certAuthProxyProtocol` is set) | — |
 | `--certAuthCFOriginPullCA` | PEM file with the CA of the Authenticated Origin Pulls client certificate (cloudflare mode; required) | — |
 | `--certAuthCFAllowedIPs` | comma list of CIDRs the auth listener accepts in cloudflare mode (empty = no IP filter) | — |
+| `--certAuthCloudflareAcknowledged` | cloudflare mode opt-in: required at startup before cloudflare mode will start (R7); the AOP CA must be a per-zone or per-hostname certificate, never Cloudflare's global one | `false` |
 | `--certAuthTestProvider` | enable the synthetic test provider (dev/e2e only) | `false` |
 | `--certAuthTestProviderCA` | PEM file with the synthetic CA certificate (its key stays with the test harness) | — |
 | `--certAuthTestProviderAllowedAPIs` | extra `--vocdoniApi` hosts the test provider may run against (see rules) | — |
@@ -207,15 +208,17 @@ Rules, enforced at startup (fail loudly, like `NewHandler` does):
   `x509.Certificate.VerifyHostname` on a sample nonce host at startup) — in cloudflare mode the
   certificate only has to satisfy the origin pull (a Cloudflare Origin CA certificate is fine),
   but the hostname check still applies.
-- Mode `cloudflare` additionally requires the AOP CA file; starting in this mode logs a prominent
-  warning naming the unverified blockers (§3b) until SP6 clears them.
+- Mode `cloudflare` additionally requires the AOP CA file and `--certAuthCloudflareAcknowledged`
+  (startup refuses without it, R7); starting in this mode logs a prominent warning naming the
+  unverified blockers (§3b) until SP6 clears them.
 - `--certAuthProxyProtocol` requires `--certAuthProxyFrontIPs` (fail at startup otherwise): PROXY
   headers are honoured only from those CIDRs (audit F14).
 - `certAuthTestProvider` refuses to enable unless the `--vocdoniApi` host is on an **allowlist**
-  (audit F8 — a deny-known-prod check fails open): `localhost`, `127.0.0.1`, the dev/stage hosts
-  `api-dev.vocdoni.net` and `api-stg.vocdoni.net`, or a host listed in
-  `--certAuthTestProviderAllowedAPIs`. Anything else refuses at startup. When enabled it always
-  logs a warning banner and adds the synthetic provider *in addition to* the configured ones.
+  (audit F8 — a deny-known-prod check fails open): `localhost`, `127.0.0.1`, the dev host
+  `api-dev.vocdoni.net`, or a host listed in `--certAuthTestProviderAllowedAPIs`. Stage and any
+  other environment must opt in explicitly with `--certAuthTestProviderAllowedAPIs` (R9). Anything
+  else refuses at startup. When enabled it always logs a warning banner and adds the synthetic
+  provider *in addition to* the configured ones.
 
 ### 2. Transaction store (Mongo)
 
@@ -663,7 +666,7 @@ follow-ups (new endpoints, `authMethod`, the error envelope) as suggested issues
 | Key the pre-Verify budget on the unverified leaf-subject document | Rejected (audit F1, Critical): the subject is attacker-controlled; 10 forged self-signed certificates naming a victim's DNI would lock the real voter out hourly — the inverse of the typed-auth submission/voter split. |
 | Charge revocation outages to the budget | A CA outage would lock every affected voter out for an hour through no fault of theirs; contract §8 excludes it. |
 | A separate cert-check microservice | Rejected in the umbrella plan (cross-origin cookie redeem = third-party cookie death); embedding keeps one trust boundary and reuses the CSP token store. |
-| Gate cloudflare mode behind an extra "ack" env var | Selecting `certAuthMode=cloudflare` is already an explicit operator act; a startup warning naming the unverified blockers is enough, and SP6's runbook controls production. |
+| Gate cloudflare mode behind an extra "ack" env var | **Adopted (R7)**: `--certAuthCloudflareAcknowledged` is required at startup for cloudflare mode; the AOP CA must be a per-zone or per-hostname certificate, never Cloudflare's global one, because the global CA and IP ranges are shared by every Cloudflare zone. |
 | Refuse `authMethod: "certificate"` only at publish when the feature is off | Would let organizers build drafts that can never run on that deployment; refusing at create/validate fails earlier with the same code path. |
 
 ## Compatibility and rollout
