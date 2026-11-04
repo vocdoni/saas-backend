@@ -57,9 +57,10 @@ func (ms *MongoStorage) IsSoleOrgAdmin(address common.Address, userID uint64) (b
 // EraseUser removes a registered user and their personal data (right to
 // erasure). Organizations where the user is the sole admin are torn down
 // entirely (members, groups, censuses, participants, processes, voting processes
-// and their questions, bundles, CSP tokens, jobs, invitations); in organizations with other admins only the
-// user's membership is removed. Invitations addressed to or issued by the
-// user, their verification codes and the user document itself are deleted.
+// and their questions, bundles, CSP tokens and statuses, jobs, metered votes, API keys, invitations); in
+// organizations with other admins only the user's membership is removed. Invitations addressed to or
+// issued by the user, their verification codes, the objects they uploaded and the user document
+// itself are deleted.
 // Each step is best-effort: failures are accumulated and returned joined, so a
 // single stuck collection cannot leave the erasure silently half-done. It refuses,
 // erasing nothing, while an organization it would tear down still has drafts: a
@@ -125,6 +126,10 @@ func (ms *MongoStorage) EraseUser(userID uint64) (*UserErasureReport, error) {
 	if err := ms.deleteAllVerificationCodes(user.ID); err != nil {
 		errs = append(errs, fmt.Errorf("deleting verification codes: %w", err))
 	}
+	// uploaded objects (images) stamped with the user's email
+	if err := ms.deleteObjectsByUser(user.Email); err != nil {
+		errs = append(errs, fmt.Errorf("deleting objects: %w", err))
+	}
 	// the user document itself (email, names, password hash, oauth data, roles)
 	if err := ms.DelUser(user); err != nil {
 		errs = append(errs, fmt.Errorf("deleting user document: %w", err))
@@ -140,6 +145,16 @@ func (ms *MongoStorage) deleteAllVerificationCodes(userID uint64) error {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	_, err := ms.verifications.DeleteMany(ctx, bson.M{"userId": userID})
+	return err
+}
+
+// deleteObjectsByUser removes every stored object whose userId is the given user email.
+func (ms *MongoStorage) deleteObjectsByUser(email string) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
+	defer cancel()
+	_, err := ms.objects.DeleteMany(ctx, bson.M{"userId": email})
 	return err
 }
 
@@ -204,6 +219,10 @@ func (ms *MongoStorage) eraseOrgData(address common.Address) error {
 	if _, err := ms.DeleteProcessesByOrg(address); err != nil {
 		errs = append(errs, fmt.Errorf("deleting processes: %w", err))
 	}
+	// the CSP rows of the voting processes go first: they are found through the processes' ids
+	if err := ms.DeleteVotingProcessCSPByOrg(address); err != nil {
+		errs = append(errs, fmt.Errorf("deleting CSP data of voting processes: %w", err))
+	}
 	// published voting processes and their questions; EraseUser refused while drafts remained
 	if _, err := ms.DeleteVotingProcessesByOrg(address); err != nil {
 		errs = append(errs, fmt.Errorf("deleting voting processes: %w", err))
@@ -221,6 +240,9 @@ func (ms *MongoStorage) eraseOrgData(address common.Address) error {
 	}
 	if _, err := ms.DeleteMeteredVotesByOrg(address); err != nil {
 		errs = append(errs, fmt.Errorf("deleting metered votes: %w", err))
+	}
+	if _, err := ms.DeleteAPIKeysByOrg(address); err != nil {
+		errs = append(errs, fmt.Errorf("deleting API keys: %w", err))
 	}
 	if _, err := ms.DeleteInvitationsByOrg(address); err != nil {
 		errs = append(errs, fmt.Errorf("deleting invitations: %w", err))
