@@ -1266,13 +1266,17 @@ const (
 	// JobTypePublishVotingProcess represents a multi-question voting-process publish
 	// (batch of NEW_PROCESS txs) tx job
 	JobTypePublishVotingProcess JobType = "publish_voting_process"
+	// JobTypeSetProcessEndDate represents the SET_PROCESS_DURATION tx job that moves the end date
+	// of every open (READY or PAUSED) published question of a voting process
+	JobTypeSetProcessEndDate JobType = "set_process_end_date"
 )
 
 // IsValid reports whether t is one of the known job types.
 func (t JobType) IsValid() bool {
 	switch t {
 	case JobTypeOrgMembers, JobTypeCensusParticipants, JobTypePublishProcess, JobTypeSetProcessStatus,
-		JobTypeSetProcessCensus, JobTypeRelayVote, JobTypeRelayVotes, JobTypePublishVotingProcess:
+		JobTypeSetProcessCensus, JobTypeRelayVote, JobTypeRelayVotes, JobTypePublishVotingProcess,
+		JobTypeSetProcessEndDate:
 		return true
 	default:
 		return false

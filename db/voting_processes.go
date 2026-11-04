@@ -487,3 +487,24 @@ func (ms *MongoStorage) SetVotingProcessPublished(id bson.ObjectID, owner string
 	}
 	return nil
 }
+
+// SetVotingProcessEndDate stores a new end date on a published voting process, once every open
+// question's election has been moved to it on chain. It returns ErrNotFound when no published
+// process has that id.
+func (ms *MongoStorage) SetVotingProcessEndDate(id bson.ObjectID, endDate time.Time) error {
+	if id == bson.NilObjectID || endDate.IsZero() {
+		return ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.votingProcesses.UpdateOne(ctx,
+		bson.M{"_id": id, "published": true},
+		bson.M{"$set": bson.M{"endDate": endDate, "updatedAt": time.Now()}})
+	if err != nil {
+		return fmt.Errorf("failed to set voting process end date: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}

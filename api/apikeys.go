@@ -86,6 +86,7 @@ var apiKeyAllowlist = map[string]string{
 	"POST " + processesPublishEndpoint:        ScopeVotingWrite,
 	"PUT " + processesQuestionsStatusEndpoint: ScopeVotingWrite,
 	"PUT " + processesQuestionStatusEndpoint:  ScopeVotingWrite,
+	"PUT " + processesEndDateEndpoint:         ScopeVotingWrite,
 	"GET " + processesParticipantsEndpoint:    ScopeVotingWrite,
 	"PUT " + processesCensusEndpoint:          ScopeVotingWrite,
 	"DELETE " + processesCensusEndpoint:       ScopeVotingWrite,

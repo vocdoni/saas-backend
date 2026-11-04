@@ -1459,6 +1459,12 @@ definitions:
           $ref: '#/definitions/apicommon.RelayVoteRequest'
         type: array
     type: object
+  apicommon.SetProcessEndDateRequest:
+    properties:
+      endDate:
+        example: "2026-12-31T23:59:59Z"
+        type: string
+    type: object
   apicommon.SetProcessStatusRequest:
     properties:
       status:
@@ -2259,6 +2265,7 @@ definitions:
     - relay_vote
     - relay_votes
     - publish_voting_process
+    - set_process_end_date
     type: string
     x-enum-varnames:
     - JobTypeOrgMembers
@@ -2269,6 +2276,7 @@ definitions:
     - JobTypeRelayVote
     - JobTypeRelayVotes
     - JobTypePublishVotingProcess
+    - JobTypeSetProcessEndDate
   db.MultiLangString:
     additionalProperties:
       type: string
@@ -6279,6 +6287,79 @@ paths:
       security:
       - BearerAuth: []
       summary: Top up the wallet to publish a voting process
+      tags:
+      - processes
+  /processes/{processId}/endDate:
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Moves the end date of every open (READY or PAUSED) published question's election to `endDate`
+        (RFC 3339, any offset; stored in UTC, truncated to seconds), as an async job; closed questions
+        keep their outcome and are skipped. Admin only (JWT, or an API key with `voting:write` whose
+        user is Admin); free. Extend only: the new end must be at least 5 minutes after the current end
+        (the current end itself is accepted as a no-op job) and at most 90 days after the process's start date. Request
+        the extension at least 5 minutes plus 1 minute per open question before the current end; the one
+        exception is a repair: an endDate that an open question's election already ends at on chain (left
+        by a partially failed job) is accepted even after the current end, and finishes the rest:
+        questions already ended on chain are skipped, and if one is still open but too close to its end
+        the job fails with nothing sent until it has ended.
+        Poll GET /jobs/{jobId}: `result.status` is the requested end date (applied
+        only if the job completed) and `result.questions[]` gives each open question's
+        `status`/`error`/`noOp`. The stored end date (used by voter
+        authentication) changes only when every question succeeded; on a partial failure the job
+        fails with "n of m questions failed; send the same endDate again to finish the rest" and calling
+        again with the same endDate finishes the rest
+        (done questions are no-ops). A question found closed on chain is skipped (`noOp`, with the reason
+        in `error`) and its stored status corrected. If the stored end date changed after the request was
+        validated, the job fails before sending anything and names the current end date. The job can also
+        fail before sending anything ("...; nothing was changed"), including "no open question left to
+        extend" when every question is closed on chain.
+        A 500 is an internal error or a failed blockchain check of a repair; no job was created, so retrying is safe.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: New end date
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.SetProcessEndDateRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/apicommon.EnqueuedResponse'
+        "400":
+          description: Bad endDate, over 90 days, unpublished, ended or near its end,
+            no open question
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: User is not admin of the organization
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal error or blockchain check failed; no job was created,
+            retry
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Organization transaction in progress (50303), or tx queue full
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Extend the end date of a published process
       tags:
       - processes
   /processes/{processId}/participants:
