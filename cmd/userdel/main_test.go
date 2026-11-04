@@ -440,7 +440,7 @@ func TestPrintPlan(t *testing.T) {
 	c := qt.New(t)
 	solo, shared, child := common.Address{0x81}, common.Address{0x82}, common.Address{0x83}
 	var out bytes.Buffer
-	printPlan(&out, &db.UserErasurePlan{
+	c.Assert(printPlan(&out, &db.UserErasurePlan{
 		UserID: 7, Name: "User Del", Email: "userdel-plan@test.com",
 		Orgs: []db.ErasurePlanOrg{
 			{
@@ -452,7 +452,7 @@ func TestPrintPlan(t *testing.T) {
 			{Address: shared, Role: db.ManagerRole, CreatorEmailRetained: true},
 		},
 		Blocked: []common.Address{solo},
-	})
+	}), qt.IsNil)
 	for _, want := range []string{
 		"This will erase user #7: User Del <userdel-plan@test.com>",
 		"Organization " + solo.String() + " (\"Solo\", role: admin)\n  DELETED ENTIRELY",

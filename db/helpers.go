@@ -44,16 +44,11 @@ func (ms *MongoStorage) collectionsMap() map[string]**mongo.Collection {
 	}
 }
 
-func (ms *MongoStorage) init(runMigrations bool) error {
+func (ms *MongoStorage) init() {
 	// Initialize collection pointers
 	for name, collectionPtr := range ms.collectionsMap() {
 		*collectionPtr = ms.DBClient.Database(ms.database).Collection(name)
 	}
-	if !runMigrations {
-		return nil
-	}
-	// run db migrations
-	return ms.RunMigrationsUp()
 }
 
 // dynamicUpdateDocument creates a BSON update document from a struct, including only non-zero fields.

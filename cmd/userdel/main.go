@@ -94,7 +94,9 @@ func run(opts *options) error {
 	if err != nil {
 		return err
 	}
-	printPlan(os.Stdout, plan)
+	if err := printPlan(os.Stdout, plan); err != nil {
+		return fmt.Errorf("could not print the plan: %w", err)
+	}
 	if opts.dryRun {
 		fmt.Println("\ndry run: nothing was deleted")
 		return nil
@@ -171,52 +173,55 @@ func printWalletBalance(w io.Writer, ms *db.MongoStorage, address common.Address
 	return nil
 }
 
-// printPlan prints a human-readable report of everything the erasure will
+// printPlan writes a human-readable report of everything the erasure will
 // touch: the user's identity, each organization with its classification (full
 // teardown vs membership removal) and, for organizations about to be deleted,
 // how much data they hold and which of their sub-orgs block the erasure.
-func printPlan(w io.Writer, plan *db.UserErasurePlan) {
-	fmt.Fprintf(w, "\nThis will erase user #%d: %s <%s>\n", plan.UserID, plan.Name, plan.Email)
+func printPlan(w io.Writer, plan *db.UserErasurePlan) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nThis will erase user #%d: %s <%s>\n", plan.UserID, plan.Name, plan.Email)
 	if len(plan.Orgs) == 0 {
-		fmt.Fprintln(w, "\nThe user belongs to no organization.")
+		fmt.Fprintln(&b, "\nThe user belongs to no organization.")
 	}
 	for _, org := range plan.Orgs {
 		orgName := org.Name
 		if orgName == "" {
 			orgName = "unnamed"
 		}
-		fmt.Fprintf(w, "\nOrganization %s (%q, role: %s)\n", org.Address, orgName, org.Role)
+		fmt.Fprintf(&b, "\nOrganization %s (%q, role: %s)\n", org.Address, orgName, org.Role)
 		if !org.DeletedEntirely {
-			fmt.Fprintln(w, "  KEPT: other admins exist, only this user's membership is removed.")
+			fmt.Fprintln(&b, "  KEPT: other admins exist, only this user's membership is removed.")
 			if org.CreatorEmailRetained {
-				fmt.Fprintln(w, "  NOTE: the creator email stays (the org signing key is derived from it);")
-				fmt.Fprintln(w, "        follow up manually if it must be redacted.")
+				fmt.Fprintln(&b, "  NOTE: the creator email stays (the org signing key is derived from it);")
+				fmt.Fprintln(&b, "        follow up manually if it must be redacted.")
 			}
 			continue
 		}
-		fmt.Fprintln(w, "  DELETED ENTIRELY: this user is its only admin. This removes:")
-		fmt.Fprintf(w, "    the organization and its voting history metadata (%d processes, %d bundles)\n",
+		fmt.Fprintln(&b, "  DELETED ENTIRELY: this user is its only admin. This removes:")
+		fmt.Fprintf(&b, "    the organization and its voting history metadata (%d processes, %d bundles)\n",
 			org.LegacyProcesses, org.Bundles)
-		fmt.Fprintf(w, "    %d voting processes, %d of them drafts (paid drafts are credited back first)\n",
+		fmt.Fprintf(&b, "    %d voting processes, %d of them drafts (paid drafts are credited back first)\n",
 			org.VotingProcesses, org.Drafts)
-		fmt.Fprintf(w, "    %d members in %d groups\n", org.Members, org.Groups)
-		fmt.Fprintf(w, "    %d censuses with %d participants (incl. their CSP auth tokens)\n",
+		fmt.Fprintf(&b, "    %d members in %d groups\n", org.Members, org.Groups)
+		fmt.Fprintf(&b, "    %d censuses with %d participants (incl. their CSP auth tokens)\n",
 			org.Censuses, org.CensusParticipants)
-		fmt.Fprintf(w, "    %d pending invitations, plus import jobs\n", org.PendingInvitations)
-		fmt.Fprintf(w, "    %d API keys\n", org.APIKeys)
+		fmt.Fprintf(&b, "    %d pending invitations, plus import jobs\n", org.PendingInvitations)
+		fmt.Fprintf(&b, "    %d API keys\n", org.APIKeys)
 		if len(org.SurvivingChildren) > 0 {
-			fmt.Fprintln(w, "  BLOCKED: these sub-orgs or managed orgs would survive it; delete them or move them first:")
+			fmt.Fprintln(&b, "  BLOCKED: these sub-orgs or managed orgs would survive it; delete them or move them first:")
 			for _, child := range org.SurvivingChildren {
-				fmt.Fprintf(w, "    %s\n", child)
+				fmt.Fprintf(&b, "    %s\n", child)
 			}
 		}
 	}
-	fmt.Fprintln(w, "\nAlso deleted: invitations sent to or issued by the user,")
-	fmt.Fprintln(w, "pending verification codes, and the user account itself.")
-	fmt.Fprintln(w, "Kept: payment records of published and partially published processes (a draft's goes")
-	fmt.Fprintln(w, "with it; the wallet ledger records its credit-back), and")
-	fmt.Fprintln(w, "wallets and their history (a torn-down organization's balance is returned by hand).")
-	fmt.Fprintln(w, "Not touched: Stripe billing data and database backups.")
+	fmt.Fprintln(&b, "\nAlso deleted: invitations sent to or issued by the user,")
+	fmt.Fprintln(&b, "pending verification codes, and the user account itself.")
+	fmt.Fprintln(&b, "Kept: payment records of published and partially published processes (a draft's goes")
+	fmt.Fprintln(&b, "with it; the wallet ledger records its credit-back), and")
+	fmt.Fprintln(&b, "wallets and their history (a torn-down organization's balance is returned by hand).")
+	fmt.Fprintln(&b, "Not touched: Stripe billing data and database backups.")
+	_, err := io.WriteString(w, b.String())
+	return err
 }
 
 // resolveUser looks the user up by ID when provided, otherwise by email.

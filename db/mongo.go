@@ -158,8 +158,11 @@ func NewWithOptions(url, database string, connOpts ConnectOptions) (*MongoStorag
 		}
 	}
 	// init the collections and, unless skipped, the migrations
-	if err := ms.init(!connOpts.SkipMigrations); err != nil {
-		return nil, err
+	ms.init()
+	if !connOpts.SkipMigrations {
+		if err := ms.RunMigrationsUp(); err != nil {
+			return nil, err
+		}
 	}
 
 	return ms, nil
