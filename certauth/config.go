@@ -50,17 +50,17 @@ const (
 	// probeLabel is the first label of the probe host.
 	probeLabel = "probe"
 	// authenticatePath is the path of the authenticate endpoint on a nonce host.
-	authenticatePath = "/v1/authenticate" //nolint:unused
+	authenticatePath = "/v1/authenticate"
 	// probePath is the path of the probe endpoint on the probe host.
-	probePath = "/ok" //nolint:unused
+	probePath = "/ok"
 	// alpnHTTP1 is the only ALPN protocol the auth listener speaks: no HTTP/2 coalescing across hosts.
-	alpnHTTP1 = "http/1.1" //nolint:unused
+	alpnHTTP1 = "http/1.1"
 )
 
 // Lifetimes of an attempt (contract sections 3 and 4).
 const (
-	stateTTL = 15 * time.Minute //nolint:unused
-	codeTTL  = 5 * time.Minute  //nolint:unused
+	stateTTL = 15 * time.Minute
+	codeTTL  = 5 * time.Minute
 	// verifyTimeout bounds Handler.Verify (revocation): the main listener times out at 45 s and the
 	// app waits 45 s.
 	verifyTimeout = 40 * time.Second //nolint:unused

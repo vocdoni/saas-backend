@@ -131,7 +131,7 @@ func (m *memStore) CertAuthTransactionByCode(code string) (*db.CertAuthTransacti
 }
 
 // transaction returns the stored transaction holding the state.
-func (m *memStore) transaction(state string) *db.CertAuthTransaction { //nolint:unused
+func (m *memStore) transaction(state string) *db.CertAuthTransaction {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, t := range m.txs {
@@ -229,18 +229,18 @@ func (f *fakeTokens) count() int { //nolint:unused
 }
 
 // logEntry is one captured log line.
-type logEntry struct { //nolint:unused
+type logEntry struct {
 	msg string
 	kv  map[string]any
 }
 
 // captureLog records what the service logs.
-type captureLog struct { //nolint:unused
+type captureLog struct {
 	mu      sync.Mutex
 	entries []logEntry
 }
 
-func (l *captureLog) add(msg string, keyvalues []any) { //nolint:unused
+func (l *captureLog) add(msg string, keyvalues []any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	kv := map[string]any{}
@@ -250,10 +250,10 @@ func (l *captureLog) add(msg string, keyvalues []any) { //nolint:unused
 	l.entries = append(l.entries, logEntry{msg: msg, kv: kv})
 }
 
-func (l *captureLog) Infow(msg string, keyvalues ...any) { l.add(msg, keyvalues) } //nolint:unused
-func (l *captureLog) Warnw(msg string, keyvalues ...any) { l.add(msg, keyvalues) } //nolint:unused
+func (l *captureLog) Infow(msg string, keyvalues ...any) { l.add(msg, keyvalues) }
+func (l *captureLog) Warnw(msg string, keyvalues ...any) { l.add(msg, keyvalues) }
 
-func (l *captureLog) all() []logEntry { //nolint:unused
+func (l *captureLog) all() []logEntry {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return append([]logEntry(nil), l.entries...)
@@ -274,7 +274,7 @@ func testConfig(c *qt.C, pki *testprovider.PKI, port int) Config {
 
 // newTestService builds a service over a memStore with cfg adjusted by mutate, its logs captured.
 // It serves nothing: newTestEnv adds the loopback auth listener.
-func newTestService(c *qt.C, port int, mutate func(*Config)) (*Service, *memStore, *testprovider.PKI) { //nolint:unused
+func newTestService(c *qt.C, port int, mutate func(*Config)) (*Service, *memStore, *testprovider.PKI) {
 	pki, err := testprovider.NewPKI()
 	c.Assert(err, qt.IsNil)
 	cfg := testConfig(c, pki, port)
