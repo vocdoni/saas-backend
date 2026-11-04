@@ -254,7 +254,8 @@ any inconsistent value (see `example.env` for the variables).
 | `VOCDONI_CERTAUTHCREATESPERMINUTE` | attempts per client IP and process per minute (60) |
 | `VOCDONI_CERTAUTHPROXYPROTOCOL` / `VOCDONI_CERTAUTHPROXYFRONTIPS` | PROXY protocol from a TCP front, honoured only from those CIDRs |
 | `VOCDONI_CERTAUTHCFORIGINPULLCA` / `VOCDONI_CERTAUTHCFALLOWEDIPS` | cloudflare mode: the Authenticated Origin Pulls CA, and optional peer CIDRs |
-| `VOCDONI_CERTAUTHTESTPROVIDER` / `VOCDONI_CERTAUTHTESTPROVIDERCA` | synthetic test CA, refused unless `--vocdoniApi` is localhost, api-dev, api-stg or listed in `VOCDONI_CERTAUTHTESTPROVIDERALLOWEDAPIS` |
+| `VOCDONI_CERTAUTHCLOUDFLAREACKNOWLEDGED` | cloudflare mode refuses to start without it; set it only once the open questions below are verified |
+| `VOCDONI_CERTAUTHTESTPROVIDER` / `VOCDONI_CERTAUTHTESTPROVIDERCA` | synthetic test CA, refused unless `--vocdoniApi` is localhost, 127.0.0.1 or api-dev; any other environment, stage included, must list its host in `VOCDONI_CERTAUTHTESTPROVIDERALLOWEDAPIS` |
 
 Behind a proxy, also set `VOCDONI_ORIGINSECRET`: the create limit then keys on the rightmost
 `X-Forwarded-For` entry, otherwise every voter shares the proxy's address.
@@ -268,13 +269,16 @@ Deploying origin mode:
 3. The public port must be 443 (corporate proxies only allow it): the front forwards 443 to
    `VOCDONI_CERTAUTHLISTENADDR`.
 4. Builds need access to the private `github.com/vocdoni/cert-check` module: `GOPRIVATE` plus a
-   token (`PRIVATE_MODULES_TOKEN`) in CI and as the Docker build secret of the same name.
+   token (`PRIVATE_MODULES_TOKEN`) in CI and as the Docker build secret of the same name. Locally,
+   `docker compose build` needs `PRIVATE_MODULES_TOKEN` exported in the shell.
 5. Nothing changes for the main API, including behind Cloudflare.
 
 Cloudflare mode (Cloudflare terminates the mTLS and forwards the certificate in headers) is
 implemented but stays out of every deployed environment until its open questions (CA names in the
 CertificateRequest, HTTP/2 coalescing across hosts, forwarding requests without a certificate,
-the mTLS hostname association) are verified.
+the mTLS hostname association) are verified. Its Authenticated Origin Pulls CA must be a per-zone or
+per-hostname certificate, never Cloudflare's global one: the global certificate and Cloudflare's IP
+ranges are shared by every Cloudflare customer, so they cannot prove the request came through our zone.
 
 Rollback: unset `VOCDONI_CERTAUTHMODE` and redeploy. A published certificate census then has no way
 to sign voters in, so do not roll back during a live certificate vote.
