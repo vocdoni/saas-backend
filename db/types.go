@@ -341,6 +341,9 @@ type Census struct {
 	Published   PublishedCensus      `json:"published" bson:"published"`
 	AuthFields  OrgMemberAuthFields  `json:"authFields" bson:"orgMemberAuthFields"`
 	TwoFaFields OrgMemberTwoFaFields `json:"twoFaFields" bson:"orgMemberTwoFaFields"`
+	// AuthMethod is how voters prove their login fields: empty for typed member details (auth/0),
+	// CensusAuthMethodCertificate for a digital certificate whose DNI/NIE matches the nationalId.
+	AuthMethod CensusAuthMethod `json:"authMethod,omitempty" bson:"authMethod,omitempty"`
 
 	CreatedAt time.Time `json:"createdAt" bson:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt" bson:"updatedAt"`

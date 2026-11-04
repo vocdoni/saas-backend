@@ -35,6 +35,9 @@ var (
 	// ErrPasswordNeedsLookupField is returned for a census whose only login field is the member
 	// password: it never takes part in the login hash, so every member would hash alike.
 	ErrPasswordNeedsLookupField = fmt.Errorf("%w: %s", ErrInvalidData, PasswordNeedsLookupFieldMessage)
+	// ErrInvalidCensusAuthMethod is returned for an unknown census authMethod, or login fields the
+	// method cannot use (see ValidateCensusAuthMethod).
+	ErrInvalidCensusAuthMethod = fmt.Errorf("invalid census auth method")
 	// ErrAutoGroupCannotBeDeleted is returned when trying to delete the auto-generated "All members" group
 	ErrAutoGroupCannotBeDeleted = fmt.Errorf("auto-generated group cannot be deleted")
 	// ErrAutoGroupMembersCannotBeModified is returned when trying to manually add/remove members from the auto group
