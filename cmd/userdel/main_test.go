@@ -452,6 +452,7 @@ func TestPrintPlan(t *testing.T) {
 			{Address: shared, Role: db.ManagerRole, CreatorEmailRetained: true},
 		},
 		Blocked: []common.Address{solo},
+		Objects: 3,
 	}), qt.IsNil)
 	for _, want := range []string{
 		"This will erase user #7: User Del <userdel-plan@test.com>",
@@ -465,6 +466,8 @@ func TestPrintPlan(t *testing.T) {
 			child.String() + "\n",
 		"Organization " + shared.String() + " (\"unnamed\", role: manager)\n  KEPT",
 		"  NOTE: the creator email stays",
+		"pending verification codes, and the user account itself.\n" +
+			"Kept with the user's email removed: 3 uploaded objects (images, election metadata).\nKept: payment records",
 		"Not touched: Stripe billing data and database backups.",
 	} {
 		c.Assert(out.String(), qt.Contains, want)

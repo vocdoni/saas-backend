@@ -216,6 +216,7 @@ func printPlan(w io.Writer, plan *db.UserErasurePlan) error {
 	}
 	fmt.Fprintln(&b, "\nAlso deleted: invitations sent to or issued by the user,")
 	fmt.Fprintln(&b, "pending verification codes, and the user account itself.")
+	fmt.Fprintf(&b, "Kept with the user's email removed: %d uploaded objects (images, election metadata).\n", plan.Objects)
 	fmt.Fprintln(&b, "Kept: payment records of published and partially published processes (a draft's goes")
 	fmt.Fprintln(&b, "with it; the wallet ledger records its credit-back), and")
 	fmt.Fprintln(&b, "wallets and their history (a torn-down organization's balance is returned by hand).")

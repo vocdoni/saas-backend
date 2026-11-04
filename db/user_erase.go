@@ -33,6 +33,8 @@ type UserErasureReport struct {
 	// and redacting either would change the derived key and break the
 	// organization's on-chain account.
 	CreatorEmailRetained []common.Address
+	// ObjectsScrubbed is how many uploaded objects had the user's email removed from their userId.
+	ObjectsScrubbed int64
 }
 
 // ErasurePlanOrg describes what erasing a user does to one of their organizations.
@@ -67,6 +69,9 @@ type UserErasurePlan struct {
 	// Blocked lists the torn-down orgs with SurvivingChildren. EraseUser refuses while it is
 	// non-empty. Drafts do not block: they are deleted first by api.DeleteUserOrgDrafts.
 	Blocked []common.Address
+	// Objects is how many uploaded objects (images, election metadata) carry the user's email as their
+	// userId. EraseUser keeps them and only removes the email.
+	Objects int64
 }
 
 // UserErasurePlan returns what erasing the user would remove and keep, organization by
@@ -126,6 +131,9 @@ func (ms *MongoStorage) UserErasurePlan(userID uint64) (*UserErasurePlan, error)
 		if len(planOrg.SurvivingChildren) > 0 {
 			plan.Blocked = append(plan.Blocked, planOrg.Address)
 		}
+	}
+	if plan.Objects, err = ms.countObjectsByOwner(user.Email); err != nil {
+		return nil, err
 	}
 	return plan, nil
 }
@@ -255,8 +263,9 @@ func (ms *MongoStorage) IsSoleOrgAdmin(address common.Address, userID uint64) (b
 // entirely (members, groups, censuses, participants, processes, voting processes
 // and their questions, bundles, CSP tokens and statuses, jobs, metered votes, API keys, invitations); in
 // organizations with other admins only the user's membership is removed. Invitations addressed to or
-// issued by the user, their verification codes, the objects they uploaded and the user document
-// itself are deleted.
+// issued by the user, their verification codes and the user document itself are deleted. The objects
+// they uploaded are kept with the email removed from their userId: they hold images and the metadata
+// on-chain elections point at, even for torn-down orgs, and being content-addressed one may be shared.
 // Each step is best-effort: failures are accumulated and returned joined, so a
 // single stuck collection cannot leave the erasure silently half-done. It refuses,
 // erasing nothing, while its UserErasurePlan is Blocked (a sub-org or managed org would
@@ -320,10 +329,12 @@ func (ms *MongoStorage) EraseUser(userID uint64) (*UserErasureReport, error) {
 	if err := ms.deleteAllVerificationCodes(user.ID); err != nil {
 		errs = append(errs, fmt.Errorf("deleting verification codes: %w", err))
 	}
-	// uploaded objects (images) stamped with the user's email
-	if err := ms.deleteObjectsByUser(user.Email); err != nil {
-		errs = append(errs, fmt.Errorf("deleting objects: %w", err))
+	// uploaded objects (images, election metadata) stamped with the user's email: kept, email removed
+	scrubbed, err := ms.scrubObjectsOwner(user.Email)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("removing the email from objects: %w", err))
 	}
+	report.ObjectsScrubbed = scrubbed
 	// the user document itself (email, names, password hash, oauth data, roles)
 	if err := ms.DelUser(user); err != nil {
 		errs = append(errs, fmt.Errorf("deleting user document: %w", err))
@@ -342,14 +353,29 @@ func (ms *MongoStorage) deleteAllVerificationCodes(userID uint64) error {
 	return err
 }
 
-// deleteObjectsByUser removes every stored object whose userId is the given user email.
-func (ms *MongoStorage) deleteObjectsByUser(email string) error {
+// countObjectsByOwner counts the stored objects whose userId is the given user email.
+func (ms *MongoStorage) countObjectsByOwner(email string) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	n, err := ms.objects.CountDocuments(ctx, bson.M{"userId": email})
+	if err != nil {
+		return 0, fmt.Errorf("could not count the objects of %s: %w", email, err)
+	}
+	return n, nil
+}
+
+// scrubObjectsOwner empties the userId of every stored object whose userId is the given user email,
+// keeping the objects, and returns how many it changed. The userId is never read for authorization.
+func (ms *MongoStorage) scrubObjectsOwner(email string) (int64, error) {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
-	_, err := ms.objects.DeleteMany(ctx, bson.M{"userId": email})
-	return err
+	res, err := ms.objects.UpdateMany(ctx, bson.M{"userId": email}, bson.M{"$set": bson.M{"userId": ""}})
+	if err != nil {
+		return 0, err
+	}
+	return res.ModifiedCount, nil
 }
 
 // eraseOrgData tears down every collection owned by the organization and

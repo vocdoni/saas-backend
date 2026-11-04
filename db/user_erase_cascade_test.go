@@ -15,7 +15,8 @@ import (
 // TestEraseUserCascade seeds an organization in every org-keyed collection of the erasure cascade,
 // plus an object stamped with its sole admin's email. Erasing the admin leaves no row of that
 // organization or that email, keeps the wallet, its ledger and the payment rows (the audit trail),
-// and leaves another organization's API key and another user's object alone.
+// keeps the admin's object with its data and the email removed, and leaves another organization's
+// API key and another user's object alone.
 func TestEraseUserCascade(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
@@ -120,8 +121,15 @@ func TestEraseUserCascade(t *testing.T) {
 		c.Assert(count(e.coll, e.filter) > 0, qt.IsTrue, qt.Commentf("not seeded: %s %v", e.coll.Name(), e.filter))
 	}
 
-	_, err = testDB.EraseUser(targetID)
+	report, err := testDB.EraseUser(targetID)
 	c.Assert(err, qt.IsNil)
+	c.Assert(report.ObjectsScrubbed, qt.Equals, int64(1))
+	// the object stays, its data intact, with the email removed
+	obj, err := testDB.Object("cascade-object")
+	c.Assert(err, qt.IsNil)
+	c.Assert(obj.UserID, qt.Equals, "")
+	c.Assert(obj.Data, qt.DeepEquals, []byte{1})
+	c.Assert(obj.ContentType, qt.Equals, "image/png")
 
 	for _, e := range erased {
 		c.Check(count(e.coll, e.filter), qt.Equals, int64(0), qt.Commentf("left behind: %s %v", e.coll.Name(), e.filter))

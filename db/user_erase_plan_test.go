@@ -74,6 +74,11 @@ func TestUserErasurePlan(t *testing.T) {
 		Address: managed, Creator: target.Email, Country: "ES", ManagedBy: integrator,
 	}), qt.IsNil)
 
+	// two objects uploaded by the target, one by someone else
+	c.Assert(testDB.SetObject("plan-logo", target.Email, "image/png", []byte{1}), qt.IsNil)
+	c.Assert(testDB.SetObject("plan-meta", target.Email, "application/json", []byte("{}")), qt.IsNil)
+	c.Assert(testDB.SetObject("plan-other", "plan-other@test.com", "image/png", []byte{2}), qt.IsNil)
+
 	plan, err := testDB.UserErasurePlan(targetID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(plan, qt.DeepEquals, &UserErasurePlan{
@@ -91,6 +96,7 @@ func TestUserErasurePlan(t *testing.T) {
 			{Address: managed, Role: AdminRole, DeletedEntirely: true, ManagedBy: integrator},
 		},
 		Blocked: []common.Address{parent},
+		Objects: 2,
 	})
 	// the plan wrote nothing: the unposted movement is still queued on the wallet
 	var wallet Wallet
@@ -118,4 +124,5 @@ func TestUserErasurePlan(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(report.DeletedOrgs, qt.DeepEquals, []common.Address{solo, parent, integrator, managed})
 	c.Assert(report.KeptOrgs, qt.DeepEquals, []common.Address{shared})
+	c.Assert(report.ObjectsScrubbed, qt.Equals, int64(2))
 }
