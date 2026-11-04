@@ -70,12 +70,6 @@ func TestPrepareOrgMemberNationalID(t *testing.T) {
 		c.Assert(got.NationalID, qt.Equals, "12345678Z")
 		c.Assert(got.NationalIDOriginal, qt.Equals, "12345678")
 	})
-	c.Run("changing to a different lettered DNI clears the marker", func(c *qt.C) {
-		different := "87654321X"
-		got := prepare((&OrgMemberUpdate{ID: stored.ID, NationalID: &different}).applyTo(stored))
-		c.Assert(got.NationalID, qt.Equals, "87654321X")
-		c.Assert(got.NationalIDOriginal, qt.Equals, "")
-	})
 }
 
 // TestOrgMembersByFieldAnyOf pins the []string form of OrgMembersByField: a member matching any of

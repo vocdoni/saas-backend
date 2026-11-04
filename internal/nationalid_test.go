@@ -23,7 +23,7 @@ func TestNormalizeNationalID(t *testing.T) {
 		{"lowercase letter", "12345678z", NationalIDCanonical, NationalIDTypeDNI, "12345678Z"},
 		{"dots and dash", "12.345.678-Z", NationalIDCanonical, NationalIDTypeDNI, "12345678Z"},
 		{"spaces around and inside", " 12 345 678 z ", NationalIDCanonical, NationalIDTypeDNI, "12345678Z"},
-		{"nbsp separator", "12345678 Z", NationalIDCanonical, NationalIDTypeDNI, "12345678Z"},
+		{"nbsp separator", "12345678\u00a0Z", NationalIDCanonical, NationalIDTypeDNI, "12345678Z"},
 		{"letterless derives", "12345678", NationalIDDerivedLetter, NationalIDTypeDNI, "12345678Z"},
 		{"typo neighbour derives its own letter", "12345679", NationalIDDerivedLetter, NationalIDTypeDNI, "12345679S"},
 		{"seven digits padded", "2345678T", NationalIDCanonical, NationalIDTypeDNI, "02345678T"},
@@ -51,13 +51,13 @@ func TestNormalizeNationalID(t *testing.T) {
 		{"passport", "PAB123456", NationalIDInvalid, "", ""},
 		{"legacy test id", "DNI001", NationalIDInvalid, "", ""},
 		{"only separators", "-.-", NationalIDInvalid, "", ""},
-		{"fullwidth letter", "12345678Ｚ", NationalIDInvalid, "", ""},
-		{"fullwidth digits", "１２３４５６７８Z", NationalIDInvalid, "", ""},
-		{"cyrillic x lookalike", "Х1234567L", NationalIDInvalid, "", ""},
-		{"accented letter", "12345678É", NationalIDInvalid, "", ""},
+		{"fullwidth letter", "12345678\uff3aZ", NationalIDInvalid, "", ""},
+		{"fullwidth digits", "\uff11\uff12\uff13\uff14\uff15\uff16\uff17\uff18Z", NationalIDInvalid, "", ""},
+		{"cyrillic x lookalike", "\u0425" + "1234567L", NationalIDInvalid, "", ""},
+		{"accented letter", "12345678\u00c9", NationalIDInvalid, "", ""},
 		{"zero width space", "12345678\u200bZ", NationalIDInvalid, "", ""},
 		{"empty", "", NationalIDMissing, "", ""},
-		{"whitespace only", " 	 ", NationalIDMissing, "", ""},
+		{"whitespace only", " \t\u00a0", NationalIDMissing, "", ""},
 	} {
 		c.Run(tc.name, func(c *qt.C) {
 			got := NormalizeNationalID(tc.in)
