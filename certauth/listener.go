@@ -299,7 +299,7 @@ func (s *Service) listenerClientIP(r *http.Request) string {
 }
 
 // publicHost returns host with the public port appended when it is not 443.
-func (s *Service) publicHost(host string) string { //nolint:unused
+func (s *Service) publicHost(host string) string {
 	if s.cfg.PublicPort == DefaultPublicPort {
 		return host
 	}
