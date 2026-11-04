@@ -29,7 +29,6 @@ func TestAddMembersNationalIDWarnings(t *testing.T) {
 		}}
 	}
 	want := []db.NationalIDWarning{
-		{Line: 1, Class: "derived_letter", Original: "12345678", Derived: "12345678Z"},
 		{Line: 3, Class: "letter_mismatch"},
 		{Line: 4, Class: "unsupported_document"},
 		{Line: 5, Class: "invalid"},
@@ -50,7 +49,7 @@ func TestAddMembersNationalIDWarnings(t *testing.T) {
 			organizationMembersURL(orgAddress.String())+"?async=true")
 		c.Assert(resp.JobID, qt.Not(qt.HasLen), 0)
 
-		// an anonymous poll sees the job finish, but not the DNI values in its warnings
+		// an anonymous poll sees the job finish, but not the nationalId warnings
 		anonymous := pollJob(t, resp.JobID.String())
 		c.Assert(anonymous.Status, qt.Equals, db.JobStatusCompleted)
 		c.Assert(anonymous.NationalIDWarnings, qt.IsNil)

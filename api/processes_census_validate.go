@@ -27,9 +27,8 @@ import (
 //	@Description	When `nationalId` is an auth field, both answers carry `nationalIdWarnings` (in the 400 under
 //	@Description	`data`): one entry per member whose nationalId is missing, a DNI/NIE with a wrong check
 //	@Description	letter (`letter_mismatch`), another tax id (`unsupported_document`), not a DNI/NIE at all
-//	@Description	(`invalid`) or letterless with a derived letter (`derived_letter`, with `original` and
-//	@Description	`derived`), plus a `duplicate_after_normalization` entry for every member sharing a canonical
-//	@Description	DNI/NIE with another. Warnings never make the census invalid.
+//	@Description	(`invalid`), plus a `duplicate_after_normalization` entry for every member sharing a
+//	@Description	canonical DNI/NIE with another. Warnings never make the census invalid.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes

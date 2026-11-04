@@ -104,7 +104,7 @@ type ValidateProcessCensusRequest struct {
 
 // ValidateProcessCensusResponse is the 200 answer of POST /processes/census/validation: the census
 // is usable, and these are its non-blocking nationalId warnings (empty unless nationalId is an auth
-// field and some member's value is missing, not a valid DNI/NIE, letter-derived or shared).
+// field and some member's value is missing, not a valid DNI/NIE, or shared with another member).
 type ValidateProcessCensusResponse struct {
 	NationalIDWarnings []db.NationalIDWarning `json:"nationalIdWarnings"`
 }

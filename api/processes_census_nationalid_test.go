@@ -61,7 +61,6 @@ func TestValidateProcessCensusNationalIDWarnings(t *testing.T) {
 	c.Run("each class is reported and the census stays valid", func(c *qt.C) {
 		got := validate(http.StatusOK, byNationalID, id["V-1"], id["V-2"], id["V-3"], id["V-4"])
 		c.Assert(got.NationalIDWarnings, qt.ContentEquals, []db.NationalIDWarning{
-			{MemberID: id["V-1"], Class: "derived_letter", Original: "12345678", Derived: "12345678Z"},
 			{MemberID: id["V-2"], Class: "letter_mismatch"},
 			{MemberID: id["V-3"], Class: "invalid"},
 			{MemberID: id["V-4"], Class: "unsupported_document"},
@@ -82,10 +81,11 @@ func TestValidateProcessCensusNationalIDWarnings(t *testing.T) {
 		})
 	})
 
-	c.Run("a collision-skipped pair is only a warning", func(c *qt.C) {
-		got := validate(http.StatusOK, byNationalID, skipped, twin)
+	c.Run("a collision-skipped pair is both blocking duplicates and warnings", func(c *qt.C) {
+		// per R19: same DNI after canonicalisation → 400 duplicates + duplicate_after_normalization
+		got := validate(http.StatusBadRequest, byNationalID, skipped, twin)
+		c.Assert(got.Duplicates, qt.HasLen, 2)
 		c.Assert(got.NationalIDWarnings, qt.ContentEquals, []db.NationalIDWarning{
-			{MemberID: skipped, Class: "derived_letter", Original: "87654321", Derived: "87654321X"},
 			{MemberID: skipped, Class: db.NationalIDWarningDuplicate},
 			{MemberID: twin, Class: db.NationalIDWarningDuplicate},
 		})
@@ -96,7 +96,6 @@ func TestValidateProcessCensusNationalIDWarnings(t *testing.T) {
 		c.Assert(got.MissingData, qt.HasLen, 1)
 		c.Assert(got.NationalIDWarnings, qt.ContentEquals, []db.NationalIDWarning{
 			{MemberID: id["V-7"], Class: "missing"},
-			{MemberID: id["V-1"], Class: "derived_letter", Original: "12345678", Derived: "12345678Z"},
 		})
 	})
 }
