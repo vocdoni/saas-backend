@@ -8,6 +8,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // validateProcessCensusHandler godoc
@@ -76,6 +77,10 @@ func (a *API) validateProcessCensusHandler(w http.ResponseWriter, r *http.Reques
 		errors.ErrInvalidData.With(db.PasswordNeedsLookupFieldMessage).Write(w)
 		return
 	}
+	if err := a.censusAuthMethodError(census); err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
 
 	// select the member set to validate: a group, an explicit subset, or (default) the whole org.
 	var results *db.OrgMemberAggregationResults
@@ -96,6 +101,11 @@ func (a *API) validateProcessCensusHandler(w http.ResponseWriter, r *http.Reques
 		}
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
+	}
+	// a certificate census logs in with the nationalId alone, so its missing data is a missing
+	// nationalId: a warning like any value no certificate can match, never a refusal
+	if census.AuthMethod == db.CensusAuthMethodCertificate {
+		results.MissingData = []bson.ObjectID{}
 	}
 	if len(results.Duplicates) > 0 || len(results.MissingData) > 0 || len(results.NotFound) > 0 {
 		errors.ErrInvalidData.WithData(results).Write(w)

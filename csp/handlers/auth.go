@@ -314,6 +314,10 @@ func (c *CSPHandlers) authFirstStep(
 		}
 		return nil, errors.ErrGenericInternalServerError.WithErr(err)
 	}
+	// a certificate census signs in only through the certificate endpoints (contract section 2)
+	if census.AuthMethod == db.CensusAuthMethodCertificate {
+		return nil, CertificateCensusError()
+	}
 	// before any budget is claimed or challenge sent: the token could not be blind-signed anyway
 	if c.anonymousCensusRefused(census) {
 		return nil, errors.ErrInvalidData.With(csp.AnonymousVotingUnavailable)
