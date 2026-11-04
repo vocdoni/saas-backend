@@ -292,9 +292,14 @@ same Viper convention as the server: flags or `VOCDONI_*` env vars.
 **What it does.** Erases a registered user and their personal data from MongoDB to serve
 right-to-erasure requests in a standardized way. The key logic is the org classification:
 organizations where the user is the **sole admin are deleted entirely** (members, groups,
-censuses, participants, processes, bundles, CSP tokens, jobs, invitations); organizations
-with other admins are kept and only the user's membership is removed. In kept orgs the
-user created, the creator email is deliberately retained — the org signing key is derived
+censuses, participants, processes and voting processes, bundles, CSP tokens, jobs,
+invitations); organizations with other admins are kept and only the user's membership is
+removed. The drafts of the organizations to delete go first, the way the API deletes a draft:
+paid ones are credited back to the wallet that paid them and their payment record goes with
+them (the credit-back row in the wallet history is the audit trail), and a once-per-organization
+add-on price no published or mined process received comes back too; no Stripe secret is needed. A draft that cannot be deleted aborts the erasure with nothing else
+erased. Wallets and their history are kept, and a torn-down organization's balance is printed
+to be returned by hand. In kept orgs the user created, the creator email is deliberately retained — the org signing key is derived
 from `secret+creator+nonce`, so redacting it would break the org's on-chain account. Those
 orgs are flagged in the output for manual follow-up.
 
@@ -307,7 +312,13 @@ go run ./cmd/userdel -id 42 -yes                       # skip confirmation
 ```
 
 Mongo connection via `-mongoURL`/`-mongoDB` flags or `VOCDONI_MONGOURL`/`VOCDONI_MONGODB`
-env vars.
+env vars. Drafts of the orgs to delete go first, each credited back the way `DELETE /processes/{id}`
+does (to the wallet that paid it); the payment record goes with the draft, and the credit-back
+row in the wallet history is the audit trail. No Stripe secret is needed: an
+open top-up checkout is left to Stripe's own expiry, and paying it meanwhile only credits the
+wallet. A draft that cannot be deleted (a publish holds it) aborts the run; rerun once it settles.
+Wallets and their history are kept, and the balance of each torn-down organization's own wallet
+is printed, to be returned by hand; a positive balance never blocks the erasure.
 
 **Precautions.** This is the destructive one of the two. Always run `-dryRun` first and
 read the impact report — a sole-admin org takes its entire voting history down with it.

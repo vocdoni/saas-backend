@@ -100,6 +100,7 @@ func (a *API) organizationUsersHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		401			{object}	errors.Error					"Unauthorized"
 //	@Failure		409			{object}	errors.Error					"User already has a role in the organization"
 //	@Failure		500			{object}	errors.Error					"Internal server error"
+//	@Failure		503			{object}	errors.Error					"Busy (50302), retry after Retry-After"
 //	@Router			/organizations/{orgAddress}/users [post]
 func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
@@ -156,12 +157,22 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// all pre-checks OK, now update the org users counter
-	if err := a.db.IncrementOrganizationUsersCounter(org.Address); err != nil {
-		if errors.Is(err, db.ErrMaxUsersReached) {
-			errors.ErrMaxUsersReached.Write(w)
+	// a write role is capped per organization, pending invitations included; the check and the
+	// invitation insert below are one step (writerLocks)
+	writerLock, err := a.writerLocks.lockOrBusy(r.Context(), org.Address)
+	if err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+	defer writerLock.Unlock()
+	if invite.Role == db.AdminRole || invite.Role == db.ManagerRole {
+		if err := a.subscriptions.OrgCanAddWriter(org.Address); err != nil {
+			writeSubscriptionError(w, err)
 			return
 		}
+	}
+	// all pre-checks OK, now update the org users counter
+	if err := a.db.IncrementOrganizationUsersCounter(org.Address); err != nil {
 		errors.ErrGenericInternalServerError.Withf("increment users: %v", err).Write(w)
 		return
 	}
@@ -188,6 +199,8 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		errors.ErrGenericInternalServerError.Withf("could not create the invite: %v", err).Write(w)
 		return
 	}
+	// the invitation now holds its seat: the mail below need not hold the lock
+	writerLock.Unlock()
 	// send the invitation mail to invited user email with the invite code and
 	// the invite link
 	if err := a.sendMail(
@@ -393,6 +406,7 @@ func (a *API) acceptOrganizationUserInvitationHandler(w http.ResponseWriter, r *
 //	@Failure		401				{object}	errors.Error	"Unauthorized"
 //	@Failure		400				{object}	errors.Error	"Invalid data - invitation not found"
 //	@Failure		500				{object}	errors.Error	"Internal server error"
+//	@Failure		503				{object}	errors.Error	"Busy (50302), retry after Retry-After"
 //	@Router			/organizations/{orgAddress}/users/pending/{invitationId} [put]
 func (a *API) updatePendingUserInvitationHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
@@ -432,6 +446,20 @@ func (a *API) updatePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 		errors.ErrInvalidData.Withf("invitation is not for this organization").Write(w)
 		return
 	}
+	// an expired invitation holds no write seat, so reviving one to a write role takes a seat again;
+	// the check and the update below are one step (writerLocks)
+	writerLock, err := a.writerLocks.lockOrBusy(r.Context(), org.Address)
+	if err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+	defer writerLock.Unlock()
+	if (invitation.Role == db.AdminRole || invitation.Role == db.ManagerRole) && !invitation.Expiration.After(time.Now()) {
+		if err := a.subscriptions.OrgCanAddWriter(org.Address); err != nil {
+			writeSubscriptionError(w, err)
+			return
+		}
+	}
 
 	// create the updated invitation
 	orgInvite := &db.OrganizationInvite{
@@ -455,6 +483,7 @@ func (a *API) updatePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 		errors.ErrGenericInternalServerError.Withf("could not update invitation: %v", err).Write(w)
 		return
 	}
+	writerLock.Unlock()
 
 	// send the invitation mail to invited user email with the invite code and
 	// the invite link
@@ -635,6 +664,7 @@ func (*API) organizationRolesHandler(w http.ResponseWriter, _ *http.Request) {
 // Note: The implementation returns 200 OK even for non-existent users
 //
 //	@Failure		500			{object}	errors.Error								"Internal server error"
+//	@Failure		503			{object}	errors.Error								"Busy (50302), retry after Retry-After"
 //	@Router			/organizations/{orgAddress}/users/{userId} [put]
 func (a *API) updateOrganizationUserHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
@@ -679,6 +709,27 @@ func (a *API) updateOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 	if valid := db.IsValidUserRole(db.UserRole(update.Role)); !valid {
 		errors.ErrInvalidUserData.Withf("invalid role").Write(w)
 		return
+	}
+	// promoting a viewer to a write role takes one of the organization's capped write seats; the
+	// check and the role update are one step (writerLocks)
+	writerLock, err := a.writerLocks.lockOrBusy(r.Context(), org.Address)
+	if err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+	defer writerLock.Unlock()
+	if newRole := db.UserRole(update.Role); newRole == db.AdminRole || newRole == db.ManagerRole {
+		target, err := a.db.User(uint64(userIDInt))
+		if err != nil {
+			errors.ErrInvalidUserData.Withf("user not found: %v", err).Write(w)
+			return
+		}
+		if current, ok := target.RoleFor(org.Address); !ok || (current != db.AdminRole && current != db.ManagerRole) {
+			if err := a.subscriptions.OrgCanAddWriter(org.Address); err != nil {
+				writeSubscriptionError(w, err)
+				return
+			}
+		}
 	}
 	// prevent demoting the last admin, which would orphan the organization
 	if db.UserRole(update.Role) != db.AdminRole && uint64(userIDInt) == user.ID {

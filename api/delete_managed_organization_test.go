@@ -18,19 +18,15 @@ import (
 //   - an org not managed by the integrator is 404 (no existence leak)
 //   - a managed org with an active on-chain election (READY) is blocked with 409, and nothing is deleted
 //   - an idle managed org is fully torn down (members, censuses, processes, bundles, jobs, invites,
-//     org doc gone; unlinked from users), the integrator's usage counters are rolled back, and the
-//     freed managed-org slot can be reused by a subsequent create.
+//     org doc gone; unlinked from users), and the integrator no longer counts it.
 func TestDeleteManagedOrg(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "deleteadminpass123")
 	integratorAddr := testCreateOrganization(t, token)
 
-	// enable the org as an integrator (override): MaxManagedOrgs 1 so we can verify slot reuse.
 	integratorOrg, err := testDB.Organization(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	integratorOrg.IntegratorLimits = &db.IntegratorLimits{
-		MaxManagedOrgs: 1,
-	}
+	integratorOrg.Integrator = true
 	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
 
 	// ---- create one managed org to exercise the happy path first ----
@@ -108,14 +104,9 @@ func TestDeleteManagedOrg(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(noMembers, qt.HasLen, 0)
 
-	// the integrator's usage counters were rolled back fully.
-	integratorOrg, err = testDB.Organization(integratorAddr)
-	c.Assert(err, qt.IsNil)
-	c.Assert(integratorOrg.Counters.ManagedOrgs, qt.Equals, 0)
-	c.Assert(integratorOrg.Counters.ManagedProcesses, qt.Equals, 0)
-	// the freed slot is reusable in principle: ManagedOrgs (0) is back below MaxManagedOrgs (1).
-	// We don't exercise a second create here to keep the test's on-chain footprint minimal
-	// (each managed-org create funds a faucet account), avoiding CI email-delivery timeouts.
+	// the integrator no longer counts it
+	info := requestAndParse[apicommon.IntegratorInfoResponse](t, http.MethodGet, token, nil, "integrator")
+	c.Assert(info.Usage.ManagedOrgs, qt.Equals, 0)
 }
 
 // TestDeleteManagedOrgQuestionGuard covers the new /processes question delete guard specifically
@@ -130,7 +121,7 @@ func TestDeleteManagedOrgQuestionGuard(t *testing.T) {
 
 	integratorOrg, err := testDB.Organization(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	integratorOrg.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 1}
+	integratorOrg.Integrator = true
 	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
 
 	managed := requestAndParse[apicommon.OrganizationInfo](

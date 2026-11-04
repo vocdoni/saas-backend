@@ -1,5 +1,7 @@
 package db
 
+import "github.com/vocdoni/saas-backend/pricing"
+
 const (
 	// user roles
 	AdminRole   UserRole = "admin"
@@ -22,15 +24,20 @@ const (
 	CodeTypeOrgInviteUpdate CodeType = "organization_invite_update"
 	CodeTypeUpdateEmail     CodeType = "update_email"
 
-	// max census size allowed for user test purposes
-	TestMaxCensusSize = 10
+	// max census size allowed for user test purposes; the same size prices to a free base,
+	// so it is defined once, by pricing
+	TestMaxCensusSize = pricing.FreeCensusSize
 	// MaxCSPSignaturesPerElection is the total number of CSP signatures (first one included) a voter
 	// can get for one election; past it the election is locked for that voter.
 	MaxCSPSignaturesPerElection = 10
-	// MaxQuestionsPerProcess bounds the number of questions a voting process may hold, and so the
-	// number of ballots a voter can sign for one. Shared by the /processes validation and the CSP
-	// sign-batch cap (which cannot reach the api-package constant through the import cycle).
-	MaxQuestionsPerProcess = 100
+	// MaxQuestionsPerProcess bounds the number of questions a new or edited voting process may
+	// hold. It does not apply to processes published before it was lowered.
+	MaxQuestionsPerProcess = 15
+	// MaxBallotsPerBatch bounds the voter-facing batch endpoints (/votes, /votes/verify, CSP
+	// sign-batch and auth batches). It stays at the former question limit so processes published
+	// before MaxQuestionsPerProcess was lowered remain votable in one batch. Defined here because
+	// the CSP handlers cannot reach the api-package constants through the import cycle.
+	MaxBallotsPerBatch = 100
 
 	// Voting-process question status values (derived at read; empty means draft).
 	QuestionStatusReady    = "READY"

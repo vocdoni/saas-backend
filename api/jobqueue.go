@@ -104,11 +104,23 @@ func (o *orgTxMutex) lockCtx(ctx context.Context, addr common.Address) (*orgTxLo
 	}
 }
 
+// lockOrBusy is lockCtx for the locks that guard a check and the write it allows rather than a
+// transaction: a request waits for one at most orgTxLockTimeout (or until its context ends) and
+// then answers errors.ErrServerBusy (503), instead of parking on a holder and keeping its router
+// slot for as long as that holder runs.
+func (o *orgTxMutex) lockOrBusy(ctx context.Context, addr common.Address) (*orgTxLock, error) {
+	l, err := o.lockCtx(ctx, addr)
+	if err != nil {
+		return nil, errors.ErrServerBusy
+	}
+	return l, nil
+}
+
 // pool sizes are consts; promote to config only if tuning is needed.
 const (
 	// relayTxQueueSize bounds the queued-but-not-yet-running vote relay tasks. It is sized to
 	// hold several full vote batches at once: POST /votes reserves one slot per envelope
-	// all-or-nothing, so a queue merely as large as one full batch (db.MaxQuestionsPerProcess)
+	// all-or-nothing, so a queue merely as large as one full batch (db.MaxBallotsPerBatch)
 	// would accept it only on a completely idle service, and a client turned away falls back to
 	// relaying one vote at a time — the half-voted window that endpoint exists to close. The
 	// buffer is not the bottleneck (the workers below are), so a bigger one adds no chain load
@@ -116,8 +128,12 @@ const (
 	// and two func pointers, so this costs tens of kilobytes.
 	relayTxQueueSize = 384
 	// relayTxQueueWorkers caps concurrent vote submits so a chain stall cannot drain the
-	// router's shared request budget or starve the public CSP voter path.
-	relayTxQueueWorkers = 12
+	// router's shared request budget or starve the public CSP voter path. A worker holds its vote
+	// for the whole inclusion wait (7.5-17.5 s: WaitUntilTxIsMined polls every 5 s and sleeps
+	// 2.5 s more once mined), so the relay ceiling is about workers / 10.5 votes/s per instance:
+	// 128 workers give ~12 votes/s. The workers only wait; the cost is ~26 req/s of tx-reference
+	// polls to the chain API when all are busy, with no measurable CPU or memory.
+	relayTxQueueWorkers = 128
 
 	// orgTxQueueSize bounds the queued organization-initiated tx tasks (publish, status and
 	// census changes). These enqueue one task per request (a publish batches internally), so a

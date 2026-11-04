@@ -118,48 +118,6 @@ func TestConsumeCSPProcessAddressPin(t *testing.T) {
 	c.Assert(replica.ConsumeCSPProcess(token, processID, other), qt.ErrorIs, ErrInvalidData)
 }
 
-// TestConcurrentReserveManagedPublish pins that the managed publish quota cannot be
-// exceeded by concurrent reservations across replicas: the quota check is part of the
-// increment itself.
-func TestConcurrentReserveManagedPublish(t *testing.T) {
-	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
-	replica := secondReplica(c)
-	handles := []*MongoStorage{testDB, replica}
-
-	c.Assert(testDB.SetOrganization(&Organization{Address: testOrgAddress}), qt.IsNil)
-
-	const limit = 5
-	const n = 20
-	errs := make([]error, n)
-	var wg sync.WaitGroup
-	for i := range n {
-		wg.Go(func() {
-			errs[i] = handles[i%2].ReserveManagedPublish(testOrgAddress, limit)
-		})
-	}
-	wg.Wait()
-
-	reserved := 0
-	for i := range n {
-		if errs[i] == nil {
-			reserved++
-			continue
-		}
-		c.Assert(errs[i], qt.ErrorIs, ErrManagedQuotaReached)
-	}
-	c.Assert(reserved, qt.Equals, limit)
-
-	org, err := testDB.Organization(testOrgAddress)
-	c.Assert(err, qt.IsNil)
-	c.Assert(org.Counters.ManagedProcesses, qt.Equals, limit)
-
-	// a missing organization is reported as such, not as a full quota
-	err = testDB.ReserveManagedPublish(testNonExistentOrg, limit)
-	c.Assert(err, qt.IsNotNil)
-	c.Assert(err, qt.Not(qt.ErrorIs), ErrManagedQuotaReached)
-}
-
 // TestConcurrentMigrations pins that several replicas starting at once against the
 // same fresh database serialize on the cross-instance migration lock, so every
 // migration runs and is recorded exactly once.

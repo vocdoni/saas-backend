@@ -49,11 +49,18 @@ func IsValidAPIKeyScope(s string) bool {
 // tickets, checkout, etc.) JWT-only. The patterns must match the constants used at registration
 // so they equal chi's RoutePattern().
 var apiKeyAllowlist = map[string]string{
-	// integrator (path-less; the integrator org is resolved from the key)
+	// integrator (path-less; the integrator org is resolved from the key). The wallet is read
+	// only on the key's own organization (walletOrganization); its top-up stays JWT-only like the
+	// rest of checkout.
 	"GET " + integratorEndpoint:             ScopeQuotaRead,
+	"GET " + walletEndpoint:                 ScopeQuotaRead,
 	"GET " + managedOrganizationsEndpoint:   ScopeManagedRead,
 	"POST " + managedOrganizationsEndpoint:  ScopeManagedWrite,
 	"DELETE " + managedOrganizationEndpoint: ScopeManagedWrite,
+	"PUT " + managedOrganizationEndpoint:    ScopeManagedWrite,
+	// what the integrator's processes cost, readable with the scope of the write it explains
+	// (publish)
+	"GET " + processesPriceEndpoint: ScopeVotingWrite,
 
 	// members & groups (of managed organizations)
 	"GET " + organizationMembersEndpoint:          ScopeMembersWrite,
@@ -83,6 +90,12 @@ var apiKeyAllowlist = map[string]string{
 	"PUT " + processesCensusEndpoint:          ScopeVotingWrite,
 	"DELETE " + processesCensusEndpoint:       ScopeVotingWrite,
 	"PUT " + processesQuestionCensusEndpoint:  ScopeVotingWrite,
+	// the only checkout route a key may call: a managed organization's census headroom is
+	// debited from the integrator wallet, and the integrator drives census growth with its key.
+	// A key only acts in its own organization and the ones it manages (apiKeyActingUser), and a
+	// managed organization never opens a top-up, so the top-up branch is never reached with one;
+	// the per-organization role check still gates it.
+	"POST " + processesCensusCheckoutEndpoint: ScopeVotingWrite,
 }
 
 // requiredScopeForRoute returns the scope required to call (method, pattern) with an API key and

@@ -10,9 +10,10 @@ import (
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
-	stripeapi "github.com/stripe/stripe-go/v82"
+	stripeapi "github.com/stripe/stripe-go/v87"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -23,6 +24,14 @@ type Service struct {
 	processedEvents sync.Map // map[string]time.Time
 	lockManager     *LockManager
 	config          *Config
+	// OnProcessTopUp, when set, is invoked after a top-up opened for a process is credited, on
+	// every delivery including Stripe's replays, so it must be idempotent. The API layer wires
+	// it to pay the process's publish (or census headroom) from the wallet. An error makes the
+	// webhook answer 500 so Stripe redelivers the event; a refusal no retry can fix returns nil.
+	OnProcessTopUp func(ProcessTopUp) error
+	// OnProcessCheckoutDropped, when set, is invoked when a process's top-up checkout expires or
+	// its delayed payment fails, to drop the process's pending payment and its add-on claims.
+	OnProcessCheckoutDropped func(processID bson.ObjectID, sessionID string) error
 }
 
 // NewService creates a new Stripe service
@@ -230,26 +239,15 @@ func processProductToPlan(product *stripeapi.Product, prices []stripeapi.Price) 
 		return nil, err
 	}
 
-	// integratorLimits is optional: only integrator plans carry it. Skip parsing when the
-	// product has no such metadata so non-integrator plans don't fail to sync.
-	var integratorLimitsData db.IntegratorLimits
-	if raw := product.Metadata["integratorLimits"]; raw != "" {
-		integratorLimitsData, err = extractPlanMetadata[db.IntegratorLimits](raw)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	plan := &db.Plan{
-		ID:               product.ID,
-		Name:             product.Name,
-		Default:          isDefaultPlan(product),
-		Public:           isPublicPlan(product),
-		Organization:     organizationData,
-		VotingTypes:      votingTypesData,
-		Features:         featuresData,
-		IntegratorLimits: integratorLimitsData,
-		FreeTrialDays:    0,
+		ID:            product.ID,
+		Name:          product.Name,
+		Default:       isDefaultPlan(product),
+		Public:        isPublicPlan(product),
+		Organization:  organizationData,
+		VotingTypes:   votingTypesData,
+		Features:      featuresData,
+		FreeTrialDays: 0,
 	}
 
 	for _, price := range prices {

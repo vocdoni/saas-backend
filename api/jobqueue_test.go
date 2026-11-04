@@ -67,6 +67,28 @@ func TestOrgTxLockBoundedWait(t *testing.T) {
 	other.Unlock()
 }
 
+// TestLockOrBusy pins that a request waiting on a held check-and-write lock (draft, writer, census
+// growth, wallet, managed organizations) answers ErrServerBusy promptly instead of parking for as
+// long as the holder runs.
+func TestLockOrBusy(t *testing.T) {
+	c := qt.New(t)
+	locks := newOrgTxMutex()
+	addr := common.Address{0xcc}
+	held := locks.lock(addr)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := time.Now()
+	_, err := locks.lockOrBusy(ctx, addr)
+	c.Assert(err, qt.ErrorIs, errors.ErrServerBusy)
+	c.Assert(time.Since(start) < time.Second, qt.IsTrue)
+
+	held.Unlock()
+	got, err := locks.lockOrBusy(context.Background(), addr)
+	c.Assert(err, qt.IsNil)
+	got.Unlock()
+}
+
 // TestTxQueueBatchAllOrNothing pins the admission contract of a bounded tx queue: a batch that
 // does not fit is refused whole (no partial enqueue), and the service runs two independent
 // queues so vote relays and organization txs cannot exhaust each other's slots.
@@ -154,27 +176,16 @@ func TestPublishWorkerStopsWithoutClaim(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(claimed, qt.IsTrue)
 
-	// the worker drew a managed slot from its integrator (here the org itself) for this attempt
-	c.Assert(testDB.AddOrganizationManagedProcesses(orgAddress, 1), qt.IsNil)
-
 	// the dispossessed worker has no chain client: reaching the submit path would panic, so a
 	// plain error proves it stopped first
 	pw := &publishWorker{
 		a:                &API{db: testDB},
 		vp:               &db.VotingProcess{ID: oid, OrgAddress: orgAddress},
 		owner:            "a-claim-that-was-reclaimed",
-		reserved:         true,
-		integratorAddr:   orgAddress,
 		minedUnpersisted: make(map[bson.ObjectID]internal.HexBytes),
 	}
 	_, err = pw.run()
 	c.Assert(err, qt.ErrorMatches, "publish claim lost.*")
-
-	// nothing was mined, so the slot is given back even though the claim is gone: whoever
-	// publishes next reserves its own
-	org, err := testDB.Organization(orgAddress)
-	c.Assert(err, qt.IsNil)
-	c.Assert(org.Counters.ManagedProcesses, qt.Equals, 0)
 
 	// the current owner's claim survived the dispossessed worker's rollback
 	vp, err := testDB.VotingProcess(oid)

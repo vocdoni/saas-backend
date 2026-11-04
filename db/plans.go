@@ -14,7 +14,7 @@ import (
 // synced from Stripe rather than authored locally: the caller always holds the complete plan,
 // so the whole document is replaced (a full ReplaceOne upsert, not a partial update). This
 // matters because zero-valued fields are meaningful here — e.g. a free plan's monthlyPrice/
-// yearlyPrice of 0 must be persisted so selectors like FreeIntegratorPlan can match on them.
+// yearlyPrice of 0 must be persisted so a free plan's zero prices are persisted rather than dropped.
 // An empty ID is rejected.
 func (ms *MongoStorage) SetPlan(plan *Plan) error {
 	if plan.ID == "" {
@@ -65,30 +65,6 @@ func (ms *MongoStorage) DefaultPlan() (*Plan, error) {
 			return nil, ErrNotFound // Plan not found
 		}
 		return nil, errors.New("failed to get plan")
-	}
-	return plan, nil
-}
-
-// FreeIntegratorPlan returns the free integrator plan: a zero-priced plan that grants
-// managed-organization capacity. It is the plan assigned to organizations created through
-// the integrator portal so they become integrators on the free tier without a checkout.
-func (ms *MongoStorage) FreeIntegratorPlan() (*Plan, error) {
-	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-	// a free plan (no recurring price) that grants at least one managed org
-	filter := bson.M{
-		"integratorLimits.maxManagedOrgs": bson.M{"$gt": 0},
-		"monthlyPrice":                    int64(0),
-		"yearlyPrice":                     int64(0),
-	}
-	plan := &Plan{}
-	err := ms.plans.FindOne(ctx, filter).Decode(plan)
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, ErrNotFound
-		}
-		return nil, errors.New("failed to get free integrator plan")
 	}
 	return plan, nil
 }

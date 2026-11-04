@@ -59,6 +59,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -168,12 +169,43 @@ type API struct {
 	oauthServiceURL string
 	originSecret    string
 	stripeHandlers  *StripeHandlers
+	// paymentGW is the seam to Stripe's one-time checkout used by pay-per-process
+	// billing; nil when the Stripe service is unavailable. Tests install a fake.
+	paymentGW paymentGateway
 	// orgTxQueue runs organization-initiated txs (publish, status, census resize);
 	// relayTxQueue runs public vote relays. Separate so neither class starves the other.
-	orgTxQueue    *txQueue
-	relayTxQueue  *txQueue
-	orgTxLocks    *orgTxMutex
-	heldTxJobs    *heldTxJobs
+	orgTxQueue   *txQueue
+	relayTxQueue *txQueue
+	orgTxLocks   *orgTxMutex
+	heldTxJobs   *heldTxJobs
+	// walletLocks serializes charges against one integrator's prepaid wallet
+	walletLocks *orgTxMutex
+	// censusGrowthLocks makes the pay-per-process growth check and the census write it
+	// allows one step per organization, so parallel growth cannot pass the same check
+	censusGrowthLocks *orgTxMutex
+	// managedOrgLocks makes the unfunded integrator's managed-organization cap and the creation it
+	// allows one step per integrator, so parallel creations cannot pass the same count
+	managedOrgLocks *orgTxMutex
+	// publishFault, when set, runs at the start of every publish attempt and fails it with what it
+	// returns. A test seam for the retry and credit-back paths; nil in production.
+	publishFault func() error
+	// publishPreJobFault, when set, runs in a publish request between the wallet debit and the
+	// job's creation and fails the request with what it returns; publishMinedFault runs in a
+	// publish attempt once a submitted batch is mined and recorded. Test seams for a failure after
+	// the payment and a failure after mining; nil in production. publishSubmittedHook runs right
+	// after a batch is submitted, before the claim is checked again: a seam for a claim that goes
+	// stale once something is on its way to the chain.
+	publishPreJobFault   func() error
+	publishMinedFault    func() error
+	publishSubmittedHook func()
+	// writerLocks makes the write-seat cap check (OrgCanAddWriter) and the invitation or role
+	// write it allows one step per organization, so parallel invites cannot pass the same check.
+	// ponytail: in-memory, like orgTxLocks — one API instance; a DB-side conditional write if that changes
+	writerLocks *orgTxMutex
+	// teardowns holds the managed organizations being deleted: draft creation, publish and every
+	// wallet debit refuse them, so nothing is created or debited behind the teardown's draft sweep.
+	// ponytail: in-memory, like orgTxLocks — one API instance; a DB marker if that changes
+	teardowns     sync.Map
 	otpExpiry     time.Duration
 	otpCooldown   time.Duration
 	notifySync    bool
@@ -187,6 +219,10 @@ type API struct {
 	electionReads *electionReads
 	// voteOnChain tells whether a vote is on chain (see Config.VoteOnChainLookup).
 	voteOnChain handlers.VoteOnChainLookup
+	// draftLocks makes the draft cap check (OrgCanCreateVotingProcessDraft) and the draft write it
+	// allows one step per organization, so parallel creations cannot pass the same count.
+	// ponytail: in-memory, like orgTxLocks — one API instance; a DB-side conditional write if that changes
+	draftLocks *orgTxMutex
 }
 
 // enqueueConfirm asks the status syncer to confirm a status change landed on-chain; a no-op when
@@ -278,6 +314,10 @@ func New(ctx context.Context, conf *Config) *API {
 		oauthServiceURL:       conf.OAuthServiceURL,
 		originSecret:          conf.OriginSecret,
 		orgTxLocks:            newOrgTxMutex(),
+		walletLocks:           newOrgTxMutex(),
+		censusGrowthLocks:     newOrgTxMutex(),
+		managedOrgLocks:       newOrgTxMutex(),
+		writerLocks:           newOrgTxMutex(),
 		otpExpiry:             otpExpiry,
 		otpCooldown:           otpCooldown,
 		notifySync:            conf.NotificationsSyncDelivery,
@@ -285,6 +325,7 @@ func New(ctx context.Context, conf *Config) *API {
 		electionCache:         electionCache,
 		liveElectionCache:     liveElectionCache,
 		legacyProjectionCache: legacyProjectionCache,
+		draftLocks:            newOrgTxMutex(),
 	}
 	a.electionReads = newElectionReads(func(id internal.HexBytes) (*dvoteapi.Election, error) {
 		return a.account.Election(id)
@@ -297,9 +338,23 @@ func New(ctx context.Context, conf *Config) *API {
 	// heartbeat this process's pending tx jobs and close those stranded by a process that died
 	// (see superviseTxJobs).
 	go a.superviseTxJobs()
+	// post the wallet movements whose own write sequence a crash cut short, so the wallet ledger
+	// matches every balance; any later touch of a wallet posts its own anyway
+	if err := a.db.DrainUnpostedWalletEntries(); err != nil {
+		log.Warnw("could not post unposted wallet movements at startup", "error", err)
+	}
+	// and the add-on releases a crash cut short after their credit-back; a sibling's quote and the
+	// owing process's next touch apply them anyway
+	if err := a.db.ReleaseOwedOrgAddOns(); err != nil {
+		log.Warnw("could not apply owed add-on releases at startup", "error", err)
+	}
 	// clear any publishing markers stranded by a previous crash/restart so those processes are
 	// publishable again (see reconcileStalePublishing).
 	a.reconcileStalePublishing()
+	// markers a restart found still fresh belonged to workers that died with it too; sweep again
+	// once they are stale. Only stale markers are touched, so a live publish (whose worker keeps
+	// its marker fresh) is never swept.
+	time.AfterFunc(db.PublishStaleAfter, a.reconcileStalePublishing)
 	return a
 }
 
@@ -441,7 +496,10 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, managedOrganizationsEndpoint, a.createManagedOrganizationHandler)
 		handle(r, http.MethodGet, managedOrganizationsEndpoint, a.managedOrganizationsHandler)
 		handle(r, http.MethodDelete, managedOrganizationEndpoint, a.deleteManagedOrganizationHandler)
+		handle(r, http.MethodPut, managedOrganizationEndpoint, a.updateManagedOrganizationHandler)
 		handle(r, http.MethodGet, integratorEndpoint, a.integratorInfoHandler)
+		handle(r, http.MethodGet, walletEndpoint, a.walletHandler)
+		handle(r, http.MethodPost, walletTopUpEndpoint, a.createWalletTopUpHandler)
 		handle(r, http.MethodPost, integratorOrgAPIKeysEndpoint, a.createAPIKeyHandler)
 		handle(r, http.MethodGet, integratorOrgAPIKeysEndpoint, a.apiKeysHandler)
 		handle(r, http.MethodDelete, integratorOrgAPIKeyEndpoint, a.revokeAPIKeyHandler)
@@ -462,6 +520,11 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPut, processesEndpoint, a.updateVotingProcessHandler)
 		handle(r, http.MethodGet, processesValidateEndpoint, a.validateVotingProcessHandler)
 		handle(r, http.MethodPost, processesPublishEndpoint, a.publishVotingProcessHandler)
+		handle(r, http.MethodGet, processesPriceEndpoint, a.processPriceHandler)
+		handle(r, http.MethodPost, processesCheckoutEndpoint, a.createProcessCheckoutHandler)
+		handle(r, http.MethodGet, processesCheckoutEndpoint, a.processCheckoutStatusHandler)
+		handle(r, http.MethodDelete, processesCheckoutEndpoint, a.cancelProcessCheckoutHandler)
+		handle(r, http.MethodPost, processesCensusCheckoutEndpoint, a.createProcessCensusCheckoutHandler)
 		handle(r, http.MethodPut, processesQuestionsStatusEndpoint, a.setVotingProcessQuestionsStatusHandler)
 		handle(r, http.MethodPut, processesQuestionStatusEndpoint, a.setVotingProcessQuestionStatusHandler)
 		handle(r, http.MethodDelete, processesEndpoint, a.deleteVotingProcessHandler)
@@ -513,7 +576,11 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, organizationLanguagesEndpoint, a.organizationsLanguagesHandler)
 		handle(r, http.MethodGet, plansEndpoint, a.plansHandler)
 		handle(r, http.MethodGet, pricingEndpoint, a.pricingHandler)
-		handle(r, http.MethodPost, subscriptionsWebhook, a.stripeHandlers.HandleWebhook)
+		// late-bound: a method value would capture a.stripeHandlers as it is at
+		// router-build time (nil when Stripe init failed or a test installs it later)
+		handle(r, http.MethodPost, subscriptionsWebhook, func(w http.ResponseWriter, r *http.Request) {
+			a.stripeHandlers.HandleWebhook(w, r)
+		})
 		handle(r, http.MethodGet, objectStorageDownloadTypedEndpoint, a.objectStorage.DownloadImageInlineHandler)
 		handle(r, http.MethodGet, jobStatusEndpoint, a.jobStatusHandler)
 		handle(r, http.MethodPost, voteEndpoint, a.relayVoteHandler)

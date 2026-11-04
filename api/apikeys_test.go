@@ -59,6 +59,13 @@ func TestRequiredScopeForRoute(t *testing.T) {
 	c.Assert(ok, qt.IsTrue)
 	c.Assert(scope, qt.Equals, ScopeManagedRead)
 
+	// the wallet read is key-visible (quota:read); the top-up is checkout and stays JWT-only
+	scope, ok = requiredScopeForRoute("GET", walletEndpoint)
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(scope, qt.Equals, ScopeQuotaRead)
+	_, ok = requiredScopeForRoute("POST", walletTopUpEndpoint)
+	c.Assert(ok, qt.IsFalse)
+
 	// account-sensitive / unmapped endpoints reject API keys (deny by default)
 	_, ok = requiredScopeForRoute("POST", integratorOrgAPIKeysEndpoint)
 	c.Assert(ok, qt.IsFalse)
@@ -77,6 +84,13 @@ func TestRequiredScopeForRoute(t *testing.T) {
 	c.Assert(ok, qt.IsTrue)
 	c.Assert(scope, qt.Equals, ScopeVotingWrite)
 	scope, ok = requiredScopeForRoute("GET", processesParticipantsEndpoint) // list voted participants of a voting process
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(scope, qt.Equals, ScopeVotingWrite)
+	// the spend cap is a managed-organization write; the price is key-readable
+	scope, ok = requiredScopeForRoute("PUT", managedOrganizationEndpoint)
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(scope, qt.Equals, ScopeManagedWrite)
+	scope, ok = requiredScopeForRoute("GET", processesPriceEndpoint)
 	c.Assert(ok, qt.IsTrue)
 	c.Assert(scope, qt.Equals, ScopeVotingWrite)
 	// every allowlisted scope is a valid, assignable scope
