@@ -228,6 +228,57 @@ docker compose down -v
 ```
 
 
+## Certificate voter sign-in
+
+Optional. A census with `authMethod: "certificate"` signs its voters in with a qualified Spanish
+certificate (FNMT natural person, idCAT) whose DNI/NIE matches the member's `nationalId`. The
+browser presents the certificate to a second, TLS listener on a fresh host per attempt
+(`<nonce>.<certAuthHost>`), which sends it straight back to the app with a code; the app redeems
+the code on the main API (`POST /processes/{processId}/auth/cert/redeem`), where the certificate
+is verified (chain, profile, revocation) with the private `github.com/vocdoni/cert-check` module.
+The HTTP contract and the design are in `docs/specs/2026-11-04-cert-auth-csp-design.md`.
+
+Everything is off unless `VOCDONI_CERTAUTHMODE` is set: no listener starts, the two endpoints
+answer 40185 and certificate censuses are refused. With it set, the service refuses to start on
+any inconsistent value (see `example.env` for the variables).
+
+| Variable | Meaning |
+|---|---|
+| `VOCDONI_CERTAUTHMODE` | `origin` (this process terminates TLS) or `cloudflare` (not for production yet, see below) |
+| `VOCDONI_CERTAUTHHOST` | auth domain, e.g. `cert.auth-dev.vocdoni.io` |
+| `VOCDONI_CERTAUTHLISTENADDR` / `VOCDONI_CERTAUTHPUBLICPORT` | bind address (`:8443`) and the public port of the URLs (`443`) |
+| `VOCDONI_CERTAUTHTLSCERT` / `VOCDONI_CERTAUTHTLSKEY` | PEM files of a certificate covering `*.<host>`; loaded at startup, so a renewal needs a restart |
+| `VOCDONI_CERTAUTHPROVIDERS` | `fnmt,idcat` |
+| `VOCDONI_CERTAUTHALLOWEDORIGINS` | exact app origins (https; http only for localhost) allowed as return URLs, CORS and probe origins |
+| `VOCDONI_CERTAUTHDEFAULTRETURN` | app URL an expired attempt returns to |
+| `VOCDONI_CERTAUTHCREATESPERMINUTE` | attempts per client IP and process per minute (60) |
+| `VOCDONI_CERTAUTHPROXYPROTOCOL` / `VOCDONI_CERTAUTHPROXYFRONTIPS` | PROXY protocol from a TCP front, honoured only from those CIDRs |
+| `VOCDONI_CERTAUTHCFORIGINPULLCA` / `VOCDONI_CERTAUTHCFALLOWEDIPS` | cloudflare mode: the Authenticated Origin Pulls CA, and optional peer CIDRs |
+| `VOCDONI_CERTAUTHTESTPROVIDER` / `VOCDONI_CERTAUTHTESTPROVIDERCA` | synthetic test CA, refused unless `--vocdoniApi` is localhost, api-dev, api-stg or listed in `VOCDONI_CERTAUTHTESTPROVIDERALLOWEDAPIS` |
+
+Behind a proxy, also set `VOCDONI_ORIGINSECRET`: the create limit then keys on the rightmost
+`X-Forwarded-For` entry, otherwise every voter shares the proxy's address.
+
+Deploying origin mode:
+
+1. DNS: a wildcard `*.<certAuthHost>` record (which covers `probe.<certAuthHost>`) to the auth
+   listener's dedicated IP, DNS-only (grey cloud) or through a TCP passthrough front (Cloudflare
+   Spectrum, a dedicated-IP forwarder; enable the PROXY protocol for it).
+2. A wildcard certificate for `*.<certAuthHost>` (DNS-01), mounted as files.
+3. The public port must be 443 (corporate proxies only allow it): the front forwards 443 to
+   `VOCDONI_CERTAUTHLISTENADDR`.
+4. Builds need access to the private `github.com/vocdoni/cert-check` module: `GOPRIVATE` plus a
+   token (`PRIVATE_MODULES_TOKEN`) in CI and as the Docker build secret of the same name.
+5. Nothing changes for the main API, including behind Cloudflare.
+
+Cloudflare mode (Cloudflare terminates the mTLS and forwards the certificate in headers) is
+implemented but stays out of every deployed environment until its open questions (CA names in the
+CertificateRequest, HTTP/2 coalescing across hosts, forwarding requests without a certificate,
+the mTLS hostname association) are verified.
+
+Rollback: unset `VOCDONI_CERTAUTHMODE` and redeploy. A published certificate census then has no way
+to sign voters in, so do not roll back during a live certificate vote.
+
 ## CI
 
 ### Testing against an unmerged vocdoni-node
