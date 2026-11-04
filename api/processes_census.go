@@ -7,6 +7,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -29,6 +30,16 @@ func censusBuildError(err error) error {
 	}
 }
 
+// anonymousVotingUnavailable is the message returned for an anonymous census while anonymous
+// voting is temporarily off (csp.Config.DisableBlindCSP).
+const anonymousVotingUnavailable = csp.AnonymousVotingUnavailable
+
+// anonymousCensusRefused reports whether an anonymous census must be refused because anonymous
+// voting is temporarily off.
+func (a *API) anonymousCensusRefused(anonymous bool) bool {
+	return anonymous && a.csp.BlindCSPDisabled()
+}
+
 // resolveOrCreateDefaultCensus materializes the inline census spec of a voting process into
 // a db.Census (auth/2FA policy + participants) and returns it. The census type is inferred
 // from the 2FA fields (SetCensus does this). The census is created unpublished; publishing happens at
@@ -37,6 +48,9 @@ func censusBuildError(err error) error {
 func (a *API) resolveOrCreateDefaultCensus(
 	spec apicommon.CensusSpec, orgAddress common.Address,
 ) (*db.Census, []string, error) {
+	if a.anonymousCensusRefused(spec.Anonymous) {
+		return nil, nil, errors.ErrInvalidData.With(anonymousVotingUnavailable)
+	}
 	census := &db.Census{
 		OrgAddress:  orgAddress,
 		Weighted:    spec.Weighted,

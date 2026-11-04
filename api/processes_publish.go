@@ -173,6 +173,10 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	if census == nil {
 		return problems, questionsMismatch, nil // the checks below need the census
 	}
+	// a resume must still mint the remaining questions of a partially published anonymous process
+	if a.anonymousCensusRefused(census.Anonymous) && !anyMined(questions) {
+		problems = append(problems, anonymousVotingUnavailable)
+	}
 	orgDoc, err := a.db.Organization(vp.OrgAddress)
 	if err != nil {
 		return append(problems, "organization not found"), questionsMismatch, nil
@@ -242,6 +246,9 @@ func preflightError(problems []string, questionsMismatch bool, denied error) err
 //	@Description	payer's wallet back (a `creditBack` history row) and publishing again charges again.
 //	@Description	409 (40172) means the stored questions do not match the process and the draft has to be
 //	@Description	saved again before it can be published.
+//	@Description	400 (40004) "process is not ready to publish: ..." lists every problem found, including
+//	@Description	"anonymous voting is temporarily unavailable" for an anonymous process while the service has
+//	@Description	anonymous voting off. A process some of whose questions are already on chain still resumes.
 //	@Description	409 (40177) while a top-up checkout opened for the draft is still open: pay it, or, when
 //	@Description	the draft's price changed since, call POST /processes/{processId}/checkout again to
 //	@Description	replace it (or cancel it with DELETE /processes/{processId}/checkout) and publish again.
@@ -266,7 +273,7 @@ func preflightError(problems []string, questionsMismatch bool, denied error) err
 //	@Param			processId	path		string	true	"Process ID"
 //	@Success		202			{object}	apicommon.EnqueuedResponse
 //	@Success		200			{object}	apicommon.CreateVotingProcessResponse	"Already published"
-//	@Failure		400			{object}	errors.Error							"Not ready to publish"
+//	@Failure		400			{object}	errors.Error							"Not ready to publish (lists every problem)"
 //	@Failure		403			{object}	errors.Error							"An integrator's own organization cannot own processes (40174)"
 //	@Failure		401			{object}	errors.Error
 //	@Failure		402			{object}	errors.Error{data=apicommon.ProcessPaymentRequired}	"Wallet short or spend cap reached"

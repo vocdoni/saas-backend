@@ -63,6 +63,9 @@ func parseProcessDates(req *apicommon.CreateVotingProcessRequest) (start, end ti
 //	@Description	`typeSetup`** — responses always carry a protocol, so echoing one back unchanged
 //	@Description	re-applies it.
 //	@Description
+//	@Description	While the service has anonymous voting temporarily off, a census with `anonymous: true` is
+//	@Description	a 400 (40037) "anonymous voting is temporarily unavailable".
+//	@Description
 //	@Description	`typeSetup.minChoices` has no on-chain counterpart and is a validation hint for
 //	@Description	clients. It is stored as sent for multichoice, and is always `1` for singlechoice,
 //	@Description	whose ballot is the single field a voter fills.
@@ -77,7 +80,7 @@ func parseProcessDates(req *apicommon.CreateVotingProcessRequest) (start, end ti
 //	@Security		BearerAuth
 //	@Param			request	body		apicommon.CreateVotingProcessRequest	true	"Voting process"
 //	@Success		200		{object}	apicommon.CreateVotingProcessResponse
-//	@Failure		400		{object}	errors.Error
+//	@Failure		400		{object}	errors.Error	"Invalid input data, or anonymous voting temporarily unavailable (40037)"
 //	@Failure		401		{object}	errors.Error
 //	@Failure		403		{object}	errors.Error
 //	@Failure		409		{object}	errors.Error	"The organization is being deleted (40901)"
@@ -397,7 +400,8 @@ func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id bson.ObjectID, u
 //	@Description
 //	@Description	Census members are handled as on create: those missing required auth data are left out
 //	@Description	and listed in `missingData`, and those the census cannot tell apart are a 400 (40037)
-//	@Description	whose `data.duplicates` lists them.
+//	@Description	whose `data.duplicates` lists them. While the service has anonymous voting temporarily off,
+//	@Description	a census with `anonymous: true` is a 400 (40037) "anonymous voting is temporarily unavailable".
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -405,7 +409,7 @@ func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id bson.ObjectID, u
 //	@Param			processId	path		string									true	"Process ID"
 //	@Param			request		body		apicommon.CreateVotingProcessRequest	true	"Voting process"
 //	@Success		200			{object}	apicommon.CreateVotingProcessResponse
-//	@Failure		400			{object}	errors.Error
+//	@Failure		400			{object}	errors.Error	"Invalid input data, or anonymous voting temporarily unavailable (40037)"
 //	@Failure		401			{object}	errors.Error
 //	@Failure		404			{object}	errors.Error
 //	@Failure		409			{object}	errors.Error
