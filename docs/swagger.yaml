@@ -3249,7 +3249,12 @@ paths:
         — no address in the URL), and the target must be managed by it.
 
         Deletion is blocked with 409 when any of the managed org's published elections is
-        still active on-chain (READY/PAUSED); end them (or wait for them to end) first.
+        still active on-chain (READY/PAUSED); end them (or wait for them to end) first. The
+        check runs before anything is deleted, again once no publish can start, and again
+        once the drafts are gone (a publish may have finished meanwhile): a 409 then leaves
+        everything but the drafts in place.
+        If removing any other data fails the response is a 500 and the organization stays,
+        so retrying the deletion finishes it.
         The on-chain organization account and any published elections/censuses are immutable
         on the Vochain and are not affected — only DB-side data is removed.
 

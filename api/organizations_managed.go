@@ -13,6 +13,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/pricing"
 	"go.vocdoni.io/dvote/log"
 )
@@ -444,7 +445,12 @@ func (a *API) integratorInfoHandler(w http.ResponseWriter, r *http.Request) {
 //	@Description	— no address in the URL), and the target must be managed by it.
 //	@Description
 //	@Description	Deletion is blocked with 409 when any of the managed org's published elections is
-//	@Description	still active on-chain (READY/PAUSED); end them (or wait for them to end) first.
+//	@Description	still active on-chain (READY/PAUSED); end them (or wait for them to end) first. The
+//	@Description	check runs before anything is deleted, again once no publish can start, and again
+//	@Description	once the drafts are gone (a publish may have finished meanwhile): a 409 then leaves
+//	@Description	everything but the drafts in place.
+//	@Description	If removing any other data fails the response is a 500 and the organization stays,
+//	@Description	so retrying the deletion finishes it.
 //	@Description	The on-chain organization account and any published elections/censuses are immutable
 //	@Description	on the Vochain and are not affected — only DB-side data is removed.
 //	@Description
@@ -482,50 +488,10 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 	}
 	managedAddr := managed.Address
 
-	// Active-election guard: fetch the managed org's published processes once. The guard blocks
-	// deletion while any published election is READY or PAUSED on-chain (a lookup error fails
-	// closed so we never orphan a live election). The same list feeds the CSP cleanup below.
-	// AllProcessesByOrg is unbounded so the guard inspects every published election, not just
-	// the first page.
-	published, err := a.db.AllProcessesByOrg(managedAddr, db.PublishedOnly)
-	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+	// fail fast, before anything is touched
+	if err := a.checkNoActiveElections(managedAddr); err != nil {
+		writeSubscriptionError(w, err)
 		return
-	}
-	for _, p := range published {
-		if p.Address.Equals(nil) {
-			continue
-		}
-		election, err := a.account.Election(p.Address.Bytes())
-		if err != nil {
-			errors.ErrVochainRequestFailed.WithErr(err).Write(w)
-			return
-		}
-		if election.Status == "READY" || election.Status == "PAUSED" {
-			errors.ErrManagedOrgHasActiveElections.Write(w)
-			return
-		}
-	}
-
-	// new /processes questions: block deletion while any published question is active (READY|PAUSED).
-	// Read the live chain status of each non-terminal question (bounded by the org's active question
-	// count) rather than the stored value, so deletion — the one safety-critical moment — never runs
-	// on a status the on-demand syncer hasn't refreshed yet. A lookup error fails closed.
-	questionRefs, err := a.db.SyncableQuestionsByOrg(managedAddr)
-	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-	for _, ref := range questionRefs {
-		election, err := a.account.Election(ref.UpstreamID)
-		if err != nil {
-			errors.ErrVochainRequestFailed.WithErr(err).Write(w)
-			return
-		}
-		if election.Status == "READY" || election.Status == "PAUSED" {
-			errors.ErrManagedOrgHasActiveElections.Write(w)
-			return
-		}
 	}
 
 	// from here on no draft may be created or published in the organization: one created and paid
@@ -544,6 +510,13 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	draftLock.Unlock()
+	// again, now that no publish can start: a publish that mined some elections and then failed
+	// before the flag left a claim-free draft whose mined questions still carry their election
+	// ids; the draft sweep below would drop them with it while those elections run on-chain
+	if err := a.checkNoActiveElections(managedAddr); err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
 
 	// drafts first, each the way DELETE /processes/{processId} deletes it, so a paid one is
 	// credited back before it goes. Unlike the cascade below this aborts on the first failure, with
@@ -553,19 +526,61 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		writeSubscriptionError(w, err)
 		return
 	}
+	// and once the drafts are gone: a publish that held its claim through the checks above and
+	// finished before the sweep is no draft any more, so the cascade below would drop its rows
+	// while its elections run on-chain
+	if err := a.checkNoActiveElections(managedAddr); err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
 
 	// cascade: EraseOrganizationData is best-effort per step, drops the managed org's spend entry
-	// (its drafts were credited back above) and deletes the org doc last.
+	// (its drafts were credited back above) and deletes the org doc last, only when every other
+	// step succeeded, so a failed teardown is a 500 that a retry resumes.
 	if err := a.db.EraseOrganizationData(managedAddr); err != nil {
 		log.Warnw("managed org teardown incomplete", "org", managedAddr.Hex(), "error", err)
-		if _, getErr := a.db.Organization(managedAddr); !errors.Is(getErr, db.ErrNotFound) {
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
-		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
 	}
 
 	log.Infow("deleted managed organization", "integrator", integratorAddr.Hex(), "org", managedAddr.Hex())
 	apicommon.HTTPWriteJSON(w, &apicommon.DeleteManagedOrganizationResponse{Address: managedAddr.Hex()})
+}
+
+// checkNoActiveElections returns ErrManagedOrgHasActiveElections while any election of the
+// organization is READY or PAUSED on-chain: a published legacy /process, or a /processes question
+// whose stored status can still change. It reads the live chain status of each rather than the
+// stored value, so deletion never runs on a status the on-demand syncer has not refreshed yet. A
+// lookup error fails closed (ErrVochainRequestFailed, or the DB error), so a live election is
+// never orphaned. The lists are unbounded, so every election is checked, not just a first page.
+func (a *API) checkNoActiveElections(org common.Address) error {
+	published, err := a.db.AllProcessesByOrg(org, db.PublishedOnly)
+	if err != nil {
+		return fmt.Errorf("failed to list published processes: %w", err)
+	}
+	var ids []internal.HexBytes
+	for _, p := range published {
+		if !p.Address.Equals(nil) {
+			ids = append(ids, p.Address)
+		}
+	}
+	questions, err := a.db.SyncableQuestionsByOrg(org)
+	if err != nil {
+		return fmt.Errorf("failed to list published questions: %w", err)
+	}
+	for _, q := range questions {
+		ids = append(ids, q.UpstreamID)
+	}
+	for _, id := range ids {
+		election, err := a.account.Election(id)
+		if err != nil {
+			return errors.ErrVochainRequestFailed.WithErr(err)
+		}
+		if election.Status == "READY" || election.Status == "PAUSED" {
+			return errors.ErrManagedOrgHasActiveElections
+		}
+	}
+	return nil
 }
 
 // managedOrgFromPath resolves the {orgAddress} path parameter to an organization managed by
