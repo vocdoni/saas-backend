@@ -44,7 +44,7 @@ func TestNationalIDRewritten(t *testing.T) {
 
 // TestParticipantByLoginNationalID pins the exact-first lookup over a census holding a collision
 // survivor: a letterless member (12345678) left on its raw hash next to its lettered twin
-// (12345678Z), as migration 0034 leaves them. Each one resolves from their own input and the
+// (12345678Z), as migration 0036 leaves them. Each one resolves from their own input and the
 // letterless input never resolves to the twin; every other login resolves canonically.
 func TestParticipantByLoginNationalID(t *testing.T) {
 	c := qt.New(t)
@@ -60,7 +60,7 @@ func TestParticipantByLoginNationalID(t *testing.T) {
 	census := &db.Census{OrgAddress: org, AuthFields: db.OrgMemberAuthFields{db.OrgMemberAuthFieldsNationalID}}
 	_, _, err := testDB.PopulateMembersCensus(census, []string{twin, variant})
 	c.Assert(err, qt.IsNil)
-	// the survivor's participant keeps the raw hash of its stored value, as written before 0034
+	// the survivor's participant keeps the raw hash of its stored value, as written before 0036
 	survivor, err := testDB.OrgMember(org, survivorID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(testDB.SetCensusParticipant(&db.CensusParticipant{

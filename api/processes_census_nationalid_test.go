@@ -33,7 +33,7 @@ func TestValidateProcessCensusNationalIDWarnings(t *testing.T) {
 	for _, m := range all {
 		id[m.MemberNumber] = m.ID
 	}
-	// letterless/lettered twins as migration 34 leaves them after a collision: distinct hashes
+	// letterless/lettered twins as migration 36 leaves them after a collision: distinct hashes
 	skipped := insertRawMember(t, orgAddress, "87654321")
 	twin := insertRawMember(t, orgAddress, "87654321X")
 

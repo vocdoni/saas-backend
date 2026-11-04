@@ -86,7 +86,7 @@ func TestCSPAuthNationalIDNormalization(t *testing.T) {
 	c.Assert(postProcessAuth0AndExpectError(t, pid, nobody).Code, qt.Equals, errors.ErrVerificationMaxAttempts.Code)
 }
 
-// TestCSPAuthNationalIDCollisionSkipped pins the letterless/lettered twins migration 34 leaves alone
+// TestCSPAuthNationalIDCollisionSkipped pins the letterless/lettered twins migration 36 leaves alone
 // (12345678 next to 12345678Z in one census, the letterless participant still on its raw login
 // hash): each member keeps authenticating as themselves with their own input, and neither input
 // ever resolves to the other twin.
@@ -98,7 +98,7 @@ func TestCSPAuthNationalIDCollisionSkipped(t *testing.T) {
 
 	// the pair cannot be published today (census validation blocks it as a duplicate), so the
 	// census is published with a placeholder value and the survivor's member and participant are
-	// then rewritten to what a census built before normalization holds after 0034 (RW4's
+	// then rewritten to what a census built before normalization holds after 0036 (RW4's
 	// migration test covers the migration half)
 	letterless := insertRawMember(t, orgAddress, "87654321X")
 	lettered := insertRawMember(t, orgAddress, "12345678Z")

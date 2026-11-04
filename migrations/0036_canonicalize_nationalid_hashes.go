@@ -15,21 +15,21 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-// NationalIDNormalizationVersion is the version of migration 0034, which canonicalizes the
+// NationalIDNormalizationVersion is the version of migration 0036, which canonicalizes the
 // nationalId login hashes. The certificate census publish guard asks db.MigrationApplied for it,
 // since a branch merge could absorb it under a higher ledger version and skip it silently.
-const NationalIDNormalizationVersion = 34
+const NationalIDNormalizationVersion = 36
 
 const (
-	// nationalIDBatchSize is how many candidate members one batch of migration 0034 reads.
+	// nationalIDBatchSize is how many candidate members one batch of migration 0036 reads.
 	nationalIDBatchSize = 500
-	// nationalIDBatchTimeout bounds one batch of migration 0034. It is well under the migration
+	// nationalIDBatchTimeout bounds one batch of migration 0036. It is well under the migration
 	// lock TTL, which every batch renews first, so the lock cannot expire under a live run.
 	nationalIDBatchTimeout = 2 * time.Minute
 )
 
 func init() {
-	AddMigration(34, "canonicalize_nationalid_login_hashes", upCanonicalizeNationalIDHashes,
+	AddMigration(36, "canonicalize_nationalid_login_hashes", upCanonicalizeNationalIDHashes,
 		downCanonicalizeNationalIDHashes)
 }
 
@@ -48,7 +48,7 @@ func nationalIDCandidates(lastID bson.ObjectID) bson.M {
 	return filter
 }
 
-// nationalIDRehasher holds the state of one run of migration 0034.
+// nationalIDRehasher holds the state of one run of migration 0036.
 type nationalIDRehasher struct {
 	members      *mongo.Collection
 	participants *mongo.Collection

@@ -194,7 +194,7 @@ func TestCensusParticipantNationalIDVariants(t *testing.T) {
 			return testDB.CensusParticipantByVerbatimLoginHash(*census, *input)
 		}
 
-		// a participant still on its raw hash, as migration 0034 leaves a collision survivor
+		// a participant still on its raw hash, as migration 0036 leaves a collision survivor
 		survivor := OrgMember{ID: bson.NewObjectID(), OrgAddress: testOrgAddress, NationalID: "12345678"}
 		_, err = testDB.censusParticipants.InsertOne(context.Background(), &CensusParticipant{
 			ParticipantID: survivor.ID.Hex(), CensusID: censusID,

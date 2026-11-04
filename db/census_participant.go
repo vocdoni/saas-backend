@@ -909,7 +909,7 @@ func calculateParticipantHashes(census Census, member OrgMember) map[string][]by
 
 // rawParticipantHashes is calculateParticipantHashes without the nationalId canonicalisation: it
 // hashes the member exactly as given, as every participant was hashed before the nationalId
-// migration (0034). The split exists for CensusParticipantByVerbatimLoginHash, which finds the
+// migration (0036). The split exists for CensusParticipantByVerbatimLoginHash, which finds the
 // participants that migration left on their raw hash; everything else hashes through
 // calculateParticipantHashes.
 func rawParticipantHashes(census Census, member OrgMember) map[string][]byte {

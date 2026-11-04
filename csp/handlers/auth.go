@@ -201,7 +201,7 @@ func authAttemptKeys(census *db.Census, member *db.OrgMember) (submission, voter
 // participantByLogin finds the census participant a step-0 login names. input is the trimmed login
 // (OrgMember.Normalized). When canonicalisation would rewrite its nationalId (a derived check
 // letter, separators, padding), the participant holding the raw hash of the value as typed goes
-// first, and the canonical lookup only runs when nobody holds it. Migration 34 leaves a letterless
+// first, and the canonical lookup only runs when nobody holds it. Migration 36 leaves a letterless
 // member on its raw hash when the canonical one collides with a lettered twin in the census: the
 // raw lookup keeps each of them matching their own input, so a letterless login never resolves to
 // the twin. Only ErrNotFound falls through; any other error is returned as is. Every other login,

@@ -112,7 +112,7 @@ What the amendment removes or relocates (branch state in parentheses):
   (`db/types.go:398-402`), its setting in `prepareOrgMember` (`db/org_members.go:282-283`),
   its projection (`db/org_members_groups.go:584`), its API exposure
   (`api/apicommon/types.go:1114-1116,1293`): all removed.
-- Migration 0034 writes `orgMembers` documents (`migrations/0034_normalize_national_ids.go:196-204`)
+- The migration (then 0034, now 0036) writes `orgMembers` documents (`migrations/0034_normalize_national_ids.go:196-204`)
   → never writes them (§5).
 
 Hash plumbing facts the amended design builds on (verified at 7568326):
@@ -124,7 +124,7 @@ Hash plumbing facts the amended design builds on (verified at 7568326):
   through **one** function, `calculateParticipantHashes` (`db/census_participant.go:874`).
 - Every migration/repair-side hash funnels through one builder over raw bson docs:
   `recomputeParticipantHashes` (`migrations/0015_normalize_member_emails.go:30`, used by 0015
-  and 0034) **delegates to** `computeParticipantHashes`
+  and 0036) **delegates to** `computeParticipantHashes`
   (`migrations/repair_login_hashes.go:417`, used by `RepairLoginHashes`/
   `scripts/repairlogins`), which calls `hashMemberFields` (`migrations/login_hash.go:46`),
   the byte-for-byte mirror of `db.HashAuthTwoFaFields` guarded by
@@ -133,8 +133,8 @@ Hash plumbing facts the amended design builds on (verified at 7568326):
   participant via `participantByLogin` (`csp/handlers/auth.go:207,410`).
 - Migration ledger: one `MigrationRecord{Version, AppliedAt}` per applied migration — **no
   name**, so renaming an unshipped migration is safe; `RunMigrationsUp` compares only the
-  highest applied version. Registered migrations reach 0033 on `main` and `origin/lts`; this
-  migration is **0034** (never 0016; re-verify the number on rebase).
+  highest applied version. Registered migrations reach 0035 on `main` and 0033 on `origin/lts`; this
+  migration is **0036** (never 0016; re-verify the number on rebase).
 - cert-check (read-only clone, private module — **not imported**): `Document.Number` is "9
   characters, uppercase, leading zeros kept"; `ValidDNI` = 8 digits +
   `TRWAGMYFPDXBNJZSQVHLCKE[n%23]`; `ValidNIE` = X/Y/Z + 7 digits + letter, prefix read as
@@ -184,11 +184,11 @@ grow DNI logic" does not apply):
 - `migrations`: the same one-liner is applied to `m.NationalID` at the top of
   `computeParticipantHashes` (`migrations/repair_login_hashes.go:417`) **only** —
   `recomputeParticipantHashes` (`migrations/0015_normalize_member_emails.go:30`) delegates to
-  it, so one site covers 0015, 0034, `RepairLoginHashes` and `scripts/repairlogins`, and there
+  it, so one site covers 0015, 0036, `RepairLoginHashes` and `scripts/repairlogins`, and there
   is no second canonicalisation point to drift. The repair tooling
   (`RepairLoginHashes`, `scripts/repairlogins`) therefore recomputes the same canonical hashes
   the login path matches — on a migrated database it is a no-op, as before. (0015 re-run on a
-  fresh/replayed database now also writes canonical nationalId hashes; 0034 then finds them
+  fresh/replayed database now also writes canonical nationalId hashes; 0036 then finds them
   already canonical and skips — the end state is identical.)
 - Parity: `db.TestRepairMatchesCanonicalHash` already compares the two sides end to end
   (seeded members → repair-computed hashes vs login-lookup hashes). Its matrix is extended
@@ -218,7 +218,7 @@ goal 3, pinned by `TestCSPAuthNationalIDNormalization`. A stored value that is n
 canonicalisable (wrong letter `12345678A`, a passport, an arbitrary id) hashes as its trimmed
 self on both sides, so those censuses keep matching byte-for-byte as on `main`.
 
-**Exact-first (verbatim) lookup — still needed, mechanism reworked.** After migration 0034,
+**Exact-first (verbatim) lookup — still needed, mechanism reworked.** After migration 0036,
 participant hashes are canonical **except** for collision-skipped participants (§5): a
 letterless member `12345678` whose lettered twin `12345678Z` sits in the same census keeps its
 old raw hash (recomputing it would collide on the unique index). Without a verbatim lookup,
@@ -321,12 +321,12 @@ longer carry values.
 Single-member add/edit responses carry no warning in SP1, as before (census validation reports
 the classes; SP4 may surface them inline).
 
-### 5. Migration 0034: recompute participant login hashes, never touch members
+### 5. Migration 0036: recompute participant login hashes, never touch members
 
 Renamed (file and registration — safe, nothing is shipped and the ledger records only the
-version) to `migrations/0034_canonicalize_nationalid_hashes.go`,
-`AddMigration(34, "canonicalize_nationalid_login_hashes", ...)`, keeping
-`const NationalIDNormalizationVersion = 34`. What survives from commit e3ce624 verbatim: the
+version) to `migrations/0036_canonicalize_nationalid_hashes.go`,
+`AddMigration(36, "canonicalize_nationalid_login_hashes", ...)`, keeping
+`const NationalIDNormalizationVersion = 36`. What survives from commit e3ce624 verbatim: the
 keyset-batched iteration (`nationalIDBatchSize = 500`, per-batch 2-minute context via
 `context.WithoutCancel`, `RenewLock` first in every batch, abort on a lost lock), the coarse
 candidate prefilter (non-empty `nationalId` not shaped `^([0-9]{8}|[XYZ][0-9]{7})[A-Z]$`), the
@@ -376,7 +376,7 @@ Unchanged (commit 8a45364): `MongoStorage.MigrationApplied(version int) (bool, e
 (`db/migrations.go:246`) reports whether the version is in the ledger; SP2's publish guard
 calls `ms.MigrationApplied(migrations.NationalIDNormalizationVersion)` and rejects publishing
 a certificate census while false. Still needed for the same reason: the ledger compares only
-the highest applied version, so a branch merge absorbing 0034 under a higher ledger would skip
+the highest applied version, so a branch merge absorbing 0036 under a higher ledger would skip
 it silently — and with raw storage the *only* migrated artifact is the hashes, which nothing
 else would catch. The godoc comment is retouched to say "canonicalizes the nationalId login
 hashes" instead of "stored nationalIds".
@@ -402,7 +402,7 @@ hashes" instead of "stored nationalIds".
   `apicommon.OrgMember` **loses** `nationalIdOriginal`, and the `derived_letter` class
   disappears. `make swagger` regenerates the spec; the PR description records the
   vocdoni.io + integrator-sdk impact (gate F3's follow-up list, minus the removed fields).
-- **Data migration**: 0034 recomputes `censusParticipants` hashes only (§5), at startup, under
+- **Data migration**: 0036 recomputes `censusParticipants` hashes only (§5), at startup, under
   the existing cross-instance lock, batched and renewing it per batch. `orgMembers` is never
   written. The candidate count is measured on a production dump before the stg/prod deploy
   (owner/ops action).
@@ -412,9 +412,9 @@ hashes" instead of "stored nationalIds".
   the canonical form itself, which old code hashes to the same bytes. Voters of
   canonical-stored members are unaffected. The window is the deploy's duration; same accepted
   pattern as 0015/0025. Stragglers outlive the window: a member/census write served by an old
-  replica *after* 0034 ran stores raw hashes that nothing rehashes (0034 is already recorded),
+  replica *after* 0036 ran stores raw hashes that nothing rehashes (0036 is already recorded),
   so a variant-stored member in that set matches only verbatim forever and SP2's certificate
-  would not match them even though `MigrationApplied(34)` is true. Therefore, **after the
+  would not match them even though `MigrationApplied(36)` is true. Therefore, **after the
   deploy completes, run the new `scripts/repairlogins` once** (dry-run, then `--apply` if it
   reports changes) to canonicalise participants written during the window — an ops step
   needing the owner's go-ahead, added to the merge/release checklist (rework-plan.md). Safe
@@ -424,14 +424,14 @@ hashes" instead of "stored nationalIds".
 - **Old binary on migrated data (rollback by redeploy)**: canonical-typed logins keep
   matching; variant-typed input fails until the new binary returns. If a longer rollback must
   restore variant logins, `scripts/repairlogins` **built at the old version** recomputes raw
-  hashes from the (untouched) stored values, exactly undoing 0034. Caveat, documented in the
-  migration's godoc: 0034 stays recorded in the ledger, so after such a repair the new binary
+  hashes from the (untouched) stored values, exactly undoing 0036. Caveat, documented in the
+  migration's godoc: 0036 stays recorded in the ledger, so after such a repair the new binary
   must be brought back with a run of the **new** `scripts/repairlogins` (which canonicalises,
   §2) — the recorded version alone no longer proves canonical hashes. The publish guard (§6)
   cannot detect this case; it guards the skipped-migration merge hazard, not deliberate ops
   reversals.
 - **Fresh databases**: migrations run in order at startup; participant hashes are canonical
-  from the first insert (§2), so 0034 finds nothing to rewrite.
+  from the first insert (§2), so 0036 finds nothing to rewrite.
 - **Existing non-certificate `nationalId` censuses**: matching gets strictly more forgiving
   for canonicalisable values and stays byte-identical for everything else. Collision-skipped
   participants keep today's behaviour at `auth/0` via §3's exact-first lookup.
@@ -444,7 +444,7 @@ hashes" instead of "stored nationalIds".
 ## Failure modes and security
 
 - **Migration collision (letterless vs lettered twin)**: members `12345678` and `12345678Z`
-  in one `nationalId` census collide after canonical hashing. 0034 skips the colliding
+  in one `nationalId` census collide after canonical hashing. 0036 skips the colliding
   participant (keeps its raw hash — the letterless one in the archetype; when both twins are
   stored non-canonically, whichever loses the `_id`-order race, §5) and logs IDs. §3's
   exact-first lookup keeps each voter matching their own member: an input typed exactly as the
@@ -470,11 +470,11 @@ hashes" instead of "stored nationalIds".
 - **Partial migration failure**: an error aborts `RunMigrationsUp`, the version record is not
   written, startup fails loudly, and the rerun is safe (member docs unchanged → candidates
   re-derivable; per-participant no-op guard skips already-written hashes).
-- **Concurrency**: the migration lock serialises 0034 across replicas for as long as it runs
+- **Concurrency**: the migration lock serialises 0036 across replicas for as long as it runs
   (per-batch renewal, abort on loss). The per-participant collision check is read-before-write
   under that lock; live writers on old replicas can still insert a colliding hash between
   check and write — the unique index then fails the migration and startup loudly, and the
-  rerun is safe. New-code writers produce canonical hashes 0034's no-op guard skips.
+  rerun is safe. New-code writers produce canonical hashes 0036's no-op guard skips.
 
 ## Acceptance criteria
 
@@ -501,16 +501,16 @@ Every criterion names its test; Docker-gated suites are marked (D).
   consuming one rate-limit unit per attempt; a non-canonicalisable stored value (`12345678A`)
   still matches exactly its identical typed input and nothing else —
   `go test -run TestCSPAuthNationalIDNormalization ./api/`.
-- [ ] AC6 (D): migration 0034 recomputes the participant hashes of variant-stored members in
+- [ ] AC6 (D): migration 0036 recomputes the participant hashes of variant-stored members in
   nationalId censuses (the real login lookup then resolves them), leaves `orgMembers`
   documents byte-identical (asserted on the full decoded docs), skips non-canonicalisable and
   case-only-variant values, and a second run writes nothing (no-op guard) —
-  `go test -run TestMigration0034NormalizeNationalIDs ./db/`
+  `go test -run TestMigration0036NormalizeNationalIDs ./db/`
   (`db/migration_normalize_national_ids_test.go`, rewritten).
 - [ ] AC7 (D): the collision case: letterless/lettered twins (`12345678`/`12345678Z`) in one
   census → the letterless participant's hash is skipped and logged (IDs only), the twin's
   other censuses still migrate (per-participant unit), validation reports
-  `duplicate_after_normalization` for both — `go test -run TestMigration0034Collision ./db/`;
+  `duplicate_after_normalization` for both — `go test -run TestMigration0036Collision ./db/`;
   and at `auth/0` each member authenticates as themselves (exact-first lookup), the letterless
   input never resolving to the twin —
   `go test -run TestCSPAuthNationalIDCollisionSkipped ./api/`.
@@ -529,7 +529,7 @@ Every criterion names its test; Docker-gated suites are marked (D).
   for a Manager/Admin poll and their absence for an anonymous poll of the same job —
   `go test -run TestAddMembersNationalIDWarnings ./api/`.
 - [ ] AC11 (D): `MigrationApplied(migrations.NationalIDNormalizationVersion)` is false on a
-  ledger without 0034 and true after `RunMigrationsUp` —
+  ledger without 0036 and true after `RunMigrationsUp` —
   `go test -run TestMigrationApplied ./db/`. Unchanged.
 - [ ] AC12 (D): admin participant lookup finds a canonical-stored member from a
   separator-typed value (`12.345.678-Z`) and a verbatim-stored letterless member from that
@@ -542,10 +542,10 @@ Every criterion names its test; Docker-gated suites are marked (D).
 - [ ] AC14 (D): the framework lock renewal works (extends `expiresat` for the holder, errors
   on takeover, no-op without a renewer; a long migration is still recorded) —
   `go test -run TestMigrationLockRenewal ./db/`. Unchanged.
-- [ ] AC15 (D): 0034 processes more than one batch (`2*500+1` candidates), renews the lock
+- [ ] AC15 (D): 0036 processes more than one batch (`2*500+1` candidates), renews the lock
   once per batch, rehashes every candidate's participants exactly once, never writes
   `orgMembers`, and aborts without writing the batch when the lock was lost —
-  `go test -run TestMigration0034Batches ./db/`.
+  `go test -run TestMigration0036Batches ./db/`.
 
 (Former AC16, the `nationalIdOriginal` read-only guarantee, is obsolete: the field no longer
 exists anywhere; AC3, AC6 and AC13 pin its absence.)
@@ -556,7 +556,7 @@ exists anywhere; AC3, AC6 and AC13 pin its absence.)
   structured logging, gofumpt, lll 130, godoc on exported entities, quicktest matchers,
   Conventional Commit titles.
 - **The system never writes a member's `nationalId`** (or any derived form of it) except when
-  an organizer's own create/update/import carries it. Migration 0034 treats `orgMembers` as
+  an organizer's own create/update/import carries it. Migration 0036 treats `orgMembers` as
   read-only.
 - Never log or persist a nationalId value outside the member document itself. Warnings carry
   classes and IDs/lines only. Migration logs IDs and counters only.
@@ -566,8 +566,8 @@ exists anywhere; AC3, AC6 and AC13 pin its absence.)
   `recomputeParticipantHashes` delegates to), so the mirrored hash pair stays frozen.
 - Do not import cert-check; its semantics enter only as test vectors (provenance commented).
 - Migration number must exceed the highest registered migration on **both** `main` and
-  `origin/lts` at merge time (both 33 today — re-verify on rebase); never renumber after it
-  has shipped anywhere. (Renaming 0034 is allowed now because nothing is pushed; the ledger
+  `origin/lts` at merge time (main 35, origin/lts 33 at the 2026-11-04 rebase — re-verify on rebase); never renumber after it
+  has shipped anywhere. (Renumbering it is allowed now because nothing is pushed; the ledger
   records only the version.)
 - Existing blocking semantics of import, census build and validation are unchanged; every new
   signal in SP1 is warning-level.

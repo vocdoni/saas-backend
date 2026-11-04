@@ -18,7 +18,7 @@ import (
 // seededAt is the updatedAt of every seeded participant, so a write by the migration shows.
 var seededAt = time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC)
 
-// migrationWrites counts the successful write commands one run of migration 0034 sent, by
+// migrationWrites counts the successful write commands one run of migration 0036 sent, by
 // collection.
 type migrationWrites struct {
 	mu      sync.Mutex
@@ -32,7 +32,7 @@ func (w *migrationWrites) count(coll string) int {
 	return w.byColl[coll]
 }
 
-// runNationalIDMigration invokes migration 0034's Up directly against the test database, through a
+// runNationalIDMigration invokes migration 0036's Up directly against the test database, through a
 // client that counts the write commands it sends. ctx may carry a lock renewer
 // (migrations.WithLockRenewer).
 func runNationalIDMigration(ctx context.Context, c *qt.C) (*migrationWrites, error) {
@@ -64,7 +64,7 @@ func runNationalIDMigration(ctx context.Context, c *qt.C) (*migrationWrites, err
 	return w, mig.Up(ctx, client.Database(testDB.database))
 }
 
-// seedRawMember stores a member document directly, as any database before migration 34 holds it.
+// seedRawMember stores a member document directly, as any database before migration 36 holds it.
 func seedRawMember(c *qt.C, nationalID string) OrgMember {
 	id := bson.NewObjectID()
 	m := OrgMember{
@@ -97,7 +97,7 @@ func seedParticipant(c *qt.C, census *Census, m OrgMember, hashes map[string][]b
 }
 
 // seedRawParticipant stores m as a participant of census hashed from its stored values verbatim,
-// as every participant was hashed before migration 34.
+// as every participant was hashed before migration 36.
 func seedRawParticipant(c *qt.C, census *Census, m OrgMember) {
 	seedParticipant(c, census, m, rawParticipantHashes(*census, m))
 }
@@ -150,9 +150,9 @@ func assertCanonicalHashes(c *qt.C, census *Census, m OrgMember) {
 	c.Assert(p.UpdatedAt.After(seededAt), qt.IsTrue, comment)
 }
 
-// TestMigration0034NormalizeNationalIDs covers AC6: participants of variant-stored members get the
+// TestMigration0036NormalizeNationalIDs covers AC6: participants of variant-stored members get the
 // canonical login hashes, the member documents are never written, and a re-run writes nothing.
-func TestMigration0034NormalizeNationalIDs(t *testing.T) {
+func TestMigration0036NormalizeNationalIDs(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
@@ -255,10 +255,10 @@ func TestMigration0034NormalizeNationalIDs(t *testing.T) {
 	c.Assert(rawMembers(c), qt.DeepEquals, membersBefore)
 }
 
-// TestMigration0034Collision covers the migration half of AC7: a participant whose canonical hash
+// TestMigration0036Collision covers the migration half of AC7: a participant whose canonical hash
 // another participant of the census holds is skipped (keeping its raw hash), the same member's
 // participants in other censuses are still rehashed, and validation blocks the pair as duplicates.
-func TestMigration0034Collision(t *testing.T) {
+func TestMigration0036Collision(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
@@ -368,10 +368,10 @@ func TestMigration0034Collision(t *testing.T) {
 	}
 }
 
-// TestMigration0034Batches covers AC15: more than one batch, one lock renewal per batch, every
+// TestMigration0036Batches covers AC15: more than one batch, one lock renewal per batch, every
 // candidate's participant rehashed exactly once, no orgMembers write, and a lost lock aborting
 // before its batch writes.
-func TestMigration0034Batches(t *testing.T) {
+func TestMigration0036Batches(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 	const candidates = 2*500 + 1 // nationalIDBatchSize is 500: two full batches and one more

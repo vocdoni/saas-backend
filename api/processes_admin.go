@@ -388,7 +388,7 @@ func DeleteUserOrgDrafts(database *db.MongoStorage, userID uint64) (map[common.A
 // nationalIDLookupValues returns what an admin nationalId lookup matches: the trimmed value, plus
 // its canonical DNI/NIE form when that differs. A member stored in canonical form (without
 // separators) is found from any variant; a member stored verbatim with separators or non-canonical
-// casing (e.g. a member that was not rehashed by migration 34) is found only by that exact stored
+// casing (e.g. a member that was not rehashed by migration 36) is found only by that exact stored
 // value.
 func nationalIDLookupValues(value string) any {
 	trimmed := strings.TrimSpace(value)
