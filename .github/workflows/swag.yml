@@ -15,6 +15,13 @@ jobs:
   api-swagger:
     name: Generate swagger.yaml
     runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
+    # the private cert-check module: a job-scoped git rewrite with the token, never written to the
+    # runner's git config (the runners may be self-hosted and shared)
+    env:
+      GOPRIVATE: github.com/vocdoni/cert-check
+      GIT_CONFIG_COUNT: 1
+      GIT_CONFIG_KEY_0: url.https://x-access-token:${{ secrets.PRIVATE_MODULES_TOKEN }}@github.com/vocdoni/cert-check.insteadOf
+      GIT_CONFIG_VALUE_0: https://github.com/vocdoni/cert-check
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
