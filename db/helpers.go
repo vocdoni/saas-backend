@@ -44,12 +44,14 @@ func (ms *MongoStorage) collectionsMap() map[string]**mongo.Collection {
 	}
 }
 
-func (ms *MongoStorage) init() error {
+func (ms *MongoStorage) init(runMigrations bool) error {
 	// Initialize collection pointers
 	for name, collectionPtr := range ms.collectionsMap() {
 		*collectionPtr = ms.DBClient.Database(ms.database).Collection(name)
 	}
-
+	if !runMigrations {
+		return nil
+	}
 	// run db migrations
 	return ms.RunMigrationsUp()
 }
