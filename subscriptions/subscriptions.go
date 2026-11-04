@@ -412,6 +412,16 @@ func (p *Subscriptions) OrgCanPublishProcess(
 	return nil
 }
 
+// MaxProcessDurationDays returns the longest, in days, a process of org may run under the plan
+// governing it (the integrator's for a managed organization).
+func (p *Subscriptions) MaxProcessDurationDays(org *db.Organization) (int, error) {
+	_, plan, err := p.limitsOwner(org)
+	if err != nil {
+		return 0, err
+	}
+	return plan.Organization.MaxDuration, nil
+}
+
 // CanReserveManagedPublish reports whether the integrator has remaining managed-process quota,
 // WITHOUT reserving it — the read-only counterpart of db.ReserveManagedPublish, for the publish
 // dry-run.

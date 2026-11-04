@@ -545,6 +545,14 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 	if _, err := a.db.DeleteProcessesByOrg(managedAddr); err != nil {
 		log.Warnw("could not delete processes", "org", managedAddr.Hex(), "error", err)
 	}
+	// the CSP rows of the voting processes go first: they are found through the processes' ids
+	if err := a.db.DeleteVotingProcessCSPByOrg(managedAddr); err != nil {
+		log.Warnw("could not delete voting process CSP data", "org", managedAddr.Hex(), "error", err)
+	}
+	// every voting process (drafts included) and its questions
+	if _, err := a.db.DeleteVotingProcessesByOrg(managedAddr); err != nil {
+		log.Warnw("could not delete voting processes", "org", managedAddr.Hex(), "error", err)
+	}
 	if _, err := a.db.DeleteAllOrgMemberGroups(managedAddr); err != nil {
 		log.Warnw("could not delete org member groups", "org", managedAddr.Hex(), "error", err)
 	}
@@ -558,6 +566,9 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 	}
 	if _, err := a.db.DeleteMeteredVotesByOrg(managedAddr); err != nil {
 		log.Warnw("could not delete metered votes", "org", managedAddr.Hex(), "error", err)
+	}
+	if _, err := a.db.DeleteAPIKeysByOrg(managedAddr); err != nil {
+		log.Warnw("could not delete API keys", "org", managedAddr.Hex(), "error", err)
 	}
 	if _, err := a.db.DeleteInvitationsByOrg(managedAddr); err != nil {
 		log.Warnw("could not delete invitations", "org", managedAddr.Hex(), "error", err)

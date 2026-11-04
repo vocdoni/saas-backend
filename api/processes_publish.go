@@ -116,6 +116,10 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	if census == nil {
 		return problems, questionsMismatch // plan checks below need the census
 	}
+	// a resume must still mint the remaining questions of a partially published anonymous process
+	if a.anonymousCensusRefused(census.Anonymous) && !anyMined(questions) {
+		problems = append(problems, anonymousVotingUnavailable)
+	}
 	orgDoc, err := a.db.Organization(vp.OrgAddress)
 	if err != nil {
 		return append(problems, "organization not found"), questionsMismatch
@@ -202,6 +206,9 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 //	@Description	GET /jobs/{jobId}. Idempotent once published.
 //	@Description	409 (40172) means the stored questions do not match the process and the draft has to be
 //	@Description	saved again before it can be published.
+//	@Description	400 (40004) "process is not ready to publish: ..." lists every problem found, including
+//	@Description	"anonymous voting is temporarily unavailable" for an anonymous process while the service has
+//	@Description	anonymous voting off. A process some of whose questions are already on chain still resumes.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -209,7 +216,7 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 //	@Param			processId	path		string	true	"Process ID"
 //	@Success		202			{object}	apicommon.EnqueuedResponse
 //	@Success		200			{object}	apicommon.CreateVotingProcessResponse	"Already published"
-//	@Failure		400			{object}	errors.Error							"Not ready to publish"
+//	@Failure		400			{object}	errors.Error							"Not ready to publish (lists every problem)"
 //	@Failure		401			{object}	errors.Error
 //	@Failure		404			{object}	errors.Error
 //	@Failure		409			{object}	errors.Error	"Publish in progress, or the stored questions do not match the process"

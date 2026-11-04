@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
@@ -46,6 +47,10 @@ const DefaultMaxHourlyAuthFailures = 10
 // VoterAuthFailuresFactor multiplies MaxHourlyAuthFailures into the hourly failure budget of one
 // claimed voter across all the contacts submitted with their login fields.
 const VoterAuthFailuresFactor = 10
+
+// AnonymousVotingUnavailable is the error message for any anonymous voting request while
+// Config.DisableBlindCSP is on.
+const AnonymousVotingUnavailable = "anonymous voting is temporarily unavailable"
 
 // Config struct contains the configuration for the CSP service. It includes
 // the database name, the MongoDB client, the notification cooldown time, the
@@ -91,6 +96,9 @@ type Config struct {
 	// soon as it is enqueued. It exists to make tests deterministic; leave false
 	// in production (fire-and-forget).
 	SyncDelivery bool
+	// DisableBlindCSP temporarily stops offering anonymous voting: no blind signing, and no new
+	// anonymous processes (the API reads it through BlindCSPDisabled).
+	DisableBlindCSP bool
 }
 
 // CSP struct contains the CSP service. It includes the storage, the
@@ -108,6 +116,17 @@ type CSP struct {
 	maxDailyChallengeSends   int
 	maxHourlyAuthFailures    int
 	notifySync               bool
+	blindCSPDisabled         atomic.Bool
+}
+
+// BlindCSPDisabled reports whether anonymous voting is temporarily off (Config.DisableBlindCSP).
+func (c *CSP) BlindCSPDisabled() bool {
+	return c.blindCSPDisabled.Load()
+}
+
+// SetBlindCSPDisabled turns anonymous voting off or back on at runtime.
+func (c *CSP) SetBlindCSPDisabled(disabled bool) {
+	c.blindCSPDisabled.Store(disabled)
 }
 
 // countSentNotification bumps the organization's sent counters for a challenge
@@ -183,7 +202,7 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 	if maxHourlyAuthFailures == 0 {
 		maxHourlyAuthFailures = DefaultMaxHourlyAuthFailures
 	}
-	return &CSP{
+	c := &CSP{
 		Storage:                  config.DB,
 		Signer:                   s,
 		notifyQueue:              queue,
@@ -193,7 +212,9 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 		maxDailyChallengeSends:   maxDailyChallengeSends,
 		maxHourlyAuthFailures:    maxHourlyAuthFailures,
 		notifySync:               config.SyncDelivery,
-	}, nil
+	}
+	c.blindCSPDisabled.Store(config.DisableBlindCSP)
+	return c, nil
 }
 
 // pushChallenge enqueues a notification challenge. In synchronous-delivery mode
