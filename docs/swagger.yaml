@@ -6685,6 +6685,11 @@ paths:
         still READY or PAUSED, is refused with 409 and the offending ids in
         `data.signedMemberIds`.
 
+        409 (40903) while a publish is running, or while an election a failed publish submitted for
+        a draft is not settled on chain yet (it may still be mined): publish the draft again (it
+        adopts or resubmits at no new charge) or retry later. One that was mined is adopted first,
+        and the question is then priced and resized as a published one.
+
         Also callable with a scoped API key (scope: `voting:write`).
 
         402 when the change would grow a published process's census beyond what it paid for:

@@ -756,6 +756,11 @@ func (a *API) addProcessCensusMembers(
 //	@Description	still READY or PAUSED, is refused with 409 and the offending ids in
 //	@Description	`data.signedMemberIds`.
 //	@Description
+//	@Description	409 (40903) while a publish is running, or while an election a failed publish submitted for
+//	@Description	a draft is not settled on chain yet (it may still be mined): publish the draft again (it
+//	@Description	adopts or resubmits at no new charge) or retry later. One that was mined is adopted first,
+//	@Description	and the question is then priced and resized as a published one.
+//	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Description
 //	@Description	402 when the change would grow a published process's census beyond what it paid for:
@@ -795,8 +800,8 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 	// write would take the draft path, skip the resize, and the worker would then mint an election
 	// sized from its older snapshot. So an unpublished process is changed under the claim a publish
 	// takes, as delete does, and the two exclude each other; checking the marker on the read above
-	// would let a publish claim the process right after. The questions are reloaded under the
-	// claim. A published process is never claimed again, so it needs none.
+	// would let a publish claim the process right after. The process and its questions are
+	// reloaded under the claim. A published process is never claimed again, so it needs none.
 	if !vp.Published {
 		owner, claimed, err := a.db.ClaimVotingProcessForPublish(oid, time.Time{})
 		if err != nil {
@@ -812,9 +817,28 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 				log.Warnw("could not release the eligibility update's claim", "processId", oid.Hex(), "error", e)
 			}
 		}()
-		if questions, err = a.db.QuestionsByProcess(oid); err != nil {
+		if vp, questions, err = a.db.ProcessWithQuestions(oid); err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
+		}
+		// a publish that submitted and gave up may have mined an election for the question:
+		// settled first, so an adopted question (one with an election now) takes the published
+		// path below, priced and resized, instead of the draft one; one that may still mine
+		// refuses the change, which would otherwise size that election from the old list
+		if vp.PublishSubmitted {
+			res, err := a.resolvePublishTxs(vp, questions)
+			if err != nil {
+				errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+				return
+			}
+			if res.unresolved {
+				errPublishNotSettled.Write(w)
+				return
+			}
+			if vp, questions, err = a.db.ProcessWithQuestions(oid); err != nil {
+				errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+				return
+			}
 		}
 	}
 	question, ok := questionOfProcess(w, questions, chi.URLParam(r, "questionId"))

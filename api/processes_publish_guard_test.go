@@ -7,6 +7,7 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/pricing"
@@ -105,4 +106,49 @@ func TestEditAfterDeadPublishTx(t *testing.T) {
 	for i := range questions {
 		c.Assert(questions[i].PublishTxs, qt.HasLen, 0)
 	}
+}
+
+// TestQuestionCensusUpdateSettlesSubmittedPublish: changing the eligibility of a question of a draft
+// whose submitted publish tx is unresolved answers 409 (40903) and stores nothing, as an edit of the
+// draft does. Once the tx is mined, the question adopts its election and the change takes the
+// published path: the list is stored for a question with an election and its resize is enqueued
+// (202), instead of the draft write (200, no job).
+func TestQuestionCensusUpdateSettlesSubmittedPublish(t *testing.T) {
+	c := qt.New(t)
+	token, orgAddress, oid := newTwoQuestionDraft(t, "questioncensussubmitted")
+	hash, electionID := randomHash(), randomHash()
+	const meta = "https://saas.test/storage/q.json"
+	questions := holdPublishTxs(c, oid, db.PublishTx{
+		Hash: hash, Nonce: 3, MetadataURL: meta, UpstreamID: electionID, SubmittedAt: time.Now(),
+	})
+	qid := questions[0].ID.Hex()
+	members := getOrgMembers(t, token, orgAddress)
+	restrict := &apicommon.UpdateQuestionCensusRequest{MemberIDs: memberIDs(members.Members)[:1]}
+
+	// the nonce did not move and the hash is not in a block: the tx may still mine
+	useFakePublishChain(t, &fakePublishChain{nonce: 3})
+	requestAndAssertError(errors.ErrPublishInProgress, t, http.MethodPut, token, restrict,
+		"processes", oid.Hex(), "questions", qid, "census")
+	vp, questions, err := testDB.ProcessWithQuestions(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(vp.PublishSubmitted, qt.IsTrue)
+	c.Assert(questions[0].EligibleMemberIDs, qt.HasLen, 0)
+	c.Assert(questions[0].PublishTxs, qt.HasLen, 1)
+	c.Assert(questions[0].UpstreamID, qt.HasLen, 0)
+
+	// the tx mined: the question adopts its election and the change is served as a published one
+	useFakePublishChain(t, &fakePublishChain{
+		nonce: 4, mined: map[string]bool{hash.String(): true}, elections: map[string]string{electionID.String(): meta},
+	})
+	upd := requestAndParseWithAssertCode[apicommon.UpdateQuestionCensusResponse](
+		http.StatusAccepted, t, http.MethodPut, token, restrict, "processes", oid.Hex(), "questions", qid, "census")
+	c.Assert(upd.Eligible, qt.Equals, uint32(1))
+	c.Assert(upd.JobID, qt.Not(qt.Equals), "")
+	vp, questions, err = testDB.ProcessWithQuestions(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(vp.PublishSubmitted, qt.IsFalse)
+	c.Assert(vp.HasMinedElections, qt.IsTrue)
+	c.Assert(questions[0].UpstreamID.String(), qt.Equals, electionID.String())
+	c.Assert(questions[0].PublishTxs, qt.HasLen, 0)
+	c.Assert(questions[0].EligibleMemberIDs, qt.DeepEquals, restrict.MemberIDs)
 }
