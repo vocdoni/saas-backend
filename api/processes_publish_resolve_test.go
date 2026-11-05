@@ -95,11 +95,11 @@ func holdPublishTxs(c *qt.C, oid bson.ObjectID, txs ...db.PublishTx) []db.Voting
 func resolveStored(c *qt.C, oid bson.ObjectID) (bool, *db.VotingProcess, *db.VotingProcessQuestion) {
 	vp, questions, err := testDB.ProcessWithQuestions(oid)
 	c.Assert(err, qt.IsNil)
-	unresolved, err := testAPI.resolvePublishTxs(vp, questions)
+	res, err := testAPI.resolvePublishTxs(vp, questions)
 	c.Assert(err, qt.IsNil)
 	vp, questions, err = testDB.ProcessWithQuestions(oid)
 	c.Assert(err, qt.IsNil)
-	return unresolved, vp, &questions[0]
+	return res.unresolved, vp, &questions[0]
 }
 
 // randomHash returns a random 32-byte tx hash.

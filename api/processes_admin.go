@@ -130,14 +130,12 @@ func (a *API) deleteDraftProcess(vp *db.VotingProcess, teardown *orgTeardown) er
 	// a submitted publish tx is settled first: a mined one is adopted, and counts as mined below;
 	// one that may still mine, or that the chain cannot tell about (or no chain: cmd/userdel),
 	// keeps the draft, which would otherwise be refunded or dropped under a live election
-	unresolved, err := a.resolvePublishTxs(current, questions)
+	res, err := a.resolvePublishTxs(current, questions)
 	if err != nil {
 		return fmt.Errorf("failed to resolve submitted publish txs: %w", err)
 	}
-	if unresolved {
-		return errors.ErrPublishInProgress.Withf(
-			"a submitted election of the draft is not settled on chain yet; " +
-				"publish the draft again (it adopts or resubmits at no new charge) or retry later")
+	if res.unresolved {
+		return errPublishNotSettled
 	}
 	// the flag is set before a mined election id is stored, so it also covers an election whose
 	// id never reached its question

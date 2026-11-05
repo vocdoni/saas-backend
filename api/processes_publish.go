@@ -847,7 +847,8 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 		}
 		// then settle what earlier rounds or attempts submitted: a mined tx is adopted, a dead
 		// one released, and an unresolved question is resubmitted below at its record's nonce
-		if _, err := a.resolvePublishTxs(pw.vp, pw.questions); err != nil {
+		resolution, err := a.resolvePublishTxs(pw.vp, pw.questions)
+		if err != nil {
 			return nil, transient(fmt.Errorf("could not resolve submitted publish txs: %w", err))
 		}
 		pending := pw.pendingQuestions()
@@ -859,9 +860,13 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 			}
 			continue
 		}
-		startNonce, err := a.account.AccountNonce(pw.vp.OrgAddress)
-		if err != nil {
-			return nil, transient(fmt.Errorf("could not read account nonce: %w", err))
+		// the nonce the resolution read is still current: nothing else submits for this
+		// organization while the worker holds its tx lock
+		startNonce := resolution.accountNonce
+		if !resolution.nonceRead {
+			if startNonce, err = a.account.AccountNonce(pw.vp.OrgAddress); err != nil {
+				return nil, transient(fmt.Errorf("could not read account nonce: %w", err))
+			}
 		}
 		stxs, ok, err := pw.buildBatch(pending, startNonce)
 		if err != nil {

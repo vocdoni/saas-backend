@@ -555,11 +555,11 @@ func (a *API) reversePublishDebit(processID bson.ObjectID) error {
 	// a submitted tx that mined is adopted here, and then counts as mined below; one that may
 	// still mine, or that the chain cannot tell about, keeps the debit until a later touch
 	// resolves it
-	unresolved, err := a.resolvePublishTxs(vp, questions)
+	res, err := a.resolvePublishTxs(vp, questions)
 	if err != nil {
 		return fmt.Errorf("failed to resolve submitted publish txs: %w", err)
 	}
-	if unresolved || vp.PublishSubmitted {
+	if res.unresolved || vp.PublishSubmitted {
 		log.Warnw("failed publish kept paid: a submitted election may exist", "processId", processID.Hex(),
 			"txHashes", publishTxHashes(questions))
 		return nil
