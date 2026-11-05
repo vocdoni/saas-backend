@@ -162,7 +162,7 @@ func (a *Account) SubmitVote(ctx context.Context, stx, nullifier []byte) ([]byte
 func (a *Account) waitVoteMined(ctx context.Context, txHash []byte) error {
 	ctx, cancel := context.WithTimeout(ctx, voteMinedTimeout)
 	defer cancel()
-	if _, err := a.client.WaitUntilTxIsMined(ctx, txHash); err != nil {
+	if err := waitTxMined(ctx, a.client, txHash); err != nil {
 		return fmt.Errorf("could not wait for vote tx to be mined: %w", err)
 	}
 	return nil

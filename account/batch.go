@@ -92,7 +92,7 @@ func (a *Account) AccountNonce(org common.Address) (uint32, error) {
 func (a *Account) WaitTxMined(hash internal.HexBytes) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*40)
 	defer cancel()
-	if _, err := a.client.WaitUntilTxIsMined(ctx, dvotetypes.HexBytes(hash)); err != nil {
+	if err := waitTxMined(ctx, a.client, dvotetypes.HexBytes(hash)); err != nil {
 		return fmt.Errorf("could not wait for tx to be mined: %w", err)
 	}
 	return nil

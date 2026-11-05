@@ -364,7 +364,7 @@ func (a *Account) SubmitSignedTx(stx []byte) ([]byte, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*40)
 	defer cancel()
-	if _, err := a.client.WaitUntilTxIsMined(ctx, hash); err != nil {
+	if err := waitTxMined(ctx, a.client, hash); err != nil {
 		return nil, fmt.Errorf("could not wait for tx to be mined: %w", err)
 	}
 	return data, nil

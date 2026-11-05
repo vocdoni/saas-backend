@@ -129,8 +129,9 @@ const (
 	relayTxQueueSize = 384
 	// relayTxQueueWorkers caps concurrent vote submits so a chain stall cannot drain the
 	// router's shared request budget or starve the public CSP voter path. A worker holds its vote
-	// for the whole inclusion wait (7.5-17.5 s: WaitUntilTxIsMined polls every 5 s and sleeps
-	// 2.5 s more once mined), so the relay ceiling is about workers / 10.5 votes/s per instance:
+	// for the whole inclusion wait (7.5-17.5 s: account.waitTxMined polls every 5 s and sleeps
+	// 2.5 s more once mined, see account.TxPollInterval), so the relay ceiling is about
+	// workers / 10.5 votes/s per instance:
 	// 128 workers give ~12 votes/s. The workers only wait; the cost is ~26 req/s of tx-reference
 	// polls to the chain API when all are busy, with no measurable CPU or memory.
 	relayTxQueueWorkers = 128
