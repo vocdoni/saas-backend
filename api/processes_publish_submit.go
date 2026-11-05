@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/db"
@@ -26,6 +27,9 @@ const (
 	// hashes is in a block is declared dead by height: room for a tx that reached the node later
 	// than the height its record carries, or that a peer re-gossiped.
 	publishTxExpiryMargin = 120
+	// publishTxClockSkew is how much earlier than its record's submit time an election the record
+	// created may have been created on chain: the service and the chain clocks are not the same.
+	publishTxClockSkew = time.Hour
 )
 
 // publishTxChain is what resolvePublishTxs asks the chain: *account.Account in production, a fake
@@ -239,7 +243,7 @@ func (a *API) adoptPublishTx(r questionResolution, tx db.PublishTx) (bool, error
 		return false, err
 	}
 	vp.HasMinedElections = true
-	electionID, err := a.minedElectionID(r.chain, vp.OrgAddress, tx)
+	electionID, err := a.minedElectionID(r, tx)
 	if err != nil {
 		log.Warnw("could not find the election of a mined publish tx", "processId", vp.ID.Hex(),
 			"questionId", q.ID.Hex(), "hash", tx.Hash.String(), "error", err)
@@ -261,14 +265,29 @@ func (a *API) adoptPublishTx(r questionResolution, tx db.PublishTx) (bool, error
 	return true, nil
 }
 
-// minedElectionID finds the election a mined publish tx created: the id the node predicted when
-// its metadata URL matches the record's, else the newest election of the organization that
-// carries that metadata URL. It returns nil, nil when the listing ends with no match.
+// minedElectionID finds the election a mined publish tx of r.q created: the id the node predicted
+// when its metadata URL matches the record's, else the newest election of the organization that
+// carries that metadata URL. It returns nil, nil when the listing ends, or reaches elections older
+// than the question's records, with no match.
 //
 // The metadata URL identifies the question: the metadata document carries the question id
 // (db.ElectionParams.Meta, set in electionParamsForQuestion), so no two questions share a URL, and
 // an election already recorded on a question is never a match.
-func (a *API) minedElectionID(chain publishTxChain, org common.Address, tx db.PublishTx) (internal.HexBytes, error) {
+//
+// The listing is newest first, and a record is written before its tx is submitted, so the walk
+// stops at the first election created more than publishTxClockSkew before the question's oldest
+// record: the election looked for cannot be past it. The creation time comes from each election
+// read; on a page of elections all recorded already (the usual history), the oldest one is read
+// for it, so the walk costs at most one election read per page beyond those of the candidates.
+func (a *API) minedElectionID(r questionResolution, tx db.PublishTx) (internal.HexBytes, error) {
+	chain := r.chain
+	cutoff := r.q.PublishTxs[0].SubmittedAt
+	for _, rec := range r.q.PublishTxs[1:] {
+		if rec.SubmittedAt.Before(cutoff) {
+			cutoff = rec.SubmittedAt
+		}
+	}
+	cutoff = cutoff.Add(-publishTxClockSkew)
 	if len(tx.UpstreamID) > 0 {
 		// a predicted id that does not exist (an error here) falls back to the listing
 		if e, err := chain.Election(tx.UpstreamID); err == nil && e.MetadataURL == tx.MetadataURL {
@@ -282,7 +301,7 @@ func (a *API) minedElectionID(chain publishTxChain, org common.Address, tx db.Pu
 		}
 	}
 	for page := 0; ; page++ {
-		ids, err := chain.OrgElectionIDs(org, page)
+		ids, err := chain.OrgElectionIDs(r.vp.OrgAddress, page)
 		if err != nil {
 			return nil, err
 		}
@@ -293,16 +312,20 @@ func (a *API) minedElectionID(chain publishTxChain, org common.Address, tx db.Pu
 		if err != nil {
 			return nil, err
 		}
-		for _, id := range ids {
-			if served[id.String()] {
+		for i, id := range ids {
+			if served[id.String()] && i < len(ids)-1 {
 				continue
 			}
 			e, err := chain.Election(id)
 			if err != nil {
 				return nil, err
 			}
-			if e.MetadataURL == tx.MetadataURL {
+			if !served[id.String()] && e.MetadataURL == tx.MetadataURL {
 				return id, nil
+			}
+			// a missing creation time cannot end the walk
+			if !e.CreationTime.IsZero() && e.CreationTime.Before(cutoff) {
+				return nil, nil
 			}
 		}
 	}

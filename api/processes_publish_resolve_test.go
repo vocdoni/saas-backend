@@ -16,8 +16,9 @@ import (
 )
 
 // fakePublishChain is a scripted chain for resolvePublishTxs: the account nonce, the chain
-// height, which hashes are mined, the metadata URL of each election and the organization's
-// election listing (one page).
+// height, which hashes are mined, the metadata URL and creation time of each election and the
+// organization's election listing (listing as its first page, older as its second). It counts the
+// listing pages and the elections it was asked for.
 type fakePublishChain struct {
 	nonce     uint32
 	nonceErr  error
@@ -26,7 +27,12 @@ type fakePublishChain struct {
 	mined     map[string]bool
 	lookupErr error
 	elections map[string]string
+	created   map[string]time.Time
 	listing   []internal.HexBytes
+	older     []internal.HexBytes
+	// pagesAsked counts the listing calls; electionsAsked the Election calls, by id
+	pagesAsked     int
+	electionsAsked map[string]int
 }
 
 func (f *fakePublishChain) AccountNonce(common.Address) (uint32, error) { return f.nonce, f.nonceErr }
@@ -41,18 +47,28 @@ func (f *fakePublishChain) TxMined(hash internal.HexBytes) (bool, error) {
 }
 
 func (f *fakePublishChain) Election(id []byte) (*dvoteapi.Election, error) {
-	url, ok := f.elections[internal.HexBytes(id).String()]
+	key := internal.HexBytes(id).String()
+	if f.electionsAsked == nil {
+		f.electionsAsked = map[string]int{}
+	}
+	f.electionsAsked[key]++
+	url, ok := f.elections[key]
 	if !ok {
 		return nil, fmt.Errorf("election %x not found", id)
 	}
-	return &dvoteapi.Election{MetadataURL: url}, nil
+	return &dvoteapi.Election{MetadataURL: url, CreationTime: f.created[key]}, nil
 }
 
 func (f *fakePublishChain) OrgElectionIDs(_ common.Address, page int) ([]internal.HexBytes, error) {
-	if page > 0 {
+	f.pagesAsked++
+	switch page {
+	case 0:
+		return f.listing, nil
+	case 1:
+		return f.older, nil
+	default:
 		return nil, nil
 	}
-	return f.listing, nil
 }
 
 // useFakePublishChain makes resolvePublishTxs ask chain until the test ends.
@@ -140,10 +156,13 @@ func TestResolvePublishTxs(t *testing.T) {
 		dead
 		unresolved
 	)
+	old := time.Now().Add(-2 * time.Hour)
 	cases := []struct {
 		name  string
 		build func(id resolveIDs) ([]db.PublishTx, fakePublishChain)
 		want  outcome
+		// check, when set, inspects what the chain was asked
+		check func(c *qt.C, chain *fakePublishChain, id resolveIDs)
 	}{{
 		name: "adopt by the predicted id",
 		build: func(id resolveIDs) ([]db.PublishTx, fakePublishChain) {
@@ -195,6 +214,39 @@ func TestResolvePublishTxs(t *testing.T) {
 			}
 		},
 		want: adopted,
+	}, {
+		name: "the listing walk stops at an election older than the records: a later page is never asked",
+		build: func(id resolveIDs) ([]db.PublishTx, fakePublishChain) {
+			return []db.PublishTx{rec(id.h1, nil)}, fakePublishChain{
+				nonce: 6, mined: map[string]bool{id.h1.String(): true},
+				elections: map[string]string{id.other.String(): otherMeta, id.ours.String(): meta},
+				created:   map[string]time.Time{id.other.String(): old},
+				listing:   []internal.HexBytes{id.other},
+				older:     []internal.HexBytes{id.ours},
+			}
+		},
+		want: unresolved,
+		check: func(c *qt.C, chain *fakePublishChain, id resolveIDs) {
+			c.Assert(chain.pagesAsked, qt.Equals, 1)
+			c.Assert(chain.electionsAsked[id.ours.String()], qt.Equals, 0)
+		},
+	}, {
+		name: "the listing walk stops at a page of recorded elections older than the records",
+		build: func(id resolveIDs) ([]db.PublishTx, fakePublishChain) {
+			return []db.PublishTx{rec(id.h1, nil)}, fakePublishChain{
+				nonce: 6, mined: map[string]bool{id.h1.String(): true},
+				elections: map[string]string{id.served.String(): meta, id.ours.String(): meta},
+				created:   map[string]time.Time{id.served.String(): old},
+				listing:   []internal.HexBytes{id.served},
+				older:     []internal.HexBytes{id.ours},
+			}
+		},
+		want: unresolved,
+		check: func(c *qt.C, chain *fakePublishChain, id resolveIDs) {
+			c.Assert(chain.pagesAsked, qt.Equals, 1)
+			c.Assert(chain.electionsAsked[id.served.String()], qt.Equals, 1)
+			c.Assert(chain.electionsAsked[id.ours.String()], qt.Equals, 0)
+		},
 	}, {
 		name: "mined but no election matches",
 		build: func(id resolveIDs) ([]db.PublishTx, fakePublishChain) {
@@ -285,6 +337,9 @@ func TestResolvePublishTxs(t *testing.T) {
 			c.Assert(q.UpstreamID, qt.HasLen, 0, comment)
 			c.Assert(q.PublishTxs, qt.HasLen, len(txs), comment)
 			c.Assert(vp.PublishSubmitted, qt.IsTrue, comment)
+		}
+		if tc.check != nil {
+			tc.check(c, &chain, id)
 		}
 	}
 }
