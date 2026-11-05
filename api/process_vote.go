@@ -239,8 +239,9 @@ const (
 // verifyLookupSem bounds concurrent node reads across every POST /votes/verify request, and
 // every vote lookup of POST /processes/{id}/check and the admin participants list (see
 // lookupVoteOnChain). Each request fans out on its own, so without a shared ceiling the node
-// load scales with request concurrency on a public endpoint (the global middleware.Throttle
-// admits 100 requests → up to 800 concurrent reads). 32 lets four fully-fanned batches run
+// load scales with request concurrency on a public endpoint (the chain-bound throttle in
+// api/throttle.go admits maxInFlightChainRequests of them → up to 400 concurrent reads). 32 lets
+// four fully-fanned batches run
 // against the node; the typical single-nullifier request never notices it.
 var verifyLookupSem = make(chan struct{}, 32)
 
