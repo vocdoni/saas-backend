@@ -79,7 +79,8 @@ type publishResolution struct {
 	// unresolved reports that some question is left unresolved or the process flag stays set
 	unresolved bool
 	// accountNonce is the organization's account nonce the resolution read, valid when nonceRead:
-	// a publish round that submits next reuses it instead of reading it again
+	// a publish round that submits next reuses it instead of reading it again. An adoption clears
+	// nonceRead: the adopted tx may have consumed its nonce after accountNonce was read.
 	accountNonce uint32
 	nonceRead    bool
 }
@@ -140,6 +141,11 @@ func (a *API) resolvePublishTxs(vp *db.VotingProcess, questions []db.VotingProce
 			}
 			if !settled {
 				res.unresolved = true
+			}
+			if len(q.UpstreamID) > 0 {
+				// adopted: its tx may have been mined between the nonce read and the hash lookup (a
+				// tx of this worker's that outlived WaitTxMined), so the nonce read is not reused
+				res.nonceRead = false
 			}
 		}
 	}

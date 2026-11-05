@@ -356,3 +356,27 @@ func TestResolvePublishTxsFlagOnly(t *testing.T) {
 	c.Assert(isUnresolved, qt.IsFalse)
 	c.Assert(vp.PublishSubmitted, qt.IsFalse)
 }
+
+// TestResolvePublishTxsAdoptionDropsTheNonce: a resolution that adopts a mined tx does not offer
+// its nonce read for reuse, since that tx may have been mined after the read; one that adopts
+// nothing does.
+func TestResolvePublishTxsAdoptionDropsTheNonce(t *testing.T) {
+	c := qt.New(t)
+	const meta = "https://saas.test/storage/q1.json"
+	for i, mined := range []bool{true, false} {
+		hash, ours := randomHash(), randomHash()
+		_, _, oid := newTwoQuestionDraft(t, fmt.Sprintf("resolvenonce%02d", i))
+		holdPublishTxs(c, oid, db.PublishTx{Hash: hash, Nonce: 5, MetadataURL: meta, UpstreamID: ours, SubmittedAt: time.Now()})
+		useFakePublishChain(t, &fakePublishChain{
+			nonce: 5, mined: map[string]bool{hash.String(): mined},
+			elections: map[string]string{ours.String(): meta},
+		})
+		vp, questions, err := testDB.ProcessWithQuestions(oid)
+		c.Assert(err, qt.IsNil)
+		res, err := testAPI.resolvePublishTxs(vp, questions)
+		c.Assert(err, qt.IsNil)
+		comment := qt.Commentf("mined: %v", mined)
+		c.Assert(res.nonceRead, qt.Equals, !mined, comment)
+		c.Assert(res.unresolved, qt.Equals, !mined, comment)
+	}
+}

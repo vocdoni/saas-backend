@@ -860,8 +860,10 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 			}
 			continue
 		}
-		// the nonce the resolution read is still current: nothing else submits for this
-		// organization while the worker holds its tx lock
+		// the nonce the resolution read is reused when it adopted nothing: nothing else submits for
+		// this organization while the worker holds its tx lock. After an adoption it is read again,
+		// since the adopted tx (this worker's own, from an earlier round) may have been mined after
+		// the resolution read it.
 		startNonce := resolution.accountNonce
 		if !resolution.nonceRead {
 			if startNonce, err = a.account.AccountNonce(pw.vp.OrgAddress); err != nil {
