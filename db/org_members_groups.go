@@ -479,6 +479,8 @@ func aggregateMemberFields(
 		Duplicates:  cm.duplicates(),
 		MissingData: cm.missing,
 		NotFound:    make([]bson.ObjectID, 0),
+
+		NationalIDWarnings: cm.nationalIDWarnings,
 	}
 	dup := make(map[bson.ObjectID]bool, len(results.Duplicates))
 	for _, id := range results.Duplicates {

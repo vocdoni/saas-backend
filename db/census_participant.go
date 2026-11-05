@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -166,8 +167,31 @@ func (ms *MongoStorage) CensusParticipantByMemberNumber(
 // CensusParticipantByLoginHash retrieves a census participant from the database.
 // Uses the loginHash generated with the details of the passed member,
 // based on the AuthFields and TwoFaFields of the passed census.
+// The nationalId is hashed in its canonical DNI/NIE form, as every participant is
+// stored (see calculateParticipantHashes).
 // Returns ErrNotFound if the participant doesn't exist.
 func (ms *MongoStorage) CensusParticipantByLoginHash(census Census, member OrgMember) (*CensusParticipant, error) {
+	return ms.censusParticipantByHashes(census, member, calculateParticipantHashes)
+}
+
+// CensusParticipantByVerbatimLoginHash is CensusParticipantByLoginHash with the member hashed as
+// given, its nationalId not canonicalised (see rawParticipantHashes). It finds only participants
+// whose stored hash was computed from that exact value, i.e. those the nationalId migration left
+// on their raw hash because the canonical one collided with another member's in the census.
+// Returns ErrNotFound if the participant doesn't exist.
+func (ms *MongoStorage) CensusParticipantByVerbatimLoginHash(census Census, member OrgMember) (
+	*CensusParticipant, error,
+) {
+	return ms.censusParticipantByHashes(census, member, rawParticipantHashes)
+}
+
+// censusParticipantByHashes finds the participant of the census stored under any of the login
+// hashes hashesOf computes for the member. Returns ErrNotFound if there is none.
+func (ms *MongoStorage) censusParticipantByHashes(
+	census Census,
+	member OrgMember,
+	hashesOf func(Census, OrgMember) map[string][]byte,
+) (*CensusParticipant, error) {
 	// validate input
 	if census.ID.IsZero() {
 		return nil, ErrInvalidData
@@ -181,7 +205,7 @@ func (ms *MongoStorage) CensusParticipantByLoginHash(census Census, member OrgMe
 	defer cancel()
 
 	// Calculate hashes based on census configuration
-	hashes := calculateParticipantHashesBson(census, member)
+	hashes := hashesOf(census, member)
 
 	findFilter := loginHashesFilter(census.ID.Hex(), hashes, nil)
 
@@ -857,7 +881,24 @@ func (ms *MongoStorage) CensusParticipantsByMemberIDs(
 // calculateParticipantHashes returns the login hashes a member is stored under as a participant of
 // the census, keyed by the censusParticipants field holding each one. Every such field carries its
 // own unique (censusId, field) index.
+//
+// The nationalId is hashed in its canonical DNI/NIE form (internal.NormalizeNationalID), so every
+// variant of one DNI/NIE (separators, case, padding, a missing check letter) hashes alike. This is
+// the one place the db applies it, on both sides of the comparison: participant writes, the login
+// lookup and the census duplicate detection all hash through here, while the stored member keeps
+// its nationalId as entered. migrations.computeParticipantHashes applies the same canonicalisation.
 func calculateParticipantHashes(census Census, member OrgMember) map[string][]byte {
+	// member is a copy: the caller's (and the stored) nationalId is left as it is
+	member.NationalID = internal.NormalizeNationalID(member.NationalID).Normalized
+	return rawParticipantHashes(census, member)
+}
+
+// rawParticipantHashes is calculateParticipantHashes without the nationalId canonicalisation: it
+// hashes the member exactly as given, as every participant was hashed before the nationalId
+// migration (0036). The split exists for CensusParticipantByVerbatimLoginHash, which finds the
+// participants that migration left on their raw hash; everything else hashes through
+// calculateParticipantHashes.
+func rawParticipantHashes(census Census, member OrgMember) map[string][]byte {
 	hashes := map[string][]byte{
 		"loginHash": HashAuthTwoFaFields(member, census.AuthFields, census.TwoFaFields),
 	}
