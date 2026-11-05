@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/test"
 )
 
@@ -44,6 +45,7 @@ const (
 )
 
 func TestMain(m *testing.M) {
+	internal.UseFastHashingForTests()
 	ctx := context.Background()
 	// start a MongoDB container for testing
 	dbContainer, err := test.StartMongoContainer(ctx)
