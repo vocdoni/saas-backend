@@ -1176,6 +1176,10 @@ type PublishTx struct {
 	// A prediction, not proof: the election there may be another one.
 	UpstreamID  internal.HexBytes `json:"-" bson:"upstreamId,omitempty"`
 	SubmittedAt time.Time         `json:"-" bson:"submittedAt"`
+	// SubmittedHeight is the chain height read right before the tx was submitted: what the
+	// mempool's TTL is counted from. 0 on a record written before it was recorded, which then
+	// never expires by height.
+	SubmittedHeight uint32 `json:"-" bson:"submittedHeight,omitempty"`
 }
 
 // QuestionResults is one question's on-chain election tally, resolved on read from its own election.

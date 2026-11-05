@@ -876,8 +876,14 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 			return nil, fmt.Errorf("voting process publish not permitted")
 		}
 		// what is about to be submitted is recorded first, so a crash or a lost answer from here on
-		// can never let it be credited back or submitted twice while it may still mine
-		records := publishRecords(pending, stxs, startNonce)
+		// can never let it be credited back or submitted twice while it may still mine. Each record
+		// carries the height it is submitted at, what its expiry is counted from: without one the
+		// round does not submit.
+		height, err := a.account.ChainHeight()
+		if err != nil {
+			return nil, transient(fmt.Errorf("could not read the chain height: %w", err))
+		}
+		records := publishRecords(pending, stxs, startNonce, height)
 		if err := pw.recordSubmission(pending, records); err != nil {
 			return nil, err
 		}
@@ -972,17 +978,19 @@ func (pw *publishWorker) pendingQuestions() []*db.VotingProcessQuestion {
 }
 
 // publishRecords builds the record of each signed tx of a batch: its hash (sha256 of the signed
-// bytes, as the node computes it), its nonce and its question's metadata URL.
-func publishRecords(pending []*db.VotingProcessQuestion, stxs [][]byte, startNonce uint32) []db.PublishTx {
+// bytes, as the node computes it), its nonce, its question's metadata URL and the chain height it
+// is submitted at.
+func publishRecords(pending []*db.VotingProcessQuestion, stxs [][]byte, startNonce, height uint32) []db.PublishTx {
 	records := make([]db.PublishTx, len(stxs))
 	now := time.Now()
 	for i, stx := range stxs {
 		hash := sha256.Sum256(stx)
 		records[i] = db.PublishTx{
-			Hash:        internal.HexBytes(hash[:]),
-			Nonce:       startNonce + uint32(i),
-			MetadataURL: pending[i].MetadataURL,
-			SubmittedAt: now,
+			Hash:            internal.HexBytes(hash[:]),
+			Nonce:           startNonce + uint32(i),
+			MetadataURL:     pending[i].MetadataURL,
+			SubmittedAt:     now,
+			SubmittedHeight: height,
 		}
 	}
 	return records

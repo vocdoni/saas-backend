@@ -298,7 +298,10 @@ claim:
   payment, and publishing again resumes it with no second charge and no second election.
 - **dead** (no hash of the question is in a block and the organization's nonce moved past the
   records'): no tx of the question can ever mine. The records are dropped, and once none is left
-  the process behaves exactly as before: credit-back, edit and delete as usual.
+  the process behaves exactly as before: credit-back, edit and delete as usual. A question whose
+  nonce never moves is dead too once the chain is 180 blocks (the node mempool's 60-block TTL plus
+  a 120-block margin) past the height its records were submitted at, which every record carries
+  (`submittedHeight`; one without it never expires this way).
 - **unresolved** (anything else, including a chain that does not answer): nothing is credited
   back, and an edit or a delete answers **409** (40903). The draft stays paid — the state a
   delete refunds and a publish reuses — and the next touch settles it again. A publish is never

@@ -115,3 +115,25 @@ func TestOrgElectionIDs(t *testing.T) {
 	_, err = a.OrgElectionIDs(org, 0)
 	c.Assert(err, qt.Not(qt.IsNil))
 }
+
+// TestChainHeight pins the height read from /chain/info, and an error on a non-200.
+func TestChainHeight(t *testing.T) {
+	c := qt.New(t)
+	fail := false
+	a := newLookupNode(c, func(w http.ResponseWriter, r *http.Request) {
+		if fail || r.URL.Path != "/chain/info" {
+			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(&api.ChainInfo{Height: 4321})
+	})
+
+	height, err := a.ChainHeight()
+	c.Assert(err, qt.IsNil)
+	c.Assert(height, qt.Equals, uint32(4321))
+
+	fail = true
+	_, err = a.ChainHeight()
+	c.Assert(err, qt.Not(qt.IsNil))
+}

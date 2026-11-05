@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/db"
@@ -17,10 +18,21 @@ var errPublishNotSettled = errors.ErrPublishInProgress.Withf(
 	"a submitted election of the draft is not settled on chain yet; " +
 		"publish the draft again (it adopts or resubmits at no new charge) or retry later")
 
+const (
+	// publishTxMempoolTTL is the number of blocks the node keeps a tx in its mempool before it is
+	// dropped: vochain's transactionBlocksTTL (dvote vochain/app.go), 6 * 10 blocks.
+	publishTxMempoolTTL = 60
+	// publishTxExpiryMargin is the number of blocks past the TTL before a record none of whose
+	// hashes is in a block is declared dead by height: room for a tx that reached the node later
+	// than the height its record carries, or that a peer re-gossiped.
+	publishTxExpiryMargin = 120
+)
+
 // publishTxChain is what resolvePublishTxs asks the chain: *account.Account in production, a fake
 // in tests (API.publishChainOverride).
 type publishTxChain interface {
 	AccountNonce(org common.Address) (uint32, error)
+	ChainHeight() (uint32, error)
 	TxMined(hash internal.HexBytes) (bool, error)
 	Election(processID []byte) (*dvoteapi.Election, error)
 	OrgElectionIDs(org common.Address, page int) ([]internal.HexBytes, error)
@@ -77,8 +89,10 @@ func (r publishResolution) asUnresolved() publishResolution {
 // resolvePublishTxs settles, against the chain, the submitted publish txs recorded on the
 // questions of vp that have no election yet (db.PublishTx). Per question: a mined record is
 // adopted (its election recorded on the question, as persistPublished does); records none of
-// which mined while the account nonce moved past theirs are dead and dropped; anything else is
-// unresolved. Once no question holds records, vp's PublishSubmitted flag is cleared.
+// which mined are dead and dropped once the account nonce moved past theirs, or once the chain is
+// publishTxMempoolTTL + publishTxExpiryMargin blocks past the height they were submitted at (the
+// mempool dropped them); anything else is unresolved. Once no question holds records, vp's
+// PublishSubmitted flag is cleared.
 //
 // It reports unresolved when any question is left unresolved or the flag stays set; a chain that
 // cannot answer, or no chain at all (the cmd/userdel path), leaves every record unresolved, never
@@ -111,9 +125,11 @@ func (a *API) resolvePublishTxs(vp *db.VotingProcess, questions []db.VotingProce
 			return res.asUnresolved(), nil
 		}
 		res.accountNonce, res.nonceRead = accNonce, true
+		// the height is read at most once, and only when a question needs it
+		chainHeight := sync.OnceValues(chain.ChainHeight)
 		for _, q := range held {
 			settled, err := a.resolveQuestionPublishTxs(questionResolution{
-				chain: chain, vp: vp, q: q, accountNonce: accNonce,
+				chain: chain, vp: vp, q: q, accountNonce: accNonce, chainHeight: chainHeight,
 			})
 			if err != nil {
 				return res.asUnresolved(), err
@@ -145,6 +161,28 @@ type questionResolution struct {
 	q     *db.VotingProcessQuestion
 	// accountNonce is the organization's account nonce, read before any hash lookup
 	accountNonce uint32
+	// chainHeight reads the current chain height, memoized across the questions of a resolution
+	chainHeight func() (uint32, error)
+}
+
+// publishTxsExpired reports whether every record of q was submitted so long ago, in blocks, that
+// the node's mempool has dropped it: the chain is past publishTxMempoolTTL + publishTxExpiryMargin
+// blocks after the newest submit height. Height, not wall-clock time, so a halted chain never
+// expires a tx the mempool still holds. A record without a submit height never expires, and an
+// unreadable height is an error: not expired.
+func (r questionResolution) publishTxsExpired() (bool, error) {
+	var newest uint32
+	for _, tx := range r.q.PublishTxs {
+		if tx.SubmittedHeight == 0 {
+			return false, nil
+		}
+		newest = max(newest, tx.SubmittedHeight)
+	}
+	height, err := r.chainHeight()
+	if err != nil {
+		return false, fmt.Errorf("could not read the chain height: %w", err)
+	}
+	return height > newest+publishTxMempoolTTL+publishTxExpiryMargin, nil
 }
 
 // resolveQuestionPublishTxs resolves one question's records (see resolvePublishTxs), reporting
@@ -165,10 +203,22 @@ func (a *API) resolveQuestionPublishTxs(r questionResolution) (bool, error) {
 			return a.adoptPublishTx(r, q.PublishTxs[i])
 		}
 	}
-	// only "not found" answers from every lookup, with the nonce consumed by some other tx, prove
-	// that none of them can ever mine (a nonce is consumed once, and they all share it)
-	if lookupFailed || r.accountNonce <= nonce {
+	// only "not found" answers from every lookup prove that none of them can mine, and only once
+	// the nonce was consumed by some other tx (a nonce is consumed once, and they all share it) or
+	// the mempool has long dropped them (they never reached a block in its TTL)
+	if lookupFailed {
 		return false, nil
+	}
+	if r.accountNonce <= nonce {
+		expired, err := r.publishTxsExpired()
+		if err != nil {
+			log.Warnw("could not tell whether submitted publish txs expired", "processId", vp.ID.Hex(),
+				"questionId", q.ID.Hex(), "error", err)
+			return false, nil
+		}
+		if !expired {
+			return false, nil
+		}
 	}
 	if err := a.db.ClearQuestionPublishTxs(q.ID, nonce); err != nil {
 		return false, err

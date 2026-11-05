@@ -15,11 +15,14 @@ import (
 	dvoteapi "go.vocdoni.io/dvote/api"
 )
 
-// fakePublishChain is a scripted chain for resolvePublishTxs: the account nonce, which hashes are
-// mined, the metadata URL of each election and the organization's election listing (one page).
+// fakePublishChain is a scripted chain for resolvePublishTxs: the account nonce, the chain
+// height, which hashes are mined, the metadata URL of each election and the organization's
+// election listing (one page).
 type fakePublishChain struct {
 	nonce     uint32
 	nonceErr  error
+	height    uint32
+	heightErr error
 	mined     map[string]bool
 	lookupErr error
 	elections map[string]string
@@ -27,6 +30,8 @@ type fakePublishChain struct {
 }
 
 func (f *fakePublishChain) AccountNonce(common.Address) (uint32, error) { return f.nonce, f.nonceErr }
+
+func (f *fakePublishChain) ChainHeight() (uint32, error) { return f.height, f.heightErr }
 
 func (f *fakePublishChain) TxMined(hash internal.HexBytes) (bool, error) {
 	if f.lookupErr != nil {
@@ -114,13 +119,21 @@ type resolveIDs struct {
 // TestResolvePublishTxs covers the resolution table over a fake chain (AC3, AC9, AC10): adopt by
 // the predicted id, adopt whichever of two same-nonce records mined, recover through the listing
 // when the prediction is missing or points at another election (skipping one already recorded),
-// dead once the nonce moved with no hash mined, and unresolved otherwise.
+// dead once the nonce moved with no hash mined, dead once the chain is past the mempool TTL and
+// its margin after the newest submit height with no hash mined, and unresolved otherwise.
 func TestResolvePublishTxs(t *testing.T) {
 	c := qt.New(t)
 	const meta, otherMeta = "https://saas.test/storage/q1.json", "https://saas.test/storage/x.json"
 	rec := func(hash, upstreamID internal.HexBytes) db.PublishTx {
 		return db.PublishTx{Hash: hash, Nonce: 5, MetadataURL: meta, UpstreamID: upstreamID, SubmittedAt: time.Now()}
 	}
+	recAt := func(hash internal.HexBytes, height uint32) db.PublishTx {
+		tx := rec(hash, nil)
+		tx.SubmittedHeight = height
+		return tx
+	}
+	// the height at which records submitted at 100 and 200 expire: the newest one counts
+	const expiry = 200 + publishTxMempoolTTL + publishTxExpiryMargin
 	type outcome int
 	const (
 		adopted outcome = iota
@@ -202,6 +215,30 @@ func TestResolvePublishTxs(t *testing.T) {
 		name: "unresolved: the nonce did not move",
 		build: func(id resolveIDs) ([]db.PublishTx, fakePublishChain) {
 			return []db.PublishTx{rec(id.h1, id.ours)}, fakePublishChain{nonce: 5}
+		},
+		want: unresolved,
+	}, {
+		name: "dead: the nonce did not move but the chain is past the newest record's expiry",
+		build: func(id resolveIDs) ([]db.PublishTx, fakePublishChain) {
+			return []db.PublishTx{recAt(id.h1, 100), recAt(id.h2, 200)}, fakePublishChain{nonce: 5, height: expiry + 1}
+		},
+		want: dead,
+	}, {
+		name: "unresolved: the chain is not past the newest record's expiry yet",
+		build: func(id resolveIDs) ([]db.PublishTx, fakePublishChain) {
+			return []db.PublishTx{recAt(id.h1, 100), recAt(id.h2, 200)}, fakePublishChain{nonce: 5, height: expiry}
+		},
+		want: unresolved,
+	}, {
+		name: "unresolved: the height could not be read",
+		build: func(id resolveIDs) ([]db.PublishTx, fakePublishChain) {
+			return []db.PublishTx{recAt(id.h1, 100)}, fakePublishChain{nonce: 5, heightErr: fmt.Errorf("status 500")}
+		},
+		want: unresolved,
+	}, {
+		name: "unresolved: a record without a submit height never expires",
+		build: func(id resolveIDs) ([]db.PublishTx, fakePublishChain) {
+			return []db.PublishTx{recAt(id.h1, 100), recAt(id.h2, 0)}, fakePublishChain{nonce: 5, height: 100_000}
 		},
 		want: unresolved,
 	}, {

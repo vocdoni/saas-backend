@@ -38,6 +38,15 @@ func (a *Account) TxMined(hash internal.HexBytes) (bool, error) {
 	}
 }
 
+// ChainHeight returns the current height of the chain (GET /chain/info).
+func (a *Account) ChainHeight() (uint32, error) {
+	info, err := a.client.ChainInfo()
+	if err != nil {
+		return 0, fmt.Errorf("could not read the chain info: %w", err)
+	}
+	return info.Height, nil
+}
+
 // OrgElectionIDs returns one page (from 0) of the ids of the elections an organization created,
 // newest first. A page past the last one is empty.
 func (a *Account) OrgElectionIDs(org common.Address, page int) ([]internal.HexBytes, error) {
