@@ -121,7 +121,7 @@ func ensureAccountExist(baseURL string, cli *apiclient.HTTPclient) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*40)
 	defer cancel()
-	if _, err := cli.WaitUntilTxIsMined(ctx, hash); err != nil {
+	if err := waitTxMined(ctx, cli, hash); err != nil {
 		return fmt.Errorf("failed to wait for tx to be mined: %w", err)
 	}
 	return nil

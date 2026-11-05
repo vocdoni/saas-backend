@@ -373,12 +373,59 @@ func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id bson.ObjectID, u
 		errors.ErrDuplicateConflict.Withf("process already published and not in draft mode").Write(w)
 	case current.PublishInProgress():
 		errors.ErrPublishInProgress.Write(w)
+	case current.PublishSubmitted:
+		errPublishNotSettled.Write(w)
 	case current.HasMinedElections:
 		errors.ErrProcessPartiallyPublished.Write(w)
 	default:
 		errors.ErrStaleUpdate.Withf("the process was modified after updatedAt %s; refetch and retry",
 			updatedAt).Write(w)
 	}
+}
+
+// settleSubmittedPublish resolves the submitted publish txs of a draft about to be edited, under
+// the publish claim (a delete takes it the same way), and returns the draft read again. A tx that
+// mined is adopted, which the edit then refuses as partially published; one still unresolved
+// answers 409 (40903). A failed claim is answered as a refused draft write.
+func (a *API) settleSubmittedPublish(
+	w http.ResponseWriter, vp *db.VotingProcess, updatedAt string,
+) (*db.VotingProcess, bool) {
+	owner, claimed, err := a.db.ClaimVotingProcessForPublish(vp.ID, vp.UpdatedAt)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return nil, false
+	}
+	if !claimed {
+		// a token that went stale between the read and the claim is the client's problem, not a
+		// publish's: named as such so the recovery (refetch, retry) is the one the message says
+		if current, e := a.db.VotingProcess(vp.ID); e == nil && !current.PublishInProgress() &&
+			!current.UpdatedAt.Equal(vp.UpdatedAt) {
+			errors.ErrStaleUpdate.Withf("the process was modified after updatedAt %s; refetch and retry", updatedAt).Write(w)
+			return nil, false
+		}
+		a.writeDraftWriteConflict(w, vp.ID, updatedAt)
+		return nil, false
+	}
+	questions, err := a.db.QuestionsByProcess(vp.ID)
+	if err == nil {
+		_, err = a.resolvePublishTxs(vp, questions)
+	}
+	if e := a.db.ClearVotingProcessPublishing(vp.ID, owner); e != nil {
+		log.Warnw("could not release the edit's claim on a draft", "processId", vp.ID.Hex(), "error", e)
+	}
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return nil, false
+	}
+	current, ok := a.loadVotingProcess(w, vp.ID)
+	if !ok {
+		return nil, false
+	}
+	if current.PublishSubmitted {
+		a.writeDraftWriteConflict(w, vp.ID, updatedAt)
+		return nil, false
+	}
+	return current, true
 }
 
 // updateVotingProcessHandler godoc
@@ -389,6 +436,10 @@ func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id bson.ObjectID, u
 //	@Description	questions on-chain, so the draft can only be published again (resuming the rest), not edited.
 //	@Description	409 (40177) when the edit turns a once-per-organization add-on on for a draft that was paid
 //	@Description	without it, since an add-on cannot be added after payment.
+//	@Description	409 (40903) while a publish is running, or while an election a failed publish submitted is
+//	@Description	not settled on chain yet (it may still be mined): publish the draft again (it adopts or
+//	@Description	resubmits at no new charge) or retry later. One that was mined is adopted first, and the
+//	@Description	edit then answers 409 (40904).
 //	@Description	The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
 //	@Description	as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
 //	@Description	`typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
@@ -443,6 +494,11 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	if !user.HasRoleFor(vp.OrgAddress, db.ManagerRole) && !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
 		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization").Write(w)
 		return
+	}
+	if vp.PublishSubmitted {
+		if vp, ok = a.settleSubmittedPublish(w, vp, req.UpdatedAt); !ok {
+			return
+		}
 	}
 	// after the role check, so a non-member reads 401 rather than learning from a 409
 	// whether someone is paying for this process. Editing a paid draft is how a draft stranded

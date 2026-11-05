@@ -3,6 +3,8 @@ package api
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"math/big"
 	"net/http"
 	"testing"
@@ -37,9 +39,18 @@ func verifyProcessCSP(t *testing.T, pid, email string, authToken internal.HexByt
 // returns the verified auth token.
 func authProcessCSP(t *testing.T, pid string, authReq *handlers.AuthRequest) internal.HexBytes {
 	t.Helper()
-	step0 := requestAndParse[handlers.AuthResponse](
-		t, http.MethodPost, "", authReq, "processes", pid, "auth", "0",
-	)
+	// a member challenged for this process less than the OTP cooldown ago is refused a new token;
+	// a tx is mined in well under the cooldown now, so a test re-authenticating a member can get
+	// there: wait the cooldown out as a voter would and ask again
+	body, code := testRequest(t, http.MethodPost, "", authReq, "processes", pid, "auth", "0")
+	cooldown := fmt.Sprintf(`"code":%d`, errors.ErrAttemptCoolDownTime.Code)
+	if code == http.StatusUnauthorized && bytes.Contains(body, []byte(cooldown)) {
+		time.Sleep(cspNotificationCoolDownTime)
+		body, code = testRequest(t, http.MethodPost, "", authReq, "processes", pid, "auth", "0")
+	}
+	qt.Assert(t, code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", body))
+	var step0 handlers.AuthResponse
+	qt.Assert(t, json.Unmarshal(body, &step0), qt.IsNil)
 	qt.Assert(t, step0.AuthToken, qt.Not(qt.HasLen), 0)
 	return verifyProcessCSP(t, pid, authReq.Email, step0.AuthToken)
 }

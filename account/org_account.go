@@ -47,7 +47,7 @@ func (a *Account) CreateOrgAccount(orgSigner *ethereum.SignKeys, name, infoURI s
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*40)
 	defer cancel()
-	if _, err := a.client.WaitUntilTxIsMined(ctx, hash); err != nil {
+	if err := waitTxMined(ctx, a.client, hash); err != nil {
 		return fmt.Errorf("could not wait for create account tx to be mined: %w", err)
 	}
 	return nil

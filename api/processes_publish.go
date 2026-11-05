@@ -1,10 +1,13 @@
 package api
 
 import (
+	"cmp"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -88,6 +91,8 @@ func electionParamsForQuestion(
 		VoteType:      voteType,
 		ElectionType:  account.ElectionTypeFromQuestion(q),
 		MaxCensusSize: maxCensusSize,
+		// unique per question, so its content-addressed metadata URL is too (see db.ElectionParams.Meta)
+		Meta: map[string]any{"questionId": q.ID.Hex()},
 	}, nil
 }
 
@@ -135,6 +140,10 @@ func (a *API) reconcileStaleClaim(claim db.StalePublishClaim) {
 	}
 	if e := a.db.ClearVotingProcessPublishing(id, owner); e != nil {
 		log.Warnw("could not release the stale publish reconcile claim", "processId", id.Hex(), "error", e)
+	}
+	if vp, questions, e := a.db.ProcessWithQuestions(id); e == nil && vp.PublishSubmitted {
+		log.Warnw("stale publish left unresolved", "processId", id.Hex(), "txHashes", publishTxHashes(questions))
+		return
 	}
 	log.Infow("reconciled stale publishing process", "processId", id.Hex())
 }
@@ -244,6 +253,9 @@ func preflightError(problems []string, questionsMismatch bool, denied error) err
 //	@Description	over 3 hours for 15. Poll GET /jobs/{jobId} until it is completed or failed.
 //	@Description	If the publish finally fails before any election is mined, a failed publish credits the
 //	@Description	payer's wallet back (a `creditBack` history row) and publishing again charges again.
+//	@Description	A publish that failed after submitting its elections is credited back only once the chain
+//	@Description	proves none of them can be mined; until then the draft stays paid, and publishing again
+//	@Description	adopts any election that did mine instead of creating a second one, at no new charge.
 //	@Description	409 (40172) means the stored questions do not match the process and the draft has to be
 //	@Description	saved again before it can be published.
 //	@Description	400 (40004) "process is not ready to publish: ..." lists every problem found, including
@@ -747,9 +759,10 @@ func (pw *publishWorker) renewClaim(stop <-chan struct{}) {
 // retry the write instead of resubmitting the (already existing) election.
 func (pw *publishWorker) persistPublished(q *db.VotingProcessQuestion, upstreamID internal.HexBytes) bool {
 	pw.minedUnpersisted[q.ID] = upstreamID
-	initialStatus := db.QuestionStatusReady
-	if pw.vp.InitialStatus == db.QuestionStatusPaused {
-		initialStatus = db.QuestionStatusPaused
+	initialStatus := publishedQuestionStatus(pw.vp)
+	metadataURL := q.MetadataURL
+	if metadataURL == "" && len(q.PublishTxs) > 0 {
+		metadataURL = q.PublishTxs[0].MetadataURL // the in-memory URL did not survive a reload
 	}
 	var err error
 	for attempt := 0; attempt < 3; attempt++ {
@@ -763,7 +776,7 @@ func (pw *publishWorker) persistPublished(q *db.VotingProcessQuestion, upstreamI
 		if err = pw.a.db.MarkVotingProcessMined(pw.vp.ID); err != nil {
 			continue
 		}
-		if err = pw.a.db.SetQuestionPublished(q.ID, upstreamID, q.MetadataURL, initialStatus); err == nil {
+		if err = pw.a.db.SetQuestionPublished(q.ID, upstreamID, metadataURL, initialStatus); err == nil {
 			q.UpstreamID = upstreamID
 			delete(pw.minedUnpersisted, q.ID)
 			return true
@@ -787,10 +800,11 @@ func (pw *publishWorker) flushMinedUnpersisted() bool {
 }
 
 // run is one publish attempt: it builds and submits one election per question in a single
-// batch, confirms them on chain, and resubmits the not-yet-confirmed ones with fresh nonces up to
-// maxPublishRounds. On success it marks the process published (one process counter unit). A
-// failure is returned, marked transient when a later attempt may get past it, and finish decides
-// between retrying and abandoning; run itself never abandons.
+// batch, confirms them on chain, and resubmits the not-yet-confirmed ones up to maxPublishRounds,
+// each at the nonce its recorded txs carry (the same-nonce rule) so no question gets two elections.
+// On success it marks the process published (one process counter unit). A failure is returned,
+// marked transient when a later attempt may get past it, and finish decides between retrying and
+// abandoning; run itself never abandons.
 func (pw *publishWorker) run() (result *db.JobResult, err error) {
 	a := pw.a
 	// a panic mid-publish must not crash the process: surface it as a permanent failure, which
@@ -813,13 +827,6 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 	stopRenew := make(chan struct{})
 	go pw.renewClaim(stopRenew)
 	defer close(stopRenew)
-	// the questions were loaded before this worker held the org tx lock. A worker that ran
-	// before it under the same lock may have persisted elections since, so read them again now
-	// that nothing else can be submitting for this organization: building from the older read
-	// would mint a second election for a question that already has one.
-	if err := pw.reloadQuestions(); err != nil {
-		return nil, err
-	}
 	confirmed := false
 	for round := 0; round < maxPublishRounds && !confirmed; round++ {
 		// a worker that no longer owns the publish claim must stop before submitting anything:
@@ -831,16 +838,20 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 		// first retry any chain-confirmed election whose DB write is still pending: it must
 		// never be resubmitted, only re-persisted.
 		pw.flushMinedUnpersisted()
-		pending := make([]*db.VotingProcessQuestion, 0, len(pw.questions))
-		for i := range pw.questions {
-			q := &pw.questions[i]
-			if _, mined := pw.minedUnpersisted[q.ID]; mined {
-				continue // already on chain, only the DB write is pending
-			}
-			if len(q.UpstreamID) == 0 {
-				pending = append(pending, q)
-			}
+		// the questions were loaded before this worker held the org tx lock, and each round
+		// records the txs it submits. Read them again now that nothing else can be submitting
+		// for this organization: building from an older read would mint a second election for
+		// a question that already has one, or miss the records the round below must resolve.
+		if err := pw.reloadQuestions(); err != nil {
+			return nil, err
 		}
+		// then settle what earlier rounds or attempts submitted: a mined tx is adopted, a dead
+		// one released, and an unresolved question is resubmitted below at its record's nonce
+		resolution, err := a.resolvePublishTxs(pw.vp, pw.questions)
+		if err != nil {
+			return nil, transient(fmt.Errorf("could not resolve submitted publish txs: %w", err))
+		}
+		pending := pw.pendingQuestions()
 		if len(pending) == 0 {
 			// everything is on chain; confirmed only once every row is persisted too
 			confirmed = pw.flushMinedUnpersisted()
@@ -849,9 +860,15 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 			}
 			continue
 		}
-		startNonce, err := a.account.AccountNonce(pw.vp.OrgAddress)
-		if err != nil {
-			return nil, transient(fmt.Errorf("could not read account nonce: %w", err))
+		// the nonce the resolution read is reused when it adopted nothing: nothing else submits for
+		// this organization while the worker holds its tx lock. After an adoption it is read again,
+		// since the adopted tx (this worker's own, from an earlier round) may have been mined after
+		// the resolution read it.
+		startNonce := resolution.accountNonce
+		if !resolution.nonceRead {
+			if startNonce, err = a.account.AccountNonce(pw.vp.OrgAddress); err != nil {
+				return nil, transient(fmt.Errorf("could not read account nonce: %w", err))
+			}
 		}
 		stxs, ok, err := pw.buildBatch(pending, startNonce)
 		if err != nil {
@@ -860,14 +877,34 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 		if !ok {
 			return nil, fmt.Errorf("voting process publish not permitted")
 		}
-		pw.submitted = true
-		results, err := a.account.SubmitSignedTxBatch(stxs)
+		// what is about to be submitted is recorded first, so a crash or a lost answer from here on
+		// can never let it be credited back or submitted twice while it may still mine. Each record
+		// carries the height it is submitted at, what its expiry is counted from: without one the
+		// round does not submit.
+		height, err := a.account.ChainHeight()
 		if err != nil {
+			return nil, transient(fmt.Errorf("could not read the chain height: %w", err))
+		}
+		records := publishRecords(pending, stxs, startNonce, height)
+		if err := pw.recordSubmission(pending, records); err != nil {
+			return nil, err
+		}
+		pw.submitted = true
+		results, err := pw.submitBatch(stxs)
+		if err != nil {
+			// the request may have reached the node: every record stays, and the next round
+			// resubmits each question at the same nonce
 			log.Warnw("voting process batch submit failed, will retry", "error", err)
 			continue
 		}
+		pw.recordBatchOutcome(pending, records, results)
 		if a.publishSubmittedHook != nil {
 			a.publishSubmittedHook()
+		}
+		if a.publishSubmittedFault != nil {
+			if err := a.publishSubmittedFault(); err != nil {
+				return nil, err
+			}
 		}
 		if err := pw.refreshClaim(); err != nil {
 			return nil, err
@@ -903,11 +940,7 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 			log.Warnw("could not update organization process counter", "error", e)
 		}
 	}
-	status := db.QuestionStatusReady
-	if pw.vp.InitialStatus == db.QuestionStatusPaused {
-		status = db.QuestionStatusPaused
-	}
-	return &db.JobResult{Status: status, ProcessID: internal.HexBytes(pw.vp.ID[:])}, nil
+	return &db.JobResult{Status: publishedQuestionStatus(pw.vp), ProcessID: internal.HexBytes(pw.vp.ID[:])}, nil
 }
 
 // reloadQuestions replaces the worker's questions with what is stored now, refusing a stored
@@ -922,6 +955,112 @@ func (pw *publishWorker) reloadQuestions() error {
 	}
 	pw.questions = questions
 	return nil
+}
+
+// pendingQuestions returns the questions still to submit, in batch order: those holding records
+// first, ascending by their record nonce (each is resubmitted at it: the same-nonce rule), then the
+// fresh ones. A question whose election mined, recorded or not, is left out.
+func (pw *publishWorker) pendingQuestions() []*db.VotingProcessQuestion {
+	var held, fresh []*db.VotingProcessQuestion
+	for i := range pw.questions {
+		q := &pw.questions[i]
+		if _, mined := pw.minedUnpersisted[q.ID]; mined || len(q.UpstreamID) > 0 {
+			continue
+		}
+		if len(q.PublishTxs) > 0 {
+			held = append(held, q)
+		} else {
+			fresh = append(fresh, q)
+		}
+	}
+	slices.SortFunc(held, func(x, y *db.VotingProcessQuestion) int {
+		return cmp.Compare(x.PublishTxs[0].Nonce, y.PublishTxs[0].Nonce)
+	})
+	return append(held, fresh...)
+}
+
+// publishRecords builds the record of each signed tx of a batch: its hash (sha256 of the signed
+// bytes, as the node computes it), its nonce, its question's metadata URL and the chain height it
+// is submitted at.
+func publishRecords(pending []*db.VotingProcessQuestion, stxs [][]byte, startNonce, height uint32) []db.PublishTx {
+	records := make([]db.PublishTx, len(stxs))
+	now := time.Now()
+	for i, stx := range stxs {
+		hash := sha256.Sum256(stx)
+		records[i] = db.PublishTx{
+			Hash:            internal.HexBytes(hash[:]),
+			Nonce:           startNonce + uint32(i),
+			MetadataURL:     pending[i].MetadataURL,
+			SubmittedAt:     now,
+			SubmittedHeight: height,
+		}
+	}
+	return records
+}
+
+// recordSubmission writes, before a batch is submitted: the process's PublishSubmitted flag, under
+// the claim just renewed, then each question's record. Any write that fails or matches nothing
+// stops the round before anything is submitted.
+func (pw *publishWorker) recordSubmission(pending []*db.VotingProcessQuestion, records []db.PublishTx) error {
+	if err := pw.refreshClaim(); err != nil {
+		return err
+	}
+	if err := pw.a.db.SetVotingProcessPublishSubmitted(pw.vp.ID, pw.owner); err != nil {
+		if errors.Is(err, db.ErrConflict) {
+			return errPublishClaimLost
+		}
+		return transient(fmt.Errorf("could not flag the process submitted: %w", err))
+	}
+	pw.vp.PublishSubmitted = true
+	// not owner-conditional: the claim just renewed and the org tx lock exclude another publisher,
+	// and the nonce filter turns a dispossessed worker's write into a no-op
+	for i, q := range pending {
+		if err := pw.a.db.AppendQuestionPublishTx(pw.vp.ID, q.ID, records[i]); err != nil {
+			return transient(fmt.Errorf("could not record the publish tx of question %s: %w", q.ID.Hex(), err))
+		}
+	}
+	return nil
+}
+
+// submitBatch submits a signed batch, or fails as publishSubmitFault says (a test seam).
+func (pw *publishWorker) submitBatch(stxs [][]byte) ([]account.BatchItemResult, error) {
+	if pw.a.publishSubmitFault != nil {
+		if err := pw.a.publishSubmitFault(); err != nil {
+			return nil, err
+		}
+	}
+	return pw.a.account.SubmitSignedTxBatch(stxs)
+}
+
+// recordBatchOutcome applies the node's answer to the records: a submitted item gets the election
+// id the node predicted, and an item that never entered the mempool (pending, or failed other
+// than as already cached) loses its record at once. A result count that does not match the batch
+// cannot be bound to its questions, so every record is kept. Best effort: a record left behind
+// only stays unresolved until the chain settles it.
+func (pw *publishWorker) recordBatchOutcome(
+	pending []*db.VotingProcessQuestion, records []db.PublishTx, results []account.BatchItemResult,
+) {
+	if len(results) != len(pending) {
+		return
+	}
+	for i, res := range results {
+		q, hash := pending[i], records[i].Hash
+		var err error
+		switch {
+		case res.Status == account.BatchSubmitted:
+			if len(res.UpstreamID) > 0 {
+				err = pw.a.db.SetQuestionPublishTxUpstreamID(q.ID, hash, res.UpstreamID)
+			}
+		case res.Status == account.BatchFailed && res.InCache:
+			// the node holds these very bytes: they may still mine
+		default:
+			err = pw.a.db.RemoveQuestionPublishTx(q.ID, hash)
+		}
+		if err != nil {
+			log.Warnw("could not record a publish batch outcome", "questionId", q.ID.Hex(),
+				"hash", hash.String(), "error", err)
+		}
+	}
 }
 
 // resolveStartDate returns the start date to persist on the process once its elections are
@@ -1025,6 +1164,14 @@ func (pw *publishWorker) buildBatch(
 		return nil, false, err
 	}
 	for i, q := range pending {
+		nonce := startNonce + uint32(i)
+		// the same-nonce rule: a question holding records is resubmitted only at their nonce, and
+		// those nonces are contiguous from the account's. A mismatch means the chain moved since
+		// it was resolved; the next attempt resolves again.
+		if len(q.PublishTxs) > 0 && q.PublishTxs[0].Nonce != nonce {
+			return nil, false, transient(fmt.Errorf("question %s holds a submitted tx at nonce %d, not %d",
+				q.ID.Hex(), q.PublishTxs[0].Nonce, nonce))
+		}
 		ep, err := electionParamsForQuestion(pw.vp, q, pw.census)
 		if err != nil {
 			return nil, false, err
@@ -1038,7 +1185,6 @@ func (pw *publishWorker) buildBatch(
 			return nil, false, err
 		}
 		q.MetadataURL = a.objectStorage.LocalURL(objectName)
-		nonce := startNonce + uint32(i)
 		tx, err := a.account.BuildNewProcessTx(&account.NewProcessParams{
 			OrgAddress:    pw.vp.OrgAddress,
 			Params:        ep,

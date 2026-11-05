@@ -64,7 +64,9 @@ const (
 
 	anotherEmail = "something-else@gmail.com"
 
-	cspNotificationCoolDownTime = time.Second * 5
+	// cspNotificationCoolDownTime is the OTP cooldown handed to the CSP under test, shorter than
+	// the production default: the tests only ever sleep it through, none asserts the refusal.
+	cspNotificationCoolDownTime = time.Second
 )
 
 var (
@@ -266,6 +268,7 @@ func pingAPI(endpoint string, retries int) error {
 // starts the API server and waits for it to start before running the tests.
 func TestMain(m *testing.M) {
 	log.Init("debug", "stdout", nil)
+	internal.UseFastHashingForTests()
 	// This context is the lifetime of the whole package test run: it is handed to
 	// the API server (api.New) and therefore becomes the notify queue's context,
 	// on which the delivery workers live. It must outlast m.Run() — a fixed
@@ -359,6 +362,10 @@ func TestMain(m *testing.M) {
 
 	// create the test account with the Voconed private key and the API
 	// container endpoint
+	// the test chain mines a block every second, so poll the mined txs far more often than the
+	// 5 s production default; keep the settle (half of it) at 150 ms or more, the indexer answers
+	// a tx reference slightly before the state tree is saved
+	account.TxPollInterval = 300 * time.Millisecond
 	testAccount, err := account.New(test.VoconedFoundedPrivKey, testAPIEndpoint)
 	if err != nil {
 		panic(err)
@@ -633,13 +640,13 @@ func waitUntilTxIsMined(ctx context.Context, txHash []byte, c *apiclient.HTTPcli
 	for {
 		_, err := c.TransactionReference(txHash)
 		if err == nil {
-			time.Sleep(time.Second * 1) // wait a bit longer to make sure the tx is committed
+			time.Sleep(account.TxPollInterval / 2) // wait a bit longer to make sure the tx is committed
 			log.Infow("transaction mined", "tx",
 				hex.EncodeToString(txHash), "duration", time.Since(startTime).String())
 			return nil
 		}
 		select {
-		case <-time.After(time.Second * 1):
+		case <-time.After(account.TxPollInterval):
 			continue
 		case <-ctx.Done():
 			return fmt.Errorf("transaction %s never mined after %s: %w",
@@ -975,7 +982,7 @@ func pollJob(t *testing.T, jobID string) apicommon.JobResponse {
 		if time.Now().After(deadline) {
 			t.Fatalf("job %s still pending after timeout", jobID)
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -995,7 +1002,7 @@ func pollOrgJob(t *testing.T, jwt, orgAddress, jobID string) apicommon.JobRespon
 		if time.Now().After(deadline) {
 			t.Fatalf("job %s still pending after timeout", jobID)
 		}
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 

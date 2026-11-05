@@ -187,3 +187,19 @@ func TestNormalizeInitialStatus(t *testing.T) {
 	_, err := NormalizeInitialStatus("ENDED")
 	c.Assert(err, qt.ErrorMatches, `initialStatus must be READY or PAUSED, got .*`)
 }
+
+// TestBuildElectionMetadataMeta: the meta block is carried into the metadata document and left out
+// when there is none, so two questions with the same content get different metadata URLs only when
+// publish stamps their ids.
+func TestBuildElectionMetadataMeta(t *testing.T) {
+	c := qt.New(t)
+	params := &db.ElectionParams{Title: db.MultiLangString{"default": "Q"}}
+	plain, err := BuildElectionMetadata(params)
+	c.Assert(err, qt.IsNil)
+	c.Assert(string(plain), qt.Not(qt.Contains), `"meta"`)
+	params.Meta = map[string]any{"questionId": "0123456789abcdef01234567"}
+	stamped, err := BuildElectionMetadata(params)
+	c.Assert(err, qt.IsNil)
+	c.Assert(string(stamped), qt.Contains, `"meta":{"questionId":"0123456789abcdef01234567"}`)
+	c.Assert(string(stamped), qt.Not(qt.Equals), string(plain))
+}

@@ -280,6 +280,46 @@ publishing again resumes the rest for free.
 A top-up webhook redelivered after its publish was credited back finds the row `failed` and
 stops: the credit is not repeated (session key), nothing is debited and nothing is published.
 
+### Submitted elections are settled on chain first
+
+A NEW_PROCESS tx can mine after its publish gave up on it: the 40 s wait ran out while the tx sat
+in the mempool, or the service died between the submit and recording the election. So before a
+round submits anything, the worker flags the process (`publishSubmitted`) and records each tx on
+its question (`publishTxs`: hash, account nonce, metadata URL and the election id the node
+predicts). Every tx ever submitted for a question carries the same nonce until the question is
+settled, so at most one of them can mine and a question never gets two elections.
+
+Every credit-back (the worker's abandon, the stale-marker sweep, a failure after the debit), a
+delete, a teardown and an edit first settle those records against the chain, under the publish
+claim:
+
+- **mined** (its hash is in a block): the election is adopted — recorded on its question as a
+  publish that confirmed it would. The draft then counts as partially published: it keeps its
+  payment, and publishing again resumes it with no second charge and no second election.
+- **dead** (no hash of the question is in a block and the organization's nonce moved past the
+  records'): no tx of the question can ever mine. The records are dropped, and once none is left
+  the process behaves exactly as before: credit-back, edit and delete as usual. A question whose
+  nonce never moves is dead too once the chain is 180 blocks (the node mempool's 60-block TTL plus
+  a 120-block margin) past the height its records were submitted at, which every record carries
+  (`submittedHeight`; one without it never expires this way).
+- **unresolved** (anything else, including a chain that does not answer): nothing is credited
+  back, and an edit or a delete answers **409** (40903). The draft stays paid — the state a
+  delete refunds and a publish reuses — and the next touch settles it again. A publish is never
+  blocked: its next round resubmits the question at the same nonce. An operator can also settle a
+  draft whose nonce never moves by publishing it on the customer's behalf; there is no support tool
+  for it yet.
+
+`cmd/userdel` has no chain client, so a draft still flagged stops the erasure with 409 (40903):
+run the service, which settles it, or delete the draft through the API first.
+
+Deployment assumption: the nonce and the tx are read from the same node. `VOCDONI_VOCDONIAPI` must
+not round-robin across gateways at different heights, or a tx another gateway has not indexed yet
+could be taken for dead.
+
+The election metadata document each question publishes carries `meta.questionId` (the question's
+id), which is what makes its content-addressed URL unique per question and lets an election be
+matched back to its question.
+
 ## Topping up for a process
 
 `POST /processes/{id}/checkout {returnURL, locale}` (Admin, JWT only) is how a standard
@@ -617,7 +657,9 @@ already landed is not refused as growth it is not.
 whatever happens to the draft); if Stripe cannot confirm an open session expired, the delete
 fails closed rather than leave a payable session for a process that no longer exists. Then what
 the draft paid is credited back (below), the row goes with the draft and its add-on claims are
-released.
+released. A draft whose failed publish submitted an election the chain has not settled yet answers
+409 (40903) instead, and one whose submitted election mined is adopted and answers 40904
+([Submitted elections are settled on chain first](#submitted-elections-are-settled-on-chain-first)).
 
 ### Deleting a paid draft
 
@@ -768,7 +810,7 @@ up.
 | 40175 | 402 | the integrator wallet does not cover a managed organization's debit (`requiredCents`/`availableCents` in data) |
 | 40176 | 422 | census above 50 000 — custom quote only, refused on every payment path |
 | 40177 | 409 | a top-up checkout is open (publish), the draft is already paid (`/checkout`), a checkout is completing, the paid amount moved since a headroom price was computed, a delete refunded the draft, or a checkout cancel whose top-up was already spent on the process's publish (publish again), or an add-on the draft's payment does not include and the organization has not paid (publish, or an edit that turns it on) |
-| 40903 | 409 | the process holds its publish claim — a publish in progress, or briefly a checkout, a checkout cancel or an eligibility update of the draft: a second publish, a checkout, cancel, edit, delete or eligibility update of that draft, or a member create, import or group update that would grow its census. Retry once the claim is released: when the publish job ends, or up to 15 minutes after a service restart (`PublishStaleAfter`) |
+| 40903 | 409 | the process holds its publish claim — a publish in progress, or briefly a checkout, a checkout cancel or an eligibility update of the draft: a second publish, a checkout, cancel, edit, delete or eligibility update of that draft, or a member create, import or group update that would grow its census. Retry once the claim is released: when the publish job ends, or up to 15 minutes after a service restart (`PublishStaleAfter`). Also: an election a failed publish submitted is not settled on chain yet — edit, delete and teardown refuse the draft until it is (publish the draft again, at no new charge, or retry later) |
 | 40901 | 409 | the organization is being deleted (a managed-organization teardown is running): `POST /processes`, publish and `census/checkout` refuse |
 | 40183 | 402 | a managed organization's spend cap would be passed (`capCents`, `spentCents`, `requiredCents` in data) |
 | 40184 | 402 | an integrator that never kept a top-up already manages its one organization (`managedOrgs`, `managedOrgsCreated`, `netTopUpCents` in data) |

@@ -58,7 +58,11 @@ func (ms *MongoStorage) SetVotingProcess(vp *VotingProcess) (bson.ObjectID, erro
 // questions rewritten underneath it. A stale marker is still overwritten, which is the intended
 // release — ClaimVotingProcessForPublish would reclaim it anyway.
 //
-// The caller cannot tell the two refusals apart from ErrConflict alone; re-read the process to see
+// A process with mined elections or with a submitted publish tx not resolved yet
+// (PublishSubmitted) is refused too: replacing its questions would orphan an election that exists
+// or may still mine.
+//
+// The caller cannot tell the refusals apart from ErrConflict alone; re-read the process to see
 // which precondition failed.
 func (ms *MongoStorage) SetVotingProcessDraft(vp *VotingProcess, seen time.Time) error {
 	if vp.ID.IsZero() || (vp.OrgAddress.Cmp(common.Address{}) == 0) {
@@ -75,10 +79,14 @@ func (ms *MongoStorage) SetVotingProcessDraft(vp *VotingProcess, seen time.Time)
 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	filter := bson.M{"_id": vp.ID, "published": false, "hasMinedElections": bson.M{"$ne": true}, "$or": bson.A{
-		bson.M{"publishing": bson.M{"$exists": false}},
-		bson.M{"publishing": bson.M{"$lt": time.Now().Add(-PublishStaleAfter)}},
-	}}
+	filter := bson.M{
+		"_id": vp.ID, "published": false, "hasMinedElections": bson.M{"$ne": true},
+		"publishSubmitted": bson.M{"$ne": true},
+		"$or": bson.A{
+			bson.M{"publishing": bson.M{"$exists": false}},
+			bson.M{"publishing": bson.M{"$lt": time.Now().Add(-PublishStaleAfter)}},
+		},
+	}
 	now := time.Now()
 	if !seen.IsZero() {
 		// mongo stores datetimes with millisecond precision, so the token the client echoes back
@@ -474,7 +482,11 @@ func (ms *MongoStorage) SetVotingProcessPublished(id bson.ObjectID, owner string
 	if owner != "" {
 		filter["publishingOwner"] = owner
 	}
-	update := bson.M{"$set": set, "$unset": bson.M{"publishing": "", "publishingOwner": ""}} //nolint:goconst
+	// every question has its election: no submitted tx is left to resolve
+	update := bson.M{
+		"$set":   set,
+		"$unset": bson.M{"publishing": "", "publishingOwner": "", "publishSubmitted": ""}, //nolint:goconst
+	}
 	res, err := ms.votingProcesses.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("failed to mark voting process published: %w", err)
