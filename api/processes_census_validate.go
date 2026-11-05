@@ -8,6 +8,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // validateProcessCensusHandler godoc
@@ -24,13 +25,19 @@ import (
 //	@Description	voting temporarily off, an `anonymous: true` spec is a 400 (40037) "anonymous voting is
 //	@Description	temporarily unavailable".
 //	@Description
+//	@Description	When `nationalId` is an auth field, both answers carry `nationalIdWarnings` (in the 400 under
+//	@Description	`data`): one entry per member whose nationalId is missing, a DNI/NIE with a wrong check
+//	@Description	letter (`letter_mismatch`), another tax id (`unsupported_document`), not a DNI/NIE at all
+//	@Description	(`invalid`), plus a `duplicate_after_normalization` entry for every member sharing a
+//	@Description	canonical DNI/NIE with another. Warnings never make the census invalid.
+//	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			request	body		apicommon.ValidateProcessCensusRequest	true	"Org address + census spec"
-//	@Success		200		{string}	string									"OK"
+//	@Success		200		{object}	apicommon.ValidateProcessCensusResponse	"Usable census, with its nationalId warnings"
 //	@Failure		400		{object}	errors.Error							"Invalid census (duplicates, missing data), or anonymous voting unavailable"
 //	@Failure		401		{object}	errors.Error							"Unauthorized"
 //	@Failure		500		{object}	errors.Error							"Internal server error"
@@ -70,6 +77,10 @@ func (a *API) validateProcessCensusHandler(w http.ResponseWriter, r *http.Reques
 		errors.ErrInvalidData.With(db.PasswordNeedsLookupFieldMessage).Write(w)
 		return
 	}
+	if err := a.censusAuthMethodError(census); err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
 
 	// select the member set to validate: a group, an explicit subset, or (default) the whole org.
 	var results *db.OrgMemberAggregationResults
@@ -91,9 +102,18 @@ func (a *API) validateProcessCensusHandler(w http.ResponseWriter, r *http.Reques
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+	// a certificate census logs in with the nationalId alone, so its missing data is a missing
+	// nationalId: a warning like any value no certificate can match, never a refusal
+	if census.AuthMethod == db.CensusAuthMethodCertificate {
+		results.MissingData = []bson.ObjectID{}
+	}
 	if len(results.Duplicates) > 0 || len(results.MissingData) > 0 || len(results.NotFound) > 0 {
 		errors.ErrInvalidData.WithData(results).Write(w)
 		return
 	}
-	apicommon.HTTPWriteOK(w)
+	warnings := results.NationalIDWarnings
+	if warnings == nil {
+		warnings = []db.NationalIDWarning{}
+	}
+	apicommon.HTTPWriteJSON(w, &apicommon.ValidateProcessCensusResponse{NationalIDWarnings: warnings})
 }

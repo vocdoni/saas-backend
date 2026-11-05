@@ -26,6 +26,14 @@ const (
 	// login fields a request submits, without the contact) on one voting process, per UTC hour. It
 	// is the coarser bound on guessing one voter's contact with ever-changing values.
 	CSPCounterVoterAuthFailures = "voterAuthFailures"
+	// CSPCounterCertAuthCreates counts certificate sign-in attempts created from one client IP on
+	// one voting process, per UTC minute.
+	CSPCounterCertAuthCreates = "certAuthCreates"
+	// CSPCounterCertAuthFailures counts certificate redeems on one voting process, per UTC hour,
+	// under two kinds of key: the presented certificate (before verification) and the verified
+	// document number (after it). Only a verified identity reaches a document key, so a forged
+	// certificate naming a voter's document spends its own budget, never the voter's.
+	CSPCounterCertAuthFailures = "certAuthFailures"
 )
 
 // CSPCounterWindow returns the length of the window a counter kind resets after. Failed
@@ -33,10 +41,14 @@ const (
 // that voter's coarse budget, and an hour bounds such a lockout while still capping contact
 // guessing at 24 windows a day. Challenge sends cost money per unit, so their budget is daily.
 func CSPCounterWindow(kind string) time.Duration {
-	if kind == CSPCounterAuthFailures || kind == CSPCounterVoterAuthFailures {
+	switch kind {
+	case CSPCounterAuthFailures, CSPCounterVoterAuthFailures, CSPCounterCertAuthFailures:
 		return time.Hour
+	case CSPCounterCertAuthCreates:
+		return time.Minute
+	default:
+		return 24 * time.Hour
 	}
-	return 24 * time.Hour
 }
 
 // cspCounter is one counter document. The _id derives from (kind, key, window start), so every

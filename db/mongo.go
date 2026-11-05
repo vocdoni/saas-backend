@@ -68,6 +68,9 @@ type MongoStorage struct {
 	meteredVotes        *mongo.Collection
 	migrations          *mongo.Collection
 	counters            *mongo.Collection
+
+	// certAuthTransactions holds the certificate sign-in attempts (see CertAuthTransaction).
+	certAuthTransactions *mongo.Collection
 }
 
 type Options struct {

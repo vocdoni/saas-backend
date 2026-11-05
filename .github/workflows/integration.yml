@@ -178,6 +178,11 @@ jobs:
       # A pinned vocdoni-node may raise the go directive in go.mod, so the toolchain
       # must be allowed to download. Otherwise the go.mod version is used as is.
       GOTOOLCHAIN: auto
+      # the private cert-check module, as in main.yml
+      GOPRIVATE: github.com/vocdoni/cert-check
+      GIT_CONFIG_COUNT: 1
+      GIT_CONFIG_KEY_0: url.https://x-access-token:${{ secrets.PRIVATE_MODULES_TOKEN }}@github.com/vocdoni/cert-check.insteadOf
+      GIT_CONFIG_VALUE_0: https://github.com/vocdoni/cert-check
     steps:
       - name: Checkout
         uses: actions/checkout@v5

@@ -16,12 +16,14 @@ require (
 	github.com/lestrrat-go/jwx/v3 v3.4.0
 	github.com/moby/moby/api v1.56.1
 	github.com/nyaruka/phonenumbers v1.8.1
+	github.com/pires/go-proxyproto v0.11.0
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
 	github.com/stripe/stripe-go/v87 v87.0.0
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/mongodb v0.44.0
 	github.com/twilio/twilio-go v1.32.0
+	github.com/vocdoni/cert-check v0.1.1
 	github.com/vocdoni/go-blindsecp256k1 v0.2.0
 	github.com/xlzd/gotp v0.1.0
 	go.mongodb.org/mongo-driver/v2 v2.9.2

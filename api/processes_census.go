@@ -10,6 +10,7 @@ import (
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/migrations"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -40,6 +41,42 @@ func (a *API) anonymousCensusRefused(anonymous bool) bool {
 	return anonymous && a.csp.BlindCSPDisabled()
 }
 
+// censusAuthMethodError refuses a census spec whose authMethod this deployment or its login fields
+// cannot serve: a certificate census without certificate sign-in configured (the db layer knows
+// nothing of the feature), or login fields the method does not fit. Nil for any other census.
+func (a *API) censusAuthMethodError(spec apicommon.CensusSpec) error {
+	if spec.AuthMethod == db.CensusAuthMethodCertificate && a.certAuth == nil {
+		return errors.ErrCertificateAuthDisabled
+	}
+	if err := db.ValidateCensusAuthMethod(spec.AuthMethod, spec.AuthFields, spec.TwoFaFields); err != nil {
+		return errors.ErrInvalidData.WithErr(err)
+	}
+	return nil
+}
+
+// certificateCensusPublishBlock is why a certificate census cannot publish yet, or "" and nil: the
+// deployment runs without certificate sign-in, or SP1's nationalId hash migration has not run, so
+// canonical certificate numbers would not match the stored login hashes.
+func (a *API) certificateCensusPublishBlock(census *db.Census) (string, error) {
+	if census.AuthMethod != db.CensusAuthMethodCertificate {
+		return "", nil
+	}
+	if a.certAuth == nil {
+		return "certificate authentication is not enabled on this server", errors.ErrCertificateAuthDisabled
+	}
+	applied, err := a.db.MigrationApplied(migrations.NationalIDNormalizationVersion)
+	if err != nil {
+		return "could not check the nationalId hash migration", errors.ErrGenericInternalServerError.WithErr(err)
+	}
+	if !applied {
+		return nationalIDMigrationPending, errors.ErrDuplicateConflict.With(nationalIDMigrationPending)
+	}
+	return "", nil
+}
+
+// nationalIDMigrationPending is the publish refusal of a certificate census before migration 36.
+const nationalIDMigrationPending = "nationalId hash migration pending"
+
 // resolveOrCreateDefaultCensus materializes the inline census spec of a voting process into
 // a db.Census (auth/2FA policy + participants) and returns it. The census type is inferred
 // from the 2FA fields (SetCensus does this). The census is created unpublished; publishing happens at
@@ -51,12 +88,16 @@ func (a *API) resolveOrCreateDefaultCensus(
 	if a.anonymousCensusRefused(spec.Anonymous) {
 		return nil, nil, errors.ErrInvalidData.With(anonymousVotingUnavailable)
 	}
+	if err := a.censusAuthMethodError(spec); err != nil {
+		return nil, nil, err
+	}
 	census := &db.Census{
 		OrgAddress:  orgAddress,
 		Weighted:    spec.Weighted,
 		Anonymous:   spec.Anonymous,
 		AuthFields:  spec.AuthFields,
 		TwoFaFields: spec.TwoFaFields,
+		AuthMethod:  spec.AuthMethod,
 		CreatedAt:   time.Now(),
 	}
 	censusID, err := a.db.SetCensus(census)
@@ -64,6 +105,9 @@ func (a *API) resolveOrCreateDefaultCensus(
 		// a census the caller configured wrong is theirs to fix, not a 500
 		if errors.Is(err, db.ErrPasswordNeedsLookupField) {
 			return nil, nil, errors.ErrInvalidData.With(db.PasswordNeedsLookupFieldMessage)
+		}
+		if errors.Is(err, db.ErrInvalidCensusAuthMethod) {
+			return nil, nil, errors.ErrInvalidData.WithErr(err)
 		}
 		return nil, nil, fmt.Errorf("failed to create census: %w", err)
 	}

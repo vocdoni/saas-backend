@@ -203,7 +203,12 @@ const (
 	// CSP voter routes for a voting process (public)
 	processesAuthEndpoint       = "/processes/{processId}/auth/{step}"
 	processesAuthResendEndpoint = "/processes/{processId}/auth/resend"
-	processesSignEndpoint       = "/processes/{processId}/sign"
+	// POST /processes/{processId}/auth/cert creates a certificate sign-in attempt, and
+	// .../auth/cert/redeem trades its code for the CSP token (public; certauth). chi prefers the
+	// static segment, so they coexist with auth/{step}.
+	processesAuthCertEndpoint       = "/processes/{processId}/auth/cert"
+	processesAuthCertRedeemEndpoint = "/processes/{processId}/auth/cert/redeem"
+	processesSignEndpoint           = "/processes/{processId}/sign"
 	// POST /processes/{processId}/sign-batch to sign every question's ballot in one call, so a
 	// voter casting a multi-question process does not need one round trip per question.
 	// Authorization is all or nothing — a rejected batch signs nothing — but the signing that

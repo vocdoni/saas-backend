@@ -198,6 +198,34 @@ func authAttemptKeys(census *db.Census, member *db.OrgMember) (submission, voter
 	return submission, voter
 }
 
+// participantByLogin finds the census participant a step-0 login names. input is the trimmed login
+// (OrgMember.Normalized). When canonicalisation would rewrite its nationalId (a derived check
+// letter, separators, padding), the participant holding the raw hash of the value as typed goes
+// first, and the canonical lookup only runs when nobody holds it. Migration 36 leaves a letterless
+// member on its raw hash when the canonical one collides with a lettered twin in the census: the
+// raw lookup keeps each of them matching their own input, so a letterless login never resolves to
+// the twin. Only ErrNotFound falls through; any other error is returned as is. Every other login,
+// and every participant written since, is a single lookup of the canonical hash.
+func (c *CSPHandlers) participantByLogin(census *db.Census, input *db.OrgMember) (*db.CensusParticipant, error) {
+	if nationalIDRewritten(census, input) {
+		participant, err := c.mainDB.CensusParticipantByVerbatimLoginHash(*census, *input)
+		if !errors.Is(err, db.ErrNotFound) {
+			return participant, err
+		}
+	}
+	return c.mainDB.CensusParticipantByLoginHash(*census, *input)
+}
+
+// nationalIDRewritten reports whether the census logs in with the nationalId and canonicalisation
+// changes the input's (trimmed) nationalId, so its raw and canonical login hashes differ. A mere
+// case change is no rewrite, since the login hash folds case. EqualFold agrees with the hash's
+// strings.ToLower here: a canonical value is ASCII, and a value canonicalisation does not rewrite
+// is passed through byte for byte.
+func nationalIDRewritten(census *db.Census, input *db.OrgMember) bool {
+	return slices.Contains(census.AuthFields, db.OrgMemberAuthFieldsNationalID) &&
+		!strings.EqualFold(internal.NormalizeNationalID(input.NationalID).Normalized, input.NationalID)
+}
+
 // memberPasswordMatches reports whether the client hash a voter sent matches the member's stored
 // password, hashing it as db.HashMemberPassword does and comparing the argon2 hashes in constant
 // time. A member without a stored password never matches. The hash runs in the service-wide
@@ -286,6 +314,10 @@ func (c *CSPHandlers) authFirstStep(
 		}
 		return nil, errors.ErrGenericInternalServerError.WithErr(err)
 	}
+	// a certificate census signs in only through the certificate endpoints (contract section 2)
+	if census.AuthMethod == db.CensusAuthMethodCertificate {
+		return nil, CertificateCensusError()
+	}
 	// before any budget is claimed or challenge sent: the token could not be blind-signed anyway
 	if c.anonymousCensusRefused(census) {
 		return nil, errors.ErrInvalidData.With(csp.AnonymousVotingUnavailable)
@@ -333,10 +365,10 @@ func (c *CSPHandlers) authFirstStep(
 		}
 	}
 
-	// create an empty member and assign the input data where applicable, then
-	// normalize it through the same method that normalized the member at
-	// creation time. Both sides of the login-hash comparison therefore derive
-	// from one definition of the canonical form, and cannot drift apart.
+	// create an empty member and assign the input data where applicable, then normalize it through
+	// the same method that normalized the member at creation time, so both sides of the login-hash
+	// comparison derive from one definition. The nationalId stays as typed (trimmed) here: the
+	// lookups hash it raw and canonical (see participantByLogin), and the attempt keys raw.
 	inputMember := (&db.OrgMember{
 		OrgAddress:   census.OrgAddress,
 		Name:         req.Name,
@@ -376,7 +408,7 @@ func (c *CSPHandlers) authFirstStep(
 	}()
 
 	// Check the participant is in the census
-	censusParticipant, err := c.mainDB.CensusParticipantByLoginHash(*census, *inputMember)
+	censusParticipant, err := c.participantByLogin(census, inputMember)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, c.unknownParticipant(r.Context(), password, errors.ErrCSPAuthFailed)

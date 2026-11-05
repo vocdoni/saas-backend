@@ -24,6 +24,10 @@ type CensusSpec struct {
 	// one other auth field or a 2FA field.
 	AuthFields  db.OrgMemberAuthFields  `json:"authFields,omitempty"`
 	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
+	// AuthMethod "certificate" makes voters sign in only with a digital certificate (FNMT, idCAT)
+	// whose DNI/NIE matches their nationalId: authFields must be exactly ["nationalId"] and
+	// twoFaFields empty. Absent: today's typed member details. Echoed on process reads.
+	AuthMethod db.CensusAuthMethod `json:"authMethod,omitempty" enums:"certificate"`
 	// GroupID is the org member group the census was built from. Round-trips: it is echoed back on
 	// process reads, so a client can restore the group a draft targeted. Absent (not a zero id) when
 	// the census is organization-wide.
@@ -100,6 +104,13 @@ type CreateVotingProcessRequest struct {
 type ValidateProcessCensusRequest struct {
 	OrgAddress internal.HexBytes `json:"orgAddress" swaggertype:"string" format:"hex" example:"a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"` //nolint:lll
 	Census     CensusSpec        `json:"census"`
+}
+
+// ValidateProcessCensusResponse is the 200 answer of POST /processes/census/validation: the census
+// is usable, and these are its non-blocking nationalId warnings (empty unless nationalId is an auth
+// field and some member's value is missing, not a valid DNI/NIE, or shared with another member).
+type ValidateProcessCensusResponse struct {
+	NationalIDWarnings []db.NationalIDWarning `json:"nationalIdWarnings"`
 }
 
 // UpdateProcessCensusResponse is the result of PUT and DELETE /processes/{processId}/census: the
@@ -452,6 +463,7 @@ func PublicQuestionResponseFromDB(q *db.VotingProcessQuestion, census *db.Census
 			Anonymous:   census.Anonymous,
 			AuthFields:  census.AuthFields,
 			TwoFaFields: census.TwoFaFields,
+			AuthMethod:  census.AuthMethod,
 		}
 	}
 	return resp
@@ -498,6 +510,7 @@ func VotingProcessResponseFromDB(
 			Anonymous:   census.Anonymous,
 			AuthFields:  census.AuthFields,
 			TwoFaFields: census.TwoFaFields,
+			AuthMethod:  census.AuthMethod,
 			Size:        census.Size,
 		}
 		// guard the zero id so an organization-wide census reports no group at all: omitempty keys off

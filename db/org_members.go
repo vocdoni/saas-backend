@@ -167,6 +167,9 @@ type BulkOrgMembersJob struct {
 	// MemberIDs are the hex ids of the members actually inserted, so the caller can propagate
 	// them to the censuses the organization's auto group backs.
 	MemberIDs []string
+	// NationalIDWarnings are the non-blocking nationalId problems of the submitted members, Line
+	// being each one's 1-based position in the submitted list. Set before the first batch runs.
+	NationalIDWarnings []NationalIDWarning
 }
 
 // ErrorsAsStrings returns the errors as a slice of strings
@@ -268,9 +271,10 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 	*OrgMember, []error, error,
 ) {
 	// Normalize every field that can feed the login hash, so what is stored is
-	// byte-identical to what the CSP recomputes from a login request. Whitespace
-	// picked up from a spreadsheet or CSV import would otherwise make the member
-	// impossible to authenticate.
+	// byte-identical to what the CSP recomputes from a login request, except the
+	// nationalId, stored trimmed and canonicalised in the hash layer (see
+	// calculateParticipantHashes). Whitespace picked up from a spreadsheet or CSV
+	// import would otherwise make the member impossible to authenticate.
 	member := *m.Normalized()
 	// named errs, not errors: this file imports the errors package
 	var errs []error
@@ -440,7 +444,11 @@ func (ms *MongoStorage) addOrgMemberBatches(
 	total := len(orgMembers)
 	currentTime := time.Now()
 
-	progress := &bulkOrgMembersProgress{job: BulkOrgMembersJob{Total: total, Errors: []error{}}}
+	progress := &bulkOrgMembersProgress{job: BulkOrgMembersJob{
+		Total:              total,
+		Errors:             []error{},
+		NationalIDWarnings: nationalIDImportWarnings(orgMembers),
+	}}
 
 	// Create a context for the progress reporter
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1210,7 +1218,8 @@ func (f OrgMemberLookupField) bsonField() string {
 //
 // For OrgMemberLookupFieldPhone, the caller must pass an already-hashed value
 // (HashedPhone bytes); for the other fields the value is matched verbatim as a
-// string. Returns an empty slice (not an error) when there is no match.
+// string, or a []string matching any of its (non-empty) values. Returns an empty
+// slice (not an error) when there is no match.
 func (ms *MongoStorage) OrgMembersByField(
 	orgAddress common.Address,
 	field OrgMemberLookupField,
@@ -1219,11 +1228,17 @@ func (ms *MongoStorage) OrgMembersByField(
 	if !field.IsValid() {
 		return nil, ErrInvalidData
 	}
+	match := value
 	switch v := value.(type) {
 	case string:
 		if v == "" {
 			return nil, ErrInvalidData
 		}
+	case []string:
+		if len(v) == 0 || slices.Contains(v, "") {
+			return nil, ErrInvalidData
+		}
+		match = bson.M{"$in": v}
 	case HashedPhone:
 		if v.IsEmpty() {
 			return nil, ErrInvalidData
@@ -1243,7 +1258,7 @@ func (ms *MongoStorage) OrgMembersByField(
 
 	filter := bson.M{
 		"orgAddress":      orgAddress,
-		field.bsonField(): value,
+		field.bsonField(): match,
 	}
 
 	cur, err := ms.orgMembers.Find(ctx, filter)

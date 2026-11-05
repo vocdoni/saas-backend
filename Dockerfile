@@ -5,9 +5,16 @@ WORKDIR /src
 ENV CGO_ENABLED=1
 RUN go env -w GOCACHE=/go-cache
 COPY . .
-RUN --mount=type=cache,target=/go-cache go mod download
+# the private cert-check module, through a build secret of the same name as the CI secret and the
+# Railway variable; the token never lands in a layer
+ENV GOPRIVATE=github.com/vocdoni/cert-check
+RUN --mount=type=cache,target=/go-cache --mount=type=secret,id=PRIVATE_MODULES_TOKEN \
+    GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0="url.https://x-access-token:$(cat /run/secrets/PRIVATE_MODULES_TOKEN)@github.com/vocdoni/cert-check.insteadOf" \
+    GIT_CONFIG_VALUE_0=https://github.com/vocdoni/cert-check \
+    go mod download
 RUN --mount=type=cache,target=/go-cache go run scripts/circuits/main.go
-RUN --mount=type=cache,target=/go-cache go build -o=backend -ldflags="-s -w" cmd/service/main.go
+RUN --mount=type=cache,target=/go-cache go build -o=backend -ldflags="-s -w" ./cmd/service
 
 FROM debian:bookworm-slim AS base
 

@@ -385,6 +385,22 @@ func DeleteUserOrgDrafts(database *db.MongoStorage, userID uint64) (map[common.A
 	return balances, nil
 }
 
+// nationalIDLookupValues returns what an admin nationalId lookup matches: the trimmed value, plus
+// its canonical DNI/NIE form when that differs. A member stored in canonical form (without
+// separators) is found from any variant; a member stored verbatim with separators or non-canonical
+// casing (e.g. a member that was not rehashed by migration 36) is found only by that exact stored
+// value.
+func nationalIDLookupValues(value string) any {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return value // nothing to normalize: matched verbatim, as before
+	}
+	if normalized := internal.NormalizeNationalID(trimmed).Normalized; normalized != trimmed {
+		return []string{trimmed, normalized}
+	}
+	return trimmed
+}
+
 // votingProcessParticipantsHandler godoc
 //
 //	@Summary		List voted participants of a voting process
@@ -395,8 +411,10 @@ func DeleteUserOrgDrafts(database *db.MongoStorage, userID uint64) (map[common.A
 //	@Description	anonymous (blind) census hasVoted is always false and hasSigned is the only signal. When
 //	@Description	the chain cannot be asked about a signed question, that question is reported with
 //	@Description	hasVotedUnknown=true (and hasVoted=false) instead of failing the whole list. For `phone`
-//	@Description	pass the plaintext number; it is hashed server-side. Requires Manager/Admin of the
-//	@Description	owning organization.
+//	@Description	pass the plaintext number; it is hashed server-side. For `nationalId` a Spanish DNI/NIE
+//	@Description	also matches its canonical form when the member is stored in canonical form; a member stored
+//	@Description	verbatim with separators or non-canonical casing is found only by that exact value.
+//	@Description	Requires Manager/Admin of the owning organization.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
@@ -433,6 +451,9 @@ func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Re
 	}
 	// phone is stored hashed, so hash the plaintext before looking up.
 	var lookupValue any = value
+	if field == db.OrgMemberLookupFieldNationalID {
+		lookupValue = nationalIDLookupValues(value)
+	}
 	if field == db.OrgMemberLookupFieldPhone {
 		org, err := a.db.Organization(vp.OrgAddress)
 		if err != nil {

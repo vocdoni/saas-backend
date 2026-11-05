@@ -13,7 +13,13 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/go-cache go mod download
+# the private cert-check module: docker compose passes PRIVATE_MODULES_TOKEN as a build secret
+ENV GOPRIVATE=github.com/vocdoni/cert-check
+RUN --mount=type=cache,target=/go-cache --mount=type=secret,id=PRIVATE_MODULES_TOKEN \
+    GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0="url.https://x-access-token:$(cat /run/secrets/PRIVATE_MODULES_TOKEN)@github.com/vocdoni/cert-check.insteadOf" \
+    GIT_CONFIG_VALUE_0=https://github.com/vocdoni/cert-check \
+    go mod download
 
 COPY . .
 RUN go run scripts/circuits/main.go
@@ -23,7 +29,7 @@ ENV LD_LIBRARY_PATH=${WASMER_PATH}
 
 # API target
 FROM base AS api
-RUN go build -o /usr/local/bin/api ./cmd/service/main.go
+RUN go build -o /usr/local/bin/api ./cmd/service
 CMD ["/usr/local/bin/api"]
 
 # Local SMTP target (used for local testing)

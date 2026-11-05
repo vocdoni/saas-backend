@@ -84,6 +84,15 @@ definitions:
         example: deadbeef
         format: hex
         type: string
+      nationalIdWarnings:
+        description: |-
+          NationalIDWarnings are the non-blocking nationalId problems of the submitted members (sync
+          path; an async import reports them on GET /jobs/{jobId}). line is the member's 1-based
+          position in the submitted list. duplicate_after_normalization only compares the submitted
+          members with each other.
+        items:
+          $ref: '#/definitions/db.NationalIDWarning'
+        type: array
     type: object
   apicommon.CensusSpec:
     properties:
@@ -101,6 +110,15 @@ definitions:
         items:
           $ref: '#/definitions/db.OrgMemberAuthField'
         type: array
+      authMethod:
+        allOf:
+        - $ref: '#/definitions/db.CensusAuthMethod'
+        description: |-
+          AuthMethod "certificate" makes voters sign in only with a digital certificate (FNMT, idCAT)
+          whose DNI/NIE matches their nationalId: authFields must be exactly ["nationalId"] and
+          twoFaFields empty. Absent: today's typed member details. Echoed on process reads.
+        enum:
+        - certificate
       groupId:
         description: |-
           GroupID is the org member group the census was built from. Round-trips: it is echoed back on
@@ -131,6 +149,112 @@ definitions:
         type: array
       weighted:
         type: boolean
+    type: object
+  apicommon.CertAuthCreateRequest:
+    properties:
+      challenge:
+        description: 'Challenge is base64url (no padding) of the SHA-256 of the verifier:
+          exactly 43 characters.'
+        example: E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM
+        type: string
+      challengeMethod:
+        description: ChallengeMethod must be "S256".
+        example: S256
+        type: string
+      purpose:
+        description: Purpose is "vote" or "check".
+        enum:
+        - vote
+        - check
+        example: vote
+        type: string
+      returnUrl:
+        description: |-
+          ReturnURL is where the auth listener sends the browser back: an allowlisted app origin with
+          an optional /:lang and /processes/{id} path, no query, fragment or userinfo.
+        example: https://app.vocdoni.io/ca/processes/6650f0c0a1b2c3d4e5f60718
+        type: string
+    type: object
+  apicommon.CertAuthCreateResponse:
+    properties:
+      authUrl:
+        description: AuthURL is the auth listener URL the browser navigates to, on
+          a fresh per-attempt host.
+        example: https://k7m2q9x4c1v8b3n6z5a0s2d4f6.cert.auth-dev.vocdoni.io/v1/authenticate?state=...
+        type: string
+      expiresAt:
+        description: ExpiresAt is when the state expires (RFC 3339, informative).
+        example: "2026-11-13T09:15:00Z"
+        type: string
+      probeUrl:
+        description: ProbeURL is the auth listener's reachability probe, absent when
+          the deployment cannot serve it.
+        example: https://probe.cert.auth-dev.vocdoni.io/ok
+        type: string
+      state:
+        description: 'State identifies the attempt: 32 random bytes, base64url. Single
+          use, valid 15 minutes.'
+        example: q3Jd0zR9xQe1v0bHkq2n8m1tY6cW4pLa7sFuEoZiXgA
+        type: string
+    type: object
+  apicommon.CertAuthHolder:
+    properties:
+      documentEnding:
+        description: DocumentEnding is the last 4 characters of the canonical 9-character
+          number.
+        example: 678Z
+        type: string
+      documentType:
+        description: DocumentType is "DNI" or "NIE".
+        example: DNI
+        type: string
+      fullName:
+        example: Maria García López
+        type: string
+    type: object
+  apicommon.CertAuthRedeemRequest:
+    properties:
+      code:
+        description: Code is the code the auth listener returned in the URL fragment.
+        example: Zx8bQ2mVt1q9LkP0aR7sYc3dWn5uHe2oJi6gFb4xTz8
+        type: string
+      verifier:
+        description: Verifier is the PKCE verifier whose S256 challenge the create
+          carried.
+        example: dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk
+        type: string
+    type: object
+  apicommon.CertAuthRedeemResponse:
+    properties:
+      authToken:
+        description: |-
+          AuthToken is the pre-verified CSP token, as an auth/0 token of an auth-only census; null for
+          a check, and for a vote while the process does not accept votes.
+        example: 8d1c5f3e0a2b4c6d8e0f1a2b3c4d5e6f
+        format: hex
+        type: string
+      holder:
+        allOf:
+        - $ref: '#/definitions/apicommon.CertAuthHolder'
+        description: Holder is the certificate holder's display identity.
+      purpose:
+        description: Purpose echoes the create purpose.
+        example: vote
+        type: string
+      reference:
+        description: Reference is the cert-check diagnostic id of this check (32 hex).
+        example: 3f9a07c2e41b8d5c2a6f90b3c7e14d28
+        type: string
+      voterRef:
+        description: VoterRef is opaque and stable for one participant of one process.
+        example: Vt3nQ9xW2kLp7RfA0bYc1d
+        type: string
+      weight:
+        description: Weight is the voter's census weight (bare hex), omitted when
+          AuthToken is null.
+        example: "01"
+        format: hex
+        type: string
     type: object
   apicommon.CreateAPIKeyRequest:
     properties:
@@ -557,6 +681,13 @@ definitions:
         type: array
       jobId:
         type: string
+      nationalIdWarnings:
+        description: |-
+          NationalIDWarnings are the nationalId warnings of a member import job, returned only to a
+          Manager/Admin of the job's organization (like the import errors).
+        items:
+          $ref: '#/definitions/db.NationalIDWarning'
+        type: array
       result:
         $ref: '#/definitions/apicommon.UnifiedJobResult'
       status:
@@ -792,7 +923,9 @@ definitions:
         description: Member's name
         type: string
       nationalId:
-        description: Member's National ID No
+        description: |-
+          Member's National ID No, stored as entered (trimmed); DNI/NIE variants are matched by their
+          canonical form at login
         type: string
       other:
         additionalProperties: {}
@@ -1957,6 +2090,13 @@ definitions:
         format: hex
         type: string
     type: object
+  apicommon.ValidateProcessCensusResponse:
+    properties:
+      nationalIdWarnings:
+        items:
+          $ref: '#/definitions/db.NationalIDWarning'
+        type: array
+    type: object
   apicommon.VerifiedVote:
     properties:
       blockHeight:
@@ -2190,6 +2330,12 @@ definitions:
       uniqueValues:
         type: boolean
     type: object
+  db.CensusAuthMethod:
+    enum:
+    - certificate
+    type: string
+    x-enum-varnames:
+    - CensusAuthMethodCertificate
   db.CensusType:
     enum:
     - auth
@@ -2281,6 +2427,17 @@ definitions:
   db.MultiLangString:
     additionalProperties:
       type: string
+    type: object
+  db.NationalIDWarning:
+    properties:
+      class:
+        type: string
+      line:
+        description: Line is the 1-based position of the member in the submitted import
+          list.
+        type: integer
+      memberId:
+        type: string
     type: object
   db.OrgAddOn:
     enum:
@@ -3560,9 +3717,10 @@ paths:
         `failed`) and `result` carries only the attributes the job produced (import counters
         `added`/`total`/`progress`, or tx `address`/`voteID`/`status`), each omitted when empty.
         Public endpoint: the 32-byte job id is the capability and results carry only public
-        data. Per-row import error detail (which may reference member data) is returned only
-        to an authenticated manager/admin of the job's organization (as on GET /jobs);
-        anonymous callers get status and counters only.
+        data. Per-row import error detail (which may reference member data) and nationalId warnings
+        (which carry no values, gated like the errors for a consistent shape) are returned only to
+        an authenticated manager/admin of the job's organization (as on GET /jobs); anonymous
+        callers get status and counters only.
       parameters:
       - description: Job id returned by the async endpoint (hex)
         in: path
@@ -5669,6 +5827,155 @@ paths:
       summary: Authenticate a voter for a voting process
       tags:
       - processes
+  /processes/{processId}/auth/cert:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Starts a digital-certificate sign-in (FNMT natural person or idCAT) for a voter of a
+        process whose census has `authMethod: "certificate"`. Public, no Authorization header.
+        The body carries a PKCE S256 `challenge` (43 characters), `challengeMethod` "S256", the
+        `returnUrl` to come back to (an allowlisted app origin, path `/`, `/:lang`,
+        `/processes/{id}` or `/:lang/processes/{id}`, no query, fragment or userinfo) and the
+        `purpose` ("vote", or "check" for a pre-check of an UPCOMING process).
+
+        The answer's `authUrl` is on the separate auth listener, on a fresh host per attempt
+        (`https://<nonce>.<certAuthHost>/v1/authenticate?state=...`, TLS 1.2, client certificate
+        requested): the browser navigates there, presents its certificate, and is sent back with
+        `303 <returnUrl>#code=<code>&state=<state>` (or `#error=attempt_expired`), never
+        verifying anything there. `probeUrl` (`https://probe.<certAuthHost>/ok`, no client
+        certificate requested) lets the app detect networks that block the auth listener.
+        The state is single use and valid 15 minutes.
+
+        Validation failures are plain errors (400; 404 unknown process; 409 a process that is not
+        published or no longer takes sign-ins; 400 a census that is not a certificate census).
+        Over the per-IP and process limit (60 per minute by default) it answers 429, code 40950,
+        with `data.reason` "too_many_attempts" and `data.retryAfter`. Without certificate sign-in
+        configured on the server it answers 400, code 40185.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: PKCE challenge, return URL and purpose
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.CertAuthCreateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.CertAuthCreateResponse'
+        "400":
+          description: Invalid request, not a certificate census, or certificate sign-in
+            not enabled (40185)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Process not published, or no longer taking sign-ins
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "429":
+          description: Too many attempts (40950, data.reason too_many_attempts)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Create a certificate sign-in attempt
+      tags:
+      - processes
+  /processes/{processId}/auth/cert/redeem:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Trades the `code` the auth listener returned in the URL fragment, with the PKCE
+        `verifier`, for the voter's CSP token. Public, no Authorization header. The code is single
+        use and valid 5 minutes, and is consumed by the first redeem whatever its outcome. The
+        server verifies the presented certificate (chain, profile, revocation: up to ~40 s),
+        matches its DNI/NIE against the census `nationalId` and answers the `holder` (full name,
+        document type, last 4 characters), an opaque `voterRef`, the diagnostic `reference`, and
+        `authToken`: the same pre-verified token an auth/0 auth-only census issues, usable with
+        check, sign-batch, blind-point, blind-sign and sign-info. `authToken` is null (and
+        `weight` absent) for a "check" attempt and for a "vote" while the process does not
+        accept votes.
+
+        Every failure is code 40950 with `data.reason`: the cert-check codes verbatim
+        (no_certificate, provider_mismatch, untrusted_issuer, invalid_chain, expired,
+        not_yet_valid, unsupported_profile, unsupported_purpose, weak_algorithm, test_certificate,
+        identity_invalid, identity_unsupported_document, revoked, revocation_unknown: 422;
+        revocation_unavailable: 503; internal: 500) and dni_not_in_census (403),
+        attempt_expired (410), code_used (409), verifier_mismatch (403), too_many_attempts (429).
+        `data` also carries `retryable` (true only for revocation_unavailable and internal), and
+        when they apply `reference`, `holder`, `issuer`, `notAfter` and `retryAfter`. Failed
+        attempts are capped per hour per presented certificate and per verified document;
+        revocation outages are never charged. Without certificate sign-in configured on the
+        server it answers 400, code 40185.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Code and PKCE verifier
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.CertAuthRedeemRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.CertAuthRedeemResponse'
+        "400":
+          description: Certificate sign-in not enabled (40185)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: dni_not_in_census or verifier_mismatch (40950)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: code_used (40950)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "410":
+          description: attempt_expired (40950)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "422":
+          description: Certificate rejected, data.reason is the cert-check code (40950)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "429":
+          description: too_many_attempts (40950)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: internal, retryable (40950)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: revocation_unavailable, retryable (40950)
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Redeem a certificate sign-in code
+      tags:
+      - processes
   /processes/{processId}/auth/resend:
     post:
       consumes:
@@ -6386,8 +6693,10 @@ paths:
         anonymous (blind) census hasVoted is always false and hasSigned is the only signal. When
         the chain cannot be asked about a signed question, that question is reported with
         hasVotedUnknown=true (and hasVoted=false) instead of failing the whole list. For `phone`
-        pass the plaintext number; it is hashed server-side. Requires Manager/Admin of the
-        owning organization.
+        pass the plaintext number; it is hashed server-side. For `nationalId` a Spanish DNI/NIE
+        also matches its canonical form when the member is stored in canonical form; a member stored
+        verbatim with separators or non-canonical casing is found only by that exact value.
+        Requires Manager/Admin of the owning organization.
 
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
@@ -7122,6 +7431,12 @@ paths:
         voting temporarily off, an `anonymous: true` spec is a 400 (40037) "anonymous voting is
         temporarily unavailable".
 
+        When `nationalId` is an auth field, both answers carry `nationalIdWarnings` (in the 400 under
+        `data`): one entry per member whose nationalId is missing, a DNI/NIE with a wrong check
+        letter (`letter_mismatch`), another tax id (`unsupported_document`), not a DNI/NIE at all
+        (`invalid`), plus a `duplicate_after_normalization` entry for every member sharing a
+        canonical DNI/NIE with another. Warnings never make the census invalid.
+
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Org address + census spec
@@ -7134,9 +7449,9 @@ paths:
       - application/json
       responses:
         "200":
-          description: OK
+          description: Usable census, with its nationalId warnings
           schema:
-            type: string
+            $ref: '#/definitions/apicommon.ValidateProcessCensusResponse'
         "400":
           description: Invalid census (duplicates, missing data), or anonymous voting
             unavailable
