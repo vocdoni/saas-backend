@@ -29,7 +29,7 @@ go test -v ./db/
 cp example.env .env   # then edit secrets
 docker compose up
 # Optional add-ons via compose profiles (docker-compose.yml):
-#   --profile with-ui      UI + defaultplan seed     --profile with-vocone  local Voconed chain + fundaccount
+#   --profile with-ui      UI                     --profile with-vocone  local Voconed chain + fundaccount
 #   --profile local-smtp   fake SMTP capture server
 ```
 

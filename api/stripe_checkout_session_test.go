@@ -35,7 +35,7 @@ func TestGetCheckoutSessionAuthorization(t *testing.T) {
 		case "/v1/checkout/sessions/cs_mine":
 			_, _ = w.Write([]byte(`{"id":"cs_mine","object":"checkout.session","status":"complete",` +
 				`"payment_status":"paid","customer_details":{"email":"creator@example.com"},` +
-				`"metadata":{"address":"` + orgAddress.String() + `"}}`))
+				`"metadata":{"wallet_topup_org":"` + orgAddress.String() + `"}}`))
 		case "/v1/checkout/sessions/cs_orphan":
 			_, _ = w.Write([]byte(`{"id":"cs_orphan","object":"checkout.session","status":"complete",` +
 				`"payment_status":"paid"}`))

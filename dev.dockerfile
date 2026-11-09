@@ -36,11 +36,6 @@ FROM base AS fundaccount
 RUN go build -o /usr/local/bin/fundaccount ./scripts/fundaccount/main.go
 CMD ["/usr/local/bin/fundaccount"]
 
-# Setup default plan target (used for local testing)
-FROM base AS defaultplan
-RUN go build -o /usr/local/bin/defaultplan ./scripts/defaultplan/main.go
-CMD ["/usr/local/bin/defaultplan"]
-
 # CSP login hash repair target (one-shot maintenance; dry run unless --apply)
 FROM base AS repairlogins
 RUN go build -o /usr/local/bin/repairlogins ./scripts/repairlogins/main.go

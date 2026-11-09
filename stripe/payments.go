@@ -113,7 +113,7 @@ func buildPaymentSessionParams(params *PaymentSessionParams) *stripeapi.Checkout
 	checkoutParams := &stripeapi.CheckoutSessionParams{
 		Mode:      new(string(stripeapi.CheckoutSessionModePayment)),
 		LineItems: lineItems,
-		// embedded client, same as the subscription flow
+		// embedded client
 		UIMode: new(string(stripeapi.CheckoutSessionUIModeElements)),
 		AutomaticTax: &stripeapi.CheckoutSessionAutomaticTaxParams{
 			Enabled: new(true),
@@ -122,7 +122,7 @@ func buildPaymentSessionParams(params *PaymentSessionParams) *stripeapi.Checkout
 			Enabled: new(true),
 		},
 		BillingAddressCollection: new(string(stripeapi.CheckoutSessionBillingAddressCollectionAuto)),
-		// one-time purchases get a real invoice instead of the subscription invoice flow
+		// one-time purchases get a real invoice
 		InvoiceCreation: &stripeapi.CheckoutSessionInvoiceCreationParams{
 			Enabled: new(true),
 		},
@@ -217,7 +217,7 @@ func (s *Service) handleCheckoutSessionResult(event *stripeapi.Event) error {
 		return err
 	}
 	if session.Metadata[MetadataKeyWalletTopUpOrg] == "" {
-		// a subscription-mode checkout completing; the subscription webhooks own it
+		// a checkout of the retired subscription model: nothing to credit
 		return nil
 	}
 	return s.creditWalletTopUp(session)

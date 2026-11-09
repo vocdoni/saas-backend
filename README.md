@@ -144,16 +144,6 @@ VOCDONI_VOCDONIAPI=http://vocone:9090/v2 \
   docker compose --profile with-vocone --profile with-ui up
 ```
 
-### Creating the default plan
-
-When running the SaaS backend locally for the first time, you need a default plan in MongoDB so organizations can be created:
-
-```bash
-docker compose --profile with-ui run --rm defaultplan
-```
-
-This connects to MongoDB, checks if a default plan exists, and creates one with generous limits (all features enabled, 100 users, 1000 processes, etc.) if none is found.
-
 ### Funding your account on vocone
 
 When using vocone locally, the account derived from your `VOCDONI_PRIVATEKEY` needs tokens. A helper script derives the address and calls the faucet:
@@ -207,9 +197,6 @@ docker compose --profile with-vocone up -d
 
 # Start everything (API + UI + fake SMTP + vocone)
 docker compose --profile with-ui --profile local-smtp --profile with-vocone up
-
-# One-shot: create default plan in MongoDB
-docker compose --profile with-ui run --rm defaultplan
 
 # One-shot: fund your account on vocone
 docker compose --profile with-vocone run --rm --build fundaccount

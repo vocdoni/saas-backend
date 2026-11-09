@@ -1,7 +1,6 @@
 package api
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 
@@ -151,21 +150,6 @@ func (a *API) InitializeStripeService() error {
 	if err != nil {
 		return err
 	}
-
-	// Load plans from Stripe and populate the database
-	plans, err := service.GetPlansFromStripe()
-	if err != nil {
-		return fmt.Errorf("failed to load plans from Stripe: %w", err)
-	}
-
-	// Store plans in database
-	for _, plan := range plans {
-		if err := a.db.SetPlan(plan); err != nil {
-			return fmt.Errorf("failed to store plan %s: %w", plan.Name, err)
-		}
-	}
-
-	log.Infof("Loaded %d plans from Stripe", len(plans))
 
 	// Create handlers
 	a.stripeHandlers = NewStripeHandlers(service)

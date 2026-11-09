@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -20,6 +21,21 @@ import (
 	"github.com/vocdoni/saas-backend/stripe"
 	"go.vocdoni.io/dvote/util"
 )
+
+// newStripeService builds a Stripe service on the test database with mock secrets.
+func newStripeService(t *testing.T) *stripe.Service {
+	t.Helper()
+	c := qt.New(t)
+
+	_ = os.Setenv("VOCDONI_STRIPEAPISECRET", "mockAPISecret")
+	_ = os.Setenv("VOCDONI_STRIPEWEBHOOKSECRET", "mockWebhookSecret")
+
+	config, err := stripe.NewConfig()
+	c.Assert(err, qt.IsNil)
+	service, err := stripe.NewService(config, testDB)
+	c.Assert(err, qt.IsNil)
+	return service
+}
 
 // installStripeWebhookService builds a real stripe.Service with the mock webhook secret,
 // wires the process follow-ups of a top-up, and installs it as the API's webhook handler for
