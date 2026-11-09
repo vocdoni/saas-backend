@@ -155,6 +155,10 @@ const (
 	// PUT /processes/{processId}/census adds members to a published process's census (+ maxCensusSize bump);
 	// DELETE removes them from it and from every question eligibility list built on it
 	processesCensusEndpoint = "/processes/{processId}/census"
+	// PUT /processes/{processId}/census/size grows the declared size of a published attested census
+	processesCensusSizeEndpoint = "/processes/{processId}/census/size"
+	// PUT /processes/{processId}/attestation-signer rotates the attestation signer of an attested census
+	processesAttestationSignerEndpoint = "/processes/{processId}/attestation-signer"
 	// GET /processes/{processId}/validation publish-readiness dry-run (protected)
 	processesValidateEndpoint = "/processes/{processId}/validation"
 
