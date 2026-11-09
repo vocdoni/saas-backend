@@ -307,6 +307,10 @@ func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	if err := c.recordAttested(sc, upstreamID); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
 	c.signAndRespond(w, req.AuthToken, *address, upstreamID, sc.weight)
 }
 
@@ -318,6 +322,10 @@ type signContext struct {
 	process  *db.VotingProcess
 	memberID string
 	weight   internal.HexBytes
+	// attestation is the attestation the token of an attested voter was issued against, nil for a
+	// member of a memberbase census; every signature for it is recorded first (recordAttested).
+	attestation *db.CSPAuthAttestation
+	userID      internal.HexBytes
 	// anonymous is the census mode: true for a blind (OFF_CHAIN_CA_V2) census, which is served by
 	// the two-round blind-point/blind-sign endpoints instead of the plain ECDSA sign endpoints.
 	anonymous bool
@@ -345,6 +353,14 @@ func (c *CSPHandlers) resolveSignContext(
 		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
 		return nil, false
 	}
+	census, err := c.mainDB.Census(vp.CensusID.Hex())
+	if err != nil {
+		errors.ErrCensusNotFound.WithErr(err).Write(w)
+		return nil, false
+	}
+	if census.Attested != nil {
+		return attestedSignContext(w, vp, census, auth)
+	}
 	// Re-check census participation. The token was minted when the voter was in the census, and it
 	// never expires, so without this a member removed from the census (or from the group that
 	// backs it) would keep being signed for forever — this check is what makes the revocation
@@ -359,11 +375,6 @@ func (c *CSPHandlers) resolveSignContext(
 	}
 	member, ok := c.orgMemberFromAuth(w, vp.OrgAddress, auth)
 	if !ok {
-		return nil, false
-	}
-	census, err := c.mainDB.Census(vp.CensusID.Hex())
-	if err != nil {
-		errors.ErrCensusNotFound.WithErr(err).Write(w)
 		return nil, false
 	}
 	weight := uint64(1)
@@ -562,6 +573,11 @@ func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Req
 	for i, b := range ballots {
 		res := &resp.Signatures[i]
 		res.UpstreamID = b.upstreamID
+		if err := c.recordAttested(sc, b.upstreamID); err != nil {
+			res.Code, res.Error = signOutcome(err)
+			logSignFailure(oid, sc.memberID, b.upstreamID, err)
+			continue
+		}
 		signature, err := c.csp.Sign(req.AuthToken, b.address, b.upstreamID, sc.weight,
 			signers.SignerTypeECDSASalted)
 		if err != nil {
@@ -965,13 +981,18 @@ func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Reques
 		errors.ErrUnauthorized.WithErr(csp.ErrAuthTokenNotVerified).Write(w)
 		return
 	}
-	member, ok := c.orgMemberFromAuth(w, vp.OrgAddress, auth)
-	if !ok {
-		return
-	}
 	census, err := c.mainDB.Census(vp.CensusID.Hex())
 	if err != nil {
 		errors.ErrCensusNotFound.WithErr(err).Write(w)
+		return
+	}
+	// an attested census is unweighted and has no member behind the token
+	if census.Attested != nil {
+		apicommon.HTTPWriteJSON(w, &UserWeightResponse{Weight: weightBytes(1)})
+		return
+	}
+	member, ok := c.orgMemberFromAuth(w, vp.OrgAddress, auth)
+	if !ok {
 		return
 	}
 	weight := uint64(1)
@@ -1034,19 +1055,26 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 	}
 	memberID := auth.UserID.String()
 	resp := &ProcessCheckResponse{}
-	if _, err := c.mainDB.CensusParticipant(vp.CensusID.Hex(), memberID); err == nil {
-		resp.BelongsToProcess = true
-	} else if err != db.ErrNotFound {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-	if member, err := c.orgMember(vp.OrgAddress, auth); err == nil {
-		census, cErr := c.mainDB.Census(vp.CensusID.Hex())
-		weight := uint64(1)
-		if cErr == nil && census.Weighted {
-			weight = member.Weight
+	census, cErr := c.mainDB.Census(vp.CensusID.Hex())
+	if cErr == nil && census.Attested != nil {
+		// an attested voter has no participant row: they belong while the signer that vouched for
+		// them is active, and weigh 1
+		resp.BelongsToProcess = attestedBySigner(auth, census)
+		resp.Weight = weightBytes(1)
+	} else {
+		if _, err := c.mainDB.CensusParticipant(vp.CensusID.Hex(), memberID); err == nil {
+			resp.BelongsToProcess = true
+		} else if err != db.ErrNotFound {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
 		}
-		resp.Weight = weightBytes(weight)
+		if member, err := c.orgMember(vp.OrgAddress, auth); err == nil {
+			weight := uint64(1)
+			if cErr == nil && census.Weighted {
+				weight = member.Weight
+			}
+			resp.Weight = weightBytes(weight)
+		}
 	}
 	questions, err := c.mainDB.QuestionsByProcess(oid)
 	if err != nil {
