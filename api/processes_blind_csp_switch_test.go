@@ -13,6 +13,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 )
 
@@ -149,6 +150,18 @@ func TestProcessBlindCSPSwitchResumesPartialPublish(t *testing.T) {
 	c.Assert(got.Questions, qt.HasLen, 2)
 	c.Assert(got.Questions[0].UpstreamID.String(), qt.Equals, mined.String())
 	c.Assert(got.Questions[1].UpstreamID, qt.Not(qt.HasLen), 0)
+
+	// anonymous elections record OFF_CHAIN_CA_V2 and the blind CSP key;
+	// question[0] was inserted without census fields (simulating a pre-T1 partial publish)
+	blindKey, err := testCSP.BlindPubKey()
+	c.Assert(err, qt.IsNil)
+	resumeOID, err := bson.ObjectIDFromHex(pid)
+	c.Assert(err, qt.IsNil)
+	resumeQs, err := testDB.QuestionsByProcess(resumeOID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(resumeQs[0].CensusOrigin, qt.Equals, "")
+	c.Assert(resumeQs[1].CensusOrigin, qt.Equals, "OFF_CHAIN_CA_V2")
+	c.Assert(resumeQs[1].CensusRoot, qt.DeepEquals, blindKey)
 }
 
 // TestProcessBlindCSPSwitchStopsBlindSigning checks that with anonymous voting off the blind rounds

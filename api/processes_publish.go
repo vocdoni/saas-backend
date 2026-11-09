@@ -1015,12 +1015,9 @@ func anyMined(questions []db.VotingProcessQuestion) bool {
 	return false
 }
 
-// buildBatch builds, funds, permission-checks and signs a NEW_PROCESS tx per pending
-// question with contiguous nonces starting at startNonce. ok is false when a question is
-// not permitted (the attempt is abandoned rather than partially submitted).
-// assignCensus returns the census origin, root and URI of q's election. A census on the SaaS
-// CSP key publishes OFF_CHAIN_CA (OFF_CHAIN_CA_V2 with its blind key when anonymous) and leaves
-// the question's own origin and root empty.
+// assignCensus returns the census origin, root and URI of q's election. The SaaS CSP key
+// publishes OFF_CHAIN_CA, or OFF_CHAIN_CA_V2 with its blind key for anonymous censuses;
+// the caller stores origin and root on the question so that resize ops reuse the same root.
 //
 //nolint:revive // function-result-limit: origin, root, uri and error are a natural group for census assignment
 func (pw *publishWorker) assignCensus(_ *db.VotingProcessQuestion) (models.CensusOrigin, []byte, string, error) {
@@ -1031,6 +1028,9 @@ func (pw *publishWorker) assignCensus(_ *db.VotingProcessQuestion) (models.Censu
 	return origin, pw.cspPubKey, pw.a.serverURL, nil
 }
 
+// buildBatch builds, funds, permission-checks and signs a NEW_PROCESS tx per pending
+// question with contiguous nonces starting at startNonce. ok is false when a question is
+// not permitted (the attempt is abandoned rather than partially submitted).
 func (pw *publishWorker) buildBatch(
 	pending []*db.VotingProcessQuestion, startNonce uint32,
 ) (stxs [][]byte, ok bool, err error) {

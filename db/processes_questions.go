@@ -217,8 +217,8 @@ func (ms *MongoStorage) ServedUpstreamIDs(upstreamIDs []internal.HexBytes) (map[
 }
 
 // QuestionPublishedParams bundles the fields written when a question's election is confirmed
-// on chain. CensusOrigin and CensusRoot are only set for elections that carry their own root
-// (external CSP); both are empty for elections on the SaaS CSP key.
+// on chain. CensusOrigin and CensusRoot record the census origin and root the election was
+// published with; both are empty for questions published before these fields existed.
 type QuestionPublishedParams struct {
 	ID           bson.ObjectID
 	UpstreamID   internal.HexBytes
@@ -229,8 +229,8 @@ type QuestionPublishedParams struct {
 }
 
 // SetQuestionPublished records the on-chain outcome of a single question in one targeted
-// update, leaving sibling questions untouched. Exactly one of CensusOrigin and CensusRoot
-// must be set, or both must be empty; setting only one returns ErrInvalidData.
+// update, leaving sibling questions untouched. CensusOrigin and CensusRoot are set together
+// or both left empty; setting only one returns ErrInvalidData.
 func (ms *MongoStorage) SetQuestionPublished(params QuestionPublishedParams) error {
 	if params.ID == bson.NilObjectID || len(params.UpstreamID) == 0 {
 		return ErrInvalidData

@@ -91,6 +91,19 @@ func TestVotingProcessPublish(t *testing.T) {
 		t, http.MethodGet, "", nil, "processes", pid, "questions", got.Questions[0].ID.Hex())
 	c.Assert(q0.Status, qt.Equals, db.QuestionStatusReady)
 
+	// each published question records the census origin and root it was published with;
+	// non-anonymous elections use the plain CSP public key with OFF_CHAIN_CA
+	cspKey, err := testCSP.PubKey()
+	c.Assert(err, qt.IsNil)
+	processOID, err := bson.ObjectIDFromHex(pid)
+	c.Assert(err, qt.IsNil)
+	dbQs, err := testDB.QuestionsByProcess(processOID)
+	c.Assert(err, qt.IsNil)
+	for i, q := range dbQs {
+		c.Assert(q.CensusOrigin, qt.Equals, "OFF_CHAIN_CA", qt.Commentf("question %d censusOrigin", i))
+		c.Assert(q.CensusRoot, qt.DeepEquals, cspKey, qt.Commentf("question %d censusRoot", i))
+	}
+
 	// re-publishing a published process is an idempotent no-op (200, not a new job)
 	requestAndAssertCode(http.StatusOK, t, http.MethodPost, token, nil, "processes", pid, "publish")
 }
