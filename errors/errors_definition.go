@@ -151,6 +151,20 @@ var (
 	// participant and when a participant was found but the contact data does not match, so a
 	// caller cannot probe who belongs to a census or which contact a participant registered.
 	ErrCSPAuthFailed = Error{Code: 40802, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("invalid authentication data"), LogLevel: "info"}
+	// ErrAttestationInvalid refuses an attestation whose signature, signer, domain or processId does not check out.
+	ErrAttestationInvalid = Error{Code: 40803, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("invalid attestation"), LogLevel: "info"}
+	// ErrAttestationExpired refuses an attestation whose expiresAt is past or too far in the future.
+	ErrAttestationExpired = Error{Code: 40804, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("attestation expired"), LogLevel: "info"}
+	// ErrContactHashMismatch refuses a contact and salt that do not hash to the attested contactHash.
+	ErrContactHashMismatch = Error{
+		Code: 40806, HTTPstatus: http.StatusUnauthorized, LogLevel: "info",
+		Err: fmt.Errorf("contact does not match the attestation"),
+	}
+	// ErrAttestationSignerRevoked refuses a token issued under an attestation signer that was rotated out.
+	ErrAttestationSignerRevoked = Error{
+		Code: 40808, HTTPstatus: http.StatusUnauthorized, LogLevel: "info",
+		Err: fmt.Errorf("attestation signer is no longer active"),
+	}
 
 	// Server errors (500) - These should be used sparingly and only for true internal errors
 	ErrMarshalingServerJSONFailed  = Error{Code: 50001, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: failed to process response"), LogLevel: "error"}
