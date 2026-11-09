@@ -3,7 +3,9 @@ package stripe
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"testing"
@@ -311,3 +313,73 @@ func TestManualInvoiceRefundBeforePaid(t *testing.T) {
 	c.Assert(entries[1].AmountCents, qt.Equals, pricing.Cents(10_000))
 	c.Assert(entries[1].IdempotencyKey, qt.Equals, InvoiceTopUpKey("in_manual"))
 }
+
+// TestTopUpInvoicePDF: a checkout top-up's key resolves its invoice through the session, a manual
+// top-up's names it; the PDF is fetched from Stripe (following its redirect) with the invoice
+// number as its name. No invoice, no PDF, or a key Stripe knows no session by, is ErrNoInvoice; a
+// PDF URL off stripe.com is refused, and a session Stripe fails to serve is a Stripe error.
+func TestTopUpInvoicePDF(t *testing.T) {
+	c := qt.New(t)
+	const pdf = "%PDF-1.4 stub"
+	srv := stubStripeAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/checkout/sessions/cs_1":
+			_, _ = w.Write([]byte(`{"id":"cs_1","object":"checkout.session","invoice":"in_1"}`))
+		case "/v1/checkout/sessions/cs_free":
+			_, _ = w.Write([]byte(`{"id":"cs_free","object":"checkout.session","invoice":null}`))
+		case "/v1/checkout/sessions/cs_broken":
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":{"type":"api_error"}}`))
+		case "/v1/invoices/in_1":
+			_, _ = w.Write([]byte(`{"id":"in_1","object":"invoice","number":"VOC-0001",` +
+				`"invoice_pdf":"https://pay.stripe.com/invoice/acct_1/live_abc/pdf?s=ap"}`))
+		case "/v1/invoices/in_draft":
+			_, _ = w.Write([]byte(`{"id":"in_draft","object":"invoice"}`))
+		case "/v1/invoices/in_evil":
+			_, _ = w.Write([]byte(`{"id":"in_evil","object":"invoice","number":"X","invoice_pdf":"https://evil.example/x.pdf"}`))
+		case "/invoice/acct_1/live_abc/pdf":
+			// pay.stripe.com redirects to the file
+			http.Redirect(w, r, "https://files.stripe.com/invoice.pdf", http.StatusFound)
+		case "/invoice.pdf":
+			w.Header().Set("Content-Type", "application/pdf")
+			_, _ = w.Write([]byte(pdf))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","code":"resource_missing"}}`))
+		}
+	}))
+	// the PDF client keeps its host check; its requests are carried to the stub instead
+	stubURL, err := url.Parse(srv.URL)
+	c.Assert(err, qt.IsNil)
+	previous := invoicePDFClient.Transport
+	invoicePDFClient.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		r.URL.Scheme, r.URL.Host = stubURL.Scheme, stubURL.Host
+		return http.DefaultTransport.RoundTrip(r)
+	})
+	c.Cleanup(func() { invoicePDFClient.Transport = previous })
+	s := &Service{client: NewClient(&Config{APIKey: "sk_test_stub"})}
+
+	for _, key := range []string{"cs_1", InvoiceTopUpKey("in_1")} {
+		got, err := s.TopUpInvoicePDF(key)
+		c.Assert(err, qt.IsNil, qt.Commentf("key %s", key))
+		body, err := io.ReadAll(got.Body)
+		c.Assert(err, qt.IsNil)
+		c.Assert(got.Body.Close(), qt.IsNil)
+		c.Assert(got.Number, qt.Equals, "VOC-0001")
+		c.Assert(string(body), qt.Equals, pdf)
+	}
+	// cs_unknown is no checkout session for Stripe (resource_missing)
+	for _, key := range []string{"cs_free", "cs_unknown", InvoiceTopUpKey("in_draft")} {
+		_, err := s.TopUpInvoicePDF(key)
+		c.Assert(err, qt.ErrorIs, ErrNoInvoice, qt.Commentf("key %s", key))
+	}
+	_, err = s.TopUpInvoicePDF(InvoiceTopUpKey("in_evil"))
+	c.Assert(err, qt.ErrorMatches, ".*refusing to fetch an invoice pdf.*")
+	_, err = s.TopUpInvoicePDF("cs_broken")
+	c.Assert(err, qt.ErrorMatches, ".*failed to get checkout session.*")
+}
+
+// roundTripperFunc adapts a function to http.RoundTripper.
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

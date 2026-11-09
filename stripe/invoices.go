@@ -3,9 +3,15 @@ package stripe
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	stripeapi "github.com/stripe/stripe-go/v87"
+	stripecheckoutsession "github.com/stripe/stripe-go/v87/checkout/session"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/pricing"
@@ -24,6 +30,106 @@ const invoiceTopUpKeyPrefix = "invoice:"
 // InvoiceTopUpKey is the idempotency key of the wallet credit of a manual top-up invoice: once
 // per invoice, whatever events Stripe replays.
 func InvoiceTopUpKey(invoiceID string) string { return invoiceTopUpKeyPrefix + invoiceID }
+
+// ErrNoInvoice is answered by TopUpInvoicePDF for a top-up whose invoice is not available yet:
+// Checkout attaches the invoice to its session, and Stripe renders the PDF, shortly after the
+// payment that credited the top-up, so a download right after paying may find neither.
+var ErrNoInvoice = fmt.Errorf("the top-up invoice is not available yet")
+
+// InvoicePDF is an invoice's PDF as Stripe serves it: Number names the file, Body streams it and
+// must be closed by the caller.
+type InvoicePDF struct {
+	Number string
+	Body   io.ReadCloser
+}
+
+const (
+	// invoicePDFTimeout bounds the whole PDF fetch, redirect included.
+	invoicePDFTimeout = 30 * time.Second
+	// maxInvoicePDFBytes caps what is copied of a PDF: Stripe invoices are a few hundred KB.
+	maxInvoicePDFBytes = 20 << 20
+)
+
+// invoicePDFClient fetches invoice PDFs: invoice_pdf is a pay.stripe.com URL that redirects to
+// the file, outside the Stripe API. Every hop must stay on stripe.com.
+var invoicePDFClient = &http.Client{
+	Timeout: invoicePDFTimeout,
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return fmt.Errorf("too many redirects")
+		}
+		if !isStripeHost(req.URL) {
+			return fmt.Errorf("redirected off stripe.com to %q", req.URL.Host)
+		}
+		return nil
+	},
+}
+
+// isStripeHost reports whether u is an https URL on stripe.com or one of its subdomains.
+func isStripeHost(u *url.URL) bool {
+	host := strings.ToLower(u.Hostname())
+	return u.Scheme == "https" && (host == "stripe.com" || strings.HasSuffix(host, ".stripe.com"))
+}
+
+// TopUpInvoicePDF serves the invoice of the top-up ledger row keyed idempotencyKey: a manual
+// invoice's key (InvoiceTopUpKey) names it, any other key is the checkout session whose invoice
+// it is. ErrNoInvoice when there is none yet, or no PDF yet, and for a key that names no
+// checkout session (resource_missing: a ledger row keyed by anything else has no invoice); any
+// other Stripe failure is errors.ErrStripeError.
+func (s *Service) TopUpInvoicePDF(idempotencyKey string) (*InvoicePDF, error) {
+	invoiceID, ok := strings.CutPrefix(idempotencyKey, invoiceTopUpKeyPrefix)
+	if !ok {
+		session, err := stripecheckoutsession.Get(idempotencyKey, &stripeapi.CheckoutSessionParams{})
+		if err != nil {
+			var stripeErr *stripeapi.Error
+			if errors.As(err, &stripeErr) && stripeErr.Code == stripeapi.ErrorCodeResourceMissing {
+				return nil, ErrNoInvoice
+			}
+			return nil, errors.ErrStripeError.Withf("failed to get checkout session: %v", err)
+		}
+		if session.Invoice == nil || session.Invoice.ID == "" {
+			return nil, ErrNoInvoice
+		}
+		invoiceID = session.Invoice.ID
+	}
+	invoice, err := s.client.GetInvoice(invoiceID)
+	if err != nil {
+		return nil, err
+	}
+	if invoice.InvoicePDF == "" {
+		return nil, ErrNoInvoice
+	}
+	body, err := fetchInvoicePDF(invoice.InvoicePDF)
+	if err != nil {
+		return nil, err
+	}
+	number := invoice.Number
+	if number == "" {
+		number = invoice.ID
+	}
+	return &InvoicePDF{Number: number, Body: body}, nil
+}
+
+// fetchInvoicePDF opens the PDF at rawURL, which must be on stripe.com, following Stripe's
+// redirect to the file; the body is capped at maxInvoicePDFBytes.
+func fetchInvoicePDF(rawURL string) (io.ReadCloser, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil || !isStripeHost(u) {
+		return nil, errors.ErrStripeError.Withf("refusing to fetch an invoice pdf from %q", rawURL)
+	}
+	resp, err := invoicePDFClient.Get(u.String())
+	if err != nil {
+		return nil, errors.ErrStripeError.Withf("failed to fetch invoice pdf: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+		return nil, errors.ErrStripeError.Withf("failed to fetch invoice pdf: status %d", resp.StatusCode)
+	}
+	return struct {
+		io.Reader
+		io.Closer
+	}{io.LimitReader(resp.Body, maxInvoicePDFBytes), resp.Body}, nil
+}
 
 // handleInvoicePaid credits the wallet of a manual top-up invoice (TopUpSourceManual) once Stripe
 // reports it paid, through a payment or marked paid out of band. Every other invoice — a checkout
