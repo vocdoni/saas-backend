@@ -116,6 +116,9 @@ func (c *CSPHandlers) verifyAttestation(
 		stored.ContactHash = internal.HexBytes(att.ContactHash.Bytes())
 		stored.ContactKind = string(kind)
 	}
+	if !twoFa && att.ContactHash != (common.Hash{}) {
+		return nil, nil, errors.ErrAttestationInvalid.With("attestation carries a contactHash but the census has no 2FA")
+	}
 	return stored, attestation.UserID(att.ProcessID, att.VoterID), nil
 }
 
