@@ -62,6 +62,7 @@ type MongoStorage struct {
 	cspTokens           *mongo.Collection
 	cspTokensStatus     *mongo.Collection
 	cspCounters         *mongo.Collection
+	cspAttestations     *mongo.Collection
 	jobs                *mongo.Collection
 	apiKeys             *mongo.Collection
 	meteredVotes        *mongo.Collection

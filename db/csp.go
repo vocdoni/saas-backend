@@ -32,6 +32,20 @@ type CSPAuth struct {
 	VerifiedAt time.Time `json:"verifiedAt" bson:"verifiedat"`
 	// Resends counts the challenge resends of the token, capped by ClaimCSPAuthResend.
 	Resends int `json:"resends" bson:"resends"`
+	// Attestation is the integrator attestation the token was issued against; nil for a token of a
+	// memberbase census. It never leaves the server.
+	Attestation *CSPAuthAttestation `json:"-" bson:"attestation,omitempty"`
+}
+
+// CSPAuthAttestation is the attestation an attested-census token was issued against. ContactHash
+// and ContactKind are empty for a census without 2FA; Signature is in canonical form.
+type CSPAuthAttestation struct {
+	VoterID     internal.HexBytes `bson:"voterId"`
+	ContactHash internal.HexBytes `bson:"contactHash,omitempty"`
+	ContactKind string            `bson:"contactKind,omitempty"`
+	ExpiresAt   int64             `bson:"expiresAt"`
+	Signature   internal.HexBytes `bson:"signature"`
+	Signer      common.Address    `bson:"signer"`
 }
 
 // CSPProcess is the status of a process in a bundle of processes for a user
@@ -63,6 +77,14 @@ type CSPProcess struct {
 // SetCSPAuth method stores a new CSP authentication token for a user and a
 // anchor. It returns an error if the token, user ID or anchor ID are nil.
 func (ms *MongoStorage) SetCSPAuth(token, userID, anchorID internal.HexBytes, secret string) error {
+	return ms.SetAttestedCSPAuth(token, userID, anchorID, secret, nil)
+}
+
+// SetAttestedCSPAuth stores a new CSP authentication token like SetCSPAuth, recording the
+// attestation it was issued against (nil for a memberbase token).
+func (ms *MongoStorage) SetAttestedCSPAuth(token, userID, anchorID internal.HexBytes, secret string,
+	attestation *CSPAuthAttestation,
+) error {
 	if token == nil || userID == nil || anchorID == nil {
 		return ErrBadInputs
 	}
@@ -73,12 +95,13 @@ func (ms *MongoStorage) SetCSPAuth(token, userID, anchorID internal.HexBytes, se
 	defer cancel()
 	// insert the token
 	if _, err := ms.cspTokens.InsertOne(ctx, CSPAuth{
-		Token:     token,
-		UserID:    userID,
-		AnchorID:  anchorID,
-		CreatedAt: time.Now(),
-		Secret:    secret,
-		Verified:  false,
+		Token:       token,
+		UserID:      userID,
+		AnchorID:    anchorID,
+		CreatedAt:   time.Now(),
+		Secret:      secret,
+		Verified:    false,
+		Attestation: attestation,
 	}); err != nil {
 		return errors.Join(ErrStoreToken, err)
 	}
@@ -574,7 +597,8 @@ func (ms *MongoStorage) DeleteCSPProcessByProcess(processID internal.HexBytes) (
 }
 
 // DeleteVotingProcessCSPByOrg removes the CSP auth tokens anchored to any voting process of the
-// organization (the anchor is the process ObjectID bytes, see csp/handlers parseProcessID) and the
+// organization (the anchor is the process ObjectID bytes, see csp/handlers parseProcessID), their
+// attestation records and the
 // CSP status rows of their questions' elections (keyed by the question UpstreamID). It is a step
 // of an organization teardown and must run before DeleteVotingProcessesByOrg, which drops the ids
 // it reads.
@@ -597,6 +621,9 @@ func (ms *MongoStorage) DeleteVotingProcessCSPByOrg(orgAddress common.Address) e
 	if len(anchors) > 0 {
 		if _, err := ms.cspTokens.DeleteMany(ctx, bson.M{"bundleid": bson.M{"$in": anchors}}); err != nil {
 			return fmt.Errorf("failed to delete CSP auth tokens of voting processes: %w", err)
+		}
+		if _, err := ms.cspAttestations.DeleteMany(ctx, bson.M{"processId": bson.M{"$in": processIDs}}); err != nil {
+			return fmt.Errorf("failed to delete attestation records of voting processes: %w", err)
 		}
 	}
 	var upstreamIDs []internal.HexBytes
