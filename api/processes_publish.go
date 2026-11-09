@@ -332,7 +332,7 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 	// only funding and chain submission are left to the worker.
 	target := publishTarget{vp: vp, questions: questions, census: census, user: user}
 	if err := preflightError(a.publishPreflightProblems(target)); err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 
@@ -340,7 +340,7 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 	// and the 402 carries what is missing so the client can go straight to a top-up checkout.
 	// The debit itself happens inside startProcessPublish, after the publish claim.
 	if err := a.paymentDueForPublish(vp); err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 
@@ -350,7 +350,7 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 			apicommon.HTTPWriteJSON(w, apicommon.CreateVotingProcessResponse{ProcessID: oid.Hex()})
 			return
 		}
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, &apicommon.EnqueuedResponse{JobID: jobID})
@@ -377,7 +377,7 @@ func (e errPublishFailedAfterDebit) Unwrap() error { return e.err }
 // The caller is responsible for preflight (publishPreflightProblems) and authorization.
 // It exists apart from the HTTP handler so payment fulfillment can trigger publication
 // server-side with the same guarantees. Errors are errors.Error values carrying their
-// HTTP semantics (write with writeSubscriptionError), plain errors mapping to 500, or
+// HTTP semantics (write with writeAPIError), plain errors mapping to 500, or
 // errProcessAlreadyPublished. ctx bounds only the lock waits below, never the enqueued work.
 func (a *API) startProcessPublish(ctx context.Context, t publishTarget) (string, error) {
 	vp, user := t.vp, t.user
@@ -1473,7 +1473,7 @@ func (a *API) enqueueStatusChange(
 	// 503 and no job row is left behind.
 	orgLock, err := a.orgTxLocks.lockCtx(r.Context(), org.Address)
 	if err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	jobID, err := apicommon.NewJobID()

@@ -111,16 +111,6 @@ func TestOrganizationUsers(t *testing.T) {
 		// Create a new organization for this test
 		newOrgAddress := testCreateOrganization(t, adminToken)
 
-		// Get the initial organization to check the users counter
-		resp, code := testRequest(t, http.MethodGet, adminToken, nil, "organizations", newOrgAddress.String())
-		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-		var initialOrg apicommon.OrganizationInfo
-		c.Assert(json.Unmarshal(resp, &initialOrg), qt.IsNil)
-
-		initialUserCount := initialOrg.Counters.Users
-		t.Logf("Initial users counter: %d", initialUserCount)
-
 		nInvites := 15
 		t.Logf("Will invite %d users", nInvites)
 		var wg sync.WaitGroup
@@ -149,24 +139,8 @@ func TestOrganizationUsers(t *testing.T) {
 		// Wait a bit more to ensure all DB operations complete
 		time.Sleep(500 * time.Millisecond)
 
-		// Get the organization again to check the users counter
-		resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", newOrgAddress.String())
-		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-		var finalOrg apicommon.OrganizationInfo
-		c.Assert(json.Unmarshal(resp, &finalOrg), qt.IsNil)
-
-		// every invite must be counted exactly once: no plan caps the users counter anymore
-		expectedCount := initialUserCount + nInvites
-		t.Logf("Final users counter: %d (expected %d)",
-			finalOrg.Counters.Users, expectedCount)
-
-		c.Assert(finalOrg.Counters.Users, qt.Equals, expectedCount,
-			qt.Commentf("race condition detected: expected users counter to be %d, got %d",
-				expectedCount, finalOrg.Counters.Users))
-
 		// Verify all invitations were actually created by checking pending invitations
-		resp, code = testRequest(
+		resp, code := testRequest(
 			t,
 			http.MethodGet,
 			adminToken,
@@ -1144,13 +1118,6 @@ func (o invitedOrg) inviteAsAdmin(t *testing.T, inviterToken string) (email, cod
 	return email, invitationCodeFromEmail(t, email)
 }
 
-func (o invitedOrg) usersCounter(t *testing.T) int {
-	t.Helper()
-	info := requestAndParse[apicommon.OrganizationInfo](t, http.MethodGet, o.ownerToken, nil,
-		"organizations", o.address.String())
-	return info.Counters.Users
-}
-
 func (o invitedOrg) pendingCount(t *testing.T) int {
 	t.Helper()
 	list := requestAndParse[apicommon.OrganizationInviteList](t, http.MethodGet, o.ownerToken, nil,
@@ -1176,17 +1143,14 @@ func TestRevokedInviterInvitations(t *testing.T) {
 		c := qt.New(t)
 		o := newInvitedOrg(t)
 		adminToken, adminInfo := o.newAdmin(t)
-		countBefore := o.usersCounter(t)
 		_, code := o.inviteAsAdmin(t, adminToken)
 		c.Assert(o.pendingCount(t), qt.Equals, 1)
-		c.Assert(o.usersCounter(t), qt.Equals, countBefore+1)
 
 		requestAndAssertCode(http.StatusOK, t, http.MethodDelete, o.ownerToken, nil,
 			append(o.usersPath, fmt.Sprint(adminInfo.ID))...)
 
 		// the invitation is gone and its slot released, and the invitee cannot accept it
 		c.Assert(o.pendingCount(t), qt.Equals, 0)
-		c.Assert(o.usersCounter(t), qt.Equals, countBefore-1)
 		o.acceptRefused(t, code)
 	})
 
@@ -1194,7 +1158,6 @@ func TestRevokedInviterInvitations(t *testing.T) {
 		c := qt.New(t)
 		o := newInvitedOrg(t)
 		adminToken, adminInfo := o.newAdmin(t)
-		countBefore := o.usersCounter(t)
 		_, code := o.inviteAsAdmin(t, adminToken)
 		c.Assert(o.pendingCount(t), qt.Equals, 1)
 
@@ -1203,7 +1166,6 @@ func TestRevokedInviterInvitations(t *testing.T) {
 			append(o.usersPath, fmt.Sprint(adminInfo.ID))...)
 
 		c.Assert(o.pendingCount(t), qt.Equals, 0)
-		c.Assert(o.usersCounter(t), qt.Equals, countBefore)
 		o.acceptRefused(t, code)
 	})
 
@@ -1211,7 +1173,6 @@ func TestRevokedInviterInvitations(t *testing.T) {
 		c := qt.New(t)
 		o := newInvitedOrg(t)
 		adminToken, adminInfo := o.newAdmin(t)
-		countBefore := o.usersCounter(t)
 		inviteeEmail, code := o.inviteAsAdmin(t, adminToken)
 
 		// drop the membership directly in the DB, bypassing the handler cleanup, as user erasure does
@@ -1223,7 +1184,6 @@ func TestRevokedInviterInvitations(t *testing.T) {
 
 		// the invitation is dropped and its slot released, and no user is created for the invitee
 		c.Assert(o.pendingCount(t), qt.Equals, 0)
-		c.Assert(o.usersCounter(t), qt.Equals, countBefore)
 		_, err = testDB.UserByEmail(inviteeEmail)
 		c.Assert(err, qt.ErrorIs, db.ErrNotFound)
 	})
@@ -1232,7 +1192,6 @@ func TestRevokedInviterInvitations(t *testing.T) {
 		c := qt.New(t)
 		o := newInvitedOrg(t)
 		adminToken, adminInfo := o.newAdmin(t)
-		countBefore := o.usersCounter(t)
 		_, code := o.inviteAsAdmin(t, adminToken)
 		removed, err := testDB.RemoveOrganizationUser(o.address, adminInfo.ID)
 		c.Assert(err, qt.IsNil)
@@ -1260,7 +1219,6 @@ func TestRevokedInviterInvitations(t *testing.T) {
 		}
 
 		c.Assert(o.pendingCount(t), qt.Equals, 0)
-		c.Assert(o.usersCounter(t), qt.Equals, countBefore)
 	})
 }
 

@@ -59,7 +59,7 @@ func postSignedStripeEvent(t *testing.T, secret, eventID, eventType string, obje
 		Secret:  secret,
 	})
 	req, err := http.NewRequest(http.MethodPost,
-		fmt.Sprintf("http://%s:%d/subscriptions/webhook", testHost, testPort),
+		fmt.Sprintf("http://%s:%d/payments/webhook", testHost, testPort),
 		bytes.NewReader(payload))
 	c.Assert(err, qt.IsNil)
 	req.Header.Set("Content-Type", "application/json")

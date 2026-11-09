@@ -360,7 +360,7 @@ func (a *API) releaseDroppedCheckoutClaim(vp *db.VotingProcess, org *db.Organiza
 //	@Description	Public calculator over the published pricing formula: pass the inputs, get the
 //	@Description	same breakdown GET /processes/{processId}/price returns for a draft. EUR cents,
 //	@Description	VAT excluded (Stripe Tax adds VAT at checkout). No organization context: branding
-//	@Description	is charged as requested and legacy plan credits are not applied. Base price on
+//	@Description	is charged as requested. Base price on
 //	@Description	graduated bands, free up to 25 voters; add-ons are charged on free processes too.
 //	@Description	A priced total below €1 is raised to €1 by a minimumCharge line. Above 15 000
 //	@Description	voters a custom quote is recommended (quoteRecommended). Above 50 000 the process
@@ -452,7 +452,7 @@ func (a *API) processPriceHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	quote, quoted, err := a.processQuote(vp)
 	if err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	resp := &apicommon.ProcessPriceResponse{

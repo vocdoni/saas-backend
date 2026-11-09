@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
@@ -194,61 +193,6 @@ func TestCreateSubOrganizationWithinPlan(t *testing.T) {
 	requestAndAssertError(errors.ErrMalformedBody, t, http.MethodPost, token, nested, organizationsEndpoint)
 }
 
-// TestOrganizationBillingEmailAdminOnly covers the regression where the public organization
-// endpoint returned the subscription billing email to anyone. Only admins of each organization in
-// the parent chain see its billing email, on the public endpoint and on /users/me.
-func TestOrganizationBillingEmailAdminOnly(t *testing.T) {
-	c := qt.New(t)
-	parentToken := testCreateUser(t, "billingparentpass123")
-	parentAddr := testCreateOrganization(t, parentToken)
-	childToken := testCreateUser(t, "billingchildpass123")
-	childAddr := testCreateOrganization(t, childToken)
-	viewerToken := testCreateUser(t, "billingviewerpass123")
-	viewer := requestAndParse[apicommon.UserInfo](t, http.MethodGet, viewerToken, nil, usersMeEndpoint)
-	c.Assert(testDB.AddUserToOrganization(viewer.Email, childAddr, db.ViewerRole), qt.IsNil)
-
-	// give both organizations a billing email and link the child to the parent
-	for addr, email := range map[common.Address]string{parentAddr: "parent@billing.test", childAddr: "child@billing.test"} {
-		org, err := testDB.Organization(addr)
-		c.Assert(err, qt.IsNil)
-		org.Subscription.Email = email
-		c.Assert(testDB.SetOrganizationSubscription(addr, &org.Subscription), qt.IsNil)
-		if addr == childAddr {
-			org.Parent = parentAddr
-			c.Assert(testDB.SetOrganization(org), qt.IsNil)
-		}
-	}
-
-	getInfo := func(token string) *apicommon.OrganizationInfo {
-		info := requestAndParse[apicommon.OrganizationInfo](t, http.MethodGet, token, nil,
-			"organizations", childAddr.String())
-		c.Assert(info.Subscription, qt.Not(qt.IsNil))
-		c.Assert(info.Parent, qt.Not(qt.IsNil))
-		c.Assert(info.Parent.Subscription, qt.Not(qt.IsNil))
-		return &info
-	}
-
-	// anonymous and non-admin members get no billing email at all
-	for _, token := range []string{"", viewerToken} {
-		info := getInfo(token)
-		c.Assert(info.Subscription.Email, qt.Equals, "")
-		c.Assert(info.Parent.Subscription.Email, qt.Equals, "")
-	}
-	// the child's admin gets the child's email, but not the parent's it does not administer
-	info := getInfo(childToken)
-	c.Assert(info.Subscription.Email, qt.Equals, "child@billing.test")
-	c.Assert(info.Parent.Subscription.Email, qt.Equals, "")
-
-	// /users/me applies the same rule per organization
-	viewerMe := requestAndParse[apicommon.UserInfo](t, http.MethodGet, viewerToken, nil, usersMeEndpoint)
-	c.Assert(viewerMe.Organizations, qt.HasLen, 1)
-	c.Assert(viewerMe.Organizations[0].Organization.Subscription.Email, qt.Equals, "")
-	childMe := requestAndParse[apicommon.UserInfo](t, http.MethodGet, childToken, nil, usersMeEndpoint)
-	c.Assert(childMe.Organizations, qt.HasLen, 1)
-	c.Assert(childMe.Organizations[0].Organization.Subscription.Email, qt.Equals, "child@billing.test")
-	c.Assert(childMe.Organizations[0].Organization.Parent.Subscription.Email, qt.Equals, "")
-}
-
 // TestAcceptInvitationRejectsInvalidCode covers the regression where the accept handler
 // would query the database for any code, including empty strings and short legacy codes.
 // A code that is not exactly 2*InvitationCodeLength valid hex characters must be rejected
@@ -268,54 +212,4 @@ func TestAcceptInvitationRejectsInvalidCode(t *testing.T) {
 			&apicommon.AcceptOrganizationInvitation{Code: badCode},
 			"organizations", orgAddr.String(), "users", "accept")
 	}
-}
-
-// TestManagedOrgBillingEmailRedacted covers the regression where the integrator create and
-// list endpoints returned subscription.email without redaction. The billing email is
-// admin-only data: a non-admin integrator must not see the billing emails of managed orgs
-// it does not administer.
-func TestManagedOrgBillingEmailRedacted(t *testing.T) {
-	c := qt.New(t)
-	intToken := testCreateUser(t, "intbillingpass123")
-	orgAddr := testCreateOrganization(t, intToken)
-
-	// enable the org as an integrator with capacity for one managed org
-	org, err := testDB.Organization(orgAddr)
-	c.Assert(err, qt.IsNil)
-	org.Integrator = true
-	c.Assert(testDB.SetOrganization(org), qt.IsNil)
-
-	// create a second user to own the managed org so the integrator is not its admin
-	ownerToken := testCreateUser(t, "intbillingownerpass123")
-	ownerInfo := requestAndParse[apicommon.UserInfo](t, http.MethodGet, ownerToken, nil, usersMeEndpoint)
-
-	// create the managed org assigned to the separate owner
-	created := requestAndParse[apicommon.OrganizationInfo](t, http.MethodPost, intToken,
-		&apicommon.CreateManagedOrganizationRequest{
-			OrganizationInfo: apicommon.OrganizationInfo{Type: string(db.CompanyType)},
-			OwnerEmail:       ownerInfo.Email,
-		}, "integrator", "organizations")
-
-	// set a billing email on the managed org
-	managed, err := testDB.Organization(created.Address)
-	c.Assert(err, qt.IsNil)
-	managed.Subscription.Email = "managed@billing.test"
-	c.Assert(testDB.SetOrganizationSubscription(created.Address, &managed.Subscription), qt.IsNil)
-
-	// list managed orgs as the integrator (not admin of the managed org) — billing email
-	// must be absent from every entry
-	list := requestAndParse[apicommon.ListManagedOrganizations](t, http.MethodGet, intToken,
-		nil, "integrator", "organizations")
-	c.Assert(list.Organizations, qt.Not(qt.HasLen), 0)
-	for _, o := range list.Organizations {
-		if o.Subscription != nil {
-			c.Assert(o.Subscription.Email, qt.Equals, "")
-		}
-	}
-
-	// the managed org's own admin (owner) CAN see the billing email on the public org endpoint
-	ownerView := requestAndParse[apicommon.OrganizationInfo](t, http.MethodGet, ownerToken, nil,
-		"organizations", created.Address.String())
-	c.Assert(ownerView.Subscription, qt.Not(qt.IsNil))
-	c.Assert(ownerView.Subscription.Email, qt.Equals, "managed@billing.test")
 }

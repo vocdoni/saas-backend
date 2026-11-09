@@ -152,11 +152,6 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrGenericInternalServerError.Withf("could not create organization signer: %v", err).Write(w)
 		return
 	}
-	defaultPlan, err := a.db.DefaultPlan()
-	if err != nil || defaultPlan == nil {
-		errors.ErrNoDefaultPlan.WithErr(err).Write(w)
-		return
-	}
 	dbOrg := &db.Organization{
 		Address:        signer.Address(),
 		Website:        req.Website,
@@ -174,11 +169,6 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		Communications: req.Communications,
 		Meta:           apicommon.BuildOrgMeta(nil, req.Name, req.Logo, req.Description, req.Meta),
 		ManagedBy:      integratorAddr,
-		Subscription: db.OrganizationSubscription{
-			PlanID:    defaultPlan.ID,
-			StartDate: time.Now(),
-			Active:    true,
-		},
 	}
 	// an integrator whose wallet kept a top-up has no cap; one that has not may create
 	// maxUnfundedManagedOrgs, and the count and the creation it allows are one step per integrator,
@@ -192,12 +182,12 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		// ponytail: in-memory lock, like orgTxLocks — one API instance; a DB CAS if that changes
 		managedOrgLock, err := a.managedOrgLocks.lockOrBusy(r.Context(), integratorAddr)
 		if err != nil {
-			writeSubscriptionError(w, err)
+			writeAPIError(w, err)
 			return
 		}
 		defer managedOrgLock.Unlock()
 		if err := a.unfundedManagedOrgError(integratorAddr); err != nil {
-			writeSubscriptionError(w, err)
+			writeAPIError(w, err)
 			return
 		}
 	}
@@ -226,9 +216,7 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 	if err := a.db.IncrementManagedOrgsCreated(integratorAddr); err != nil {
 		log.Errorw(err, fmt.Sprintf("could not count managed organization %s created by %s", dbOrg.Address, integratorAddr))
 	}
-	info := apicommon.OrganizationFromDB(dbOrg, nil)
-	redactBillingEmails(info, user)
-	apicommon.HTTPWriteJSON(w, info)
+	apicommon.HTTPWriteJSON(w, apicommon.OrganizationFromDB(dbOrg, nil))
 }
 
 // maxUnfundedManagedOrgs is how many organizations an integrator may create before it has topped
@@ -344,9 +332,12 @@ func (a *API) managedOrganizationsHandler(w http.ResponseWriter, r *http.Request
 	}
 	list := make([]*apicommon.ManagedOrganizationInfo, 0, len(orgs))
 	for i := range orgs {
-		info := apicommon.ManagedOrganizationFromDB(&orgs[i], wallet.ManagedOrgSpend(orgs[i].Address))
-		redactBillingEmails(&info.OrganizationInfo, user)
-		list = append(list, info)
+		processes, err := a.db.CountVotingProcesses(orgs[i].Address, db.PublishedOnly)
+		if err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+		list = append(list, apicommon.ManagedOrganizationFromDB(&orgs[i], wallet.ManagedOrgSpend(orgs[i].Address), processes))
 	}
 	apicommon.HTTPWriteJSON(w, &apicommon.ListManagedOrganizations{
 		Pagination:    pagination,
@@ -541,7 +532,7 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 	// until its draft is stored: taking that lock once lets the sweep below find that draft
 	draftLock, err := a.draftLocks.lockOrBusy(r.Context(), managedAddr)
 	if err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	draftLock.Unlock()
@@ -551,7 +542,7 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 	// nothing else deleted: money must never be left behind in a deleted organization, and a
 	// retry resumes where it stopped.
 	if err := a.deleteOrgDrafts(managedAddr); err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 
@@ -752,9 +743,12 @@ func (a *API) updateManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	info := apicommon.ManagedOrganizationFromDB(managed, wallet.ManagedOrgSpend(managed.Address))
-	redactBillingEmails(&info.OrganizationInfo, user)
-	apicommon.HTTPWriteJSON(w, info)
+	processes, err := a.db.CountVotingProcesses(managed.Address, db.PublishedOnly)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	apicommon.HTTPWriteJSON(w, apicommon.ManagedOrganizationFromDB(managed, wallet.ManagedOrgSpend(managed.Address), processes))
 }
 
 // refuseTearingDown refuses with 409 work in an organization whose teardown is running.

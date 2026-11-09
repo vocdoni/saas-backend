@@ -75,6 +75,9 @@ func TestVotingProcessCRUD(t *testing.T) {
 	n, err = testDB.CountVotingProcesses(org, DraftOnly)
 	c.Assert(err, qt.IsNil)
 	c.Assert(n, qt.Equals, int64(0))
+	n, err = testDB.CountVotingProcesses(org, PublishedOnly)
+	c.Assert(err, qt.IsNil)
+	c.Assert(n, qt.Equals, int64(1))
 }
 
 func TestClaimVotingProcessForPublish(t *testing.T) {

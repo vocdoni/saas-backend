@@ -100,12 +100,6 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		errors.ErrInvalidUserData.WithErr(err).Write(w)
 		return
 	}
-	// find default plan
-	defaultPlan, err := a.db.DefaultPlan()
-	if err != nil || defaultPlan == nil {
-		errors.ErrNoDefaultPlan.WithErr(err).Write(w)
-		return
-	}
 	// check if the user has permission to create new organizations
 	hasPermission, err := a.subscriptions.HasDBPermission(user.Email, common.Address{}, subscriptions.CreateOrg)
 	if err != nil {
@@ -182,11 +176,6 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		Parent:         parentOrg,
 		// integrator portal opt-in: the new organization pays for its managed ones from its wallet
 		Integrator: orgInfo.Integrator,
-		Subscription: db.OrganizationSubscription{
-			PlanID:    defaultPlan.ID,
-			StartDate: time.Now(),
-			Active:    true,
-		},
 	}
 	// optionally provision the organization's on-chain account (opt-in, eager) BEFORE
 	// persisting the DB row. CreateOrgAccount is idempotent, so doing it first means a
@@ -244,24 +233,8 @@ func (a *API) organizationInfoHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrNoOrganizationProvided.Write(w)
 		return
 	}
-	info := apicommon.OrganizationFromDB(org, parent)
-	// the endpoint is public, but the billing email is only for the organization's admins, as on
-	// the dedicated subscription endpoint
-	redactBillingEmails(info, a.optionalCallerUser(r))
 	// send the organization back to the user
-	apicommon.HTTPWriteJSON(w, info)
-}
-
-// redactBillingEmails clears the subscription billing email of every organization in info's
-// parent chain that user is not an admin of (all of them when user is nil). The billing email is
-// admin-only data, as on the dedicated subscription endpoint, and each level is checked against
-// its own organization: an admin of a suborganization is not an admin of its parent.
-func redactBillingEmails(info *apicommon.OrganizationInfo, user *db.User) {
-	for o := info; o != nil; o = o.Parent {
-		if o.Subscription != nil && (user == nil || !user.HasRoleFor(o.Address, db.AdminRole)) {
-			o.Subscription.Email = ""
-		}
-	}
+	apicommon.HTTPWriteJSON(w, apicommon.OrganizationFromDB(org, parent))
 }
 
 // updateOrganizationHandler godoc
@@ -404,56 +377,6 @@ func (*API) organizationsLanguagesHandler(w http.ResponseWriter, _ *http.Request
 		Languages: slices.Clone(apicommon.SupportedLangs),
 		Default:   apicommon.DefaultLang,
 	})
-}
-
-// organizationSubscriptionHandler godoc
-//
-//	@Summary		Get organization subscription
-//	@Description	Get the subscription information for an organization
-//	@Tags			organizations
-//	@Accept			json
-//	@Produce		json
-//	@Security		BearerAuth
-//	@Param			orgAddress	path		string	true	"Organization address"
-//	@Success		200			{object}	apicommon.OrganizationSubscriptionInfo
-//	@Failure		400			{object}	errors.Error	"Invalid input data"
-//	@Failure		401			{object}	errors.Error	"Unauthorized"
-//	@Failure		404			{object}	errors.Error	"Organization not found or no subscription"
-//	@Failure		500			{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{orgAddress}/subscription [get]
-func (a *API) organizationSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
-	// get the user from the request context
-	user, ok := apicommon.UserFromContext(r.Context())
-	if !ok {
-		errors.ErrUnauthorized.Write(w)
-		return
-	}
-	// get the organization info from the request context
-	org, _, ok := a.organizationFromRequest(r)
-	if !ok {
-		errors.ErrNoOrganizationProvided.Write(w)
-		return
-	}
-	if !user.HasRoleFor(org.Address, db.AdminRole) {
-		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
-		return
-	}
-	if org.Subscription == (db.OrganizationSubscription{}) {
-		errors.ErrOrganizationHasNoSubscription.Write(w)
-		return
-	}
-	// get the subscription from the database
-	plan, err := a.db.Plan(org.Subscription.PlanID)
-	if err != nil {
-		errors.ErrGenericInternalServerError.Withf("could not get subscription: %v", err).Write(w)
-		return
-	}
-	info := &apicommon.OrganizationSubscriptionInfo{
-		SubscriptionDetails: apicommon.SubscriptionDetailsFromDB(&org.Subscription),
-		Usage:               apicommon.SubscriptionUsageFromDB(&org.Counters),
-		Plan:                apicommon.SubscriptionPlanFromDB(a.planForResponse(plan)),
-	}
-	apicommon.HTTPWriteJSON(w, info)
 }
 
 // organizationCensusesHandler godoc

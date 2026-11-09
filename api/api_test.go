@@ -1102,9 +1102,13 @@ func putOrgMemberAndExpectError(t *testing.T, adminToken string, orgAddress comm
 	return requestAndExpectError(t, http.MethodPut, adminToken, member, organizationMembersURL(orgAddress.String()))
 }
 
-func getOrganization(t *testing.T, orgAddress common.Address) apicommon.OrganizationInfo {
+// orgCounters reads the organization's sent counters, which the API no longer exposes on the
+// organization (only summed over managed organizations by GET /integrator).
+func orgCounters(t *testing.T, orgAddress common.Address) db.OrganizationCounters {
 	t.Helper()
-	return requestAndParse[apicommon.OrganizationInfo](t, http.MethodGet, "", nil, organizationInfoURL(orgAddress.String()))
+	org, err := testDB.Organization(orgAddress)
+	qt.Assert(t, err, qt.IsNil)
+	return org.Counters
 }
 
 func postGroup(t *testing.T, token string, orgAddress common.Address, memberIDs ...string) apicommon.OrganizationMemberGroupInfo {
@@ -1150,10 +1154,6 @@ func organizationMembersURL(orgAddress string) string {
 
 func organizationGroupsURL(orgAddress string) string {
 	return strings.ReplaceAll(organizationGroupsEndpoint, "{orgAddress}", orgAddress)
-}
-
-func organizationInfoURL(orgAddress string) string {
-	return strings.ReplaceAll(organizationEndpoint, "{orgAddress}", orgAddress)
 }
 
 func processAuthURL(pid, step string) string {

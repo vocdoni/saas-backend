@@ -105,13 +105,13 @@ func (a *API) setVotingProcessEndDateHandler(w http.ResponseWriter, r *http.Requ
 	}
 	published, err := endDateTargets(vp, questions, newEnd)
 	if err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	if err := endDateTiming(vp.EndDate, len(published)); err != nil {
 		// a repeat of the stored end is refused as before; only a different date can be a repair
 		if newEnd.Equal(vp.EndDate.Truncate(time.Second)) {
-			writeSubscriptionError(w, err)
+			writeAPIError(w, err)
 			return
 		}
 		repair, unfinished, readErr := a.isEndDateRepair(published, vp.EndDate, newEnd)
@@ -126,7 +126,7 @@ func (a *API) setVotingProcessEndDateHandler(w http.ResponseWriter, r *http.Requ
 				err = apiErr.Withf("a previous extension is unfinished: send endDate %s to finish it",
 					unfinished.UTC().Format(time.RFC3339))
 			}
-			writeSubscriptionError(w, err)
+			writeAPIError(w, err)
 			return
 		}
 	}
@@ -243,7 +243,7 @@ func (a *API) enqueueEndDateChange(w http.ResponseWriter, r *http.Request, vp *d
 	// 503 and no job row is left behind.
 	orgLock, err := a.orgTxLocks.lockCtx(r.Context(), org.Address)
 	if err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	jobID, err := apicommon.NewJobID()

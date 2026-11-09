@@ -180,7 +180,7 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 	}
 	target := publishTarget{vp: vp, questions: questions, census: census, user: user}
 	if err := preflightError(a.publishPreflightProblems(target)); err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	// what the draft paid is read off its wallet's ledger; a state we cannot read is never
@@ -192,7 +192,7 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 	}
 	// a draft a delete refunded can only be deleted again, as publish answers it
 	if paid.Refunded {
-		writeSubscriptionError(w, errRefundedDraft)
+		writeAPIError(w, errRefundedDraft)
 		return
 	}
 	if paid.paid() {
@@ -213,11 +213,11 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 	}
 	quote, input, err := a.processQuote(vp)
 	if err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	if err := input.heldError(); err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	// win the add-on claims before the top-up is priced, so the price it is opened for is the
@@ -225,7 +225,7 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 	quote, claims, err := a.claimOrgAddOnsForPayment(vp, &input)
 	if err != nil {
 		a.releaseRefusedOrgAddOnClaims(vp, claims)
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	// every refusal below leaves no payment behind the claims, so they are given back; only a
@@ -251,7 +251,7 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 	// own: a negative balance would otherwise open a checkout for a free draft.
 	if quote.TotalCents == 0 || shortfall <= 0 {
 		if err := a.dropObsoleteCheckout(vp, payment); err != nil {
-			writeSubscriptionError(w, err)
+			writeAPIError(w, err)
 			return
 		}
 		if quote.TotalCents == 0 {
@@ -550,7 +550,7 @@ func (a *API) cancelProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	} else if err := a.releasePendingCheckout(payment); err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	dropped, err := a.db.DeleteProcessPaymentCheckout(oid, cancelled)

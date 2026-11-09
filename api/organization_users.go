@@ -96,7 +96,7 @@ func (a *API) organizationUsersHandler(w http.ResponseWriter, r *http.Request) {
 //	@Param			orgAddress	path		string							true	"Organization address"
 //	@Param			request		body		apicommon.OrganizationInvite	true	"Invitation information"
 //	@Success		200			{string}	string							"OK"
-//	@Failure		400			{object}	errors.Error					"Invalid input data, or the organization's plan allows no more users"
+//	@Failure		400			{object}	errors.Error					"Invalid input data, or the admin and manager limit is reached"
 //	@Failure		401			{object}	errors.Error					"Unauthorized"
 //	@Failure		409			{object}	errors.Error					"User already has a role in the organization"
 //	@Failure		500			{object}	errors.Error					"Internal server error"
@@ -161,13 +161,13 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 	// invitation insert below are one step (writerLocks)
 	writerLock, err := a.writerLocks.lockOrBusy(r.Context(), org.Address)
 	if err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	defer writerLock.Unlock()
 	if invite.Role == db.AdminRole || invite.Role == db.ManagerRole {
 		if err := a.subscriptions.OrgCanAddWriter(org.Address); err != nil {
-			writeSubscriptionError(w, err)
+			writeAPIError(w, err)
 			return
 		}
 	}
@@ -450,13 +450,13 @@ func (a *API) updatePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 	// the check and the update below are one step (writerLocks)
 	writerLock, err := a.writerLocks.lockOrBusy(r.Context(), org.Address)
 	if err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	defer writerLock.Unlock()
 	if (invitation.Role == db.AdminRole || invitation.Role == db.ManagerRole) && !invitation.Expiration.After(time.Now()) {
 		if err := a.subscriptions.OrgCanAddWriter(org.Address); err != nil {
-			writeSubscriptionError(w, err)
+			writeAPIError(w, err)
 			return
 		}
 	}
@@ -714,7 +714,7 @@ func (a *API) updateOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 	// check and the role update are one step (writerLocks)
 	writerLock, err := a.writerLocks.lockOrBusy(r.Context(), org.Address)
 	if err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	defer writerLock.Unlock()
@@ -726,7 +726,7 @@ func (a *API) updateOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		}
 		if current, ok := target.RoleFor(org.Address); !ok || (current != db.AdminRole && current != db.ManagerRole) {
 			if err := a.subscriptions.OrgCanAddWriter(org.Address); err != nil {
-				writeSubscriptionError(w, err)
+				writeAPIError(w, err)
 				return
 			}
 		}

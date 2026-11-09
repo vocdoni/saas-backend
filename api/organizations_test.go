@@ -64,7 +64,7 @@ func TestCreateSubOrganizationHandler(t *testing.T) {
 	// Create a parent organization
 	parentOrgAddress := testCreateOrganization(t, token)
 
-	// Test creating a suborganization - no plan caps suborganizations anymore, so it is created
+	// Test creating a suborganization - nothing caps suborganizations, so it is created
 	subOrgInfo := &apicommon.OrganizationInfo{
 		Type:    string(db.CompanyType),
 		Website: "https://suborganization.com",
@@ -88,7 +88,7 @@ func TestCreateSubOrganizationHandler(t *testing.T) {
 	_, code := testRequest(t, http.MethodPost, token, invalidSubOrgInfo, organizationsEndpoint)
 	c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
-	// an admin of the parent creates a suborganization of it; no plan caps them
+	// an admin of the parent creates a suborganization of it; nothing caps them
 	anotherUserToken := testCreateUser(t, "anotherpassword")
 	anotherUserOrgAddress := testCreateOrganization(t, anotherUserToken)
 	subOrgByNonAdmin := &apicommon.OrganizationInfo{
@@ -244,38 +244,6 @@ func TestOrganizationsLanguagesHandler(t *testing.T) {
 	c.Assert(json.Unmarshal(resp, &langList), qt.IsNil)
 	c.Assert(langList.Languages, qt.DeepEquals, apicommon.SupportedLangs)
 	c.Assert(langList.Default, qt.Equals, apicommon.DefaultLang)
-}
-
-func TestOrganizationSubscriptionHandler(t *testing.T) {
-	c := qt.New(t)
-
-	// Create a user and organization
-	token := testCreateUser(t, testPass)
-	orgAddress := testCreateOrganization(t, token)
-
-	// Test getting subscription info
-	resp, code := testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String(), "subscription")
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	var subInfo apicommon.OrganizationSubscriptionInfo
-	c.Assert(json.Unmarshal(resp, &subInfo), qt.IsNil)
-	c.Assert(subInfo.Plan, qt.Not(qt.IsNil))
-	c.Assert(subInfo.SubscriptionDetails, qt.Not(qt.IsNil))
-	c.Assert(subInfo.Usage, qt.Not(qt.IsNil))
-
-	// Test without authentication
-	_, code = testRequest(t, http.MethodGet, "", nil, "organizations", orgAddress.String(), "subscription")
-	c.Assert(code, qt.Equals, http.StatusUnauthorized)
-
-	// Test when user is not admin
-	anotherUserToken := testCreateUser(t, "anotherpassword")
-	_, code = testRequest(t, http.MethodGet, anotherUserToken, nil, "organizations", orgAddress.String(), "subscription")
-	c.Assert(code, qt.Equals, http.StatusUnauthorized)
-
-	// Test with non-existent organization
-	nonExistentAddr := common.HexToAddress("0x0000000000000000000000000000000000000001")
-	_, code = testRequest(t, http.MethodGet, token, nil, "organizations", nonExistentAddr.String(), "subscription")
-	c.Assert(code, qt.Equals, http.StatusBadRequest)
 }
 
 func TestOrganizationCensusesHandler(t *testing.T) {
@@ -533,5 +501,25 @@ func TestCreateOrganizationWithDifferentTypes(t *testing.T) {
 		var createdOrg apicommon.OrganizationInfo
 		c.Assert(json.Unmarshal(resp, &createdOrg), qt.IsNil)
 		c.Assert(createdOrg.Type, qt.Equals, string(orgType))
+	}
+}
+
+// TestRetiredSubscriptionRoutes: the plan and subscription routes are gone with the subscription
+// model; the Stripe webhook and the top-up session read moved to /payments and /wallet.
+func TestRetiredSubscriptionRoutes(t *testing.T) {
+	token := testCreateUser(t, testPass)
+	orgAddress := testCreateOrganization(t, token).String()
+	for _, route := range []struct {
+		method string
+		path   []string
+	}{
+		{http.MethodGet, []string{"plans"}},
+		{http.MethodGet, []string{"subscriptions", "checkout", "cs_test"}},
+		{http.MethodPost, []string{"subscriptions", "webhook"}},
+		{http.MethodPost, []string{"subscriptions", "checkout"}},
+		{http.MethodGet, []string{"subscriptions", orgAddress, "portal"}},
+		{http.MethodGet, []string{"organizations", orgAddress, "subscription"}},
+	} {
+		requestAndAssertCode(http.StatusNotFound, t, route.method, token, nil, route.path...)
 	}
 }
