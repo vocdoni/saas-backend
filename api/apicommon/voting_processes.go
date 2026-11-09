@@ -5,6 +5,8 @@ package apicommon
 import (
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
+
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/pricing"
@@ -38,6 +40,23 @@ type CensusSpec struct {
 	// equals Size for a non-weighted census. Needed by clients (e.g. the results report) to turn
 	// per-answer weights into percentages.
 	TotalWeight int64 `json:"totalWeight,omitempty"`
+	// Attested makes the census an attested one: an integrator vouches for each voter with an EIP-712
+	// attestation instead of a member list. It excludes groupId, memberIds, authFields, weighted,
+	// anonymous and question eligibility, and allows twoFaFields [], ["email"] or ["phone"].
+	Attested *AttestedCensusSpec `json:"attested,omitempty"`
+}
+
+// AttestedCensusSpec configures an attested census.
+type AttestedCensusSpec struct {
+	// Signer is the address whose attestations the CSP accepts.
+	Signer common.Address `json:"signer" swaggertype:"string" example:"0x71C7656EC7ab88b098defB751B7401B5f6d8976F"`
+	// MaxCensusSize is the declared maximum number of voters; it prices and sizes the process.
+	MaxCensusSize int64 `json:"maxCensusSize"`
+	// SignerHistory lists every signer with the time it became active. Response-only.
+	SignerHistory []db.AttestationSigner `json:"signerHistory,omitempty"`
+	// VerifyingContract is the verifyingContract of the attestation EIP-712 domain: the address of
+	// the CSP signer of this environment. Response-only.
+	VerifyingContract *common.Address `json:"verifyingContract,omitempty" swaggertype:"string"`
 }
 
 // EligibilitySpec is an optional per-question subset of the process census, resolved to a
@@ -504,6 +523,13 @@ func VotingProcessResponseFromDB(
 		// the empty string, but a zero ObjectID hexes to 24 zeros and would serialize as a real group.
 		if !census.GroupID.IsZero() {
 			resp.Census.GroupID = census.GroupID.Hex()
+		}
+		if census.Attested != nil {
+			resp.Census.Attested = &AttestedCensusSpec{
+				Signer:        census.Attested.Signer,
+				MaxCensusSize: census.Size,
+				SignerHistory: census.Attested.SignerHistory,
+			}
 		}
 	}
 	return resp

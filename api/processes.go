@@ -144,6 +144,10 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrMalformedBody.WithErr(err).Write(w)
 		return
 	}
+	if p := attestedCensusProblem(req.Census, req.Questions); p != "" {
+		errors.ErrInvalidData.With(p).Write(w)
+		return
+	}
 	census, missing, err := a.resolveOrCreateDefaultCensus(req.Census, orgAddr)
 	if err != nil {
 		writeSubscriptionError(w, err)
@@ -536,6 +540,10 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	// one is reaped only after the update fully succeeds, so a failed edit neither orphans the
 	// new census nor destroys the old draft.
 	oldCensusID := vp.CensusID
+	if p := attestedCensusProblem(req.Census, req.Questions); p != "" {
+		errors.ErrInvalidData.With(p).Write(w)
+		return
+	}
 	census, missing, err := a.resolveOrCreateDefaultCensus(req.Census, vp.OrgAddress)
 	if err != nil {
 		writeSubscriptionError(w, err)
@@ -659,6 +667,7 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := apicommon.VotingProcessResponseFromDB(vp, questions, census, a.account.ChainID())
 	resp.Census.TotalWeight = a.censusTotalWeight(census)
+	a.echoAttestationDomain(&resp.Census)
 	apicommon.HTTPWriteJSON(w, resp)
 }
 
@@ -816,7 +825,9 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 		if !isManager {
 			redactQuestionsForPublic(questions)
 		}
-		resp.Processes = append(resp.Processes, *apicommon.VotingProcessResponseFromDB(vp, questions, census, chainID))
+		item := apicommon.VotingProcessResponseFromDB(vp, questions, census, chainID)
+		a.echoAttestationDomain(&item.Census)
+		resp.Processes = append(resp.Processes, *item)
 	}
 	// the legacy tail starts where the stored pages ran out: the page holding the boundary comes
 	// back short of the limit, and every page after it is legacy-only.
@@ -1348,6 +1359,8 @@ func validateVotingProcessForPublish(
 	}
 	if census == nil {
 		problems = append(problems, "census not resolvable")
+	} else if census.Attested != nil {
+		problems = append(problems, attestedCensusPublishProblems(census, questions)...)
 	}
 	if len(questions) == 0 {
 		problems = append(problems, "at least one question is required")
