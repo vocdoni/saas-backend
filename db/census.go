@@ -35,6 +35,35 @@ func ValidateCensusFields(authFields OrgMemberAuthFields, twoFaFields OrgMemberT
 	return nil
 }
 
+// CensusAuthMethod is how the voters of a census prove their login fields. The empty value is
+// today's typed member details.
+type CensusAuthMethod string
+
+// CensusAuthMethodCertificate is a census whose voters sign in only with a qualified digital
+// certificate (FNMT, idCAT) whose DNI/NIE matches the member's nationalId login hash.
+const CensusAuthMethodCertificate CensusAuthMethod = "certificate"
+
+// ValidateCensusAuthMethod checks the census login fields fit its auth method: a certificate census
+// logs in with exactly the nationalId and no 2FA field, and any other non-empty method is unknown.
+// Both refusals wrap ErrInvalidCensusAuthMethod. It knows nothing of whether the deployment runs
+// certificate authentication: that refusal belongs to the API.
+func ValidateCensusAuthMethod(
+	method CensusAuthMethod, authFields OrgMemberAuthFields, twoFaFields OrgMemberTwoFaFields,
+) error {
+	switch method {
+	case "":
+		return nil
+	case CensusAuthMethodCertificate:
+		if len(authFields) != 1 || authFields[0] != OrgMemberAuthFieldsNationalID || len(twoFaFields) > 0 {
+			return fmt.Errorf("%w: a certificate census needs authFields [\"nationalId\"] and no twoFaFields",
+				ErrInvalidCensusAuthMethod)
+		}
+		return nil
+	default:
+		return fmt.Errorf("%w: unknown authMethod %q", ErrInvalidCensusAuthMethod, method)
+	}
+}
+
 // SetCensus creates a new census for an organization
 // Returns the hex representation of the census
 func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
@@ -46,6 +75,9 @@ func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
 		return "", ErrInvalidData
 	}
 	if err := ValidateCensusFields(census.AuthFields, census.TwoFaFields); err != nil {
+		return "", err
+	}
+	if err := ValidateCensusAuthMethod(census.AuthMethod, census.AuthFields, census.TwoFaFields); err != nil {
 		return "", err
 	}
 	// check that the org exists

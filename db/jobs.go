@@ -321,8 +321,16 @@ func (ms *MongoStorage) SetJobStatus(jobID string, status JobStatus, result *Job
 	return nil
 }
 
-// CompleteJob updates a job with final results when it completes.
-func (ms *MongoStorage) CompleteJob(jobID string, added int, errors []string) error {
+// CompleteJobResults are the final results CompleteJob stamps on a job when it completes.
+type CompleteJobResults struct {
+	Added  int
+	Errors []string
+	// NationalIDWarnings are the nationalId warnings of a member import job, nil for any other.
+	NationalIDWarnings []NationalIDWarning
+}
+
+// CompleteJob updates a job with its final results when it completes.
+func (ms *MongoStorage) CompleteJob(jobID string, results CompleteJobResults) error {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
@@ -332,9 +340,10 @@ func (ms *MongoStorage) CompleteJob(jobID string, added int, errors []string) er
 	filter := bson.M{"jobId": jobID}
 	update := bson.M{
 		"$set": bson.M{
-			"added":       added,
-			"errors":      errors,
-			"completedAt": time.Now(),
+			"added":              results.Added,
+			"errors":             results.Errors,
+			"nationalIdWarnings": results.NationalIDWarnings,
+			"completedAt":        time.Now(),
 		},
 	}
 

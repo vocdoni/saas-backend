@@ -144,6 +144,15 @@ var (
 		Code: 40180, HTTPstatus: http.StatusConflict, LogLevel: "info",
 		Err: fmt.Errorf("organization already has a paid subscription, manage it from the billing portal"),
 	}
+	// ErrCertificateAuthDisabled answers the certificate sign-in endpoints, and refuses certificate
+	// censuses, on a deployment that runs without certificate authentication configured.
+	ErrCertificateAuthDisabled = Error{Code: 40185, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("certificate authentication is not enabled on this server"), LogLevel: "info"}
+
+	// ErrCertificateAuth is the one code of every certificate sign-in failure; clients key on
+	// data.reason, never on the code. The HTTP status varies per reason (see CertificateAuthError):
+	// contract-cert-auth.md section 8 fixes one code for every certificate reason, including the
+	// retryable 500/503 ones, a deliberate exception to the 4xxxx/5xxxx split above.
+	ErrCertificateAuth = Error{Code: 40950, HTTPstatus: http.StatusUnprocessableEntity, Err: fmt.Errorf("certificate authentication failed"), LogLevel: "info"}
 
 	// CSP errors (408)
 	ErrZeroWeightVoter = Error{Code: 40801, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("voter weight cannot be zero")}

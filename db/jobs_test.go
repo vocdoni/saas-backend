@@ -41,7 +41,7 @@ func TestJobOperations(t *testing.T) {
 	// Test CompleteJob
 	added := 85
 	errors := []string{"error 1", "error 2"}
-	err = testDB.CompleteJob(jobID, added, errors)
+	err = testDB.CompleteJob(jobID, CompleteJobResults{Added: added, Errors: errors})
 	c.Assert(err, qt.IsNil)
 
 	// Test Job retrieval after completion

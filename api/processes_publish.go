@@ -182,13 +182,19 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	if census == nil {
 		return problems, questionsMismatch, nil // the checks below need the census
 	}
+	// a certificate census needs the feature on and SP1's nationalId migration applied; publish
+	// answers its own refusal (400 40185, or 409) rather than a 400 listing it
+	if problem, blocked := a.certificateCensusPublishBlock(census); blocked != nil {
+		problems = append(problems, problem)
+		denied = blocked
+	}
 	// a resume must still mint the remaining questions of a partially published anonymous process
 	if a.anonymousCensusRefused(census.Anonymous) && !anyMined(questions) {
 		problems = append(problems, anonymousVotingUnavailable)
 	}
 	orgDoc, err := a.db.Organization(vp.OrgAddress)
 	if err != nil {
-		return append(problems, "organization not found"), questionsMismatch, nil
+		return append(problems, "organization not found"), questionsMismatch, denied
 	}
 	if !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
 		problems = append(problems, "publishing requires the admin role")
@@ -204,7 +210,7 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	// the checks below but fail in the worker (electionParamsForQuestion). Reject it here.
 	if maxSize == 0 {
 		problems = append(problems, "census has no members")
-		return problems, questionsMismatch, nil
+		return problems, questionsMismatch, denied
 	}
 	start := vp.StartDate
 	if start.IsZero() || start.Before(time.Now()) {
@@ -216,7 +222,9 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	}
 	if err := a.subscriptions.OrgCanPublishProcess(orgDoc, durationSeconds); err != nil {
 		problems = append(problems, err.Error())
-		denied = err
+		if denied == nil {
+			denied = err
+		}
 	}
 	return problems, questionsMismatch, denied
 }

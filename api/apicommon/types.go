@@ -1109,7 +1109,8 @@ type OrgMember struct {
 	// Member's surname
 	Surname string `json:"surname,omitempty"`
 
-	// Member's National ID No
+	// Member's National ID No, stored as entered (trimmed); DNI/NIE variants are matched by their
+	// canonical form at login
 	NationalID string `json:"nationalId,omitempty"`
 
 	// Member's date of birth in format YYYY-MM-DD
@@ -1314,6 +1315,12 @@ type AddMembersResponse struct {
 	// census just grew, one per organization. Poll each with GET /jobs/{jobId}. Absent when no
 	// live census was affected.
 	CensusJobIDs []string `json:"censusJobIds,omitempty"`
+
+	// NationalIDWarnings are the non-blocking nationalId problems of the submitted members (sync
+	// path; an async import reports them on GET /jobs/{jobId}). line is the member's 1-based
+	// position in the submitted list. duplicate_after_normalization only compares the submitted
+	// members with each other.
+	NationalIDWarnings []db.NationalIDWarning `json:"nationalIdWarnings,omitempty"`
 }
 
 // UpsertOrgMemberResponse is returned by PUT /organizations/{orgAddress}/members. The id is the
@@ -1513,6 +1520,9 @@ type JobResponse struct {
 	Status db.JobStatus      `json:"status,omitempty"`
 	Errors []string          `json:"errors,omitempty"`
 	Result *UnifiedJobResult `json:"result,omitempty"`
+	// NationalIDWarnings are the nationalId warnings of a member import job, returned only to a
+	// Manager/Admin of the job's organization (like the import errors).
+	NationalIDWarnings []db.NationalIDWarning `json:"nationalIdWarnings,omitempty"`
 }
 
 // JobsListResponse is the paginated response of GET /jobs.
@@ -1560,7 +1570,9 @@ func JobResponseFromDB(job *db.Job) JobResponse {
 	if job.Total > 0 {
 		res.Progress = job.Added * 100 / job.Total
 	}
-	resp := JobResponse{JobID: job.JobID, Type: job.Type, Status: status, Errors: errs}
+	resp := JobResponse{
+		JobID: job.JobID, Type: job.Type, Status: status, Errors: errs, NationalIDWarnings: job.NationalIDWarnings,
+	}
 	if !res.isEmpty() {
 		resp.Result = res
 	}

@@ -414,7 +414,7 @@ func TestMain(m *testing.M) {
 	}
 
 	// start the API
-	testAPI = New(ctx, &Config{
+	apiConf := &Config{
 		Host:                testHost,
 		Port:                testPort,
 		Secret:              testSecret,
@@ -439,13 +439,18 @@ func TestMain(m *testing.M) {
 			}
 			return testAPI.lookupVoteOnChain(ctx, nullifier)
 		},
-	})
+	}
+	testAPI = New(ctx, apiConf)
 	testAPI.Start()
 	// wait for the API to start
 	if err := pingAPI(testURL(pingEndpoint), 5); err != nil {
 		panic(err)
 	}
 	log.Infow("API server started", "host", testHost, "port", testPort)
+	// a second API on the same database and CSP with certificate sign-in on (see useCertAPI)
+	if err := startCertAuthAPI(ctx, *apiConf, *rootKey); err != nil {
+		panic(err)
+	}
 	// run the tests
 	m.Run()
 }

@@ -332,9 +332,10 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 
 		// Return the number of members added
 		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{
-			Added:        uint32(lastProgress.Added),
-			Errors:       append(lastProgress.ErrorsAsStrings(), propagated.Errors...),
-			CensusJobIDs: propagated.JobIDs,
+			Added:              uint32(lastProgress.Added),
+			Errors:             append(lastProgress.ErrorsAsStrings(), propagated.Errors...),
+			CensusJobIDs:       propagated.JobIDs,
+			NationalIDWarnings: lastProgress.NationalIDWarnings,
 		})
 		return
 	}
@@ -366,7 +367,11 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 		// The channel closes once every batch ran, so the job ends here even when some rows
 		// failed to insert and Progress never reached 100.
 		if lastProgress != nil {
-			if err := a.db.CompleteJob(jobID.String(), lastProgress.Added, lastProgress.ErrorsAsStrings()); err != nil {
+			if err := a.db.CompleteJob(jobID.String(), db.CompleteJobResults{
+				Added:              lastProgress.Added,
+				Errors:             lastProgress.ErrorsAsStrings(),
+				NationalIDWarnings: lastProgress.NationalIDWarnings,
+			}); err != nil {
 				log.Warnw("failed to persist job completion", "error", err, "jobId", jobID.String())
 			}
 		}

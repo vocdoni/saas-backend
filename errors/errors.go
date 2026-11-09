@@ -221,6 +221,16 @@ func (e Error) WithData(data any) Error {
 	return e
 }
 
+// CertificateAuthError is ErrCertificateAuth answering status, with message as the body's error
+// string and data as its data object. message must be client-safe: it is sent for 5xx statuses too.
+func CertificateAuthError(status int, message string, data any) Error {
+	e := ErrCertificateAuth
+	e.HTTPstatus = status
+	e.Err = fmt.Errorf("%s", message)
+	e.Data = data
+	return e
+}
+
 // As finds the first error in err's tree that matches target, and if one is found, sets
 // target to that error value and returns true. Otherwise, it returns false.
 //
