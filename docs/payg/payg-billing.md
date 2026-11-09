@@ -95,15 +95,41 @@ organization, whose processes its integrator pays. It is created on its first cr
   `GET /organizations/{orgAddress}/wallet` shows the `topup` row, so poll that. A
   delayed payment (SEPA) shows nothing until it is paid; one that fails or expires never shows a
   row, and the client opens a new top-up.
-- A managed organization has no wallet: both routes answer **403** (40181,
+- `GET /organizations/{orgAddress}/wallet/history/{entryId}/invoice` (same authorization as the
+  wallet read, `quota:read` key included) downloads the Stripe invoice of a `topup` row as a PDF
+  (`Content-Disposition: attachment; filename="<invoice number>.pdf"`), by the row's `id`. The
+  invoice is Stripe's own — numbering, branding, VAT and credit notes live in the Stripe
+  Dashboard — fetched from `invoice_pdf` (host-checked, 30 s, 20 MB) and streamed, never
+  redirected to. **404** (40185, `ErrWalletInvoiceNotFound`) for a row that is not a `topup`, a
+  row of another wallet or an unknown id (indistinguishable on purpose), and a top-up whose
+  invoice is not available yet: Stripe attaches the invoice to the checkout session and renders
+  its PDF shortly after the payment that credited the row, so a download right after paying may
+  answer 404 with "not available yet, try again in a moment" (do not cache it). A `topup` row
+  whose key Stripe knows no checkout session by (`resource_missing`) answers the same 404, not a
+  500; **400** for a malformed id; **500** (50005) when Stripe fails.
+- A managed organization has no wallet: all three routes answer **403** (40181,
   `ErrManagedOrgHasNoWallet`). The path-less `/wallet` routes and
   `GET /organizations/{orgAddress}/payments` are gone; the wallet history replaces the latter.
+- **Manual top-ups** (credit paid outside the checkout: a bank transfer, a negotiated amount) are
+  Stripe invoices issued by `cmd/topup` to the organization's Stripe customer (VAT by Stripe Tax,
+  `collection_method: send_invoice`, `auto_advance: false`, metadata `wallet_topup_org` and
+  `wallet_topup_source: manual`), either marked paid out of band or emailed for the customer to
+  pay. The wallet is credited by the `invoice.paid` webhook alone, once, keyed `invoice:<invoice
+  id>`; the command never writes the ledger. Checkout-issued invoices carry
+  `wallet_topup_source: checkout` and are credited by the checkout events only. Crediting a
+  checkout top-up also stamps the organization address on its customer's metadata (best effort),
+  so `GetCustomerByAddress` finds it for later checkouts and for `cmd/topup`. The stamp is
+  skipped, with a warning to merge them by hand, when another customer already carries the
+  organization or the search for one fails, so two customers never end up stamped with one
+  organization. For the same reason a checkout falls back to the user's email (Checkout then
+  creates a customer) only when the search finds no customer: a failed search fails the checkout
+  with a Stripe error (50005) instead of creating a duplicate.
 
 `history` is the `walletLedger`, newest first, with `amountCents` signed as applied:
 
 | Kind | Sign | What |
 |---|---|---|
-| `topup` | + | a verified Stripe top-up, net of VAT |
+| `topup` | + | a verified Stripe top-up, net of VAT: a checkout, or a manual invoice (`cmd/topup`) paid |
 | `payment` | − | a process publish or census headroom (`processId`, and `processOrgAddress`: the managed organization that spent it) |
 | `creditBack` | + | a payment returned to the wallet: a paid draft deleted, a publish that failed for good, or an organization teardown returning an add-on price nobody received (naming the process that withheld it). `withheldCents` and `withheldAddOns` are what it kept back for add-ons another process relies on; a delete whose withheld add-ons are all the draft paid for shows `amountCents: 0` |
 | `refund` | − | a top-up refunded by hand in the Stripe dashboard |
@@ -111,7 +137,8 @@ organization, whose processes its integrator pays. It is created on its first cr
 Each row carries `kind`, `amountCents`, `createdAt`, and where they apply `processId`,
 `processOrgAddress`, `withheldCents` and `withheldAddOns`. The idempotency keys the service builds
 (`refund:<process id>`, `publishfail:<process id>:<attempt>`, `teardownaddon:<org>:<addOn>:<process id>`,
-`striperefund:<refund id>`, the session id of a top-up) are internal and never in the response: a client
+`striperefund:<refund id>`, the session id of a checkout top-up, `invoice:<invoice id>` of a manual one) are
+internal and never in the response: a client
 tells credit-backs of one process apart by `withheldCents`/`withheldAddOns`, amount and `createdAt`, and finds
 its top-up by amount and `createdAt` (or reads the session with `GET /wallet/checkout/{sessionId}`).
 
@@ -415,8 +442,27 @@ credit is in the wallet and the process is published by hand. The next payment r
 - `refund.created` / `refund.updated`: [Stripe refunds of top-ups](#stripe-refunds-of-top-ups).
 - `charge.dispute.funds_withdrawn` / `charge.dispute.funds_reinstated`: disputes on top-ups, in
   the same section.
+- `invoice.paid`: a manual top-up invoice (`wallet_topup_source: manual`; `cmd/topup`) paid
+  through Stripe or marked paid out of band. The event is trusted for the invoice id and the
+  marker only; the invoice is re-fetched with its payments expanded and acted on live: status
+  `paid`, an unmanaged organization in `wallet_topup_org`, currency `eur`, net =
+  `total_excluding_tax` > 0. The net is credited under `invoice:<invoice id>` with the paying
+  payment intent (none out of band) and `amount_due` — what that payment collected: the total
+  plus any debit balance paid on top — as the gross, so a refund or dispute of a manual invoice
+  paid through Stripe is mirrored like a checkout's, at the net/collected ratio. Checkout
+  invoices (and those of the retired subscriptions, until they are cancelled) also emit
+  `invoice.paid` and are ignored (no `manual` marker). An
+  invoice that can never be credited (not eur, a managed or unknown organization) is dropped as
+  permanent. Two more are dropped as permanent, logged at error level, and left to be credited
+  by hand: one whose `amount_due` is below its `total` (a customer credit balance was applied,
+  so less than the invoiced total was received; a debit balance paid on top of the total is
+  credited as usual), and one whose `wallet_topup_org` was edited after the event fired (the
+  payload's organization differs from the live invoice's; the credit is keyed per wallet and a
+  resent event would credit the new organization too).
 
-The webhook endpoint must be subscribed to these four refund and dispute events on deploy.
+The webhook endpoint (`POST /payments/webhook`) must be subscribed to these four refund and
+dispute events, and to `invoice.paid`, on deploy — `invoice.paid` only after the code handling it
+is live: old code answers it 200 and Stripe never retries it.
 
 There is **no durable event store**. Idempotency is a property of every side effect:
 
@@ -779,7 +825,14 @@ order — finds no `topup` row: the payment intent's top-up checkout session is 
 Stripe (`payment_intent` filter, `wallet_topup_org` metadata) and credited first under its
 session key, before the debit. The `completed` event credits nothing when it lands (the key is
 applied) and its process follow-up meets the debited wallet, so the two net to zero whatever the
-order. A payment intent no top-up session made is still ignored.
+order. A payment intent no checkout session made is looked up among the invoice payments
+(`payment[payment_intent]` filter): when it paid a manual top-up invoice whose `invoice.paid` was
+not handled yet, that invoice is credited first under `invoice:<invoice id>`, by the same live
+checks as `invoice.paid` (which then credits nothing), before the debit. With no event payload
+to tell an edited `wallet_topup_org` by, this path also requires the invoice's customer to be
+stamped with that organization (`metadata.address`): otherwise the refund is dropped as
+permanent and the returned funds must be debited by hand (an invoice re-targeted and credited by
+hand is never credited again; otherwise `invoice.paid` still credits it). A payment intent that paid neither is still ignored.
 
 A dispute (chargeback) on a top-up is mirrored the same way: `charge.dispute.funds_withdrawn`
 debits the disputed amount net of VAT, found through the top-up's payment intent, as a `refund`
