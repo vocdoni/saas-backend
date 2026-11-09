@@ -121,6 +121,7 @@ func newFakeVoteNode(c *qt.C, node *fakeVoteNode) *Account {
 	c.Patch(&voteRetryCap, 40*time.Millisecond)
 	c.Patch(&voteRetryBudget, 2*time.Second)
 	c.Patch(&voteMinedTimeout, 200*time.Millisecond)
+	c.Patch(&TxPollInterval, 20*time.Millisecond)
 
 	// the trailing slash matters: see TestVoteByNullifier
 	client, err := apiclient.New(srv.URL + "/")
@@ -245,7 +246,7 @@ func TestSubmitVoteInCacheIsAccepted(t *testing.T) {
 		minedOnPoll: 2,
 	}
 	a := newFakeVoteNode(c, node)
-	// the second poll comes one apiclient.PollInterval (5s) after the first
+	// the second poll comes one TxPollInterval after the first
 	c.Patch(&voteMinedTimeout, 10*time.Second)
 
 	voteID, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)

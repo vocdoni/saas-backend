@@ -715,6 +715,11 @@ type ElectionParams struct {
 	ElectionType  ElectionType          `json:"electionType" bson:"electionType"`
 	TypeMetadata  *ElectionTypeMetadata `json:"type,omitempty" bson:"type,omitempty"`
 	MaxCensusSize uint64                `json:"maxCensusSize,omitempty" bson:"maxCensusSize,omitempty"`
+	// Meta is the free-form "meta" block of the election metadata document (api.ElectionMetadata.Meta).
+	// Publish sets {"questionId": <question ObjectID hex>} so the content-addressed metadata URL
+	// (objectstorage.PutJSON) is unique per question and an election can be matched back to its
+	// question from the URL alone. Built at publish time, never stored or exposed.
+	Meta map[string]any `json:"-" bson:"-"`
 	// InitialStatus is the on-chain status the election is published with. Empty (the default)
 	// means READY; "PAUSED" publishes it in the PAUSED state, so voting only opens once an
 	// admin sets it to READY via SET_PROCESS_STATUS. Only "" / "READY" / "PAUSED" are
@@ -847,9 +852,15 @@ type VotingProcess struct {
 	// process: a draft edit would rewrite the questions and erase their election ids. Keeping the
 	// flag on the process document makes that refusal part of the draft write itself, rather than
 	// a check of the questions collection that a publish could invalidate before the write lands.
-	HasMinedElections bool      `json:"-" bson:"hasMinedElections,omitempty"`
-	CreatedAt         time.Time `json:"createdAt" bson:"createdAt"`
-	UpdatedAt         time.Time `json:"updatedAt" bson:"updatedAt"`
+	HasMinedElections bool `json:"-" bson:"hasMinedElections,omitempty"`
+	// PublishSubmitted is set by a publish worker before it records and submits a NEW_PROCESS tx,
+	// and cleared only once no question of the process holds a PublishTx any more (see
+	// VotingProcessQuestion.PublishTxs). While it is set a submitted election may exist or still
+	// mine: SetVotingProcessDraft refuses the process, and no credit-back, edit or delete goes
+	// ahead before the records are resolved against the chain.
+	PublishSubmitted bool      `json:"-" bson:"publishSubmitted,omitempty"`
+	CreatedAt        time.Time `json:"createdAt" bson:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt" bson:"updatedAt"`
 }
 
 // PublishInProgress reports whether a publish worker currently holds this process. A marker older
@@ -1137,6 +1148,10 @@ type VotingProcessQuestion struct {
 	// JSON field is absent (not an empty array) until the keykeepers publish the keys, so clients
 	// treat its absence as "not yet published" and poll. Voters seal encrypted vote packages with these.
 	EncryptionKeys []EncryptionKey `json:"encryptionKeys,omitempty" bson:"encryptionKeys,omitempty"`
+	// PublishTxs are the NEW_PROCESS txs submitted for this question that are not resolved yet:
+	// appended before each submit, all at the same account nonce (so at most one can ever mine),
+	// and unset once the question's election is recorded or the chain proves none can mine.
+	PublishTxs []PublishTx `json:"-" bson:"publishTxs,omitempty"`
 	// Results is this question's live on-chain tally, resolved on read for any published (on-chain)
 	// question; FinalResults marks live vs final. The results object itself is present whenever the
 	// question is published — it's the inner per-choice matrix (QuestionResults.Results) that is omitted
@@ -1146,6 +1161,25 @@ type VotingProcessQuestion struct {
 	// /processes/{id} and the public question read); the list endpoint leaves it nil to avoid an N+1
 	// chain fan-out, so its absence in a LIST response means "not resolved here", not "not published".
 	Results *QuestionResults `json:"results,omitempty" bson:"-"`
+}
+
+// PublishTx records one NEW_PROCESS tx submitted for a question, so what it did on chain can be
+// resolved after a crash or a lost answer.
+type PublishTx struct {
+	// Hash is the tx hash: sha256 of the signed tx bytes.
+	Hash internal.HexBytes `json:"-" bson:"hash"`
+	// Nonce is the organization account nonce the tx was signed with.
+	Nonce uint32 `json:"-" bson:"nonce"`
+	// MetadataURL is the election metadata URL the tx carries, the one an adoption records.
+	MetadataURL string `json:"-" bson:"metadataURL"`
+	// UpstreamID is the election id the node predicted when it accepted the tx; empty until known.
+	// A prediction, not proof: the election there may be another one.
+	UpstreamID  internal.HexBytes `json:"-" bson:"upstreamId,omitempty"`
+	SubmittedAt time.Time         `json:"-" bson:"submittedAt"`
+	// SubmittedHeight is the chain height read right before the tx was submitted: what the
+	// mempool's TTL is counted from. 0 on a record written before it was recorded, which then
+	// never expires by height.
+	SubmittedHeight uint32 `json:"-" bson:"submittedHeight,omitempty"`
 }
 
 // QuestionResults is one question's on-chain election tally, resolved on read from its own election.

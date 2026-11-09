@@ -37,6 +37,7 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	internal.UseFastHashingForTests()
 	ctx := context.Background()
 	// start a MongoDB container for testing
 	dbContainer, err := test.StartMongoContainer(ctx)

@@ -3,6 +3,7 @@ package account
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -31,6 +32,9 @@ type BatchItemResult struct {
 	UpstreamID internal.HexBytes
 	Hash       internal.HexBytes
 	Err        string
+	// InCache marks a failed item the node refused because it already holds the same tx bytes
+	// (cometbft's mempool.ErrTxInCache): those bytes may still be mined.
+	InCache bool
 }
 
 // SubmitSignedTxBatch submits several already-signed transactions at once, in order, via
@@ -65,7 +69,7 @@ func mapBatchResults(res *dvoteapi.TransactionBatchResult) []BatchItemResult {
 		})
 	}
 	for _, t := range res.Failed {
-		out = append(out, BatchItemResult{Status: BatchFailed, Err: t.Error})
+		out = append(out, BatchItemResult{Status: BatchFailed, Err: t.Error, InCache: strings.Contains(t.Error, txInCacheMsg)})
 	}
 	for range res.Pending {
 		out = append(out, BatchItemResult{Status: BatchPending})
@@ -88,7 +92,7 @@ func (a *Account) AccountNonce(org common.Address) (uint32, error) {
 func (a *Account) WaitTxMined(hash internal.HexBytes) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*40)
 	defer cancel()
-	if _, err := a.client.WaitUntilTxIsMined(ctx, dvotetypes.HexBytes(hash)); err != nil {
+	if err := waitTxMined(ctx, a.client, dvotetypes.HexBytes(hash)); err != nil {
 		return fmt.Errorf("could not wait for tx to be mined: %w", err)
 	}
 	return nil

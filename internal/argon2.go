@@ -11,13 +11,26 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
-// Argon2 parameters for hashing, if modified, the current hashes will be invalidated.
-const (
-	argonMemoryKiB = 64 * 1024
-	argonTime      = 4
-	argonThreads   = 8
-	argonKeyLen    = 32
+// Argon2 parameters for hashing, if modified, the current hashes will be invalidated. The cost
+// parameters are variables only so that UseFastHashingForTests can lower them.
+var (
+	argonMemoryKiB uint32 = 64 * 1024
+	argonTime      uint32 = 4
 )
+
+const (
+	argonThreads = 8
+	argonKeyLen  = 32
+)
+
+// UseFastHashingForTests lowers the Argon2id cost parameters so test suites that hash thousands
+// of members and passwords do not spend minutes on it. Test-only: never call it in production, the
+// hashes it produces are not comparable with the production ones. Tests lose nothing, since every
+// test run hashes into a fresh database and compares only hashes produced in the same run.
+func UseFastHashingForTests() {
+	argonMemoryKiB = 1024
+	argonTime = 1
+}
 
 // HashSlotWait is how long HashPasswordContext waits for a free hashing slot before giving up
 // with ErrHashingBusy.

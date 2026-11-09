@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/test"
 )
 
@@ -12,6 +13,7 @@ import (
 var testDB *db.MongoStorage
 
 func TestMain(m *testing.M) {
+	internal.UseFastHashingForTests()
 	ctx := context.Background()
 	container, err := test.StartMongoContainer(ctx)
 	if err != nil {

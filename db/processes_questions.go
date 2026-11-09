@@ -217,7 +217,7 @@ func (ms *MongoStorage) ServedUpstreamIDs(upstreamIDs []internal.HexBytes) (map[
 }
 
 // SetQuestionPublished records the on-chain outcome of a single question in one targeted
-// update, leaving sibling questions untouched.
+// update, leaving sibling questions untouched, and drops the question's PublishTxs.
 func (ms *MongoStorage) SetQuestionPublished(
 	id bson.ObjectID, upstreamID internal.HexBytes, metadataURL, status string,
 ) error {
@@ -226,7 +226,11 @@ func (ms *MongoStorage) SetQuestionPublished(
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	update := bson.M{"$set": bson.M{"upstreamId": upstreamID, "metadataURL": metadataURL, "status": status}} //nolint:goconst
+	// the election is recorded: the submitted txs it came from are resolved
+	update := bson.M{
+		"$set":   bson.M{"upstreamId": upstreamID, "metadataURL": metadataURL, "status": status}, //nolint:goconst
+		"$unset": bson.M{"publishTxs": ""},
+	}
 	res, err := ms.processesQuestions.UpdateOne(ctx, bson.M{"_id": id}, update)
 	if err != nil {
 		return fmt.Errorf("failed to set question published: %w", err)
@@ -293,7 +297,8 @@ func (ms *MongoStorage) DeleteQuestion(id bson.ObjectID) error {
 
 // ResetQuestionsPublish clears the publish state (status, metadataURL) of the not-yet-mined
 // questions of a process (those without an upstreamId). Used to abandon a failed publish while
-// keeping any elections already on-chain, so a subsequent publish resumes the remaining ones.
+// keeping any elections already on-chain, so a subsequent publish resumes the remaining ones. A
+// question that still holds PublishTxs is left untouched: what its txs did is not known yet.
 func (ms *MongoStorage) ResetQuestionsPublish(processID bson.ObjectID) error {
 	if processID == bson.NilObjectID {
 		return ErrInvalidData
@@ -303,8 +308,12 @@ func (ms *MongoStorage) ResetQuestionsPublish(processID bson.ObjectID) error {
 	// only reset questions that were NOT mined (no upstreamId): a failed publish must keep the
 	// elections already on-chain so a re-publish resumes the remaining ones instead of
 	// regenerating (and orphaning) the mined ones.
-	filter := bson.M{"processId": processID, "upstreamId": bson.M{"$exists": false}} //nolint:goconst
-	update := bson.M{"$unset": bson.M{"status": "", "metadataURL": ""}}              //nolint:goconst
+	filter := bson.M{
+		"processId":    processID,                //nolint:goconst
+		"upstreamId":   bson.M{"$exists": false}, //nolint:goconst
+		"publishTxs.0": bson.M{"$exists": false}, //nolint:goconst
+	}
+	update := bson.M{"$unset": bson.M{"status": "", "metadataURL": ""}} //nolint:goconst
 	if _, err := ms.processesQuestions.UpdateMany(ctx, filter, update); err != nil {
 		return fmt.Errorf("failed to reset questions publish state: %w", err)
 	}

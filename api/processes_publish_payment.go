@@ -530,7 +530,9 @@ func atMoneyStep(step moneyStep, processID bson.ObjectID) error {
 // for good before any election was mined: the publish worker's abandon, the publish request
 // failing after the debit, and the stale-marker sweep after a restart. The caller holds the
 // publish claim. A draft with mined elections keeps the debit — they exist and were paid for, and
-// publishing again resumes them for free.
+// publishing again resumes them for free. So does a draft with a submitted publish tx the chain
+// has not settled yet (resolvePublishTxs): its election may exist or still mine, and it stays
+// paid, the state a delete refunds and a publish reuses, until a later touch resolves it.
 //
 // Under the payer's wallet lock it reads what the process paid off the ledger and credits it back
 // under the attempt's key (db.PublishFailCreditKey), the credit-back row carrying the add-ons it
@@ -547,8 +549,23 @@ func (a *API) reversePublishDebit(processID bson.ObjectID) error {
 	if err != nil {
 		return fmt.Errorf("failed to get process: %w", err)
 	}
+	if vp.Published {
+		return nil
+	}
+	// a submitted tx that mined is adopted here, and then counts as mined below; one that may
+	// still mine, or that the chain cannot tell about, keeps the debit until a later touch
+	// resolves it
+	res, err := a.resolvePublishTxs(vp, questions)
+	if err != nil {
+		return fmt.Errorf("failed to resolve submitted publish txs: %w", err)
+	}
+	if res.unresolved || vp.PublishSubmitted {
+		log.Warnw("failed publish kept paid: a submitted election may exist", "processId", processID.Hex(),
+			"txHashes", publishTxHashes(questions))
+		return nil
+	}
 	// HasMinedElections also covers an election that mined but whose id never reached its question
-	if vp.Published || anyMined(questions) || vp.HasMinedElections {
+	if anyMined(questions) || vp.HasMinedElections {
 		return nil
 	}
 	org, err := a.db.Organization(vp.OrgAddress)

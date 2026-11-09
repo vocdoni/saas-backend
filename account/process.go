@@ -52,6 +52,10 @@ func BuildElectionMetadata(params *db.ElectionParams) ([]byte, error) {
 		},
 		Questions: make([]api.Question, 0, len(params.Questions)),
 	}
+	// Meta is `any`: a nil map set on it would be encoded as null, not omitted
+	if len(params.Meta) > 0 {
+		meta.Meta = params.Meta
+	}
 	if params.TypeMetadata != nil {
 		meta.Type = api.ElectionProperties{Name: params.TypeMetadata.Name, Properties: params.TypeMetadata.Properties}
 	} else {
@@ -360,7 +364,7 @@ func (a *Account) SubmitSignedTx(stx []byte) ([]byte, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*40)
 	defer cancel()
-	if _, err := a.client.WaitUntilTxIsMined(ctx, hash); err != nil {
+	if err := waitTxMined(ctx, a.client, hash); err != nil {
 		return nil, fmt.Errorf("could not wait for tx to be mined: %w", err)
 	}
 	return data, nil

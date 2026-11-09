@@ -41,6 +41,11 @@ import (
 //	@Description	checkout of the draft is expired first; one already completed still credits the
 //	@Description	wallet when its webhook arrives.
 //	@Description
+//	@Description	409 (40903) also answers while an election a failed publish submitted is not settled on
+//	@Description	chain yet (it may still be mined): publish the draft again (it adopts or resubmits at no
+//	@Description	new charge) or retry later. One that was mined is adopted, and the draft then answers 409
+//	@Description	(40904) like any partially published one.
+//	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
 //	@Produce		json
@@ -121,6 +126,16 @@ func (a *API) deleteDraftProcess(vp *db.VotingProcess, teardown *orgTeardown) er
 	current, err := a.db.VotingProcess(oid)
 	if err != nil {
 		return fmt.Errorf("failed to get the draft: %w", err)
+	}
+	// a submitted publish tx is settled first: a mined one is adopted, and counts as mined below;
+	// one that may still mine, or that the chain cannot tell about (or no chain: cmd/userdel),
+	// keeps the draft, which would otherwise be refunded or dropped under a live election
+	res, err := a.resolvePublishTxs(current, questions)
+	if err != nil {
+		return fmt.Errorf("failed to resolve submitted publish txs: %w", err)
+	}
+	if res.unresolved {
+		return errPublishNotSettled
 	}
 	// the flag is set before a mined election id is stored, so it also covers an election whose
 	// id never reached its question
@@ -329,7 +344,9 @@ func (a *API) creditUndeliveredAddOns(org, payer common.Address, teardown *orgTe
 // server: cmd/userdel, whose erasure must not strand money when it tears an organization down. It
 // has no payment gateway: an open top-up checkout is dropped with its draft and left to Stripe's
 // own expiry, and paying it meanwhile only credits the wallet. It stops at the first draft it
-// cannot delete, leaving it and the rest in place.
+// cannot delete, leaving it and the rest in place. It has no chain client either, so a draft with a
+// submitted publish tx not settled yet (db.VotingProcess.PublishSubmitted) stops it with 409
+// ErrPublishInProgress: run the service, which settles it, or delete the draft through the API.
 //
 // ponytail: the wallet lock it takes is its own, not the running server's — a census headroom
 // charge on the same payer landing between a draft's refund read and its credit stays debited for
@@ -739,6 +756,11 @@ func (a *API) addProcessCensusMembers(
 //	@Description	still READY or PAUSED, is refused with 409 and the offending ids in
 //	@Description	`data.signedMemberIds`.
 //	@Description
+//	@Description	409 (40903) while a publish is running, or while an election a failed publish submitted for
+//	@Description	a draft is not settled on chain yet (it may still be mined): publish the draft again (it
+//	@Description	adopts or resubmits at no new charge) or retry later. One that was mined is adopted first,
+//	@Description	and the question is then priced and resized as a published one.
+//	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Description
 //	@Description	402 when the change would grow a published process's census beyond what it paid for:
@@ -778,8 +800,8 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 	// write would take the draft path, skip the resize, and the worker would then mint an election
 	// sized from its older snapshot. So an unpublished process is changed under the claim a publish
 	// takes, as delete does, and the two exclude each other; checking the marker on the read above
-	// would let a publish claim the process right after. The questions are reloaded under the
-	// claim. A published process is never claimed again, so it needs none.
+	// would let a publish claim the process right after. The process and its questions are
+	// reloaded under the claim. A published process is never claimed again, so it needs none.
 	if !vp.Published {
 		owner, claimed, err := a.db.ClaimVotingProcessForPublish(oid, time.Time{})
 		if err != nil {
@@ -795,9 +817,28 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 				log.Warnw("could not release the eligibility update's claim", "processId", oid.Hex(), "error", e)
 			}
 		}()
-		if questions, err = a.db.QuestionsByProcess(oid); err != nil {
+		if vp, questions, err = a.db.ProcessWithQuestions(oid); err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
+		}
+		// a publish that submitted and gave up may have mined an election for the question:
+		// settled first, so an adopted question (one with an election now) takes the published
+		// path below, priced and resized, instead of the draft one; one that may still mine
+		// refuses the change, which would otherwise size that election from the old list
+		if vp.PublishSubmitted {
+			res, err := a.resolvePublishTxs(vp, questions)
+			if err != nil {
+				errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+				return
+			}
+			if res.unresolved {
+				errPublishNotSettled.Write(w)
+				return
+			}
+			if vp, questions, err = a.db.ProcessWithQuestions(oid); err != nil {
+				errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+				return
+			}
 		}
 	}
 	question, ok := questionOfProcess(w, questions, chi.URLParam(r, "questionId"))
