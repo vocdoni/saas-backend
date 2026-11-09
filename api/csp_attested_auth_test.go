@@ -154,6 +154,12 @@ func TestAttestedAuthOnly(t *testing.T) {
 	withContact.Contact, withContact.Salt = "voter@example.org", make([]byte, attestation.SaltLen)
 	assertAuthError(t, pid, withContact, errors.ErrInvalidData)
 
+	// A validly signed attestation with a non-zero contactHash must be refused on a no-2FA census:
+	// the census stores no contactHash and an auditor recomputing with zero finds a mismatch.
+	withNonZeroHash := attestedAuthRequest(t, key, oid, voter, attestation.ContactEmail, "refusal@example.org", soon)
+	withNonZeroHash.Contact, withNonZeroHash.Salt = "", nil
+	assertAuthError(t, pid, withNonZeroHash, errors.ErrAttestationInvalid)
+
 	next, err := ethcrypto.GenerateKey()
 	c.Assert(err, qt.IsNil)
 	requestAndParse[apicommon.AttestedCensusSpec](t, http.MethodPut, token,
