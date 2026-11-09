@@ -76,6 +76,7 @@ func TestBuildNewProcessTxInitialStatus(t *testing.T) {
 			Params:        ep,
 			CensusRoot:    []byte{0x01},
 			CensusURI:     "https://example.invalid",
+			CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA,
 			MetadataURL:   "https://example.invalid/meta.json",
 			Nonce:         &nonce,
 			InitialStatus: status,
@@ -186,4 +187,51 @@ func TestNormalizeInitialStatus(t *testing.T) {
 
 	_, err := NormalizeInitialStatus("ENDED")
 	c.Assert(err, qt.ErrorMatches, `initialStatus must be READY or PAUSED, got .*`)
+}
+
+// TestBuildNewProcessTxCensusOrigin checks that BuildNewProcessTx accepts OFF_CHAIN_CA and
+// OFF_CHAIN_CA_V2 as CensusOrigin, carries the chosen origin into the tx, and refuses any other
+// origin including the zero value and non-CSP origins.
+func TestBuildNewProcessTxCensusOrigin(t *testing.T) {
+	nonce := uint32(0)
+	baseParams := func(origin models.CensusOrigin) *NewProcessParams {
+		return &NewProcessParams{
+			Params: &db.ElectionParams{
+				EndDate:       time.Now().Add(time.Hour),
+				MaxCensusSize: 10,
+			},
+			CensusRoot:   []byte{0x02, 0x01},
+			CensusURI:    "https://example.invalid",
+			CensusOrigin: origin,
+			MetadataURL:  "https://example.invalid/meta.json",
+			Nonce:        &nonce,
+		}
+	}
+	a := &Account{}
+
+	t.Run("OFF_CHAIN_CA accepted", func(t *testing.T) {
+		c := qt.New(t)
+		tx, err := a.BuildNewProcessTx(baseParams(models.CensusOrigin_OFF_CHAIN_CA))
+		c.Assert(err, qt.IsNil)
+		c.Assert(tx.GetNewProcess().GetProcess().GetCensusOrigin(), qt.Equals, models.CensusOrigin_OFF_CHAIN_CA)
+	})
+
+	t.Run("OFF_CHAIN_CA_V2 accepted", func(t *testing.T) {
+		c := qt.New(t)
+		tx, err := a.BuildNewProcessTx(baseParams(models.CensusOrigin_OFF_CHAIN_CA_V2))
+		c.Assert(err, qt.IsNil)
+		c.Assert(tx.GetNewProcess().GetProcess().GetCensusOrigin(), qt.Equals, models.CensusOrigin_OFF_CHAIN_CA_V2)
+	})
+
+	t.Run("zero value refused", func(t *testing.T) {
+		c := qt.New(t)
+		_, err := a.BuildNewProcessTx(baseParams(models.CensusOrigin(0)))
+		c.Assert(err, qt.Not(qt.IsNil))
+	})
+
+	t.Run("OFF_CHAIN_TREE refused", func(t *testing.T) {
+		c := qt.New(t)
+		_, err := a.BuildNewProcessTx(baseParams(models.CensusOrigin_OFF_CHAIN_TREE))
+		c.Assert(err, qt.Not(qt.IsNil))
+	})
 }

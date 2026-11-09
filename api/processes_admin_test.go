@@ -63,3 +63,40 @@ func TestWithDraftID(t *testing.T) {
 	c.Assert(rec.Body.String(), qt.Contains, "draft abc")
 	c.Assert(rec.Body.String(), qt.Not(qt.Contains), "boom")
 }
+
+// TestQuestionCensusRootPrefersOwnRoot verifies that questionCensusRoot returns the question's own
+// stored root when it is set, and falls back to the SaaS CSP public key (or blind key for an
+// anonymous census) when the question carries no root.
+func TestQuestionCensusRootPrefersOwnRoot(t *testing.T) {
+	c := qt.New(t)
+
+	ownRoot := db.VotingProcessQuestion{CensusRoot: []byte{0x02, 0xAB, 0xCD}}
+	plainQ := db.VotingProcessQuestion{}
+	anonQ := db.VotingProcessQuestion{}
+
+	plainCensus := &db.Census{Anonymous: false}
+	anonCensus := &db.Census{Anonymous: true}
+
+	// own root wins regardless of census flags
+	got, err := testAPI.questionCensusRoot(&ownRoot, plainCensus)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got, qt.DeepEquals, []byte(ownRoot.CensusRoot))
+
+	got, err = testAPI.questionCensusRoot(&ownRoot, anonCensus)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got, qt.DeepEquals, []byte(ownRoot.CensusRoot))
+
+	// no own root, non-anonymous: returns the CSP ECDSA public key
+	expPub, err := testAPI.csp.PubKey()
+	c.Assert(err, qt.IsNil)
+	got, err = testAPI.questionCensusRoot(&plainQ, plainCensus)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got, qt.DeepEquals, []byte(expPub))
+
+	// no own root, anonymous: returns the blind public key
+	expBlind, err := testAPI.csp.BlindPubKey()
+	c.Assert(err, qt.IsNil)
+	got, err = testAPI.questionCensusRoot(&anonQ, anonCensus)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got, qt.DeepEquals, []byte(expBlind))
+}

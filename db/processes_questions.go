@@ -216,18 +216,39 @@ func (ms *MongoStorage) ServedUpstreamIDs(upstreamIDs []internal.HexBytes) (map[
 	return served, nil
 }
 
+// QuestionPublishedParams bundles the fields written when a question's election is confirmed
+// on chain. CensusOrigin and CensusRoot are only set for elections that carry their own root
+// (external CSP); both are empty for elections on the SaaS CSP key.
+type QuestionPublishedParams struct {
+	ID           bson.ObjectID
+	UpstreamID   internal.HexBytes
+	MetadataURL  string
+	Status       string
+	CensusOrigin string
+	CensusRoot   internal.HexBytes
+}
+
 // SetQuestionPublished records the on-chain outcome of a single question in one targeted
-// update, leaving sibling questions untouched.
-func (ms *MongoStorage) SetQuestionPublished(
-	id bson.ObjectID, upstreamID internal.HexBytes, metadataURL, status string,
-) error {
-	if id == bson.NilObjectID || len(upstreamID) == 0 {
+// update, leaving sibling questions untouched. Exactly one of CensusOrigin and CensusRoot
+// must be set, or both must be empty; setting only one returns ErrInvalidData.
+func (ms *MongoStorage) SetQuestionPublished(params QuestionPublishedParams) error {
+	if params.ID == bson.NilObjectID || len(params.UpstreamID) == 0 {
+		return ErrInvalidData
+	}
+	originSet := params.CensusOrigin != ""
+	rootSet := len(params.CensusRoot) > 0
+	if originSet != rootSet {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	update := bson.M{"$set": bson.M{"upstreamId": upstreamID, "metadataURL": metadataURL, "status": status}} //nolint:goconst
-	res, err := ms.processesQuestions.UpdateOne(ctx, bson.M{"_id": id}, update)
+	fields := bson.M{"upstreamId": params.UpstreamID, "metadataURL": params.MetadataURL, "status": params.Status} //nolint:goconst
+	if originSet {
+		fields["censusOrigin"] = params.CensusOrigin
+		fields["censusRoot"] = params.CensusRoot
+	}
+	update := bson.M{"$set": fields}
+	res, err := ms.processesQuestions.UpdateOne(ctx, bson.M{"_id": params.ID}, update)
 	if err != nil {
 		return fmt.Errorf("failed to set question published: %w", err)
 	}
@@ -303,8 +324,8 @@ func (ms *MongoStorage) ResetQuestionsPublish(processID bson.ObjectID) error {
 	// only reset questions that were NOT mined (no upstreamId): a failed publish must keep the
 	// elections already on-chain so a re-publish resumes the remaining ones instead of
 	// regenerating (and orphaning) the mined ones.
-	filter := bson.M{"processId": processID, "upstreamId": bson.M{"$exists": false}} //nolint:goconst
-	update := bson.M{"$unset": bson.M{"status": "", "metadataURL": ""}}              //nolint:goconst
+	filter := bson.M{"processId": processID, "upstreamId": bson.M{"$exists": false}}                          //nolint:goconst
+	update := bson.M{"$unset": bson.M{"status": "", "metadataURL": "", "censusOrigin": "", "censusRoot": ""}} //nolint:goconst
 	if _, err := ms.processesQuestions.UpdateMany(ctx, filter, update); err != nil {
 		return fmt.Errorf("failed to reset questions publish state: %w", err)
 	}

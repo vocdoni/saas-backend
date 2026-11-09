@@ -198,3 +198,58 @@ func TestSetQuestionEndedAt(t *testing.T) {
 	c.Assert(testDB.SetQuestionEndedAt(upstream, time.Time{}), qt.Not(qt.IsNil))
 	c.Assert(testDB.SetQuestionEndedAt(internal.HexBytes{}, t1), qt.Not(qt.IsNil))
 }
+
+// TestSetQuestionPublishedCensusOrigin checks that SetQuestionPublished stores per-question
+// census fields when both are provided, refuses exactly one, and leaves both absent when neither
+// is provided.
+func TestSetQuestionPublishedCensusOrigin(t *testing.T) {
+	c := qt.New(t)
+	org := common.Address{0xCA, 0x01}
+	setupVotingProcessOrg(c, org)
+	pid, err := testDB.SetVotingProcess(&VotingProcess{OrgAddress: org, Title: MultiLangString{"default": "csp-origin"}})
+	c.Assert(err, qt.IsNil)
+	upstream := internal.HexBytes("csp-origin-election")
+	root := internal.HexBytes{0x02, 0x11, 0x22, 0x33}
+	originStr := "OFF_CHAIN_CA_V2"
+
+	qIDs, err := testDB.SetProcessQuestions(pid, questionSet(org, 1, "q"))
+	c.Assert(err, qt.IsNil)
+	qID := qIDs[0]
+
+	// both set: stored and round-trip correctly
+	c.Assert(testDB.SetQuestionPublished(QuestionPublishedParams{
+		ID: qID, UpstreamID: upstream, MetadataURL: "url", Status: QuestionStatusReady,
+		CensusOrigin: originStr, CensusRoot: root,
+	}), qt.IsNil)
+	got, err := testDB.Question(qID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.CensusOrigin, qt.Equals, originStr)
+	c.Assert(got.CensusRoot, qt.DeepEquals, root)
+
+	// reset for next cases
+	qIDs2, err := testDB.SetProcessQuestions(pid, questionSet(org, 1, "q2"))
+	c.Assert(err, qt.IsNil)
+	qID2 := qIDs2[0]
+	upstream2 := internal.HexBytes("csp-origin-election-2")
+
+	// only origin set: ErrInvalidData
+	c.Assert(testDB.SetQuestionPublished(QuestionPublishedParams{
+		ID: qID2, UpstreamID: upstream2, MetadataURL: "url", Status: QuestionStatusReady,
+		CensusOrigin: originStr,
+	}), qt.Equals, ErrInvalidData)
+
+	// only root set: ErrInvalidData
+	c.Assert(testDB.SetQuestionPublished(QuestionPublishedParams{
+		ID: qID2, UpstreamID: upstream2, MetadataURL: "url", Status: QuestionStatusReady,
+		CensusRoot: root,
+	}), qt.Equals, ErrInvalidData)
+
+	// neither set: fields absent (plain CSP publish)
+	c.Assert(testDB.SetQuestionPublished(QuestionPublishedParams{
+		ID: qID2, UpstreamID: upstream2, MetadataURL: "url", Status: QuestionStatusReady,
+	}), qt.IsNil)
+	got2, err := testDB.Question(qID2)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got2.CensusOrigin, qt.Equals, "")
+	c.Assert(got2.CensusRoot, qt.IsNil)
+}

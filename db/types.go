@@ -1126,6 +1126,11 @@ type VotingProcessQuestion struct {
 	MetadataURL       string            `json:"-" bson:"metadataURL,omitempty"`
 	Status            string            `json:"status,omitempty" bson:"status,omitempty"`
 	SyncedAt          time.Time         `json:"-" bson:"syncedAt,omitempty"`
+	// CensusOrigin is the census origin name of this question's election when its census root
+	// is its own rather than the SaaS CSP key, and CensusRoot that root. Both are empty for an
+	// election on the SaaS CSP key.
+	CensusOrigin string            `json:"-" bson:"censusOrigin,omitempty"`
+	CensusRoot   internal.HexBytes `json:"-" bson:"censusRoot,omitempty"`
 	// EndedAt is the actual on-chain moment this question's election stopped accepting votes,
 	// set only when the vote was ended early (before its scheduled end, i.e. ManuallyEnded on
 	// the chain). Absent while the vote is open or when it ran to its scheduled end. Recorded by

@@ -131,7 +131,9 @@ func TestProcessBlindCSPSwitchResumesPartialPublish(t *testing.T) {
 
 	// simulate a publish that mined the first question's election and then failed
 	mined := internal.HexBytes(randomProcessID())
-	c.Assert(testDB.SetQuestionPublished(questions[0].ID, mined, "url", db.QuestionStatusReady), qt.IsNil)
+	c.Assert(testDB.SetQuestionPublished(db.QuestionPublishedParams{
+		ID: questions[0].ID, UpstreamID: mined, MetadataURL: "url", Status: db.QuestionStatusReady,
+	}), qt.IsNil)
 
 	setDisableBlindCSP(t, true)
 

@@ -871,7 +871,9 @@ func TestGroupAdditionFailsJobOnlyForTheBrokenTarget(t *testing.T) {
 
 	// the broken question points at an election the chain does not know, so its resize is refused
 	missing := make(internal.HexBytes, 32)
-	c.Assert(testDB.SetQuestionPublished(broken.ID, missing, "", db.QuestionStatusReady), qt.IsNil)
+	c.Assert(testDB.SetQuestionPublished(db.QuestionPublishedParams{
+		ID: broken.ID, UpstreamID: missing, MetadataURL: "", Status: db.QuestionStatusReady,
+	}), qt.IsNil)
 
 	upd := requestAndParse[apicommon.UpdateOrganizationMemberGroupResponse](
 		t, http.MethodPut, token, &apicommon.UpdateOrganizationMemberGroupsRequest{

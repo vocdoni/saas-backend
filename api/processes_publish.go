@@ -763,7 +763,10 @@ func (pw *publishWorker) persistPublished(q *db.VotingProcessQuestion, upstreamI
 		if err = pw.a.db.MarkVotingProcessMined(pw.vp.ID); err != nil {
 			continue
 		}
-		if err = pw.a.db.SetQuestionPublished(q.ID, upstreamID, q.MetadataURL, initialStatus); err == nil {
+		if err = pw.a.db.SetQuestionPublished(db.QuestionPublishedParams{
+			ID: q.ID, UpstreamID: upstreamID, MetadataURL: q.MetadataURL, Status: initialStatus,
+			CensusOrigin: q.CensusOrigin, CensusRoot: q.CensusRoot,
+		}); err == nil {
 			q.UpstreamID = upstreamID
 			delete(pw.minedUnpersisted, q.ID)
 			return true
@@ -1015,6 +1018,19 @@ func anyMined(questions []db.VotingProcessQuestion) bool {
 // buildBatch builds, funds, permission-checks and signs a NEW_PROCESS tx per pending
 // question with contiguous nonces starting at startNonce. ok is false when a question is
 // not permitted (the attempt is abandoned rather than partially submitted).
+// assignCensus returns the census origin, root and URI of q's election. A census on the SaaS
+// CSP key publishes OFF_CHAIN_CA (OFF_CHAIN_CA_V2 with its blind key when anonymous) and leaves
+// the question's own origin and root empty.
+//
+//nolint:revive // function-result-limit: origin, root, uri and error are a natural group for census assignment
+func (pw *publishWorker) assignCensus(_ *db.VotingProcessQuestion) (models.CensusOrigin, []byte, string, error) {
+	origin := models.CensusOrigin_OFF_CHAIN_CA
+	if pw.census.Anonymous {
+		origin = models.CensusOrigin_OFF_CHAIN_CA_V2
+	}
+	return origin, pw.cspPubKey, pw.a.serverURL, nil
+}
+
 func (pw *publishWorker) buildBatch(
 	pending []*db.VotingProcessQuestion, startNonce uint32,
 ) (stxs [][]byte, ok bool, err error) {
@@ -1038,13 +1054,19 @@ func (pw *publishWorker) buildBatch(
 			return nil, false, err
 		}
 		q.MetadataURL = a.objectStorage.LocalURL(objectName)
+		origin, root, uri, err := pw.assignCensus(q)
+		if err != nil {
+			return nil, false, err
+		}
+		q.CensusOrigin = origin.String()
+		q.CensusRoot = root
 		nonce := startNonce + uint32(i)
 		tx, err := a.account.BuildNewProcessTx(&account.NewProcessParams{
 			OrgAddress:    pw.vp.OrgAddress,
 			Params:        ep,
-			CensusRoot:    pw.cspPubKey,
-			CensusURI:     a.serverURL,
-			Anonymous:     pw.census.Anonymous,
+			CensusRoot:    root,
+			CensusURI:     uri,
+			CensusOrigin:  origin,
 			MetadataURL:   q.MetadataURL,
 			Nonce:         &nonce,
 			InitialStatus: initialStatus,

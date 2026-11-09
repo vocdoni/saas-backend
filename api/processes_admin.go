@@ -1220,11 +1220,30 @@ func (a *API) setProcessCensusSizes(orgSigner *ethereum.SignKeys, targets []cens
 	return result, nil
 }
 
+// questionCensusRoot returns the census root to use for a question's SET_PROCESS_CENSUS tx. When
+// the question carries its own root (set at publish for external CSP), that root is returned.
+// Otherwise the SaaS CSP public key is returned, using the blind key for anonymous censuses.
+// It returns an error rather than a root so that T4's external branch can refuse instead of
+// falling back; in T1 the error is always nil.
+func (a *API) questionCensusRoot(q *db.VotingProcessQuestion, census *db.Census) ([]byte, error) {
+	if len(q.CensusRoot) > 0 {
+		return q.CensusRoot, nil
+	}
+	if census.Anonymous {
+		return a.csp.BlindPubKey()
+	}
+	return a.csp.PubKey()
+}
+
 // submitSetProcessCensus builds, funds, signs and submits one SET_PROCESS_CENSUS tx for a target.
 func (a *API) submitSetProcessCensus(orgSigner *ethereum.SignKeys, t *censusSizeTarget) error {
+	root, err := a.questionCensusRoot(&t.question, t.census)
+	if err != nil {
+		return fmt.Errorf("question %s: %w", t.question.ID.Hex(), err)
+	}
 	tx, err := a.account.BuildSetProcessCensusTx(
 		orgSigner.Address(), t.question.UpstreamID,
-		t.census.Published.Root, t.census.Published.URI, t.size,
+		root, t.census.Published.URI, t.size,
 	)
 	if err != nil {
 		return err

@@ -142,8 +142,9 @@ func TestProcessEndDateExtendsOnChain(t *testing.T) {
 	// AC4: the second question points at an election the chain does not have; the job reads every
 	// election before sending, so it fails with nothing sent and the stored end date keeps the last
 	// full success
-	c.Assert(testDB.SetQuestionPublished(got.Questions[1].ID, internal.HexBytes(randomProcessID()),
-		"url", db.QuestionStatusReady), qt.IsNil)
+	c.Assert(testDB.SetQuestionPublished(db.QuestionPublishedParams{
+		ID: got.Questions[1].ID, UpstreamID: internal.HexBytes(randomProcessID()), MetadataURL: "url", Status: db.QuestionStatusReady,
+	}), qt.IsNil)
 	later := newEnd.Add(24 * time.Hour)
 	job = enqueueAndPollJob(t, http.MethodPut, token, endDateBody(later), "processes", pid, "endDate")
 	c.Assert(job.Status, qt.Equals, db.JobStatusFailed)
@@ -161,8 +162,9 @@ func TestProcessEndDateExtendsOnChain(t *testing.T) {
 	c.Assert(vp.EndDate.Equal(newEnd), qt.IsTrue, qt.Commentf("stored %s, want %s", vp.EndDate, newEnd))
 
 	// calling again once the election is back extends both
-	c.Assert(testDB.SetQuestionPublished(got.Questions[1].ID, got.Questions[1].UpstreamID,
-		"url", db.QuestionStatusReady), qt.IsNil)
+	c.Assert(testDB.SetQuestionPublished(db.QuestionPublishedParams{
+		ID: got.Questions[1].ID, UpstreamID: got.Questions[1].UpstreamID, MetadataURL: "url", Status: db.QuestionStatusReady,
+	}), qt.IsNil)
 	job = enqueueAndPollJob(t, http.MethodPut, token, endDateBody(later), "processes", pid, "endDate")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job errors: %v", job.Errors))
 	c.Assert(job.Result.Questions[0].NoOp, qt.IsFalse)
@@ -260,11 +262,14 @@ func TestProcessEndDateRepair(t *testing.T) {
 	c.Assert(refused.Code, qt.Equals, errors.ErrInvalidData.Code)
 	c.Assert(refused.Err.Error(), qt.Contains, "a previous extension is unfinished: send endDate "+
 		end1.Format(time.RFC3339)+" to finish it")
-	c.Assert(testDB.SetQuestionPublished(q1.ID, internal.HexBytes(randomProcessID()), "url",
-		db.QuestionStatusReady), qt.IsNil)
+	c.Assert(testDB.SetQuestionPublished(db.QuestionPublishedParams{
+		ID: q1.ID, UpstreamID: internal.HexBytes(randomProcessID()), MetadataURL: "url", Status: db.QuestionStatusReady,
+	}), qt.IsNil)
 	requestAndAssertError(errors.ErrVochainRequestFailed, t, http.MethodPut, token, endDateBody(end1),
 		"processes", pid, "endDate")
-	c.Assert(testDB.SetQuestionPublished(q1.ID, q1.UpstreamID, "url", db.QuestionStatusReady), qt.IsNil)
+	c.Assert(testDB.SetQuestionPublished(db.QuestionPublishedParams{
+		ID: q1.ID, UpstreamID: q1.UpstreamID, MetadataURL: "url", Status: db.QuestionStatusReady,
+	}), qt.IsNil)
 	job := put(end1)
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job errors: %v", job.Errors))
 	c.Assert(job.Result.Questions[0].NoOp, qt.IsTrue)
@@ -279,11 +284,14 @@ func TestProcessEndDateRepair(t *testing.T) {
 	endOnChain(q1)
 	requestAndAssertError(errors.ErrInvalidData, t, http.MethodPut, token, endDateBody(end2.Add(time.Hour)),
 		"processes", pid, "endDate")
-	c.Assert(testDB.SetQuestionPublished(q1.ID, internal.HexBytes(randomProcessID()), "url",
-		db.QuestionStatusReady), qt.IsNil)
+	c.Assert(testDB.SetQuestionPublished(db.QuestionPublishedParams{
+		ID: q1.ID, UpstreamID: internal.HexBytes(randomProcessID()), MetadataURL: "url", Status: db.QuestionStatusReady,
+	}), qt.IsNil)
 	requestAndAssertError(errors.ErrVochainRequestFailed, t, http.MethodPut, token, endDateBody(end2),
 		"processes", pid, "endDate")
-	c.Assert(testDB.SetQuestionPublished(q1.ID, q1.UpstreamID, "url", db.QuestionStatusReady), qt.IsNil)
+	c.Assert(testDB.SetQuestionPublished(db.QuestionPublishedParams{
+		ID: q1.ID, UpstreamID: q1.UpstreamID, MetadataURL: "url", Status: db.QuestionStatusReady,
+	}), qt.IsNil)
 	// inside the budget but with nothing open at the date, the real chain still gives the 400
 	c.Assert(testDB.SetVotingProcessEndDate(oid, time.Now().Add(6*time.Minute)), qt.IsNil)
 	requestAndAssertError(errors.ErrInvalidData, t, http.MethodPut, token, endDateBody(end2.Add(time.Hour)),
@@ -343,8 +351,9 @@ func TestProcessEndDateRefusals(t *testing.T) {
 
 	// publish it with fake election ids
 	for i := range questions {
-		c.Assert(testDB.SetQuestionPublished(questions[i].ID, internal.HexBytes(randomProcessID()),
-			"url", db.QuestionStatusReady), qt.IsNil)
+		c.Assert(testDB.SetQuestionPublished(db.QuestionPublishedParams{
+			ID: questions[i].ID, UpstreamID: internal.HexBytes(randomProcessID()), MetadataURL: "url", Status: db.QuestionStatusReady,
+		}), qt.IsNil)
 	}
 	c.Assert(testDB.SetVotingProcessPublished(oid, "", vp.StartDate), qt.IsNil)
 
