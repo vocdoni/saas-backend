@@ -96,38 +96,30 @@ func TestOrgAddressesManagedBy(t *testing.T) {
 	c.Assert(got, qt.HasLen, 0)
 }
 
-// TestOrganizationInsertOnlyFields covers the fields SetOrganization writes only on insert: the
-// signer seed and the subscription are both set when the organization is created, and an update
-// carrying different values overwrites neither. SignerSeedValue falls back to the creator for
-// legacy rows.
+// TestOrganizationInsertOnlyFields covers the signer seed, which SetOrganization writes only on insert:
+// an update carrying a different value does not overwrite it. SignerSeedValue falls back to the creator
+// for legacy rows.
 func TestOrganizationInsertOnlyFields(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 	org := &Organization{
-		Address:      testOrgAddress,
-		SignerSeed:   "creator@seed.test",
-		Subscription: OrganizationSubscription{PlanID: "plan-initial", Active: true},
+		Address:    testOrgAddress,
+		SignerSeed: "creator@seed.test",
 	}
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 	stored, err := testDB.Organization(testOrgAddress)
 	c.Assert(err, qt.IsNil)
 	c.Assert(stored.SignerSeed, qt.Equals, "creator@seed.test")
-	c.Assert(stored.Subscription.PlanID, qt.Equals, "plan-initial")
-	c.Assert(stored.Subscription.Active, qt.IsTrue)
 
-	// an update carrying a different seed and subscription must overwrite neither
+	// an update carrying a different seed must not overwrite it
 	stored.SignerSeed = "attacker@seed.test"
-	stored.Subscription.PlanID = "plan-stale"
-	stored.Subscription.StripeSubscriptionID = "sub_stale"
 	stored.Country = "ES"
 	c.Assert(testDB.SetOrganization(stored), qt.IsNil)
 	stored, err = testDB.Organization(testOrgAddress)
 	c.Assert(err, qt.IsNil)
 	c.Assert(stored.SignerSeed, qt.Equals, "creator@seed.test")
-	c.Assert(stored.Subscription.PlanID, qt.Equals, "plan-initial")
-	c.Assert(stored.Subscription.StripeSubscriptionID, qt.Equals, "")
 	c.Assert(stored.Country, qt.Equals, "ES")
 	c.Assert(stored.SignerSeedValue(), qt.Equals, "creator@seed.test")
 

@@ -147,7 +147,6 @@ func TestTopUpWebhookPublishNeverDebitsAboveTheCheckout(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	token := testCreateUser(t, "webhookceiling123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	oid := objectID(c, pid)
 	extra := postNewOrgMembers(t, token, orgAddress, 1)
@@ -213,7 +212,6 @@ func TestTopUpWebhookPublishesProcess(t *testing.T) {
 
 	token := testCreateUser(t, "webhookpass12345")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	oid := objectID(c, pid)
 	const balance = 400
@@ -274,7 +272,7 @@ func TestTopUpWebhookPublishesProcess(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPaid)
 
-	// a completed session carrying none of our metadata (the subscription checkout) passes
+	// a completed session carrying none of our metadata (a legacy subscription checkout) passes
 	code = postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8),
 		"checkout.session.completed", checkoutSessionObject("cs_sub_flow", "paid", 19_900, nil))
 	c.Assert(code, qt.Equals, http.StatusOK)
@@ -290,7 +288,6 @@ func TestStripeCheckoutWebhookStampsBranding(t *testing.T) {
 
 	token := testCreateUser(t, "brandingpaid1234")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 
 	// process A selects branding: 2 voters -> free base, +€149 branding = 14900 cents
@@ -330,7 +327,6 @@ func TestTopUpWebhookStaleSessionKeepsCredit(t *testing.T) {
 
 	token := testCreateUser(t, "webhookmismatch1")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	_, paid := openProcessTopUp(t, fake, token, pid)
 	paid["id"] = "cs_orphaned_session"
@@ -358,7 +354,6 @@ func TestTopUpWebhookRefusalKeepsCredit(t *testing.T) {
 
 	token := testCreateUser(t, "webhookunderpaid1")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	_, paid := openProcessTopUp(t, fake, token, pid)
 	paid["total_details"] = map[string]any{"amount_discount": 500}
@@ -397,7 +392,6 @@ func TestTopUpWebhookFailedDropsCheckout(t *testing.T) {
 
 	token := testCreateUser(t, "webhookfail12345")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	sessionID, paid := openProcessTopUp(t, fake, token, pid)
 	paid["payment_status"] = "unpaid"
@@ -457,7 +451,6 @@ func TestTopUpWebhookHealsCrashBeforeConsume(t *testing.T) {
 
 	token := testCreateUser(t, "replaypass123456")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	sessionID, paid := openProcessTopUp(t, fake, token, pid)
 
@@ -484,7 +477,6 @@ func TestStripeCheckoutWebhookRetriesTransientPublishFailure(t *testing.T) {
 
 	token := testCreateUser(t, "retrypass1234567")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	oid := objectID(c, pid)
 	_, paid := openProcessTopUp(t, fake, token, pid)
@@ -520,7 +512,6 @@ func TestTopUpWebhookReplayAfterCreditBackDoesNotDebit(t *testing.T) {
 
 	token := testCreateUser(t, "replaycredit1234")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	oid := objectID(c, pid)
 	_, paid := openProcessTopUp(t, fake, token, pid)

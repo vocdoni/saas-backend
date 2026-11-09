@@ -86,8 +86,6 @@ func TestCSPVoting(t *testing.T) {
 	token := testCreateUser(t, "superpassword123")
 	vocdoniClient := testNewVocdoniClient(t)
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	// premium: this test publishes seven processes, one per census variant
-	setOrganizationSubscription(t, orgAddress, mockPremiumPlan.ID)
 
 	authFields := db.OrgMemberAuthFields{
 		db.OrgMemberAuthFieldsName,

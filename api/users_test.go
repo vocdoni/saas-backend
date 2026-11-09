@@ -371,7 +371,7 @@ func TestUserInfoIsIntegrator(t *testing.T) {
 	token := testCreateUser(t, "superpassword123")
 	orgAddr := testCreateOrganization(t, token)
 
-	// A freshly created org is on the default (non-integrator) plan.
+	// A freshly created org is not an integrator.
 	before := requestAndParse[apicommon.UserInfo](t, http.MethodGet, token, nil, usersMeEndpoint)
 	c.Assert(before.Organizations, qt.HasLen, 1)
 	c.Assert(before.Organizations[0].IsIntegrator, qt.IsFalse)

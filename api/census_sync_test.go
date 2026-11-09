@@ -69,7 +69,6 @@ func TestProcessCSPElectionStateGates(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 	authFields := db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname}
@@ -120,7 +119,6 @@ func TestUpdateQuestionCensusReopen(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
 	ids := memberIDs(members)
 
@@ -177,7 +175,6 @@ func TestUpdateQuestionCensusRetriesAnUnenqueuedResize(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
 	ids := memberIDs(members)
 
@@ -230,7 +227,6 @@ func TestUpdateQuestionCensusRefusesStrippingASignedVoter(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
 	ids := memberIDs(members)
 
@@ -278,7 +274,6 @@ func TestUpdateQuestionCensusNarrowAndValidate(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
 	ids := memberIDs(members)
 
@@ -339,7 +334,6 @@ func TestRemoveProcessCensusContract(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -422,7 +416,6 @@ func TestProcessCSPRevocation(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
 	ids := memberIDs(members)
 
@@ -483,7 +476,6 @@ func TestReAddedMemberCannotSignForASecondAddress(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -537,7 +529,6 @@ func TestMemberDeletionRefusedForVoter(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -579,7 +570,6 @@ func TestUpdatedMemberDoesNotRejoinRevokedCensus(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -618,7 +608,6 @@ func TestGroupReAddDoesNotUndoRevocation(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
 	ids := memberIDs(members)
 
@@ -707,7 +696,6 @@ func TestVotingProcessMutationsRefusedWhilePublishing(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -775,7 +763,6 @@ func TestGroupAdditionGrowsPublishedCensus(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
 	ids := memberIDs(members)
 
@@ -840,7 +827,6 @@ func TestGroupAdditionFailsJobOnlyForTheBrokenTarget(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
 	ids := memberIDs(members)
 
@@ -908,7 +894,6 @@ func TestResizeSkipsElectionEndedWhileQueued(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
 	ids := memberIDs(members)
 
@@ -990,7 +975,6 @@ func TestGroupAdditionSkipsEndedElectionOnSharedCensus(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
 	ids := memberIDs(members)
 
@@ -1054,7 +1038,6 @@ func TestGroupCensusGuards(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -1116,7 +1099,6 @@ func TestMemberDeletionReleasedByStaleSignature(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -1146,7 +1128,6 @@ func TestGroupRemovalReleasedForNonParticipant(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -1196,7 +1177,6 @@ func TestBlockedVotersScopedAndDeduped(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -1238,7 +1218,6 @@ func TestDeleteMembersIsOrgScoped(t *testing.T) {
 
 	// the organization under attack: a published process whose first member has been signed for
 	victim := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, victim, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, victim, newOrgMembers(3)...)
 	ids := memberIDs(members)
 	pid, got := publishedProcess(t, token, victim, ids)
@@ -1247,7 +1226,6 @@ func TestDeleteMembersIsOrgScoped(t *testing.T) {
 
 	// a second organization, of the same user, asks to delete the first one's members
 	attacker := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, attacker, mockEssentialPlan.ID)
 
 	del := requestAndParse[apicommon.DeleteMembersResponse](t, http.MethodDelete, token,
 		&apicommon.DeleteMembersRequest{IDs: ids},
@@ -1283,7 +1261,6 @@ func TestRemoveProcessCensusIsOrgScoped(t *testing.T) {
 	token := testCreateUser(t, "adminpassword123")
 
 	victim := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, victim, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, victim, newOrgMembers(2)...)
 	ids := memberIDs(members)
 	victimPID, victimGot := publishedProcess(t, token, victim, ids)
@@ -1297,7 +1274,6 @@ func TestRemoveProcessCensusIsOrgScoped(t *testing.T) {
 	// the attacker owns a published process of their own, so they are a legitimate caller of this
 	// endpoint — they simply name ids that are not theirs
 	attacker := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, attacker, mockEssentialPlan.ID)
 	attackerMembers := postOrgMembers(t, token, attacker, newOrgMembers(2)...)
 	attackerPID, _ := publishedProcess(t, token, attacker, memberIDs(attackerMembers))
 
@@ -1332,7 +1308,6 @@ func TestResizeWaitsForBusyOrgLock(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
 	ids := memberIDs(members)
 
@@ -1379,7 +1354,6 @@ func TestResizeRecordsAlreadyLargeElectionAsNoOp(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 
 	_, got := publishedProcess(t, token, orgAddress, memberIDs(members))

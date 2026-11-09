@@ -71,18 +71,6 @@ func TestStatusSync(t *testing.T) {
 	vocdoniClient := testNewVocdoniClient(t)
 	orgAddress := testCreateOrganization(t, token)
 
-	// subscribe the organization to a plan so NEW_PROCESS is permitted
-	plans, err := testDB.Plans()
-	c.Assert(err, qt.IsNil)
-	c.Assert(len(plans) > 1, qt.IsTrue)
-	c.Assert(testDB.SetOrganizationSubscription(orgAddress, &db.OrganizationSubscription{
-		PlanID:          plans[1].ID,
-		StartDate:       time.Now(),
-		RenewalDate:     time.Now().Add(time.Hour * 24),
-		LastPaymentDate: time.Now(),
-		Active:          true,
-	}), qt.IsNil)
-
 	// create the organization account on-chain
 	orgName := fmt.Sprintf("syncorg-%d", internal.RandomInt(1000))
 	orgInfoURI := fmt.Sprintf("https://example.com/%d", internal.RandomInt(1000))

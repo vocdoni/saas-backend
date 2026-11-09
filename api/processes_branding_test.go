@@ -27,7 +27,6 @@ func TestBrandingChargedOncePerOrganization(t *testing.T) {
 	installFakePaymentGW(t)
 	adminToken := testCreateUser(t, "brandingpass1234")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	newBrandedProcess := func() string { return newBrandedVotingProcess(t, adminToken, orgAddress) }
 	// 26 voters, email 2FA free = €17.16; branding adds €149
@@ -102,7 +101,6 @@ func TestBrandingClaimReleasedWhenClaimantDropsIt(t *testing.T) {
 	installFakePaymentGW(t)
 	adminToken := testCreateUser(t, "brandingdrop1234")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	const plainCents = pricedProcessCents
 	const withBrandingCents = plainCents + pricing.BrandingCents
 
@@ -157,7 +155,6 @@ func TestBrandingClaimReleasedByRefusedPayment(t *testing.T) {
 
 	// card: the checkout session cannot be created
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	refused, sibling := newBrandedVotingProcess(t, adminToken, orgAddress), newBrandedVotingProcess(t, adminToken, orgAddress)
 	gw.createErr = fmt.Errorf("stripe unreachable")
 	requestAndAssertError(errors.ErrStripeError, t, http.MethodPost, adminToken,
@@ -170,7 +167,7 @@ func TestBrandingClaimReleasedByRefusedPayment(t *testing.T) {
 	c.Assert(price.TotalCents, qt.Equals, pricedProcessCents+pricing.BrandingCents)
 
 	// wallet: the integrator's balance does not cover the branded price
-	_, managedAddr := newIntegratorWithManagedOrg(t, adminToken, "prod_test_branding_refused")
+	_, managedAddr := newIntegratorWithManagedOrg(t, adminToken)
 	managed := newBrandedVotingProcess(t, adminToken, managedAddr)
 	requestAndAssertError(errors.ErrInsufficientWalletBalance, t, http.MethodPost, adminToken, nil,
 		"processes", managed, "publish")
@@ -186,7 +183,6 @@ func TestBrandingClaimReleasedByDroppedCheckout(t *testing.T) {
 	installFakePaymentGW(t)
 	adminToken := testCreateUser(t, "brandingcancel1234")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	checkoutReq := &apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}
 	const withBrandingCents = pricedProcessCents + pricing.BrandingCents
 	checkoutCents := func(pid string) pricing.Cents {
@@ -212,7 +208,6 @@ func TestCancelCheckoutExcludesConcurrentCheckout(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	adminToken := testCreateUser(t, "cancelrace123456")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	checkoutReq := &apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}
 	const withBrandingCents = pricedProcessCents + pricing.BrandingCents
 
@@ -247,7 +242,6 @@ func TestBrandingClaimReleasedByAbandonedCheckout(t *testing.T) {
 	installFakePaymentGW(t)
 	adminToken := testCreateUser(t, "brandingexpire1234")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	newBrandedProcess := func() string { return newBrandedVotingProcess(t, adminToken, orgAddress) }
 	const plainCents = pricedProcessCents
@@ -308,7 +302,6 @@ func TestPaidDraftBrandingFixedAtPayment(t *testing.T) {
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "brandingfixed1234")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	checkoutReq := &apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}
 	const plainCents = pricedProcessCents
 
@@ -361,7 +354,6 @@ func TestStaleClaimOfPaidAddOnStampsOrganization(t *testing.T) {
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "brandingunstamped")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	paid := newBrandedVotingProcess(t, token, orgAddress)
 	c.Assert(markProcessPaid(t, paid), qt.Equals, pricedProcessCents+pricing.BrandingCents)
 	// the stamp the debit wrote is lost; the paid claimant's claim stays

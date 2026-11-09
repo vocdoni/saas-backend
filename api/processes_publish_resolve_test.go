@@ -85,7 +85,6 @@ func newTwoQuestionDraft(t *testing.T, password string) (string, common.Address,
 	c := qt.New(t)
 	token := testCreateUser(t, password)
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, newVotingProcessRequest(orgAddress, memberIDs(members)), processesCreateEndpoint)

@@ -243,7 +243,7 @@ func (ms *MongoStorage) ListVotingProcesses(
 }
 
 // CountVotingProcesses counts the voting processes of an organization, filtered by draft
-// state (DraftOnly counts unpublished drafts — used to enforce the MaxDrafts plan limit
+// state (DraftOnly counts unpublished drafts — used to enforce the MaxDrafts limit
 // against the new collection). Mirrors CountProcesses but keys on the published flag.
 func (ms *MongoStorage) CountVotingProcesses(orgAddress common.Address, draft DraftFilter) (int64, error) {
 	if orgAddress.Cmp(common.Address{}) == 0 {

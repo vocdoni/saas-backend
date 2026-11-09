@@ -22,7 +22,7 @@ func TestManagedOrgSpendCap(t *testing.T) {
 	c := qt.New(t)
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "spendcappass1234")
-	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_spend_cap")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token)
 	fundWallet(t, integratorAddr, 100_000)
 	setCap := func(capCents *pricing.Cents) apicommon.ManagedOrganizationInfo {
 		return requestAndParse[apicommon.ManagedOrganizationInfo](t, http.MethodPut, token,
@@ -121,7 +121,7 @@ func TestSpendCapRefusalReleasesAddOnClaims(t *testing.T) {
 	c := qt.New(t)
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "spendcapclaims123")
-	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_spend_cap_claims")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token)
 	c.Assert(testDB.CreditWallet(db.WalletCredit{
 		OrgAddress: integratorAddr, AmountCents: 100_000, IdempotencyKey: "cs_spend_cap_claims",
 	}), qt.IsNil)
@@ -148,7 +148,7 @@ func TestSpendCapRefusalReleasesAddOnClaims(t *testing.T) {
 func TestUnfundedIntegratorManagesOneOrg(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "unfundedint12345")
-	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_unfunded_integrator")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token)
 	createManaged := func() (int, []byte) {
 		body := &apicommon.CreateManagedOrganizationRequest{OrganizationInfo: apicommon.OrganizationInfo{
 			Type: string(db.CompanyType), Website: fmt.Sprintf("https://unfunded-%s.example", bson.NewObjectID().Hex()),

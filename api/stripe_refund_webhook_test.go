@@ -112,7 +112,7 @@ func TestStripeRefundWebhookDebitsWallet(t *testing.T) {
 	c.Assert(entries[0].Kind, qt.Equals, db.WalletEntryRefund)
 	c.Assert(entries[0].AmountCents, qt.Equals, pricing.Cents(-7_500))
 
-	// a refund of a payment that never credited a wallet (a subscription invoice) is ignored
+	// a refund of a payment that never credited a wallet (a legacy subscription invoice) is ignored
 	post("evt_"+util.RandomHex(8), "refund.created", refundObject("re_other", "pi_not_a_topup", "succeeded", 5_000))
 	assertWallet(t, orgAddress, -8_000, db.WalletEntryRefund, 2)
 

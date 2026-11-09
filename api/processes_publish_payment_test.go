@@ -50,7 +50,6 @@ func TestVotingProcessPublishPaymentGate(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	token := testCreateUser(t, "gatepassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(pricedProcessVoters)...)
 	pid := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, newVotingProcessRequest(orgAddress, memberIDs(members)),
@@ -105,12 +104,9 @@ func TestVotingProcessPublishPaymentGate(t *testing.T) {
 	c.Assert(entries[0].ProcessOrgAddress, qt.Equals, orgAddress)
 }
 
-// newIntegratorWithManagedOrg provisions an integrator organization on a plan that allows
-// managed organizations, and returns its address together with one managed organization
-// created under it. planID must be unique per test; the plan is removed on cleanup.
-func newIntegratorWithManagedOrg(
-	t *testing.T, token, planID string,
-) (integrator, managedOrg common.Address) {
+// newIntegratorWithManagedOrg provisions an integrator organization and returns its address
+// together with one managed organization created under it.
+func newIntegratorWithManagedOrg(t *testing.T, token string) (integrator, managedOrg common.Address) {
 	t.Helper()
 	c := qt.New(t)
 	integratorAddr := testCreateOrganization(t, token)
@@ -119,18 +115,6 @@ func newIntegratorWithManagedOrg(
 	c.Assert(err, qt.IsNil)
 	integratorOrg.Integrator = true
 	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
-	integratorPlan := &db.Plan{
-		ID:           planID,
-		Name:         "Wallet Integrator",
-		Organization: db.PlanLimits{MaxProcesses: 5, MaxCensus: 10_000, MaxDuration: 30, MaxDrafts: 5},
-		VotingTypes:  db.VotingTypes{Single: true, Multiple: true},
-		Features:     db.Features{TwoFaEmail: 10_000, TwoFaSms: 10_000},
-	}
-	c.Assert(testDB.SetPlan(integratorPlan), qt.IsNil)
-	t.Cleanup(func() { _ = testDB.DelPlan(&db.Plan{ID: integratorPlan.ID}) })
-	c.Assert(testDB.SetOrganizationSubscription(integratorAddr, &db.OrganizationSubscription{
-		PlanID: integratorPlan.ID, StartDate: time.Now(), Active: true,
-	}), qt.IsNil)
 
 	managed := requestAndParse[apicommon.OrganizationInfo](
 		t, http.MethodPost, token, &apicommon.CreateManagedOrganizationRequest{
@@ -149,7 +133,7 @@ func TestManagedProcessWalletPublish(t *testing.T) {
 	c := qt.New(t)
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "walletpassword123")
-	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_wallet_integrator")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token)
 
 	members := postOrgMembers(t, token, managedAddr, newOrgMembers(pricedProcessVoters)...)
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
@@ -200,13 +184,7 @@ func TestManagedWalletPublishRefusesQuoteRequired(t *testing.T) {
 	c := qt.New(t)
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "walletquote12345")
-	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_wallet_quote")
-	// lift the plan past the self-service limit, so it is the price that refuses, not the plan
-	plan, err := testDB.Plan("prod_test_wallet_quote")
-	c.Assert(err, qt.IsNil)
-	plan.Organization.MaxCensus = 100_000
-	plan.Features.TwoFaEmail = 100_000
-	c.Assert(testDB.SetPlan(plan), qt.IsNil)
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token)
 	c.Assert(testDB.CreditWallet(db.WalletCredit{
 		OrgAddress: integratorAddr, AmountCents: 10_000_000, IdempotencyKey: "cs_wallet_quote_topup",
 	}), qt.IsNil)
@@ -246,7 +224,6 @@ func TestPublishPaidProcessRefusesGrownCensus(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "grownpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	oid := objectID(c, pid)
 	vp, err := testDB.VotingProcess(oid)
@@ -293,7 +270,7 @@ func TestManagedWalletDebitRepricesGrownCensus(t *testing.T) {
 	c := qt.New(t)
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "walletgrowth1234")
-	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_wallet_growth")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token)
 
 	members := postOrgMembers(t, token, managedAddr, newOrgMembers(pricedProcessVoters)...)
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
@@ -361,7 +338,7 @@ func TestManagedWalletConcurrentChargesPayOnce(t *testing.T) {
 	c := qt.New(t)
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "walletrace123456")
-	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_wallet_race")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token)
 
 	members := postOrgMembers(t, token, managedAddr, newOrgMembers(pricedProcessVoters)...)
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
@@ -410,7 +387,6 @@ func TestWalletChargeRefusesOpenCheckout(t *testing.T) {
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "walletopencheck1")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, token,
 		&apicommon.ProcessCheckoutRequest{ReturnURL: "https://x.example"}, "processes", pid, "checkout")
@@ -450,7 +426,6 @@ func TestPublishBusyOrgLockDebitsNothing(t *testing.T) {
 	shortenOrgTxLockWait(t)
 	token := testCreateUser(t, "publishbusylock1")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	fundWallet(t, orgAddress, pricedProcessCents)
 
@@ -479,7 +454,6 @@ func TestTopUpWebhookBusyOrgLockRedelivers(t *testing.T) {
 	shortenOrgTxLockWait(t)
 	token := testCreateUser(t, "webhookbusylock1")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	_, paid := openProcessTopUp(t, fake, token, pid)
 	eventID := "evt_busy_" + pid
@@ -572,7 +546,6 @@ func TestCoveredChargeRedoesStampAndCache(t *testing.T) {
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "coveredcharge123")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newBrandedVotingProcess(t, token, orgAddress)
 	oid := objectID(c, pid)
 	vp, err := testDB.VotingProcess(oid)

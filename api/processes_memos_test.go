@@ -23,7 +23,6 @@ func TestVotingProcessMemos(t *testing.T) {
 	token := testCreateUser(t, "superpassword123")
 	vocdoniClient := testNewVocdoniClient(t)
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	// census setup for CSP voting
 	authFields := db.OrgMemberAuthFields{

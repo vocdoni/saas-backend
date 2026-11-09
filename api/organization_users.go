@@ -3,12 +3,10 @@ package api
 import (
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
@@ -171,11 +169,6 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
-	// all pre-checks OK, now update the org users counter
-	if err := a.db.IncrementOrganizationUsersCounter(org.Address); err != nil {
-		errors.ErrGenericInternalServerError.Withf("increment users: %v", err).Write(w)
-		return
-	}
 	// create new invitation
 	orgInvite := &db.OrganizationInvite{
 		OrganizationAddress: org.Address,
@@ -186,16 +179,10 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 	// generate the verification code and the verification link
 	code, link, err := a.generateVerificationCodeAndLink(orgInvite, db.CodeTypeOrgInvite)
 	if err == db.ErrAlreadyExists {
-		if err := a.db.DecrementOrganizationUsersCounter(org.Address); err != nil {
-			log.Errorf("decrement users: %v", err)
-		}
 		errors.ErrDuplicateConflict.With("user is already invited to the organization").Write(w)
 		return
 	}
 	if err != nil {
-		if err := a.db.DecrementOrganizationUsersCounter(org.Address); err != nil {
-			log.Errorf("decrement users: %v", err)
-		}
 		errors.ErrGenericInternalServerError.Withf("could not create the invite: %v", err).Write(w)
 		return
 	}
@@ -212,8 +199,7 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		}{apicommon.OrgDisplayName(org.Meta, org.Address.String()), code, link},
 		time.Now().Add(apicommon.InvitationExpiration),
 	); err != nil {
-		// in this case we don't DecrementOrganizationUsersCounter because the invite was actually created,
-		// just the notification failed.
+		// the invite was created, just the notification failed
 		log.Warnw("could not send verification code email", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)
 		return
@@ -285,7 +271,7 @@ func (a *API) acceptOrganizationUserInvitationHandler(w http.ResponseWriter, r *
 		return
 	}
 	// check the inviter still holds the admin role, so an invitation issued by someone who was
-	// removed, demoted or erased cannot grant a role. The invitation is dropped and its slot released.
+	// removed, demoted or erased cannot grant a role. The invitation is dropped.
 	// This check and the grant below are not atomic: an inviter removed in between can still get a
 	// role granted, so this check plus the cleanup on removal is best-effort for that race.
 	inviter, err := a.db.User(invitation.CurrentUserID)
@@ -294,15 +280,8 @@ func (a *API) acceptOrganizationUserInvitationHandler(w http.ResponseWriter, r *
 		return
 	}
 	if err == db.ErrNotFound || !inviter.HasRoleFor(org.Address, db.AdminRole) {
-		// only the call that actually deletes the invitation releases its slot, so concurrent accepts
-		// of the same code cannot drop the counter more than once
-		revoked, revokeErr := a.db.RevokeInvitationByCode(invitationReq.Code)
-		if revokeErr != nil {
-			log.Warnw("could not revoke invitation of a removed inviter", "error", revokeErr)
-		} else if revoked {
-			if err := a.db.DecrementOrganizationUsersCounter(org.Address); err != nil {
-				log.Errorf("decrement users: %v", err)
-			}
+		if err := a.db.DeleteInvitationByCode(invitationReq.Code); err != nil {
+			log.Warnw("could not revoke invitation of a removed inviter", "error", err)
 		}
 		errors.ErrUnauthorized.With("invitation issuer is no longer an admin of the organization").Write(w)
 		return
@@ -564,12 +543,6 @@ func (a *API) deletePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// update the org users counter
-	if err := a.db.DecrementOrganizationUsersCounter(org.Address); err != nil {
-		log.Errorf("decrement users: %v", err)
-		errors.ErrGenericInternalServerError.Withf("could not update organization users counter: %v", err).Write(w)
-		return
-	}
 	apicommon.HTTPWriteOK(w)
 }
 
@@ -756,26 +729,11 @@ func (a *API) updateOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 	// a user who is no longer an admin must not keep invitations that could still be accepted. The accept-time
 	// check is the real guard, so a failure here is logged rather than failing the demotion
 	if db.UserRole(update.Role) != db.AdminRole {
-		if err := a.revokeInvitationsIssuedBy(org.Address, uint64(userIDInt)); err != nil {
+		if _, err := a.db.DeleteInvitationsByInviter(org.Address, uint64(userIDInt)); err != nil {
 			log.Warnw("could not revoke invitations of a demoted user", "error", err)
 		}
 	}
 	apicommon.HTTPWriteOK(w)
-}
-
-// revokeInvitationsIssuedBy deletes the pending invitations of the organization issued by the given user,
-// releasing the user slot each of them reserved, as deletePendingUserInvitationHandler does.
-func (a *API) revokeInvitationsIssuedBy(orgAddress common.Address, userID uint64) error {
-	deleted, err := a.db.DeleteInvitationsByInviter(orgAddress, userID)
-	if err != nil {
-		return err
-	}
-	for range deleted {
-		if err := a.db.DecrementOrganizationUsersCounter(orgAddress); err != nil {
-			return fmt.Errorf("decrement users: %w", err)
-		}
-	}
-	return nil
 }
 
 // removeOrganizationUserHandler godoc
@@ -836,21 +794,13 @@ func (a *API) removeOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		errors.ErrInvalidUserData.Withf("user not found: %v", err).Write(w)
 		return
 	}
-	// removing a user who is not a member must not decrement the users counter, or repeating the
-	// request would push it below the real number of users and lift the plan's user limit
 	if !removed {
 		errors.ErrInvalidUserData.With("user is not a member of the organization").Write(w)
 		return
 	}
-	// update the org users counter
-	if err := a.db.DecrementOrganizationUsersCounter(org.Address); err != nil {
-		log.Errorf("decrement users: %v", err)
-		errors.ErrGenericInternalServerError.Withf("could not update organization users counter: %v", err).Write(w)
-		return
-	}
 	// the removed user must not keep invitations that could still be accepted. The accept-time check is the
 	// real guard, so a failure here is logged rather than failing the removal that already happened
-	if err := a.revokeInvitationsIssuedBy(org.Address, uint64(userIDInt)); err != nil {
+	if _, err := a.db.DeleteInvitationsByInviter(org.Address, uint64(userIDInt)); err != nil {
 		log.Warnw("could not revoke invitations of a removed user", "error", err)
 	}
 	apicommon.HTTPWriteOK(w)

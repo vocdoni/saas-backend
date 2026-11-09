@@ -510,7 +510,6 @@ func TestUpsertOrganizationMember(t *testing.T) {
 	c.Run("MemberNumber+Email", func(c *qt.C) {
 		loginToken := testCreateUser(t, "adminpassword123")
 		orgAddress := testCreateProvisionedOrganization(t, loginToken)
-		setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 		members := newOrgMembers(3)
 		c.Logf("will add org members: %+v", members)
 		orgMembers := postOrgMembers(t, loginToken, orgAddress, members...)
@@ -592,7 +591,6 @@ func TestUpsertOrganizationMember(t *testing.T) {
 	c.Run("MemberNumber+Phone", func(c *qt.C) {
 		loginToken := testCreateUser(t, "adminpassword123")
 		orgAddress := testCreateProvisionedOrganization(t, loginToken)
-		setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 		members := newOrgMembers(3)
 		c.Logf("will add org members: %+v", members)
 		orgMembers := postOrgMembers(t, loginToken, orgAddress, members...)
@@ -643,7 +641,6 @@ func TestUpsertOrganizationMember(t *testing.T) {
 	c.Run("AllAuthAndTwoFaFields", func(c *qt.C) {
 		loginToken := testCreateUser(t, "adminpassword123")
 		orgAddress := testCreateProvisionedOrganization(t, loginToken)
-		setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 		members := newOrgMembers(3)
 		c.Logf("will add org members: %+v", members)
 		orgMembers := postOrgMembers(t, loginToken, orgAddress, members...)
@@ -853,7 +850,6 @@ func TestUpsertMemberClearsEmptiedFields(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(1)...)
 	c.Assert(members, qt.HasLen, 1)
@@ -972,7 +968,6 @@ func TestAddMembersLargeSyncImportRunsAsJob(t *testing.T) {
 	c := qt.New(t)
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	membersWithPasswords := func(prefix string, n int) []apicommon.OrgMember {
 		members := make([]apicommon.OrgMember, n)

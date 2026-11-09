@@ -22,7 +22,6 @@ func TestValidateProcessCensus(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
 	authNameSurname := db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname}
@@ -78,7 +77,6 @@ func TestUpdateProcessCensus(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
 	ids := memberIDs(members)
 
@@ -145,7 +143,6 @@ func TestProcessesCensusGroupID(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "groupcensuspass123")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
 	group := postGroup(t, token, orgAddress, memberIDs(members)...)
@@ -273,7 +270,6 @@ func TestProcessCensusMissingData(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := qt.New(t)
 			orgAddress := testCreateOrganization(t, token)
-			setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 			toAdd := newOrgMembers(len(tc.members))
 			for i, l := range tc.members {
@@ -355,7 +351,6 @@ func TestProcessCensusMissingData(t *testing.T) {
 func TestProcessCensusPassword(t *testing.T) {
 	token := testCreateUser(t, "censuspassword123")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	// newOrgMembers gives every member a password and an email
 	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(2)...))
 

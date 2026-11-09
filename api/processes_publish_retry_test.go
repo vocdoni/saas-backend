@@ -35,10 +35,10 @@ func injectPublishFaults(t *testing.T, fail func(attempt int32) error) *atomic.I
 // newFundedManagedDraft creates a managed organization with a priced draft (email 2FA,
 // integratorProcessCents) and an integrator wallet holding 100 000 cents, returning the integrator
 // and the draft.
-func newFundedManagedDraft(t *testing.T, token, planID string) (common.Address, string, bson.ObjectID) {
+func newFundedManagedDraft(t *testing.T, token, key string) (common.Address, string, bson.ObjectID) {
 	t.Helper()
 	c := qt.New(t)
-	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, planID)
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token)
 	members := postOrgMembers(t, token, managedAddr, newOrgMembers(pricedProcessVoters)...)
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, newVotingProcessRequest(managedAddr, memberIDs(members)),
@@ -46,7 +46,7 @@ func newFundedManagedDraft(t *testing.T, token, planID string) (common.Address, 
 	oid, err := bson.ObjectIDFromHex(created.ProcessID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(testDB.CreditWallet(db.WalletCredit{
-		OrgAddress: integratorAddr, AmountCents: 100_000, IdempotencyKey: "cs_" + planID,
+		OrgAddress: integratorAddr, AmountCents: 100_000, IdempotencyKey: "cs_" + key,
 	}), qt.IsNil)
 	return integratorAddr, created.ProcessID, oid
 }
@@ -252,7 +252,6 @@ func TestPublishFinalFailureCreditsBackStandard(t *testing.T) {
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "publishcreditstd")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	oid := objectID(c, pid)
 	fundWallet(t, orgAddress, 100_000)
@@ -304,7 +303,6 @@ func TestTopUpWebhookReplayAfterFailedPublishDoesNotDebit(t *testing.T) {
 
 	token := testCreateUser(t, "replayfailed1234")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	_, paid := openProcessTopUp(t, fake, token, pid)
 	c.Assert(postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8),
@@ -353,7 +351,6 @@ func TestTopUpWebhookReplayReadsTheLedgerNotTheRow(t *testing.T) {
 
 	token := testCreateUser(t, "replaystalerow12")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	oid := objectID(c, pid)
 	_, paid := openProcessTopUp(t, fake, token, pid)
@@ -385,7 +382,6 @@ func TestTopUpWebhookFailureAfterDebitIsRefusal(t *testing.T) {
 	t.Cleanup(func() { testAPI.publishPreJobFault = nil })
 	token := testCreateUser(t, "afterdebitrefusal")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	_, paid := openProcessTopUp(t, fake, token, pid)
 
@@ -488,7 +484,6 @@ func retryWaitingOnOrgTxLock(t *testing.T, name string) retryWaiting {
 	c := qt.New(t)
 	token := testCreateUser(t, name)
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(growthBaseVoters)...))
 	autoGroup, err := testDB.AutoMemberGroup(orgAddress)
 	c.Assert(err, qt.IsNil)

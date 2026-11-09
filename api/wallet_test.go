@@ -84,7 +84,7 @@ func TestWalletTopUpRequiresAdmin(t *testing.T) {
 func TestWalletManagedOrganizationHasNone(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	token := testCreateUser(t, "walletmanaged123")
-	_, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_wallet_managed")
+	_, managedAddr := newIntegratorWithManagedOrg(t, token)
 
 	requestAndAssertError(errors.ErrManagedOrgHasNoWallet, t, http.MethodGet, token, nil,
 		"organizations", managedAddr.String(), "wallet")
@@ -100,7 +100,7 @@ func TestWalletManagedOrganizationHasNone(t *testing.T) {
 func TestWalletIntegratorHistoryAndKeys(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "walletkeypass123")
-	integratorAddr, managedA := newIntegratorWithManagedOrg(t, token, "prod_test_wallet_keys")
+	integratorAddr, managedA := newIntegratorWithManagedOrg(t, token)
 	fundWallet(t, integratorAddr, 10_000) // a second managed organization needs a top-up first
 	managedB := requestAndParse[apicommon.OrganizationInfo](
 		t, http.MethodPost, token, &apicommon.CreateManagedOrganizationRequest{

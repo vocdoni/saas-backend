@@ -31,14 +31,10 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
-	"github.com/vocdoni/saas-backend/migrations"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
 	"github.com/vocdoni/saas-backend/objectstorage"
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"github.com/vocdoni/saas-backend/test"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/crypto/ethereum"
@@ -67,130 +63,6 @@ const (
 	// cspNotificationCoolDownTime is the OTP cooldown handed to the CSP under test, shorter than
 	// the production default: the tests only ever sleep it through, none asserts the refusal.
 	cspNotificationCoolDownTime = time.Second
-)
-
-var (
-	mockPlans = []*db.Plan{mockFreePlan, mockEssentialPlan, mockPremiumPlan}
-
-	mockFreePlan = &db.Plan{
-		ID:                   "prod_test_free",
-		Name:                 "Free Plan",
-		StripeMonthlyPriceID: "price_month_test_free",
-		MonthlyPrice:         0,
-		StripeYearlyPriceID:  "price_year_test_free",
-		YearlyPrice:          0,
-		Default:              true,
-		Public:               true,
-		Organization: db.PlanLimits{
-			Users:        1,
-			SubOrgs:      0,
-			MaxProcesses: 10,
-			MaxCensus:    50,
-			MaxDuration:  7,
-			CustomURL:    false,
-			MaxDrafts:    0,
-			CustomPlan:   false,
-		},
-		VotingTypes: db.VotingTypes{
-			Single:     true,
-			Multiple:   true,
-			Approval:   true,
-			Cumulative: true,
-			Ranked:     true,
-			Weighted:   true,
-		},
-		Features: db.Features{
-			Anonymous:       true,
-			Overwrite:       true,
-			LiveResults:     true,
-			Personalization: false,
-			EmailReminder:   false,
-			TwoFaSms:        0,
-			TwoFaEmail:      100,
-			WhiteLabel:      false,
-			LiveStreaming:   false,
-			PhoneSupport:    false,
-		},
-	}
-	mockEssentialPlan = &db.Plan{
-		ID:                   "prod_test_essential",
-		Name:                 "Essential Annual Subscription Plan",
-		StripeMonthlyPriceID: "price_month_test_essential",
-		MonthlyPrice:         1990,
-		StripeYearlyPriceID:  "price_year_test_essential",
-		YearlyPrice:          19900,
-		Default:              false,
-		Public:               true,
-		Organization: db.PlanLimits{
-			Users:        5,
-			SubOrgs:      1,
-			MaxProcesses: 20,
-			MaxCensus:    10000,
-			MaxDuration:  90,
-			CustomURL:    false,
-			MaxDrafts:    5,
-			CustomPlan:   false,
-		},
-		VotingTypes: db.VotingTypes{
-			Single:     true,
-			Multiple:   true,
-			Approval:   true,
-			Cumulative: true,
-			Ranked:     false,
-			Weighted:   true,
-		},
-		Features: db.Features{
-			Anonymous:       true,
-			Overwrite:       true,
-			LiveResults:     true,
-			Personalization: true,
-			EmailReminder:   false,
-			TwoFaSms:        10000,
-			TwoFaEmail:      10000,
-			WhiteLabel:      true,
-			LiveStreaming:   true,
-			PhoneSupport:    true,
-		},
-	}
-	mockPremiumPlan = &db.Plan{
-		ID:                   "prod_test_premium",
-		Name:                 "Premium Annual Subscription Plan",
-		StripeMonthlyPriceID: "price_month_test_premium",
-		MonthlyPrice:         4990,
-		StripeYearlyPriceID:  "price_year_test_premium",
-		YearlyPrice:          49900,
-		Default:              false,
-		Public:               true,
-		Organization: db.PlanLimits{
-			Users:        10,
-			SubOrgs:      2,
-			MaxProcesses: 40,
-			MaxCensus:    20000,
-			MaxDuration:  180,
-			CustomURL:    false,
-			MaxDrafts:    10,
-		},
-		VotingTypes: db.VotingTypes{
-			Single:     true,
-			Multiple:   true,
-			Approval:   true,
-			Cumulative: true,
-			Ranked:     false,
-			Weighted:   true,
-		},
-		Features: db.Features{
-			Anonymous:       true,
-			Overwrite:       true,
-			LiveResults:     true,
-			Personalization: true,
-			EmailReminder:   false,
-			TwoFaSms:        20000,
-			TwoFaEmail:      20000,
-			WhiteLabel:      true,
-			LiveStreaming:   true,
-			PhoneSupport:    true,
-		},
-	}
 )
 
 // testPort is the port used for the API tests.
@@ -292,24 +164,6 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-
-	// overwrite "stub_plans" migration to inject instead mockPlans
-	migrations.AddMigration(3, "mock_plans",
-		func(ctx context.Context, database *mongo.Database) error {
-			for _, p := range mockPlans {
-				filter := bson.M{"_id": p.ID}
-				update := bson.M{"$set": p}
-				opts := options.UpdateOne().SetUpsert(true)
-				if _, err := database.Collection("plans").UpdateOne(ctx, filter, update, opts); err != nil {
-					return fmt.Errorf("failed to upsert plan with ID %s: %w", p.ID, err)
-				}
-			}
-			return nil
-		},
-		func(ctx context.Context, database *mongo.Database) error {
-			_, err := database.Collection("plans").DeleteMany(ctx, bson.D{})
-			return err
-		})
 
 	// set reset db env var to true
 	_ = os.Setenv("VOCDONI_MONGO_RESET_DB", "true")
@@ -1103,7 +957,8 @@ func putOrgMemberAndExpectError(t *testing.T, adminToken string, orgAddress comm
 }
 
 // orgCounters reads the organization's sent counters, which the API no longer exposes on the
-// organization (only summed over managed organizations by GET /integrator).
+// organization (only summed over managed organizations by GET /integrator and listed per managed
+// organization by GET /integrator/organizations).
 func orgCounters(t *testing.T, orgAddress common.Address) db.OrganizationCounters {
 	t.Helper()
 	org, err := testDB.Organization(orgAddress)
@@ -1123,18 +978,6 @@ func postGroup(t *testing.T, token string, orgAddress common.Address, memberIDs 
 	qt.Assert(t, groupInfo.ID, qt.Not(qt.Equals), "")
 	t.Logf("Created member group with ID: %s", groupInfo.ID)
 	return groupInfo
-}
-
-func setOrganizationSubscription(t *testing.T, orgAddress common.Address, planID string) {
-	t.Helper()
-	err := testDB.SetOrganizationSubscription(orgAddress, &db.OrganizationSubscription{
-		PlanID:          planID,
-		StartDate:       time.Now(),
-		RenewalDate:     time.Now().Add(time.Hour * 24),
-		LastPaymentDate: time.Now(),
-		Active:          true,
-	})
-	qt.Assert(t, err, qt.IsNil)
 }
 
 // URLs

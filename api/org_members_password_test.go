@@ -21,7 +21,6 @@ func TestOrgMemberPassword(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	membersURL := organizationMembersURL(orgAddress.String())
 
 	t.Run("a password that is not the client hash is refused and nothing is written", func(t *testing.T) {

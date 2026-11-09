@@ -150,11 +150,6 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		parentOrg = orgInfo.Parent.Address
-		// update the parent organization counter
-		if err := a.db.IncrementOrganizationSubOrgsCounter(parentOrg); err != nil {
-			errors.ErrGenericInternalServerError.Withf("increment suborgs: %v", err).Write(w)
-			return
-		}
 	}
 	// create the organization
 	dbOrg := &db.Organization{
@@ -186,22 +181,12 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		infoURI := fmt.Sprintf("%s/organizations/%s", a.serverURL, dbOrg.Address.String())
 		displayName := apicommon.OrgDisplayName(dbOrg.Meta, dbOrg.Address.String())
 		if err := a.account.CreateOrgAccount(signer, displayName, infoURI); err != nil {
-			if orgInfo.Parent != nil {
-				if err := a.db.DecrementOrganizationSubOrgsCounter(parentOrg); err != nil {
-					log.Errorf("decrement suborgs: %v", err)
-				}
-			}
 			errors.ErrGenericInternalServerError.
 				Withf("could not provision organization account: %v", err).Write(w)
 			return
 		}
 	}
 	if err := a.db.SetOrganization(dbOrg); err != nil {
-		if orgInfo.Parent != nil {
-			if err := a.db.DecrementOrganizationSubOrgsCounter(parentOrg); err != nil {
-				log.Errorf("decrement suborgs: %v", err)
-			}
-		}
 		if err == db.ErrAlreadyExists {
 			errors.ErrInvalidOrganizationData.WithErr(err).Write(w)
 			return
@@ -290,7 +275,7 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// update just the fields that can be updated and are not empty
-	// only the editable fields are written, so the counters, subscription and limits that were
+	// only the editable fields are written, so the counters and add-ons that were
 	// read with the organization above cannot be put back over changes made since
 	profile := &db.Organization{Address: org.Address}
 	updateOrg := false

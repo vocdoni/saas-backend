@@ -32,7 +32,6 @@ func TestProcessEndDateExtendsOnChain(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "enddatechain1234")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(2)...))
 	pid, got := publishedProcess(t, token, orgAddress, ids)
 	oid := objectID(c, pid)
@@ -196,7 +195,6 @@ func TestProcessEndDateRepair(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "enddaterepair123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(2)...))
 	pid, got := publishedProcess(t, token, orgAddress, ids)
 	oid := objectID(c, pid)
@@ -325,7 +323,6 @@ func TestProcessEndDateRefusals(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "enddaterefuse123")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(2)...))
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, newVotingProcessRequest(orgAddress, ids), processesCreateEndpoint,

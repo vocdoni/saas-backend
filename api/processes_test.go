@@ -62,7 +62,6 @@ func TestVotingProcessAuthoring(t *testing.T) {
 	c := qt.New(t)
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -123,7 +122,6 @@ func TestVotingProcessUpdate(t *testing.T) {
 	c := qt.New(t)
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -149,7 +147,6 @@ func TestVotingProcessLegacyDraftShapeRoundTrip(t *testing.T) {
 	c := qt.New(t)
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -223,7 +220,6 @@ func TestVotingProcessUpdateBallotShapeEcho(t *testing.T) {
 	c := qt.New(t)
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -285,7 +281,6 @@ func TestVotingProcessUpdateBallotShapeEcho(t *testing.T) {
 func TestVotingProcessAuthoringErrors(t *testing.T) {
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -416,7 +411,6 @@ func TestVotingProcessEmptyCensusRejected(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, minimalVotingProcessRequest(orgAddress), processesCreateEndpoint,
 	)
@@ -457,8 +451,6 @@ func TestVotingProcessAPIKeyAuth(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "integratorpass123")
 	orgAddr := testCreateOrganization(t, token)
-	// the integrator's plan governs the managed org's draft quota
-	setOrganizationSubscription(t, orgAddr, mockEssentialPlan.ID)
 	org, err := testDB.Organization(orgAddr)
 	c.Assert(err, qt.IsNil)
 	org.Integrator = true
@@ -502,7 +494,7 @@ func TestVotingProcessAPIKeyAuth(t *testing.T) {
 	requestAndAssertCode(http.StatusNotFound, t, http.MethodGet, noScope.Secret, nil, "processes", proc.ProcessID)
 }
 
-// TestVotingProcessPublishPreflight verifies the publish-readiness dry-run now catches plan
+// TestVotingProcessPublishPreflight verifies the publish-readiness dry-run now catches limit
 // denials that used to only surface as an async job failure: a process whose duration exceeds
 // the 90-day duration cap is reported invalid by GET .../check AND rejected 400 by publish (synchronously,
 // never enqueued). Drafts are capped too, so the over-long draft is one stored before the cap.
@@ -510,7 +502,6 @@ func TestVotingProcessPublishPreflight(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID) // MaxDuration 90 days
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -541,7 +532,6 @@ func TestVotingProcessUpdateNoCensusOrphan(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -602,7 +592,6 @@ func TestVotingProcessResults(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -669,7 +658,6 @@ func TestVotingProcessPublicReads(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 	otherToken := testCreateUser(t, "otherpass123") // a user with no role in the org
@@ -775,7 +763,6 @@ func TestVotingProcessPublicQuestionCensus(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -807,7 +794,6 @@ func TestVotingProcessParticipant(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 	req := newVotingProcessRequest(orgAddress, ids)
@@ -839,7 +825,6 @@ func TestVotingProcessStalePublishReclaim(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
@@ -884,7 +869,6 @@ func TestVotingProcessConcurrentUpdates(t *testing.T) {
 	c := qt.New(t)
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -933,7 +917,6 @@ func TestVotingProcessConcurrentUpdatesVaryingLengths(t *testing.T) {
 	c := qt.New(t)
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -983,7 +966,6 @@ func TestVotingProcessConditionalUpdate(t *testing.T) {
 	c := qt.New(t)
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -1042,7 +1024,6 @@ func TestVotingProcessBallotShapeConsistency(t *testing.T) {
 	c := qt.New(t)
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -1078,23 +1059,12 @@ func TestVotingProcessBallotShapeConsistency(t *testing.T) {
 
 // TestVotingProcessRankedBallotProtocol covers ranked as a named type: a question authored as
 // type "ranked" reads back as ranked, carries the unique-values permutation protocol the type
-// derives, and is publishable under a plan that grants Ranked.
+// derives, and is publishable.
 func TestVotingProcessRankedBallotProtocol(t *testing.T) {
 	c := qt.New(t)
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, adminToken)
 
-	// mockEssentialPlan allows drafts (MaxDrafts 5) but grants no Ranked, so clone it with Ranked
-	// on for this test.
-	rankedPlan := *mockEssentialPlan
-	rankedPlan.ID = "prod_test_ranked"
-	rankedPlan.Name = "Ranked Plan"
-	rankedPlan.StripeMonthlyPriceID = "price_month_test_ranked"
-	rankedPlan.StripeYearlyPriceID = "price_year_test_ranked"
-	rankedPlan.Public = false
-	rankedPlan.VotingTypes.Ranked = true
-	c.Assert(testDB.SetPlan(&rankedPlan), qt.IsNil)
-	setOrganizationSubscription(t, orgAddress, rankedPlan.ID)
 	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -1125,12 +1095,11 @@ func TestVotingProcessRankedBallotProtocol(t *testing.T) {
 
 // TestVotingProcessCumulativeBallotType covers cumulative (budget/quadratic) as a named type: a
 // question authored as type "cumulative" with a budget and costExponent reads back with both, and
-// is publishable under a plan that grants Cumulative.
+// is publishable.
 func TestVotingProcessCumulativeBallotType(t *testing.T) {
 	c := qt.New(t)
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID) // Cumulative is granted
 	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 

@@ -86,7 +86,6 @@ func TestProcessBlindCSP(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID) // plan grants weighted voting
 	// two members so the voter (members[1]) carries weight 2 — newOrgMembers assigns weights 1,2 —
 	// which lets the tally below prove the round-1-pinned weight reaches the weighted on-chain count.
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
@@ -192,7 +191,6 @@ func TestProcessBlindCSPWeightPin(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 	voterMember := members[1] // weight "2"
@@ -297,7 +295,6 @@ func TestProcessBlindCSPOverwrite(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID) // grants Overwrite
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 	voterMember := members[1] // weight 2

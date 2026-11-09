@@ -159,19 +159,13 @@ func TestGroupUpdateRejectsOverlappingLists(t *testing.T) {
 	c.Assert(updated.MemberIDs, qt.DeepEquals, []string{members[0].ID})
 }
 
-// TestCreateSubOrganizationWithinPlan covers the regression where creating a suborganization
-// always failed: the parent check took the length of a fixed-size address, never zero. No plan
-// caps suborganizations anymore, so a plan's former limit does not stop the next one either.
-func TestCreateSubOrganizationWithinPlan(t *testing.T) {
+// TestCreateSubOrganization covers the regression where creating a suborganization always failed:
+// the parent check took the length of a fixed-size address, never zero. Nothing caps how many
+// suborganizations an organization has.
+func TestCreateSubOrganization(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "suborgplanpass123")
 	parentAddr := testCreateOrganization(t, token)
-
-	// the essential plan used to allow one suborganization
-	parent, err := testDB.Organization(parentAddr)
-	c.Assert(err, qt.IsNil)
-	parent.Subscription.PlanID = mockEssentialPlan.ID
-	c.Assert(testDB.SetOrganizationSubscription(parentAddr, &parent.Subscription), qt.IsNil)
 
 	subOrgInfo := &apicommon.OrganizationInfo{
 		Type:   string(db.CompanyType),
@@ -181,7 +175,7 @@ func TestCreateSubOrganizationWithinPlan(t *testing.T) {
 	c.Assert(sub.Parent, qt.Not(qt.IsNil))
 	c.Assert(sub.Parent.Address, qt.Equals, parentAddr)
 
-	// the plan's former limit (one suborganization) no longer applies
+	// a second one is created too
 	second := requestAndParse[apicommon.OrganizationInfo](t, http.MethodPost, token, subOrgInfo, organizationsEndpoint)
 	c.Assert(second.Address, qt.Not(qt.Equals), sub.Address)
 

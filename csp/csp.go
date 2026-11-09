@@ -130,9 +130,9 @@ func (c *CSP) SetBlindCSPDisabled(disabled bool) {
 }
 
 // countSentNotification bumps the organization's sent counters for a challenge
-// the queue reports. Only delivered challenges count: the counters gate
-// publishing, so given-up ones (expired, permanently failed, no service
-// configured) must not use up the quota.
+// the queue reports. Only delivered challenges count, so given-up ones
+// (expired, permanently failed, no service configured) do not inflate the
+// usage that the integrator usage and the managed organization listing report.
 func countSentNotification(storage *db.MongoStorage, ch *notifications.NotificationChallenge) {
 	if !ch.Success {
 		return

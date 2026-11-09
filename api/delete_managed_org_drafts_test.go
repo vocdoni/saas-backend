@@ -46,7 +46,7 @@ func TestDeleteManagedOrgRefundsDrafts(t *testing.T) {
 	c := qt.New(t)
 	fake := installFakePaymentGW(t)
 	token := testCreateUser(t, "teardownrefund12")
-	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_teardown_refund")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token)
 	fundWallet(t, integratorAddr, 100_000)
 
 	walletPaid := newManagedDraft(t, token, managedAddr)
@@ -95,7 +95,7 @@ func TestDeleteManagedOrgAbortsOnUndeletableDraft(t *testing.T) {
 	c := qt.New(t)
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "teardownabort123")
-	_, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_teardown_abort")
+	_, managedAddr := newIntegratorWithManagedOrg(t, token)
 	draft := newManagedDraft(t, token, managedAddr)
 	stored, err := testDB.SetProcessPaymentPending(&db.ProcessPayment{
 		ProcessID: draft, OrgAddress: managedAddr,
@@ -124,7 +124,7 @@ func TestDeleteOrgDraftsForErasure(t *testing.T) {
 	c := qt.New(t)
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "erasedrafts12345")
-	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_erase_drafts")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token)
 	fundWallet(t, integratorAddr, 100_000)
 
 	walletPaid := newManagedDraft(t, token, managedAddr)
@@ -162,7 +162,7 @@ func TestDeleteDraftAfterCutShortReversal(t *testing.T) {
 	c := qt.New(t)
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "deleteowed123456")
-	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_delete_owed")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token)
 	fundWallet(t, integratorAddr, 100_000)
 	draft := newManagedDraft(t, token, managedAddr)
 	debitManagedDraft(c, draft)
@@ -191,7 +191,7 @@ func TestDeleteManagedOrgDropsPartiallyPublishedDraft(t *testing.T) {
 	c := qt.New(t)
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "teardownpartial1")
-	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_teardown_partial")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token)
 	fundWallet(t, integratorAddr, 100_000)
 	draft := newManagedDraft(t, token, managedAddr)
 	debitManagedDraft(c, draft)
@@ -231,7 +231,7 @@ func TestManagedOrgTeardownBlocksDraftsAndPublish(t *testing.T) {
 	c := qt.New(t)
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "teardownblock123")
-	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_teardown_block")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token)
 	fundWallet(t, integratorAddr, 100_000)
 	draft := newManagedDraft(t, token, managedAddr)
 

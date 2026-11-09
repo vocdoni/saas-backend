@@ -461,7 +461,6 @@ func (a *API) startProcessPublish(ctx context.Context, t publishTarget) (string,
 	if err != nil {
 		return "", fmt.Errorf("failed to reload the census: %w", err)
 	}
-	nonTestSized := uint64(census.Size) > uint64(db.TestMaxCensusSize)
 
 	// acquire the per-org tx lock with a bounded wait before anything is charged: a worker may hold
 	// it through tx mining, and a caller is better served by a prompt 503 than a parked request. A
@@ -534,7 +533,7 @@ func (a *API) startProcessPublish(ctx context.Context, t publishTarget) (string,
 
 	worker := &publishWorker{
 		a: a, vp: vp, questions: questions, census: census, org: org, user: user,
-		orgSigner: orgSigner, cspPubKey: cspPubKey, nonTestSized: nonTestSized, jobID: jobID, owner: owner,
+		orgSigner: orgSigner, cspPubKey: cspPubKey, jobID: jobID, owner: owner,
 		minedUnpersisted: make(map[bson.ObjectID]internal.HexBytes),
 		staleAfter:       db.PublishStaleAfter,
 	}
@@ -618,16 +617,15 @@ func (pw *publishWorker) finish(result *db.JobResult, err error) {
 // publishWorker carries the state of an async voting-process publish across the batch +
 // retry rounds executed on the tx worker pool.
 type publishWorker struct {
-	a            *API
-	vp           *db.VotingProcess
-	questions    []db.VotingProcessQuestion
-	census       *db.Census
-	org          *db.Organization
-	user         *db.User
-	orgSigner    *ethereum.SignKeys
-	cspPubKey    []byte
-	nonTestSized bool
-	jobID        string
+	a         *API
+	vp        *db.VotingProcess
+	questions []db.VotingProcessQuestion
+	census    *db.Census
+	org       *db.Organization
+	user      *db.User
+	orgSigner *ethereum.SignKeys
+	cspPubKey []byte
+	jobID     string
 	// attempt counts the retries already scheduled (0 on the first attempt)
 	attempt int
 	// owner is the publish-claim token returned by ClaimVotingProcessForPublish: the worker
@@ -802,7 +800,7 @@ func (pw *publishWorker) flushMinedUnpersisted() bool {
 // run is one publish attempt: it builds and submits one election per question in a single
 // batch, confirms them on chain, and resubmits the not-yet-confirmed ones up to maxPublishRounds,
 // each at the nonce its recorded txs carry (the same-nonce rule) so no question gets two elections.
-// On success it marks the process published (one process counter unit). A failure is returned,
+// On success it marks the process published. A failure is returned,
 // marked transient when a later attempt may get past it, and finish decides between retrying and
 // abandoning; run itself never abandons.
 func (pw *publishWorker) run() (result *db.JobResult, err error) {
@@ -934,11 +932,6 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 	// growth check records it if this write fails)
 	if _, e := a.db.SetProcessPaymentBase(pw.vp.ID, pw.vp.OrgAddress, 0); e != nil {
 		log.Warnw("could not record the published process's payment base", "processId", pw.vp.ID.Hex(), "error", e)
-	}
-	if pw.nonTestSized {
-		if e := a.db.IncrementOrganizationProcessesCounter(pw.vp.OrgAddress); e != nil {
-			log.Warnw("could not update organization process counter", "error", e)
-		}
 	}
 	return &db.JobResult{Status: publishedQuestionStatus(pw.vp), ProcessID: internal.HexBytes(pw.vp.ID[:])}, nil
 }
