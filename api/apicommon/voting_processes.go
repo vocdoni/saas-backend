@@ -121,6 +121,23 @@ type ValidateProcessCensusRequest struct {
 	Census     CensusSpec        `json:"census"`
 }
 
+// AttestedCensusSizeRequest is the body of PUT /processes/{processId}/census/size.
+type AttestedCensusSizeRequest struct {
+	Size int64 `json:"size"`
+}
+
+// AttestedCensusSizeResponse answers PUT /processes/{processId}/census/size: the stored size and,
+// when open questions are resized on chain, the job doing it.
+type AttestedCensusSizeResponse struct {
+	Size  int64  `json:"size"`
+	JobID string `json:"jobId,omitempty"`
+}
+
+// AttestationSignerRequest is the body of PUT /processes/{processId}/attestation-signer.
+type AttestationSignerRequest struct {
+	Signer common.Address `json:"signer" swaggertype:"string" example:"0x71C7656EC7ab88b098defB751B7401B5f6d8976F"`
+}
+
 // UpdateProcessCensusResponse is the result of PUT and DELETE /processes/{processId}/census: the
 // number of members added to or removed from the census synchronously, plus the async job id that
 // raises each published election's maxCensusSize on-chain (empty when no on-chain update was

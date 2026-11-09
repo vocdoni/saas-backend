@@ -701,6 +701,9 @@ func (a *API) addProcessCensusMembers(
 	if err != nil {
 		return nil, err
 	}
+	if census.Attested != nil {
+		return nil, errors.ErrInvalidData.With("an attested census has no members: grow it with PUT /processes/{processId}/census/size")
+	}
 	// pay-per-process: the price is a function of the census size, so the census may grow
 	// only as far as the price already paid reaches. Past that the 402 carries what the
 	// growth costs, which POST /processes/{processId}/census/checkout sells — by card, or
