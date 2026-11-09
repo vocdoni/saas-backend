@@ -2,6 +2,7 @@ package stripe
 
 import (
 	"fmt"
+	"net/http"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
@@ -58,4 +59,31 @@ func TestValidateWebhookEventAPIVersion(t *testing.T) {
 
 	_, err = client.ValidateWebhookEvent(signed("2025-08-27.basil"))
 	c.Assert(err, qt.ErrorMatches, ".*API version.*")
+}
+
+// TestGetCustomerByAddress tells the three answers of a customer search apart: a hit is the
+// customer, an empty result wraps ErrCustomerNotFound, and a failed search is a Stripe error
+// a caller must not read as "no customer".
+func TestGetCustomerByAddress(t *testing.T) {
+	c := qt.New(t)
+	status, data := http.StatusOK, `[]`
+	stubStripeAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.Assert(r.URL.Path, qt.Equals, "/v1/customers/search")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(`{"object":"search_result","url":"/v1/customers/search","has_more":false,"data":` + data + `}`))
+	}))
+	client := NewClient(&Config{APIKey: "sk_test_stub"})
+
+	_, err := client.GetCustomerByAddress("0x01")
+	c.Assert(err, qt.ErrorIs, ErrCustomerNotFound)
+
+	data = `[{"id":"cus_1","object":"customer"}]`
+	customer, err := client.GetCustomerByAddress("0x01")
+	c.Assert(err, qt.IsNil)
+	c.Assert(customer.ID, qt.Equals, "cus_1")
+
+	status, data = http.StatusInternalServerError, `[]`
+	_, err = client.GetCustomerByAddress("0x01")
+	c.Assert(err, qt.ErrorMatches, ".*failed to search customers.*")
+	c.Assert(err, qt.Not(qt.ErrorIs), ErrCustomerNotFound)
 }

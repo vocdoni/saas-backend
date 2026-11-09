@@ -81,7 +81,24 @@ func (*Client) TopUpSessionByPaymentIntent(paymentIntentID string) (*stripeapi.C
 	return nil, nil
 }
 
-// GetCustomerByAddress retrieves a customer by the organization EVM address
+// UpdateCustomerMetadata updates a customer's metadata
+func (*Client) UpdateCustomerMetadata(customerID string, metadata map[string]string) error {
+	params := &stripeapi.CustomerParams{
+		Metadata: metadata,
+	}
+	_, err := stripecustomer.Update(customerID, params)
+	if err != nil {
+		return errors.ErrStripeError.Withf("failed to update customer metadata: %v", err)
+	}
+	return nil
+}
+
+// ErrCustomerNotFound is GetCustomerByAddress finding no customer stamped with the address;
+// a failed search (network, rate limit, outage) is errors.ErrStripeError instead.
+var ErrCustomerNotFound = fmt.Errorf("customer not found")
+
+// GetCustomerByAddress retrieves a customer by the organization EVM address: one stamped with
+// it in metadata.address. No such customer wraps ErrCustomerNotFound.
 func (*Client) GetCustomerByAddress(address string) (*stripeapi.Customer, error) {
 	customers := stripecustomer.Search(&stripeapi.CustomerSearchParams{
 		SearchParams: stripeapi.SearchParams{
@@ -89,12 +106,13 @@ func (*Client) GetCustomerByAddress(address string) (*stripeapi.Customer, error)
 			Limit: new(int64(1)),
 		},
 	})
-
-	if !customers.Next() {
-		return nil, errors.ErrStripeError.Withf("customer with address %s not found", address)
+	if customers.Next() {
+		return customers.Customer(), nil
 	}
-
-	return customers.Customer(), nil
+	if err := customers.Err(); err != nil {
+		return nil, errors.ErrStripeError.Withf("failed to search customers: %v", err)
+	}
+	return nil, fmt.Errorf("customer with address %s: %w", address, ErrCustomerNotFound)
 }
 
 // stripeLocale maps an organization language onto the locale of the embedded checkout

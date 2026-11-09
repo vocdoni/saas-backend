@@ -39,6 +39,14 @@ const (
 	MetadataKeyProcessTopUpFromCents = "process_topup_from_cents"
 	// MetadataKeyRequestedBy carries the email of the user who started the checkout.
 	MetadataKeyRequestedBy = "requested_by"
+	// MetadataKeyWalletTopUpSource is set on every top-up invoice and names what issued it:
+	// TopUpSourceCheckout or TopUpSourceManual. The invoice.paid webhook credits manual ones only.
+	MetadataKeyWalletTopUpSource = "wallet_topup_source"
+	// TopUpSourceCheckout marks the invoice a checkout session issued for its top-up, credited
+	// by the checkout events.
+	TopUpSourceCheckout = "checkout"
+	// TopUpSourceManual marks a manual top-up invoice (cmd/topup), credited when it is paid.
+	TopUpSourceManual = "manual"
 )
 
 // PaymentLineItem is one server-priced line of a one-time purchase.
@@ -59,15 +67,21 @@ type PaymentSessionParams struct {
 
 // CreatePaymentCheckoutSession opens an embedded one-time checkout session with
 // server-calculated line items (tax_behavior exclusive — Stripe Tax adds VAT on top),
-// reusing the organization's Stripe customer when one exists. The caller gets the
-// session back and must persist its ID before handing the client secret to the UI.
+// reusing the organization's Stripe customer when one exists. Only a search that finds none
+// (ErrCustomerNotFound) falls back to CustomerEmail, which makes Checkout create a customer: a
+// failed search aborts with its errors.ErrStripeError, so an outage never creates a duplicate
+// customer for the organization. The caller gets the session back and must persist its ID before
+// handing the client secret to the UI.
 func (c *Client) CreatePaymentCheckoutSession(params *PaymentSessionParams) (*stripeapi.CheckoutSession, error) {
 	checkoutParams := buildPaymentSessionParams(params)
 
 	customer, err := c.GetCustomerByAddress(params.OrgAddress)
-	if err != nil {
+	switch {
+	case errors.Is(err, ErrCustomerNotFound):
 		checkoutParams.CustomerEmail = new(params.CustomerEmail)
-	} else {
+	case err != nil:
+		return nil, err
+	default:
 		checkoutParams.Customer = &customer.ID
 		checkoutParams.CustomerUpdate = &stripeapi.CheckoutSessionCustomerUpdateParams{
 			Name:    new("auto"),
@@ -122,9 +136,17 @@ func buildPaymentSessionParams(params *PaymentSessionParams) *stripeapi.Checkout
 			Enabled: new(true),
 		},
 		BillingAddressCollection: new(string(stripeapi.CheckoutSessionBillingAddressCollectionAuto)),
-		// one-time purchases get a real invoice
+		// one-time purchases get a real invoice; Checkout copies no session metadata onto it, so the
+		// invoice names its organization here (searchable in the dashboard) and its source, which
+		// the invoice.paid webhook ignores
 		InvoiceCreation: &stripeapi.CheckoutSessionInvoiceCreationParams{
 			Enabled: new(true),
+			InvoiceData: &stripeapi.CheckoutSessionInvoiceCreationInvoiceDataParams{
+				Metadata: map[string]string{
+					MetadataKeyWalletTopUpOrg:    params.Metadata[MetadataKeyWalletTopUpOrg],
+					MetadataKeyWalletTopUpSource: TopUpSourceCheckout,
+				},
+			},
 		},
 		// session-level metadata: a payment session has no SubscriptionData, and the
 		// webhook needs the routing identity back from the session itself
@@ -336,7 +358,45 @@ func (s *Service) creditTopUpSession(session *stripeapi.CheckoutSession) error {
 		log.Infow("wallet top-up credited",
 			"orgAddress", orgAddress.String(), "amountCents", net, "sessionId", session.ID)
 	}
+	s.stampTopUpCustomer(session, orgAddress)
 	return nil
+}
+
+// stampTopUpCustomer stamps the organization address on the metadata of the customer a top-up
+// session created or reused, when it has none, so GetCustomerByAddress finds it from then on: the
+// next checkout reuses it instead of creating another, and cmd/topup bills it. Best effort: a
+// failure is logged and never fails the credit. A customer stamped for another organization is
+// left alone, and so is an unstamped one when another customer already carries the organization
+// (or the search for one fails): two customers stamped with one organization would make the
+// lookup ambiguous, so it is logged for the operator to merge them by hand.
+func (s *Service) stampTopUpCustomer(session *stripeapi.CheckoutSession, orgAddress common.Address) {
+	if session.Customer == nil || session.Customer.ID == "" {
+		return
+	}
+	customer, err := s.client.GetCustomer(session.Customer.ID)
+	if err != nil {
+		log.Warnw("could not read the customer of a top-up session", "customer", session.Customer.ID,
+			"sessionId", session.ID, "error", err.Error())
+		return
+	}
+	if customer.Metadata["address"] != "" {
+		return
+	}
+	stampedCustomer, err := s.client.GetCustomerByAddress(orgAddress.String())
+	if err != nil && !errors.Is(err, ErrCustomerNotFound) {
+		log.Warnw("could not search the customer of a top-up organization, its customer is left unstamped",
+			"customer", customer.ID, "orgAddress", orgAddress.String(), "error", err.Error())
+		return
+	}
+	if err == nil && stampedCustomer.ID != customer.ID {
+		log.Warnw("another customer already carries the organization of a top-up, its customer is left unstamped",
+			"customer", customer.ID, "stampedCustomer", stampedCustomer.ID, "orgAddress", orgAddress.String())
+		return
+	}
+	if err := s.client.UpdateCustomerMetadata(customer.ID, map[string]string{"address": orgAddress.String()}); err != nil {
+		log.Warnw("could not stamp the organization address on a top-up customer", "customer", customer.ID,
+			"orgAddress", orgAddress.String(), "error", err.Error())
+	}
 }
 
 // sessionProcessTopUp parses the process (and census headroom) a top-up session was opened for.
