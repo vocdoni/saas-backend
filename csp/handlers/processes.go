@@ -219,6 +219,10 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrOrganizationNotFound.WithErr(err).Write(w)
 		return
 	}
+	if census.Attested != nil {
+		c.attestedResend(w, r, &req, auth, org)
+		return
+	}
 	member, ok := c.orgMemberFromAuth(w, vp.OrgAddress, auth)
 	if !ok {
 		return

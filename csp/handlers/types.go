@@ -26,13 +26,31 @@ type AuthRequest struct {
 	// ":" + trim(password).normalize("NFC")))), as in apicommon.OrgMember.Password. Only read when the
 	// census auth fields include "password".
 	Password string `json:"password,omitempty"`
+	// Attestation and Signature authenticate a voter of an attested census in place of the member
+	// fields above; Contact and Salt open its contactHash when the census uses 2FA. They are only
+	// read for an attested census.
+	Attestation *AttestationPayload `json:"attestation,omitempty"`
+	Signature   internal.HexBytes   `json:"signature,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Contact     string              `json:"contact,omitempty"`
+	Salt        internal.HexBytes   `json:"salt,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
-// AuthResendRequest defines the payload for the 2FA resend request.
+// AttestationPayload is the EIP-712 Attestation message an integrator signed for one voter.
+type AttestationPayload struct {
+	ProcessID   internal.HexBytes `json:"processId" swaggertype:"string" format:"hex" example:"64b7f0e0a1b2c3d4e5f60718"`
+	VoterID     internal.HexBytes `json:"voterId" swaggertype:"string" format:"hex" example:"deadbeef"`
+	ContactHash internal.HexBytes `json:"contactHash" swaggertype:"string" format:"hex" example:"deadbeef"`
+	ExpiresAt   uint64            `json:"expiresAt" example:"1762700000"`
+}
+
+// AuthResendRequest defines the payload for the 2FA resend request. A memberbase census reads Email
+// or Phone; an attested census reads Contact and the Salt of the attestation the token was issued for.
 type AuthResendRequest struct {
 	AuthToken internal.HexBytes `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
 	Email     string            `json:"email"`
 	Phone     string            `json:"phone"`
+	Contact   string            `json:"contact,omitempty"`
+	Salt      internal.HexBytes `json:"salt,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
 // AuthResponse defines the payload for the authentication response, including

@@ -25,6 +25,55 @@ func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 	ctype notifications.ChallengeType, lang string,
 	orgName, orgLogo string, orgAddress common.Address,
 ) (internal.HexBytes, error) {
+	return c.issueAuthToken(anchorID, uID, nil, to, ctype, lang,
+		notifications.OrganizationInfo{Address: orgAddress, Name: orgName, Logo: orgLogo})
+}
+
+// AttestedAuthToken issues the token of an attested voter of a census with 2FA: like AuthToken, it
+// sends the challenge to the attested contact, and the token records the attestation.
+func (c *CSP) AttestedAuthToken(anchorID, uID internal.HexBytes, attestation *db.CSPAuthAttestation,
+	to string, ctype notifications.ChallengeType, lang string, org notifications.OrganizationInfo,
+) (internal.HexBytes, error) {
+	if attestation == nil || to == "" || ctype == "" {
+		return nil, ErrInvalidAuthToken
+	}
+	return c.issueAuthToken(anchorID, uID, attestation, to, ctype, lang, org)
+}
+
+// AttestedAuthOnlyToken issues the pre-verified token of an attested voter of a census without 2FA.
+// It returns the voter's latest token when that one is verified and was issued under the active
+// signer, so repeated logins reuse it; otherwise it creates one, capped per voter per day by the
+// challenge-send counter.
+func (c *CSP) AttestedAuthOnlyToken(anchorID, uID internal.HexBytes, attestation *db.CSPAuthAttestation,
+) (internal.HexBytes, error) {
+	if len(anchorID) == 0 {
+		return nil, ErrNoAnchorID
+	}
+	if len(uID) == 0 {
+		return nil, ErrNoUserID
+	}
+	if attestation == nil {
+		return nil, ErrInvalidAuthToken
+	}
+	last, err := c.Storage.LastCSPAuth(uID, anchorID)
+	if err != nil && err != db.ErrTokenNotFound {
+		log.Warnw("error getting last token", "userID", uID, "anchorID", anchorID, "error", err)
+		return nil, ErrStorageFailure
+	}
+	if last != nil && last.Verified && last.Attestation != nil && last.Attestation.Signer == attestation.Signer {
+		return last.Token, nil
+	}
+	if _, err := c.claimDailyChallengeSend(uID, anchorID); err != nil {
+		return nil, err
+	}
+	return c.createAuthOnlyToken(anchorID, uID, attestation)
+}
+
+// issueAuthToken is AuthToken, recording on the token the attestation it was issued against (nil for a
+// member of a memberbase census).
+func (c *CSP) issueAuthToken(anchorID, uID internal.HexBytes, attestation *db.CSPAuthAttestation, to string,
+	ctype notifications.ChallengeType, lang string, orgInfo notifications.OrganizationInfo,
+) (internal.HexBytes, error) {
 	// check the input parameters
 	if len(anchorID) == 0 {
 		return nil, ErrNoAnchorID
@@ -35,7 +84,7 @@ func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 
 	// For auth-only cases (no challenge type and no destination), create a pre-verified token
 	if to == "" && ctype == "" {
-		return c.createAuthOnlyToken(anchorID, uID)
+		return c.createAuthOnlyToken(anchorID, uID, attestation)
 	}
 
 	// get last token for the user and anchor
@@ -75,7 +124,7 @@ func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 	// generate a new token, secret and code
 	token, secret, code := c.generateToken()
 	// create the new token
-	if err := c.Storage.SetCSPAuth(token, uID, anchorID, secret); err != nil {
+	if err := c.Storage.SetAttestedCSPAuth(token, uID, anchorID, secret, attestation); err != nil {
 		log.Warnw("error setting new token",
 			"userID", uID,
 			"anchorID", anchorID,
@@ -89,11 +138,6 @@ func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 		"token", token)
 	// compose the notification challenge, advertising the OTP validity window
 	// (the challenge TTL, not the notification cooldown) as the code's expiry
-	orgInfo := notifications.OrganizationInfo{
-		Address: orgAddress,
-		Name:    orgName,
-		Logo:    orgLogo,
-	}
 	ch, err := notifications.NewNotificationChallenge(ctype, lang, uID, anchorID, to, code, orgInfo, c.notificationTTL.String())
 	if err != nil {
 		log.Warnw("error composing notification challenge",
@@ -462,8 +506,9 @@ func (*CSP) verifySolution(secret, solution string) bool {
 
 // createAuthOnlyToken creates a pre-verified token for auth-only censuses
 // that don't require challenge verification. It generates a token and immediately
-// marks it as verified.
-func (c *CSP) createAuthOnlyToken(anchorID, uID internal.HexBytes) (internal.HexBytes, error) {
+// marks it as verified. attestation is nil except for an attested voter.
+func (c *CSP) createAuthOnlyToken(anchorID, uID internal.HexBytes, attestation *db.CSPAuthAttestation,
+) (internal.HexBytes, error) {
 	// generate a new token (we don't need the code for auth-only)
 	bToken, err := uuid.New().MarshalBinary()
 	if err != nil {
@@ -475,7 +520,7 @@ func (c *CSP) createAuthOnlyToken(anchorID, uID internal.HexBytes) (internal.Hex
 	}
 
 	// create the new token (auth-only tokens need no OTP secret)
-	if err := c.Storage.SetCSPAuth(bToken, uID, anchorID, ""); err != nil {
+	if err := c.Storage.SetAttestedCSPAuth(bToken, uID, anchorID, "", attestation); err != nil {
 		log.Warnw("error setting new token",
 			"userID", uID,
 			"anchorID", anchorID,
