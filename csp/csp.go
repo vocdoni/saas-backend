@@ -9,6 +9,7 @@ import (
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
+	"github.com/vocdoni/saas-backend/csp/attestation"
 	"github.com/vocdoni/saas-backend/csp/notifications"
 	"github.com/vocdoni/saas-backend/csp/signers/saltedkey"
 	"github.com/vocdoni/saas-backend/db"
@@ -252,6 +253,17 @@ func (c *CSP) PubKey() (internal.HexBytes, error) {
 		return nil, err
 	}
 	return ethcrypto.CompressPubkey(pub), nil
+}
+
+// AttestationDomain returns the EIP-712 domain of the attestations this CSP accepts. Its
+// verifyingContract is the address of the CSP root key, so an attestation is valid in one
+// environment only.
+func (c *CSP) AttestationDomain() (attestation.Domain, error) {
+	pub, err := c.Signer.ECDSAPubKey()
+	if err != nil {
+		return attestation.Domain{}, err
+	}
+	return attestation.Domain{VerifyingContract: ethcrypto.PubkeyToAddress(*pub)}, nil
 }
 
 // BlindPubKey returns the CSP blind-signature root public key, serialized as a compressed
