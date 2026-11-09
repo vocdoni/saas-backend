@@ -56,7 +56,7 @@ scripts/test-db-recovery.sh
    0600): DB `saas-lts`, `VOCDONI_VOCDONIAPI=https://api.vocdoni.net/v2`, your private key,
    dummy Stripe, mail/SMS blanked. No compose override is needed: the base compose hardcodes
    `VOCDONI_MONGOURL=…/saasdb`, but `VOCDONI_MONGODB` from `.env` wins over the URL's database
-   (`db/mongo.go`). Smoke: `/ping`, `GET /plans` (restored data), migration log scan
+   (`db/mongo.go`). Smoke: `/ping`, restored collection counts, migration log scan
    (lts code = prod parity, so migrations are a no-op on a fresh backup).
 5. **Frontend** — `pnpm dev` in `dr-main` with `SAAS_URL=http://<DR_HOST>:8080` and
    `VOCDONI_ENVIRONMENT=prod` (there is no `lts` value; `prod` *is* LTS for the frontend's
@@ -73,7 +73,7 @@ Expected limitations:
 - On-chain writes for **restored** orgs fail: org signers derive from `VOCDONI_SECRET`, which
   is random unless you export the production value as `RECOVERY_SECRET`. Newly created orgs
   sign fine (funded by your `VOCDONI_PRIVATEKEY`).
-- Stripe checkout/billing endpoints are non-functional (dummy keys; restored `plans` serve reads).
+- Stripe checkout and top-up endpoints are non-functional (dummy keys).
 - No emails or SMS are ever sent (SMTP/Twilio blanked).
 
 ### Teardown

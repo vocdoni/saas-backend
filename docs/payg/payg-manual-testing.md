@@ -99,7 +99,7 @@ service funds it on the local chain.
 docker compose --profile with-vocone --profile local-smtp up -d
 # forward real signed webhooks from Stripe to the local API — keep this running;
 # it prints the whsec_… that must be in .env (restart the api after setting it)
-stripe listen --forward-to localhost:8080/subscriptions/webhook
+stripe listen --forward-to localhost:8080/payments/webhook
 ```
 
 The pinned `stripe-go` (v87, API version `2026-09-30.endive`) matches the current Stripe

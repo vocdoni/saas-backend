@@ -7,7 +7,7 @@ This file provides guidance to coding agents (Claude Code, Codex, etc.) when wor
 Vocdoni SaaS backend is a Go service that lets multiple users act on behalf of a single
 organization on the Vocdoni Chain. It also acts as a **remote signer** for the Vocdoni SDK,
 making the service transparent to SDK consumers. It manages organizations, members, censuses,
-voting processes, subscriptions (Stripe), and a CSP (Credential Service Provider) that
+voting processes, wallet billing (Stripe), and a CSP (Credential Service Provider) that
 authenticates voters and signs their ballots.
 
 ## Commands
@@ -140,7 +140,8 @@ Component packages (each is a focused service composed in `main.go`):
   `integratorLimits` override granting managed orgs, or without one an active non-default integrator
   plan; API keys alone do not count).
   There is no command to switch it later.
-- **`stripe/`** — Stripe client, checkout/portal sessions, and webhook handling for billing.
+- **`stripe/`** — Stripe client, one-time wallet top-up checkouts, and the webhooks that credit,
+  refund or dispute them (subscription, invoice and product events are acknowledged and ignored).
 - **`objectstorage/`** — S3-like object storage (images) backed by Mongo, with upload/download handlers.
 - **`errors/`** — typed API `Error` (code + HTTP status + optional data), JSON-serializable; handlers
   return these. Predefined errors in `errors_definition.go`.

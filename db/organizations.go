@@ -716,11 +716,6 @@ func (ms *MongoStorage) DeleteOrganizationMetaKeys(address common.Address, keysT
 	return nil
 }
 
-// DecrementOrganizationSubOrgsCounter atomically decrements the suborgs counter for the organization with the given address.
-func (ms *MongoStorage) DecrementOrganizationSubOrgsCounter(address common.Address) error {
-	return ms.addToOrganizationCounter(address, "subOrgs", -1)
-}
-
 // IncrementOrganizationSentEmailsCounter atomically increments the emails counter for the organization with the given address.
 func (ms *MongoStorage) IncrementOrganizationSentEmailsCounter(address common.Address) error {
 	return ms.addToOrganizationCounter(address, "sentEmails", 1)

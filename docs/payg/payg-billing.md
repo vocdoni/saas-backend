@@ -90,7 +90,7 @@ organization, whose processes its integrator pays. It is created on its first cr
   it to `key.OrgAddress` (403 `ErrAPIKeyNotAllowed` otherwise).
 - `POST /organizations/{orgAddress}/wallet/topup {amountCents, returnURL, locale}` (Admin, JWT
   only) opens a `mode: payment` checkout for €1–€100 000 net; Stripe Tax adds VAT on top. The
-  balance moves only when the verified webhook credits it. `GET /subscriptions/checkout/{sessionId}`
+  balance moves only when the verified webhook credits it. `GET /wallet/checkout/{sessionId}`
   reports the session's Stripe state to the organization's admins; the money is there once
   `GET /organizations/{orgAddress}/wallet` shows the `topup` row, so poll that. A
   delayed payment (SEPA) shows nothing until it is paid; one that fails or expires never shows a
@@ -113,7 +113,7 @@ Each row carries `kind`, `amountCents`, `createdAt`, and where they apply `proce
 (`refund:<process id>`, `publishfail:<process id>:<attempt>`, `teardownaddon:<org>:<addOn>:<process id>`,
 `striperefund:<refund id>`, the session id of a top-up) are internal and never in the response: a client
 tells credit-backs of one process apart by `withheldCents`/`withheldAddOns`, amount and `createdAt`, and finds
-its top-up by amount and `createdAt` (or reads the session with `GET /subscriptions/checkout/{sessionId}`).
+its top-up by amount and `createdAt` (or reads the session with `GET /wallet/checkout/{sessionId}`).
 
 **The ledger is the source of truth** for money. Every movement — a top-up, a process payment, a
 credit-back, a Stripe refund or dispute and their reversals — is one conditional update of the
@@ -404,8 +404,8 @@ credit is in the wallet and the process is published by hand. The next payment r
 `stripe/webhook.go` routes the one-time payment events:
 
 - `checkout.session.completed` / `checkout.session.async_payment_succeeded`: dispatched on
-  `wallet_topup_org` **first** — every payment session carries it; a session without it is a
-  subscription checkout, owned by the subscription webhooks. A session whose `payment_status`
+  `wallet_topup_org` **first** — every payment session carries it; a session without it (a checkout of the retired
+  subscription model) is ignored. A session whose `payment_status`
   is not `paid` (a delayed method still clearing) credits nothing yet. The net paid amount
   (subtotal − discount, VAT excluded) is credited under the session id, with the payment intent
   and the VAT-included total a later refund needs; only then is `voting_process_id` (and the
@@ -464,8 +464,8 @@ override, an active subscription to a non-default plan that granted them — the
 integrator check, override first (an override of 0 revoked the status), except for the default
 plan, which granted managed organizations to every organization. Holding API keys or managing
 organizations was not enough on its own, since the default plan allowed both. The migration
-leaves `integratorLimits` and the managed counters in place: nothing reads them, and a rollback
-finds its integrators again (until a plan is next written, which drops the plan's field). Subscribing to an integrator plan in Stripe no longer grants integrator status:
+leaves `integratorLimits` and the managed counters in place for a rollback; migration 0036
+archives and removes them (see "Legacy subscriptions" below). Subscribing to an integrator plan in Stripe no longer grants integrator status:
 the organization has to be created with `integrator: true`. There is no command to flag an
 existing organization later.
 
@@ -841,6 +841,37 @@ up.
   `brandingClaimedBy` and `brandingClaimedAt`, and `customUrlPaidAt`, `customUrlClaimedBy` and
   `customUrlClaimedAt` (the once-per-organization custom URL, no migration: absent means unpaid).
 
+## Legacy subscriptions (migration 0036)
+
+The plan and subscription model is gone. Removed routes:
+
+- `GET /plans` (removed)
+- `POST /subscriptions/checkout` (removed)
+- `GET /subscriptions/{orgAddress}/portal` (removed)
+- `GET /organizations/{orgAddress}/subscription` (removed)
+
+The `subscription` and `counters` fields were removed from the organization responses; `GET /integrator/organizations` keeps `counters` (`sentSMS`, `sentEmails`, `sentVotes` and the live number of published `processes`) on each managed organization. The Stripe webhook moved to `POST /payments/webhook` and the top-up session read to
+`GET /wallet/checkout/{sessionId}`; the webhook acknowledges and ignores subscription, invoice and
+product events. The team updates the webhook endpoint URL in Stripe after the deploy.
+
+Migration 0036, per organization holding legacy billing fields:
+
+- archives into `legacySubscriptions` (keyed by the organization address) the `subscription`,
+  `counters`, `integratorLimits`, `tokensPurchased`, `tokensRemaining` and `managedBy` fields as
+  they were, the `plan` document the organization was subscribed to, and `archivedAt`. The write
+  uses `$setOnInsert`, so a re-run keeps the first run's archive;
+- then unsets `subscription`, `integratorLimits`, `tokensPurchased`, `tokensRemaining` and the
+  `users`, `processes`, `subOrgs`, `managedOrgs` and `managedProcesses` counters. `counters.sentSMS`,
+  `sentEmails` and `sentVotes` stay: `GET /integrator` sums them and `GET /integrator/organizations`
+  (and the `PUT` response) returns them per managed organization, with the live `processes` count;
+- after the loop, drops `plans`, and drops the unused `subscriptions` collection when it is empty
+  (when it holds documents it logs a warning with the count and leaves it).
+
+It grants nothing: the team credits wallets and cancels the Stripe subscriptions by hand.
+
+The archived `subscription` is copied without its billing `email`, so the archive holds no
+personal data.
+
 ## Testing the flow
 
 Three layers, from hermetic to manual:
@@ -848,7 +879,7 @@ Three layers, from hermetic to manual:
 1. **Signed-webhook e2e (CI, no network, no cards)** —
    `api/stripe_checkout_webhook_test.go` and `api/stripe_refund_webhook_test.go` sign event
    payloads with the real Stripe v1 signature scheme (`stripe-go/webhook.GenerateTestSignedPayload`)
-   and POST them to `/subscriptions/webhook`, driving signature validation, event parsing, the
+   and POST them to `/payments/webhook`, driving signature validation, event parsing, the
    wallet credit, server-side publication and refund sync through the production code path.
    Card numbers never appear here: the card only matters inside Stripe's browser step, and the
    webhook is Stripe's signed statement of the outcome.
@@ -862,7 +893,7 @@ Three layers, from hermetic to manual:
    setup, curl sequence, a copy-paste payment-page harness) is
    [`payg-manual-testing.md`](payg-manual-testing.md). Run the stack with test-mode
    keys, forward webhooks with
-   `stripe listen --forward-to localhost:8080/subscriptions/webhook`,
+   `stripe listen --forward-to localhost:8080/payments/webhook`,
    and use Stripe's standard test data (authoritative list:
    https://docs.stripe.com/testing — any future expiry, any CVC, any postcode):
 
@@ -894,5 +925,5 @@ Three layers, from hermetic to manual:
   ledger row. The HackMD spec needs the same update.
 - An open top-up checkout of an organization erased by `cmd/userdel` stays payable until Stripe
   expires it, and paying it credits the kept wallet.
-- Legacy subscriptions convert to process credits and the subscription system is
-  removed in the follow-up PR (see the spec's "Legacy plans transition").
+- Legacy subscriptions are not converted by code: migration 0036 archives them and the team
+  credits wallets by hand (see "Legacy subscriptions").

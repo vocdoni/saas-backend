@@ -187,10 +187,6 @@ definitions:
       communications:
         description: Whether the organization has enabled communications
         type: boolean
-      counters:
-        allOf:
-        - $ref: '#/definitions/apicommon.SubscriptionUsage'
-        description: Usage counters for the organization
       country:
         description: The country where the organization is based
         type: string
@@ -258,10 +254,6 @@ definitions:
       subdomain:
         description: The organization's subdomain
         type: string
-      subscription:
-        allOf:
-        - $ref: '#/definitions/apicommon.SubscriptionDetails'
-        description: Subscription details for the organization
       timezone:
         description: The organization's timezone
         type: string
@@ -303,10 +295,6 @@ definitions:
       communications:
         description: Whether the organization has enabled communications
         type: boolean
-      counters:
-        allOf:
-        - $ref: '#/definitions/apicommon.SubscriptionUsage'
-        description: Usage counters for the organization
       country:
         description: The country where the organization is based
         type: string
@@ -376,10 +364,6 @@ definitions:
       subdomain:
         description: The organization's subdomain
         type: string
-      subscription:
-        allOf:
-        - $ref: '#/definitions/apicommon.SubscriptionDetails'
-        description: Subscription details for the organization
       timezone:
         description: The organization's timezone
         type: string
@@ -610,6 +594,17 @@ definitions:
         description: JWT authentication token
         type: string
     type: object
+  apicommon.ManagedOrganizationCounters:
+    properties:
+      processes:
+        type: integer
+      sentEmails:
+        type: integer
+      sentSMS:
+        type: integer
+      sentVotes:
+        type: integer
+    type: object
   apicommon.ManagedOrganizationInfo:
     properties:
       address:
@@ -625,8 +620,11 @@ definitions:
         type: boolean
       counters:
         allOf:
-        - $ref: '#/definitions/apicommon.SubscriptionUsage'
-        description: Usage counters for the organization
+        - $ref: '#/definitions/apicommon.ManagedOrganizationCounters'
+        description: |-
+          Counters are the messages and relayed votes sent on behalf of the organization and its
+          published processes. Only the integrator's listing and update expose them, per managed
+          organization.
       country:
         description: The country where the organization is based
         type: string
@@ -701,10 +699,6 @@ definitions:
       subdomain:
         description: The organization's subdomain
         type: string
-      subscription:
-        allOf:
-        - $ref: '#/definitions/apicommon.SubscriptionDetails'
-        description: Subscription details for the organization
       timezone:
         description: The organization's timezone
         type: string
@@ -898,10 +892,6 @@ definitions:
       communications:
         description: Whether the organization has enabled communications
         type: boolean
-      counters:
-        allOf:
-        - $ref: '#/definitions/apicommon.SubscriptionUsage'
-        description: Usage counters for the organization
       country:
         description: The country where the organization is based
         type: string
@@ -965,10 +955,6 @@ definitions:
       subdomain:
         description: The organization's subdomain
         type: string
-      subscription:
-        allOf:
-        - $ref: '#/definitions/apicommon.SubscriptionDetails'
-        description: Subscription details for the organization
       timezone:
         description: The organization's timezone
         type: string
@@ -1105,21 +1091,6 @@ definitions:
         items:
           $ref: '#/definitions/apicommon.OrganizationRole'
         type: array
-    type: object
-  apicommon.OrganizationSubscriptionInfo:
-    properties:
-      plan:
-        allOf:
-        - $ref: '#/definitions/apicommon.SubscriptionPlan'
-        description: Subscription plan details
-      subscriptionDetails:
-        allOf:
-        - $ref: '#/definitions/apicommon.SubscriptionDetails'
-        description: Subscription details
-      usage:
-        allOf:
-        - $ref: '#/definitions/apicommon.SubscriptionUsage'
-        description: Current usage metrics
     type: object
   apicommon.OrganizationType:
     properties:
@@ -1482,190 +1453,6 @@ definitions:
       status:
         example: ENDED
         type: string
-    type: object
-  apicommon.SubscriptionCheckout:
-    properties:
-      address:
-        description: Organization address
-        items:
-          type: integer
-        type: array
-      billingPeriod:
-        description: Billing period (e.g., "month" or "year")
-        type: string
-      locale:
-        description: Locale for the checkout page
-        type: string
-      lookupKey:
-        description: Plan lookup key (the plan's Stripe product ID)
-        type: string
-      returnURL:
-        description: URL to return to after checkout
-        type: string
-    type: object
-  apicommon.SubscriptionDetails:
-    properties:
-      active:
-        description: Whether the subscription is active
-        type: boolean
-      email:
-        description: Email associated with the subscription
-        type: string
-      lastPaymentDate:
-        description: Date of the last payment
-        type: string
-      planId:
-        description: ID of the subscription plan (its Stripe product ID)
-        type: string
-      renewalDate:
-        description: Date when the subscription will renew
-        type: string
-      startDate:
-        description: Date when the subscription started
-        type: string
-    type: object
-  apicommon.SubscriptionFeatures:
-    properties:
-      2FAemail:
-        description: Two-factor authentication email limit
-        type: integer
-      2FAsms:
-        description: Two-factor authentication sms limit
-        type: integer
-      anonymous:
-        description: |-
-          The plan's stored zk-SNARK anonymous voting flag, which does not gate census.anonymous. It is forced
-          to false while the service has anonymous voting temporarily off, and passed through unchanged otherwise.
-        type: boolean
-      emailReminder:
-        description: Whether email reminders are available
-        type: boolean
-      liveResults:
-        description: Whether live results are available
-        type: boolean
-      liveStreaming:
-        description: Whether live streaming is available
-        type: boolean
-      overwrite:
-        description: Whether census overwrite is allowed
-        type: boolean
-      personalization:
-        description: Whether UI personalization is available
-        type: boolean
-      phoneSupport:
-        description: Whether eligible for phone support
-        type: boolean
-      whiteLabel:
-        description: Whether white labeling is available
-        type: boolean
-    type: object
-  apicommon.SubscriptionPlan:
-    properties:
-      default:
-        description: Whether this is the default plan
-        type: boolean
-      features:
-        allOf:
-        - $ref: '#/definitions/apicommon.SubscriptionFeatures'
-        description: Features available in this plan
-      id:
-        description: Unique identifier for the plan (its Stripe product ID)
-        type: string
-      monthlyPrice:
-        description: Monthly price
-        type: integer
-      name:
-        description: Human-readable name of the plan
-        type: string
-      organization:
-        allOf:
-        - $ref: '#/definitions/apicommon.SubscriptionPlanLimits'
-        description: Organization limits for this plan
-      stripeMonthlyPriceId:
-        description: Stripe monthly price ID
-        type: string
-      stripeYearlyPriceId:
-        description: Stripe yearly price ID
-        type: string
-      votingTypes:
-        allOf:
-        - $ref: '#/definitions/apicommon.SubscriptionVotingTypes'
-        description: Voting types available in this plan
-      yearlyPrice:
-        description: Yearly price
-        type: integer
-    type: object
-  apicommon.SubscriptionPlanLimits:
-    properties:
-      customPlan:
-        description: Whether this is a custom plan
-        type: boolean
-      customURL:
-        description: Whether custom URLs are allowed
-        type: boolean
-      drafts:
-        description: How many draft processes are allowed
-        type: integer
-      maxCensus:
-        description: Maximum number of census allowed
-        type: integer
-      maxDaysDuration:
-        description: Maximum duration of voting processes in days
-        type: integer
-      maxProcesses:
-        description: Maximum number of voting processes allowed
-        type: integer
-      maxVotes:
-        description: Maximum number of votes that may be relayed; 0 means unlimited
-        type: integer
-      subOrgs:
-        description: Maximum number of sub-organizations allowed
-        type: integer
-      teamMembers:
-        description: Maximum number of users allowed
-        type: integer
-    type: object
-  apicommon.SubscriptionUsage:
-    properties:
-      processes:
-        description: Number of voting processes created
-        type: integer
-      sentEmails:
-        description: Number of emails sent
-        type: integer
-      sentSMS:
-        description: Number of SMS messages sent
-        type: integer
-      sentVotes:
-        description: Number of votes relayed
-        type: integer
-      subOrgs:
-        description: Number of sub-organizations created
-        type: integer
-      users:
-        description: Number of users in the organization
-        type: integer
-    type: object
-  apicommon.SubscriptionVotingTypes:
-    properties:
-      approval:
-        description: Whether approval voting is available
-        type: boolean
-      cumulative:
-        description: Whether cumulative voting is available
-        type: boolean
-      multiple:
-        description: Whether multiple choice voting is available
-        type: boolean
-      ranked:
-        description: Whether ranked choice voting is available
-        type: boolean
-      single:
-        description: Whether single choice voting is available
-        type: boolean
-      weighted:
-        description: Whether weighted voting is available
-        type: boolean
     type: object
   apicommon.UnifiedJobResult:
     properties:
@@ -2223,29 +2010,6 @@ definitions:
         format: hex
         type: string
     type: object
-  db.Features:
-    properties:
-      2FAemail:
-        type: integer
-      2FAsms:
-        type: integer
-      anonymous:
-        type: boolean
-      emailReminder:
-        type: boolean
-      liveResults:
-        type: boolean
-      liveStreaming:
-        type: boolean
-      overwrite:
-        type: boolean
-      personalization:
-        type: boolean
-      phoneSupport:
-        type: boolean
-      whiteLabel:
-        type: boolean
-    type: object
   db.JobStatus:
     enum:
     - pending
@@ -2314,60 +2078,6 @@ definitions:
     x-enum-varnames:
     - OrgMemberTwoFaFieldEmail
     - OrgMemberTwoFaFieldPhone
-  db.Plan:
-    properties:
-      default:
-        type: boolean
-      features:
-        $ref: '#/definitions/db.Features'
-      freeTrialDays:
-        type: integer
-      id:
-        type: string
-      monthlyPrice:
-        type: integer
-      name:
-        type: string
-      organization:
-        $ref: '#/definitions/db.PlanLimits'
-      public:
-        description: |-
-          Public reports whether the plan is listed on the public /plans catalog. Private plans
-          (custom per-customer contracts and the internal free integrator tier) are hidden from
-          the listing but remain visible to their own subscriber via the subscription payload.
-        type: boolean
-      stripeMonthlyPriceID:
-        type: string
-      stripeYearlyPriceID:
-        type: string
-      votingTypes:
-        $ref: '#/definitions/db.VotingTypes'
-      yearlyPrice:
-        type: integer
-    type: object
-  db.PlanLimits:
-    properties:
-      customPlan:
-        type: boolean
-      customURL:
-        type: boolean
-      drafts:
-        type: integer
-      maxCensus:
-        type: integer
-      maxDaysDuration:
-        description: Max process duration in days
-        type: integer
-      maxProcesses:
-        type: integer
-      maxVotes:
-        description: Max votes that may be relayed; 0 means unlimited.
-        type: integer
-      subOrgs:
-        type: integer
-      teamMembers:
-        type: integer
-    type: object
   db.ProcessAddOns:
     properties:
       branding:
@@ -2540,21 +2250,6 @@ definitions:
         format: hex
         type: string
     type: object
-  db.VotingTypes:
-    properties:
-      approval:
-        type: boolean
-      cumulative:
-        type: boolean
-      multiple:
-        type: boolean
-      ranked:
-        type: boolean
-      single:
-        type: boolean
-      weighted:
-        type: boolean
-    type: object
   db.WalletLedgerEntry:
     properties:
       amountCents:
@@ -2612,11 +2307,9 @@ definitions:
       payment_status:
         description: |-
           PaymentStatus is the payment outcome of the session, in every mode: "paid",
-          "unpaid" or "no_payment_required" (e.g. a subscription that starts with a trial).
+          "unpaid" or "no_payment_required".
         type: string
       status:
-        type: string
-      subscription_status:
         type: string
     type: object
   handlers.AuthRequest:
@@ -4623,45 +4316,6 @@ paths:
       summary: Update organization meta information
       tags:
       - organizations
-  /organizations/{orgAddress}/subscription:
-    get:
-      consumes:
-      - application/json
-      description: Get the subscription information for an organization
-      parameters:
-      - description: Organization address
-        in: path
-        name: orgAddress
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.OrganizationSubscriptionInfo'
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization not found or no subscription
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Get organization subscription
-      tags:
-      - organizations
   /organizations/{orgAddress}/ticket:
     post:
       consumes:
@@ -4773,8 +4427,7 @@ paths:
           schema:
             type: string
         "400":
-          description: Invalid input data, or the organization's plan allows no more
-            users
+          description: Invalid input data, or the admin and manager limit is reached
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -5147,7 +4800,7 @@ paths:
         the payment is verified by webhook — never before. The amount is EUR cents, VAT
         excluded (Stripe Tax adds VAT at checkout), between €1 and €100 000. 403 (40181) for
         a managed organization. Requires an Admin user session; not callable with an API key.
-        GET /subscriptions/checkout/{sessionId} reports the session's Stripe state; the money
+        GET /wallet/checkout/{sessionId} reports the session's Stripe state; the money
         is in once GET /organizations/{orgAddress}/wallet shows the `topup` row: poll that. A
         delayed payment (SEPA) shows nothing until it is paid; one that fails or expires never
         shows a row, and a new top-up is needed.
@@ -5244,34 +4897,45 @@ paths:
       summary: Get available organization types
       tags:
       - organizations
-  /plans:
-    get:
+  /payments/webhook:
+    post:
       consumes:
       - application/json
-      description: Get the list of publicly available subscription plans
+      description: |-
+        Process incoming webhook events from Stripe: wallet top-up and process payment checkouts,
+        refunds and disputes, with idempotency. Any other event is acknowledged and ignored.
+      parameters:
+      - description: Stripe webhook payload
+        in: body
+        name: body
+        required: true
+        schema:
+          type: string
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/db.Plan'
-            type: array
-        "500":
-          description: Internal server error
+            type: string
+        "400":
+          description: Bad Request
           schema:
-            $ref: '#/definitions/errors.Error'
-      summary: Get all subscription plans
+            type: string
+        "500":
+          description: Internal Server Error
+          schema:
+            type: string
+      summary: Handle Stripe webhook events
       tags:
-      - plans
+      - payments
   /pricing:
     get:
       description: |-
         Public calculator over the published pricing formula: pass the inputs, get the
         same breakdown GET /processes/{processId}/price returns for a draft. EUR cents,
         VAT excluded (Stripe Tax adds VAT at checkout). No organization context: branding
-        is charged as requested and legacy plan credits are not applied. Base price on
+        is charged as requested. Base price on
         graduated bands, free up to 25 voters; add-ons are charged on free processes too.
         A priced total below €1 is raised to €1 by a minimumCharge line. Above 15 000
         voters a custom quote is recommended (quoteRecommended). Above 50 000 the process
@@ -7248,168 +6912,6 @@ paths:
       summary: Download a stored object
       tags:
       - storage
-  /subscriptions/{orgAddress}/portal:
-    get:
-      consumes:
-      - application/json
-      description: Create a Stripe customer portal session for managing subscriptions
-      parameters:
-      - description: Organization address
-        in: path
-        name: orgAddress
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Contains portalURL
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Create a subscription portal session
-      tags:
-      - plans
-  /subscriptions/checkout:
-    post:
-      consumes:
-      - application/json
-      description: Create a new Stripe checkout session for subscription purchases
-      parameters:
-      - description: Checkout information
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.SubscriptionCheckout'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Contains clientSecret and sessionID
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Invalid input data, or the plan has no price for the billing
-            period
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization or plan not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "409":
-          description: Organization already has a paid subscription
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Create a subscription checkout session
-      tags:
-      - plans
-  /subscriptions/checkout/{sessionId}:
-    get:
-      consumes:
-      - application/json
-      description: |-
-        Retrieve the status of a Stripe checkout session. Only an admin of the organization
-        the session was created for may read it; any other session id answers 404, so the
-        existence of a session is never revealed.
-      parameters:
-      - description: Checkout session ID
-        in: path
-        name: sessionId
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/github_com_vocdoni_saas-backend_stripe.CheckoutSessionStatus'
-        "400":
-          description: Invalid session ID
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Checkout session not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Get checkout session status
-      tags:
-      - plans
-  /subscriptions/webhook:
-    post:
-      consumes:
-      - application/json
-      description: |-
-        Process incoming webhook events from Stripe for subscription management. Handles subscription creation,
-        updates, deletions, and payment events with idempotency and proper error handling.
-      parameters:
-      - description: Stripe webhook payload
-        in: body
-        name: body
-        required: true
-        schema:
-          type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Bad Request
-          schema:
-            type: string
-        "500":
-          description: Internal Server Error
-          schema:
-            type: string
-      summary: Handle Stripe webhook events
-      tags:
-      - plans
   /users:
     post:
       consumes:
@@ -7942,6 +7444,48 @@ paths:
       summary: Verify vote nullifiers against the Vochain
       tags:
       - vote
+  /wallet/checkout/{sessionId}:
+    get:
+      consumes:
+      - application/json
+      description: |-
+        Retrieve the status of a Stripe checkout session. Only an admin of the organization
+        the session was created for may read it; any other session id answers 404, so the
+        existence of a session is never revealed.
+      parameters:
+      - description: Checkout session ID
+        in: path
+        name: sessionId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_vocdoni_saas-backend_stripe.CheckoutSessionStatus'
+        "400":
+          description: Invalid session ID
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Checkout session not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get checkout session status
+      tags:
+      - payments
 schemes:
 - http
 - https
