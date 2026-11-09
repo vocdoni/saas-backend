@@ -509,10 +509,13 @@ func disputeMovements(dispute *stripeapi.Dispute) (withdrawn, reinstated int) {
 }
 
 // topUpOfPaymentIntent returns the top-up ledger row a payment intent credited, or db.ErrNotFound
-// for a payment that is not a wallet top-up. Funds can be returned before the top-up's completed
-// event is handled (the endpoint was failing and Stripe redelivers in any order): the top-up is
-// then credited first, from its checkout session and under the session's key, so the completed
-// event credits nothing when it lands and the two net to zero whatever the order.
+// for a payment that is not a wallet top-up. Funds can be returned before the event that credits
+// the top-up is handled (the endpoint was failing and Stripe redelivers in any order): the top-up
+// is then credited first, under the key that event uses, so the event credits nothing when it
+// lands and the two net to zero whatever the order. A checkout top-up is credited from the paid
+// top-up session that created the payment intent (creditTopUpSession); a payment no checkout
+// session made, from the manual top-up invoice it paid (creditManualInvoice), if any and only
+// while the invoice's customer is stamped with the organization the invoice names.
 func (s *Service) topUpOfPaymentIntent(paymentIntentID string) (*db.WalletLedgerEntry, error) {
 	topUp, err := s.db.WalletTopUpByPaymentIntent(paymentIntentID)
 	if !errors.Is(err, db.ErrNotFound) {
@@ -522,19 +525,34 @@ func (s *Service) topUpOfPaymentIntent(paymentIntentID string) (*db.WalletLedger
 	if err != nil {
 		return nil, err
 	}
-	if session == nil || session.PaymentStatus != stripeapi.CheckoutSessionPaymentStatusPaid {
+	if session != nil {
+		if session.PaymentStatus != stripeapi.CheckoutSessionPaymentStatusPaid {
+			return nil, db.ErrNotFound
+		}
+		if err := s.creditTopUpSession(session); err != nil {
+			return nil, err
+		}
+		return s.db.WalletTopUpByPaymentIntent(paymentIntentID)
+	}
+	invoiceID, err := s.client.InvoiceByPaymentIntent(paymentIntentID)
+	if err != nil {
+		return nil, err
+	}
+	if invoiceID == "" {
 		return nil, db.ErrNotFound
 	}
-	if err := s.creditTopUpSession(session); err != nil {
+	// an invoice that is not a manual top-up credits nothing, and the row is still not found
+	if err := s.creditManualInvoice(invoiceID, nil); err != nil {
 		return nil, err
 	}
 	return s.db.WalletTopUpByPaymentIntent(paymentIntentID)
 }
 
 // debitTopUpRefund debits from a wallet amount (VAT included) that Stripe returned to the payer of
-// the top-up paid through paymentIntent — found through the top-up's ledger row, credited first if
-// it was not yet (topUpOfPaymentIntent) — net of VAT at the top-up's own ratio (rounded down), in
-// full even below zero. Money returned on a payment that is not a top-up is ignored.
+// the top-up paid through paymentIntent, a checkout's or a manual invoice's — found through the
+// top-up's ledger row, credited first if it was not yet (topUpOfPaymentIntent) — net of VAT at the
+// top-up's own ratio (rounded down), in full even below zero. Money returned on a payment that is
+// not a top-up is ignored.
 func (s *Service) debitTopUpRefund(paymentIntent *stripeapi.PaymentIntent, amount int64, key string) error {
 	if amount <= 0 {
 		return nil
