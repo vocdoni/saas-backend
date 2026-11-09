@@ -54,6 +54,7 @@ var apiKeyAllowlist = map[string]string{
 	// rest of checkout.
 	"GET " + integratorEndpoint:             ScopeQuotaRead,
 	"GET " + walletEndpoint:                 ScopeQuotaRead,
+	"GET " + walletInvoiceEndpoint:          ScopeQuotaRead,
 	"GET " + managedOrganizationsEndpoint:   ScopeManagedRead,
 	"POST " + managedOrganizationsEndpoint:  ScopeManagedWrite,
 	"DELETE " + managedOrganizationEndpoint: ScopeManagedWrite,

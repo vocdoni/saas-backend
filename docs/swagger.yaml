@@ -4736,7 +4736,8 @@ paths:
       description: |-
         Prepaid EUR balance (1 credit = €1, VAT excluded) and paged history, newest first,
         of an organization's wallet — a standard organization's or an integrator's. History
-        kinds: topup (Stripe checkout credit), payment (a process publish or census
+        kinds: topup (a Stripe checkout or invoice credit; its invoice downloads at
+        GET /organizations/{orgAddress}/wallet/history/{entryId}/invoice), payment (a process publish or census
         headroom; processOrgAddress names the managed organization that spent it),
         creditBack (a paid draft deleted, a publish that failed for good, or an organization
         teardown returning an add-on price no process received) and refund (a
@@ -4789,6 +4790,60 @@ paths:
       security:
       - BearerAuth: []
       summary: Get an organization's wallet
+      tags:
+      - organizations
+  /organizations/{orgAddress}/wallet/history/{entryId}/invoice:
+    get:
+      description: |-
+        Serves, as a PDF, the Stripe invoice of a `topup` row of the wallet history, by the
+        row's `id` from GET /organizations/{orgAddress}/wallet. Same authorization as the
+        wallet read: Admin or Manager, or a `quota:read` API key of this same organization;
+        403 (40181) for a managed organization. 404 (40185) for a row that is not a top-up,
+        a row of another wallet or an unknown id (the two are indistinguishable), and a
+        top-up whose invoice is not available yet: Stripe attaches and renders it shortly
+        after the payment that credited the top-up, so try again in a moment. The file is
+        named after the invoice number.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: Wallet history row id
+        in: path
+        name: entryId
+        required: true
+        type: string
+      produces:
+      - application/pdf
+      responses:
+        "200":
+          description: 'The invoice PDF (Content-Disposition: attachment)'
+          schema:
+            type: file
+        "400":
+          description: Invalid row id
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Managed organization, or an API key of another organization
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: No such movement, or its invoice is not available yet
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Stripe failure
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Download the invoice of a wallet top-up
       tags:
       - organizations
   /organizations/{orgAddress}/wallet/topup:

@@ -2,15 +2,20 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"maps"
 	"net/http"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/pricing"
 	"github.com/vocdoni/saas-backend/stripe"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.vocdoni.io/dvote/log"
 )
 
 // walletTopUpMaxCents keeps a fat-fingered free-form top-up from going through unnoticed; the
@@ -88,7 +93,8 @@ func (a *API) walletOrganization(w http.ResponseWriter, r *http.Request, roles .
 //	@Summary		Get an organization's wallet
 //	@Description	Prepaid EUR balance (1 credit = €1, VAT excluded) and paged history, newest first,
 //	@Description	of an organization's wallet — a standard organization's or an integrator's. History
-//	@Description	kinds: topup (Stripe checkout credit), payment (a process publish or census
+//	@Description	kinds: topup (a Stripe checkout or invoice credit; its invoice downloads at
+//	@Description	GET /organizations/{orgAddress}/wallet/history/{entryId}/invoice), payment (a process publish or census
 //	@Description	headroom; processOrgAddress names the managed organization that spent it),
 //	@Description	creditBack (a paid draft deleted, a publish that failed for good, or an organization
 //	@Description	teardown returning an add-on price no process received) and refund (a
@@ -141,6 +147,80 @@ func (a *API) walletHandler(w http.ResponseWriter, r *http.Request) {
 		History:      entries,
 		Pagination:   pagination,
 	})
+}
+
+// walletInvoiceHandler godoc
+//
+//	@Summary		Download the invoice of a wallet top-up
+//	@Description	Serves, as a PDF, the Stripe invoice of a `topup` row of the wallet history, by the
+//	@Description	row's `id` from GET /organizations/{orgAddress}/wallet. Same authorization as the
+//	@Description	wallet read: Admin or Manager, or a `quota:read` API key of this same organization;
+//	@Description	403 (40181) for a managed organization. 404 (40185) for a row that is not a top-up,
+//	@Description	a row of another wallet or an unknown id (the two are indistinguishable), and a
+//	@Description	top-up whose invoice is not available yet: Stripe attaches and renders it shortly
+//	@Description	after the payment that credited the top-up, so try again in a moment. The file is
+//	@Description	named after the invoice number.
+//	@Tags			organizations
+//	@Produce		application/pdf
+//	@Security		BearerAuth
+//	@Param			orgAddress	path		string			true	"Organization address"
+//	@Param			entryId		path		string			true	"Wallet history row id"
+//	@Success		200			{file}		binary			"The invoice PDF (Content-Disposition: attachment)"
+//	@Failure		400			{object}	errors.Error	"Invalid row id"
+//	@Failure		401			{object}	errors.Error
+//	@Failure		403			{object}	errors.Error	"Managed organization, or an API key of another organization"
+//	@Failure		404			{object}	errors.Error	"No such movement, or its invoice is not available yet"
+//	@Failure		500			{object}	errors.Error	"Stripe failure"
+//	@Router			/organizations/{orgAddress}/wallet/history/{entryId}/invoice [get]
+func (a *API) walletInvoiceHandler(w http.ResponseWriter, r *http.Request) {
+	org := a.walletOrganization(w, r, db.AdminRole, db.ManagerRole)
+	if org == nil {
+		return
+	}
+	if a.paymentGW == nil {
+		errors.ErrStripeError.Withf("stripe service not available").Write(w)
+		return
+	}
+	entryID, err := bson.ObjectIDFromHex(chi.URLParam(r, "entryId"))
+	if err != nil {
+		errors.ErrMalformedURLParam.Withf("invalid wallet history row id").Write(w)
+		return
+	}
+	// looked up within this wallet: a row of another wallet is not found, and never revealed
+	entry, err := a.db.WalletLedgerEntryByID(org.Address, entryID)
+	if errors.Is(err, db.ErrNotFound) || errors.Is(err, db.ErrInvalidData) {
+		errors.ErrWalletInvoiceNotFound.Write(w)
+		return
+	}
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	// only a top-up was invoiced: the other kinds move prepaid balance already paid for
+	if entry.Kind != db.WalletEntryTopUp {
+		errors.ErrWalletInvoiceNotFound.Withf("this movement has no invoice").Write(w)
+		return
+	}
+	pdf, err := a.paymentGW.TopUpInvoicePDF(entry.IdempotencyKey)
+	if errors.Is(err, stripe.ErrNoInvoice) {
+		errors.ErrWalletInvoiceNotFound.Withf("the invoice of this top-up is not available yet, try again in a moment").Write(w)
+		return
+	}
+	if err != nil {
+		errors.ErrStripeError.Withf("cannot fetch the top-up invoice").WithErr(err).Write(w)
+		return
+	}
+	defer func() {
+		if err := pdf.Body.Close(); err != nil {
+			log.Warnw("could not close the invoice pdf body", "error", err)
+		}
+	}()
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", pdf.Number+".pdf"))
+	if _, err := io.Copy(w, pdf.Body); err != nil {
+		// the status is sent: the client sees a short body, nothing else can be told
+		log.Warnw("could not stream the invoice pdf", "entryId", entry.ID.Hex(), "error", err)
+	}
 }
 
 // createWalletTopUpHandler godoc

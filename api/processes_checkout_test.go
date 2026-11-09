@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -35,6 +37,10 @@ type fakePaymentGW struct {
 	expireFn func(sessionID string)
 	// createFn, when set, runs as a session is created: a request racing the checkout
 	createFn func()
+	// invoicePDF is what TopUpInvoicePDF serves for every key; nil means no invoice yet
+	invoicePDF []byte
+	// invoiceKeys records the idempotency keys TopUpInvoicePDF was asked for
+	invoiceKeys []string
 }
 
 func newFakePaymentGW() *fakePaymentGW {
@@ -107,6 +113,17 @@ func (f *fakePaymentGW) ExpirePaymentSession(sessionID string) error {
 		f.mu.Lock()
 	}
 	return nil
+}
+
+// TopUpInvoicePDF serves invoicePDF, numbered INV-0001, for any key; stripe.ErrNoInvoice when nil.
+func (f *fakePaymentGW) TopUpInvoicePDF(idempotencyKey string) (*stripe.InvoicePDF, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.invoiceKeys = append(f.invoiceKeys, idempotencyKey)
+	if f.invoicePDF == nil {
+		return nil, stripe.ErrNoInvoice
+	}
+	return &stripe.InvoicePDF{Number: "INV-0001", Body: io.NopCloser(bytes.NewReader(f.invoicePDF))}, nil
 }
 
 // installFakePaymentGW swaps the API's payment gateway for a fake for one test.
