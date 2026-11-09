@@ -438,6 +438,15 @@ func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
+	census, err := a.db.Census(vp.CensusID.Hex())
+	if err != nil {
+		errors.ErrCensusNotFound.WithErr(err).Write(w)
+		return
+	}
+	if census.Attested != nil {
+		a.attestedParticipants(w, r, vp, questions)
+		return
+	}
 	field := db.OrgMemberLookupField(r.URL.Query().Get("field"))
 	if !field.IsValid() {
 		errors.ErrMalformedBody.Withf("invalid field: must be one of email, phone, memberNumber, nationalId").Write(w)

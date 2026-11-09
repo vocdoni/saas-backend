@@ -202,6 +202,9 @@ const (
 	// GET /processes/{processId}/participants?field=&value= — Manager/Admin lookup of org members by
 	// field intersected with the census, with per-question voted status (protected)
 	processesParticipantsEndpoint = "/processes/{processId}/participants"
+	// GET /processes/{processId}/attestations publishes the attestation records of an ended attested
+	// census (public)
+	processesAttestationsEndpoint = "/processes/{processId}/attestations"
 	// POST /processes/{processId}/sign-info — voter's per-question consumed address/nullifier (public)
 	processesSignInfoEndpoint = "/processes/{processId}/sign-info"
 	// CSP voter routes for a voting process (public)

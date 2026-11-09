@@ -547,6 +547,7 @@ func (a *API) initRouter() http.Handler {
 	// Public routes
 	r.Group(func(r chi.Router) {
 		r.Use(limitBody(maxPublicBodyBytes))
+		handle(r, http.MethodGet, processesAttestationsEndpoint, a.processAttestationsHandler)
 		handle(r, http.MethodGet, "/ping", func(w http.ResponseWriter, _ *http.Request) {
 			if _, err := w.Write([]byte(".")); err != nil {
 				log.Warnw("failed to write ping response", "error", err)

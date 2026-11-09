@@ -121,6 +121,40 @@ type ValidateProcessCensusRequest struct {
 	Census     CensusSpec        `json:"census"`
 }
 
+// ProcessAttestationsResponse is the public audit of an attested census: the EIP-712 domain, the
+// signer history and a page of attestation records.
+type ProcessAttestationsResponse struct {
+	Domain        AttestationDomainInfo    `json:"domain"`
+	SignerHistory []db.AttestationSigner   `json:"signerHistory"`
+	MaxCensusSize int64                    `json:"maxCensusSize"`
+	Attestations  []AttestationRecordEntry `json:"attestations"`
+	Pagination    *Pagination              `json:"pagination"`
+}
+
+// AttestationDomainInfo is the EIP-712 domain every attestation of the process is signed under.
+type AttestationDomainInfo struct {
+	Name              string         `json:"name"`
+	Version           string         `json:"version"`
+	VerifyingContract common.Address `json:"verifyingContract" swaggertype:"string"`
+}
+
+// AttestationRecordEntry is the attestation the CSP signed an attested voter's ballots against, with
+// the questions it signed for them. ContactHash is absent for a census without 2FA.
+type AttestationRecordEntry struct {
+	VoterID     internal.HexBytes  `json:"voterId" swaggertype:"string" format:"hex"`
+	ContactHash internal.HexBytes  `json:"contactHash,omitempty" swaggertype:"string" format:"hex"`
+	ExpiresAt   int64              `json:"expiresAt"`
+	Signature   internal.HexBytes  `json:"signature" swaggertype:"string" format:"hex"`
+	Signer      common.Address     `json:"signer" swaggertype:"string"`
+	Questions   []AttestedQuestion `json:"questions"`
+}
+
+// AttestedQuestion is a question the CSP signed an attested voter's ballot for.
+type AttestedQuestion struct {
+	QuestionID string            `json:"questionId"`
+	UpstreamID internal.HexBytes `json:"upstreamId" swaggertype:"string" format:"hex"`
+}
+
 // AttestedCensusSizeRequest is the body of PUT /processes/{processId}/census/size.
 type AttestedCensusSizeRequest struct {
 	Size int64 `json:"size"`
@@ -387,7 +421,9 @@ type ProcessParticipantQuestionVote struct {
 // ProcessParticipantEntry is a matched org member that is also a participant of the process
 // census, with its per-question voted status.
 type ProcessParticipantEntry struct {
-	MemberID     string                           `json:"memberId"`
+	MemberID string `json:"memberId"`
+	// VoterID is the attested voter an attested census looks up, which has no member behind it.
+	VoterID      internal.HexBytes                `json:"voterId,omitempty" swaggertype:"string" format:"hex"`
 	Name         string                           `json:"name,omitempty"`
 	Surname      string                           `json:"surname,omitempty"`
 	Email        string                           `json:"email,omitempty"`
