@@ -633,6 +633,29 @@ func (ms *MongoStorage) WalletEntry(orgAddress common.Address, idempotencyKey st
 	return entry, nil
 }
 
+// WalletLedgerEntryByID returns orgAddress's ledger entry with id, or ErrNotFound when the wallet
+// has none with it: an id from another wallet is not found either, so a caller never learns it
+// exists elsewhere. It drains the wallet first, so a movement not posted yet is found.
+func (ms *MongoStorage) WalletLedgerEntryByID(orgAddress common.Address, id bson.ObjectID) (*WalletLedgerEntry, error) {
+	if (orgAddress.Cmp(common.Address{}) == 0) || id.IsZero() {
+		return nil, ErrInvalidData
+	}
+	if err := ms.drainWallet(orgAddress); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	entry := &WalletLedgerEntry{}
+	err := ms.walletLedger.FindOne(ctx, bson.M{"_id": id, "orgAddress": orgAddress}).Decode(entry)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to find wallet ledger entry: %w", err)
+	}
+	return entry, nil
+}
+
 // ReleaseOwedOrgAddOns applies every add-on release a credit-back still owes
 // (ProcessLedgerState.OwedRelease): the startup sweep for releases a crash cut short after their
 // credit-back, next to DrainUnpostedWalletEntries. Each is pinned like the release any later touch

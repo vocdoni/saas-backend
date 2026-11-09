@@ -435,3 +435,47 @@ func TestWalletNetTopUpCents(t *testing.T) {
 	}), qt.IsNil)
 	c.Assert(net(), qt.Equals, pricing.Cents(0))
 }
+
+// TestWalletLedgerEntryByID: a ledger row is read by its id within its own wallet only — another
+// wallet's id, an unknown id and a zero id are not found or invalid — and a row whose posting a
+// crash cut short is posted and found.
+func TestWalletLedgerEntryByID(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() {
+		walletStepHook = nil
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+	})
+	other := common.Address{0xaa}
+	c.Assert(topUpTestWallet(10_000, "cs_byid"), qt.IsNil)
+	c.Assert(testDB.CreditWallet(WalletCredit{OrgAddress: other, AmountCents: 2_000, IdempotencyKey: "cs_other"}), qt.IsNil)
+	_, rows, err := testDB.WalletLedger(testOrgAddress, 1, 10)
+	c.Assert(err, qt.IsNil)
+	c.Assert(rows, qt.HasLen, 1)
+
+	entry, err := testDB.WalletLedgerEntryByID(testOrgAddress, rows[0].ID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(entry.IdempotencyKey, qt.Equals, "cs_byid")
+	c.Assert(entry.Kind, qt.Equals, WalletEntryTopUp)
+	_, err = testDB.WalletLedgerEntryByID(other, rows[0].ID)
+	c.Assert(err, qt.ErrorIs, ErrNotFound)
+	_, err = testDB.WalletLedgerEntryByID(testOrgAddress, bson.NewObjectID())
+	c.Assert(err, qt.ErrorIs, ErrNotFound)
+	_, err = testDB.WalletLedgerEntryByID(testOrgAddress, bson.NilObjectID)
+	c.Assert(err, qt.ErrorIs, ErrInvalidData)
+	_, err = testDB.WalletLedgerEntryByID(common.Address{}, rows[0].ID)
+	c.Assert(err, qt.ErrorIs, ErrInvalidData)
+
+	// a movement whose ledger insert a crash cut short is still in the wallet's unposted list
+	walletStepHook = func(walletStep, string) error { return errSimulatedCrash }
+	c.Assert(topUpTestWallet(1_000, "cs_unposted_byid"), qt.ErrorIs, errSimulatedCrash)
+	walletStepHook = nil
+	var wallet struct {
+		Unposted []WalletLedgerEntry `bson:"unposted"`
+	}
+	c.Assert(testDB.wallets.FindOne(context.Background(), bson.M{"_id": testOrgAddress}).Decode(&wallet), qt.IsNil)
+	c.Assert(wallet.Unposted, qt.HasLen, 1)
+	entry, err = testDB.WalletLedgerEntryByID(testOrgAddress, wallet.Unposted[0].ID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(entry.IdempotencyKey, qt.Equals, "cs_unposted_byid")
+	assertWalletConsistent(c, testOrgAddress)
+}
