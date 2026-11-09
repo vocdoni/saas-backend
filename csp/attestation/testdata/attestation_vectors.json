@@ -1,0 +1,61 @@
+{
+  "privateKey": "0xf7bcf8f3c32523b44c5e97349d8720cbce490b3e41d595dda19d6da687df5c45",
+  "signer": "0x308800a6063AE50b369c4289d85Bb0E0A32F5EF2",
+  "verifyingContract": "0x6f7771896B719Ca2344962ee2C43250B74e2eea4",
+  "domainSeparator": "0x2026d3be121074abaa7b0b94b396ffc3ccce9cd256d2717f0409dd776d2bb91b",
+  "cases": [
+    {
+      "name": "email",
+      "processId": "0x6740c3a1b2d4e5f601234567",
+      "voterId": "0x1f0e2d3c4b5a69788796a5b4c3d2e1f00112233445566778899aabbccddeeff0",
+      "kind": "email",
+      "contact": "voter@example.org",
+      "salt": "0xa1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0",
+      "contactHash": "0x4a044a882453b2409cefb8b2696c937f01f5bea1a9e4602bf1d83dad4c846d97",
+      "expiresAt": 1893456000,
+      "structHash": "0x84bd2588bb2094ff0d579eccb6b5be0169056d61288e748b16017c6dfa230663",
+      "digest": "0xb5b27547a5b64f989ecd5859991f4e2da7eed3a6a586fdc1bbd7061d2c63faa6",
+      "signature": "0xa2062a73f101139b77ad8ec1b9162fe0ff25f76e5b89188f95a6bc8466792bb276fb1b28e7378755cbbdb65e75fc03ebc834e6162a44741b2269a88dc8c872811b",
+      "userId": "0x92f4fac8562ab2d17873b695dc7d5ed7d2f6dff6213c51cb981289a1621ca56d"
+    },
+    {
+      "name": "phone",
+      "processId": "0x6740c3a1b2d4e5f601234567",
+      "voterId": "0x00000000000000000000000000000000000000000000000000000000000000ff",
+      "kind": "phone",
+      "contact": "+34600123456",
+      "salt": "0x0101010101010101010101010101010101010101010101010101010101010101",
+      "contactHash": "0xb1e416d07815824892b4071b17626589ff49cd52a843d0c71459ab6ab6049386",
+      "expiresAt": 1893456001,
+      "structHash": "0x21148f474e8eff0bcc9d0e4aa226782b311bf8cadf7c84af88fbecfa6dc2b9d3",
+      "digest": "0xf9f3270a8597cf70010b8f3a429cac62699350cc0133e4eda25c044c2d3e80b1",
+      "signature": "0xd14c79ed22cbd7e40f0d67a7c8063ad0f38630dbcac5fb7f141c917d937cde496d078b1fb5687b1e06882c2b42e4c3d62cf4d7a508797435509d410538a5fc001c",
+      "userId": "0x0c0c7316fad21eca09d1eac2f23101b0548127f433468c9eaac1623faab0dcb5"
+    },
+    {
+      "name": "unicode-email",
+      "processId": "0x000000000000000000000001",
+      "voterId": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "kind": "email",
+      "contact": "élise@exämple.org",
+      "salt": "0xfefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefe",
+      "contactHash": "0x2047429f9fe3cfacf1b9f912ce989c1e76bf38bbd0be3c62b49bc11d5f12ffd3",
+      "expiresAt": 4102444800,
+      "structHash": "0x0933668f901b68b44e38a59a0684ba0ebd9650a32903b8bfdc3cc28f9ea46c35",
+      "digest": "0xfa62dc96ae73acfd59849f763e6b376931b9f13245c1d0d480d5c96899854b84",
+      "signature": "0xc1f42b92a1381b69b6ec8680a65776acf4cb3245f4479ca61b1e0ac620888a267b908e6a7ddf327b50c6e16edb7ace1ed8cf3f704b4f83c1967b1b086aa7661d1c",
+      "userId": "0xc911c02891fa2d0560434449c33ea2f40d2b88ead60b9581a6a446a8e3697efa"
+    },
+    {
+      "name": "no-2fa",
+      "processId": "0x6740c3a1b2d4e5f601234567",
+      "voterId": "0x5555555555555555555555555555555555555555555555555555555555555555",
+      "contactHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "expiresAt": 1893456002,
+      "structHash": "0x38f5e3efe331fc719af20d02acd5e8cdb9a395afd804230fa0b5c9efbb0f2bc3",
+      "digest": "0x7e1ca9abebcfab98fe7bfb24b3e7058d44a87da83830fc6228f0941a2b5c70a2",
+      "signature": "0x579cf6b226f31a63c1ab4d3e196d75a61f456ee859404e392c984dab3cbb62943bbb5b71a8fdff4cffc5342fdf028a53678c81a298bcf92fd37825b1626a15581b",
+      "userId": "0x34f37f1094676f919a3369b8063adfb432b2eac2d85f1623638a0ca00991e960"
+    }
+  ]
+}
