@@ -87,3 +87,32 @@ func TestGetCustomerByAddress(t *testing.T) {
 	c.Assert(err, qt.ErrorMatches, ".*failed to search customers.*")
 	c.Assert(err, qt.Not(qt.ErrorIs), ErrCustomerNotFound)
 }
+
+// TestCheckoutSessionsOfCustomer lists a customer's checkout sessions through the customer
+// filter: none is an empty result, not an error, and a failed list is a Stripe error.
+func TestCheckoutSessionsOfCustomer(t *testing.T) {
+	c := qt.New(t)
+	status, data := http.StatusOK, `[]`
+	stubStripeAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.Assert(r.URL.Path, qt.Equals, "/v1/checkout/sessions")
+		c.Assert(r.URL.Query().Get("customer"), qt.Equals, "cus_1")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(`{"object":"list","url":"/v1/checkout/sessions","has_more":false,"data":` + data + `}`))
+	}))
+	client := NewClient(&Config{APIKey: "sk_test_stub"})
+
+	sessions, err := client.CheckoutSessionsOfCustomer("cus_1")
+	c.Assert(err, qt.IsNil)
+	c.Assert(sessions, qt.HasLen, 0)
+
+	data = `[{"id":"cs_1","object":"checkout.session","metadata":{"` + MetadataKeyWalletTopUpOrg + `":"0x01"}},` +
+		`{"id":"cs_2","object":"checkout.session"}]`
+	sessions, err = client.CheckoutSessionsOfCustomer("cus_1")
+	c.Assert(err, qt.IsNil)
+	c.Assert(sessions, qt.HasLen, 2)
+	c.Assert(sessions[0].Metadata[MetadataKeyWalletTopUpOrg], qt.Equals, "0x01")
+
+	status, data = http.StatusInternalServerError, `[]`
+	_, err = client.CheckoutSessionsOfCustomer("cus_1")
+	c.Assert(err, qt.ErrorMatches, ".*failed to list the checkout sessions of customer cus_1.*")
+}

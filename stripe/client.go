@@ -117,6 +117,22 @@ func (*Client) TopUpSessionByPaymentIntent(paymentIntentID string) (*stripeapi.C
 	return nil, nil
 }
 
+// CheckoutSessionsOfCustomer returns every checkout session of a customer, of any mode and
+// status, oldest last as Stripe lists them; none is an empty slice, not an error.
+func (*Client) CheckoutSessionsOfCustomer(customerID string) ([]*stripeapi.CheckoutSession, error) {
+	var sessions []*stripeapi.CheckoutSession
+	iter := stripecheckoutsession.List(&stripeapi.CheckoutSessionListParams{
+		Customer: stripeapi.String(customerID),
+	})
+	for iter.Next() {
+		sessions = append(sessions, iter.CheckoutSession())
+	}
+	if err := iter.Err(); err != nil {
+		return nil, errors.ErrStripeError.Withf("failed to list the checkout sessions of customer %s: %v", customerID, err)
+	}
+	return sessions, nil
+}
+
 // UpdateCustomerMetadata updates a customer's metadata
 func (*Client) UpdateCustomerMetadata(customerID string, metadata map[string]string) error {
 	params := &stripeapi.CustomerParams{
