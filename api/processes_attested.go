@@ -26,8 +26,8 @@ const errCensusNotAttested = "the process census is not attested"
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			processId	path		string									true	"Voting process ID"
-//	@Param			request		body		apicommon.AttestedCensusSizeRequest		true	"New declared size"
+//	@Param			processId	path		string								true	"Voting process ID"
+//	@Param			request		body		apicommon.AttestedCensusSizeRequest	true	"New declared size"
 //	@Success		200			{object}	apicommon.AttestedCensusSizeResponse
 //	@Success		202			{object}	apicommon.AttestedCensusSizeResponse
 //	@Failure		400			{object}	errors.Error	"Not an attested census, or the size shrinks"
