@@ -166,3 +166,48 @@ func challengeTypeFor(kind attestation.ContactKind) notifications.ChallengeType 
 	}
 	return notifications.EmailChallenge
 }
+
+// attestedSignContext is resolveSignContext for an attested census: there is no participant row nor
+// member to re-check, so the token must instead have been issued under the active signer, which
+// makes a signer rotation revoke every earlier token. Every voter weighs 1.
+func attestedSignContext(
+	w http.ResponseWriter, vp *db.VotingProcess, census *db.Census, auth *db.CSPAuth,
+) (*signContext, bool) {
+	if census.Anonymous {
+		errors.ErrInvalidData.With("an attested census cannot be anonymous").Write(w)
+		return nil, false
+	}
+	if auth.Attestation == nil {
+		errors.ErrUnauthorized.Withf("token was not issued for an attested voter").Write(w)
+		return nil, false
+	}
+	if !attestedBySigner(auth, census) {
+		errors.ErrAttestationSignerRevoked.Write(w)
+		return nil, false
+	}
+	return &signContext{
+		process:     vp,
+		memberID:    auth.UserID.String(),
+		weight:      weightBytes(1),
+		attestation: auth.Attestation,
+		userID:      auth.UserID,
+	}, true
+}
+
+// attestedBySigner reports whether the token was issued against an attestation of the census's
+// active signer.
+func attestedBySigner(auth *db.CSPAuth, census *db.Census) bool {
+	return auth.Attestation != nil && census.Attested != nil &&
+		auth.Attestation.Signer == census.Attested.Signer
+}
+
+// recordAttested stores, before the CSP signs question upstreamID for an attested voter, the
+// attestation and the question in the voter's attestation record, so no signature exists without
+// one. A record may list a question whose signature then failed; it never misses a signed one. It
+// does nothing for a memberbase census.
+func (c *CSPHandlers) recordAttested(sc *signContext, upstreamID internal.HexBytes) error {
+	if sc.attestation == nil {
+		return nil
+	}
+	return c.mainDB.RecordAttestedSignature(sc.process.ID, sc.userID, sc.attestation, upstreamID)
+}
