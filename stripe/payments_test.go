@@ -52,7 +52,7 @@ func stubStripeAPI(t *testing.T, handler http.Handler) *httptest.Server {
 func TestBuildPaymentSessionParams(t *testing.T) {
 	c := qt.New(t)
 
-	params := buildPaymentSessionParams(&PaymentSessionParams{
+	params, err := buildPaymentSessionParams(&PaymentSessionParams{
 		LineItems: []PaymentLineItem{
 			{Description: "voting process (600 eligible voters)", AmountCents: 29_000},
 			{Description: "email 2FA", AmountCents: 600},
@@ -65,6 +65,7 @@ func TestBuildPaymentSessionParams(t *testing.T) {
 		ReturnURL: "https://app.example.com/payment",
 		Locale:    "ca", // unsupported by Stripe, must fall back to es
 	})
+	c.Assert(err, qt.IsNil)
 
 	c.Assert(*params.Mode, qt.Equals, "payment")
 	c.Assert(*params.UIMode, qt.Equals, "elements")
