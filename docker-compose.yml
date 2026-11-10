@@ -61,22 +61,6 @@ services:
     depends_on:
       - api
 
-  defaultplan:
-    platform: linux/amd64
-    profiles:
-      - with-ui
-    build:
-      context: ./
-      dockerfile: dev.dockerfile
-      target: defaultplan
-    image: saas-backend-defaultplan
-    env_file:
-      - .env
-    environment:
-      - VOCDONI_MONGOURL=mongodb://root:vocdoni@mongo:27017/saasdb
-    depends_on:
-      - mongo
-
   fakesmtp:
     profiles:
       - local-smtp

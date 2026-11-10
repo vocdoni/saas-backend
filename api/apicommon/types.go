@@ -229,12 +229,6 @@ type OrganizationInfo struct {
 	// Whether the organization has enabled communications
 	Communications bool `json:"communications"`
 
-	// Subscription details for the organization
-	Subscription *SubscriptionDetails `json:"subscription"`
-
-	// Usage counters for the organization
-	Counters *SubscriptionUsage `json:"counters"`
-
 	// Parent organization if this is a sub-organization
 	Parent *OrganizationInfo `json:"parent"`
 
@@ -581,8 +575,6 @@ func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 	if parent != nil {
 		parentOrg = OrganizationFromDB(parent, nil)
 	}
-	details := SubscriptionDetailsFromDB(&dbOrg.Subscription)
-	usage := SubscriptionUsageFromDB(&dbOrg.Counters)
 	// copy dbOrg.Meta into a fresh map: we normalize legacy string values below
 	// and must not mutate the db model in-place, since callers don't expect this
 	// read/convert helper to have side effects. A nil Meta is normalized to an
@@ -623,8 +615,6 @@ func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 		Description:    MultilingualFromAny(meta["description"]),
 		Parent:         parentOrg,
 		ManagedBy:      managedBy,
-		Subscription:   &details,
-		Counters:       &usage,
 	}
 }
 
@@ -664,15 +654,34 @@ type ManagedOrganizationInfo struct {
 	// SpentCents is what its processes hold debited now: refunds and failed-publish credit-backs
 	// take their amount off again.
 	SpentCents pricing.Cents `json:"spentCents"`
+	// Counters are the messages and relayed votes sent on behalf of the organization and its
+	// published processes. Only the integrator's listing and update expose them, per managed
+	// organization.
+	Counters ManagedOrganizationCounters `json:"counters"`
+}
+
+// ManagedOrganizationCounters are the usage counters of a managed organization: what it sent and
+// how many processes it has published (counted live, not stored).
+type ManagedOrganizationCounters struct {
+	SentSMS    int   `json:"sentSMS"`
+	SentEmails int   `json:"sentEmails"`
+	SentVotes  int   `json:"sentVotes"`
+	Processes  int64 `json:"processes"`
 }
 
 // ManagedOrganizationFromDB builds the integrator's view of a managed organization from the
-// organization and its spending as recorded on the integrator's wallet.
-func ManagedOrganizationFromDB(org *db.Organization, spend db.ManagedOrgSpend) *ManagedOrganizationInfo {
+// organization, its spending as recorded on the integrator's wallet and its published processes.
+func ManagedOrganizationFromDB(
+	org *db.Organization, spend db.ManagedOrgSpend, processes int64,
+) *ManagedOrganizationInfo {
 	return &ManagedOrganizationInfo{
 		OrganizationInfo: *OrganizationFromDB(org, nil),
 		SpendCapCents:    spend.CapCents,
 		SpentCents:       spend.SpentCents,
+		Counters: ManagedOrganizationCounters{
+			SentSMS: org.Counters.SentSMS, SentEmails: org.Counters.SentEmails,
+			SentVotes: org.Counters.SentVotes, Processes: processes,
+		},
 	}
 }
 
@@ -711,259 +720,6 @@ type IntegratorInfoResponse struct {
 	NetTopUpCents pricing.Cents `json:"netTopUpCents"`
 	// CanCreateManagedOrg: one more managed organization would be allowed now.
 	CanCreateManagedOrg bool `json:"canCreateManagedOrg"`
-}
-
-// OrganizationSubscriptionInfo provides detailed information about an organization's subscription.
-// swagger:model OrganizationSubscriptionInfo
-type OrganizationSubscriptionInfo struct {
-	// Subscription details
-	SubscriptionDetails SubscriptionDetails `json:"subscriptionDetails"`
-
-	// Current usage metrics
-	Usage SubscriptionUsage `json:"usage"`
-
-	// Subscription plan details
-	Plan SubscriptionPlan `json:"plan"`
-}
-
-// SubscriptionPlan represents a subscription plan in the API.
-// It is the mirror struct of db.Plan.
-// swagger:model SubscriptionPlan
-type SubscriptionPlan struct {
-	// Unique identifier for the plan (its Stripe product ID)
-	ID string `json:"id"`
-
-	// Human-readable name of the plan
-	Name string `json:"name"`
-
-	// Stripe monthly price ID
-	StripeMonthlyPriceID string `json:"stripeMonthlyPriceId"`
-
-	// Monthly price
-	MonthlyPrice int64 `json:"monthlyPrice"`
-
-	// Stripe yearly price ID
-	StripeYearlyPriceID string `json:"stripeYearlyPriceId"`
-
-	// Yearly price
-	YearlyPrice int64 `json:"yearlyPrice"`
-
-	// Whether this is the default plan
-	Default bool `json:"default"`
-
-	// Organization limits for this plan
-	Organization SubscriptionPlanLimits `json:"organization"`
-
-	// Voting types available in this plan
-	VotingTypes SubscriptionVotingTypes `json:"votingTypes"`
-
-	// Features available in this plan
-	Features SubscriptionFeatures `json:"features"`
-}
-
-// SubscriptionPlanFromDB converts a db.Plan to a SubscriptionPlan.
-func SubscriptionPlanFromDB(plan *db.Plan) SubscriptionPlan {
-	if plan == nil {
-		return SubscriptionPlan{}
-	}
-	return SubscriptionPlan{
-		ID:                   plan.ID,
-		Name:                 plan.Name,
-		StripeMonthlyPriceID: plan.StripeMonthlyPriceID,
-		MonthlyPrice:         plan.MonthlyPrice,
-		StripeYearlyPriceID:  plan.StripeYearlyPriceID,
-		YearlyPrice:          plan.YearlyPrice,
-		Default:              plan.Default,
-		Organization:         SubscriptionPlanLimits(plan.Organization),
-		VotingTypes:          SubscriptionVotingTypes(plan.VotingTypes),
-		Features:             SubscriptionFeatures(plan.Features),
-	}
-}
-
-// SubscriptionPlanLimits represents the limits of a subscription plan.
-// It is the mirror struct of db.PlanLimits.
-// swagger:model SubscriptionPlanLimits
-type SubscriptionPlanLimits struct {
-	// Maximum number of users allowed
-	Users int `json:"teamMembers"`
-
-	// Maximum number of sub-organizations allowed
-	SubOrgs int `json:"subOrgs"`
-
-	// Maximum number of voting processes allowed
-	MaxProcesses int `json:"maxProcesses"`
-
-	// Maximum number of census allowed
-	MaxCensus int `json:"maxCensus"`
-
-	// Maximum number of votes that may be relayed; 0 means unlimited
-	MaxVotes int `json:"maxVotes"`
-
-	// Maximum duration of voting processes in days
-	MaxDuration int `json:"maxDaysDuration"`
-
-	// Whether custom URLs are allowed
-	CustomURL bool `json:"customURL"`
-
-	// How many draft processes are allowed
-	MaxDrafts int `json:"drafts"`
-
-	// Whether this is a custom plan
-	CustomPlan bool `json:"customPlan"`
-}
-
-// SubscriptionVotingTypes represents the voting types available in a subscription plan.
-// It is the mirror struct of db.VotingTypes.
-// swagger:model SubscriptionVotingTypes
-type SubscriptionVotingTypes struct {
-	// Whether single choice voting is available
-	Single bool `json:"single"`
-
-	// Whether multiple choice voting is available
-	Multiple bool `json:"multiple"`
-
-	// Whether approval voting is available
-	Approval bool `json:"approval"`
-
-	// Whether cumulative voting is available
-	Cumulative bool `json:"cumulative"`
-
-	// Whether ranked choice voting is available
-	Ranked bool `json:"ranked"`
-
-	// Whether weighted voting is available
-	Weighted bool `json:"weighted"`
-}
-
-// SubscriptionFeatures represents the features available in a subscription plan.
-// It is the mirror struct of db.Features.
-// swagger:model SubscriptionFeatures
-type SubscriptionFeatures struct {
-	// The plan's stored zk-SNARK anonymous voting flag, which does not gate census.anonymous. It is forced
-	// to false while the service has anonymous voting temporarily off, and passed through unchanged otherwise.
-	Anonymous bool `json:"anonymous"`
-
-	// Whether census overwrite is allowed
-	Overwrite bool `json:"overwrite"`
-
-	// Whether live results are available
-	LiveResults bool `json:"liveResults"`
-
-	// Whether UI personalization is available
-	Personalization bool `json:"personalization"`
-
-	// Whether email reminders are available
-	EmailReminder bool `json:"emailReminder"`
-
-	// Two-factor authentication sms limit
-	TwoFaSms int `json:"2FAsms"`
-
-	// Two-factor authentication email limit
-	TwoFaEmail int `json:"2FAemail"`
-
-	// Whether white labeling is available
-	WhiteLabel bool `json:"whiteLabel"`
-
-	// Whether live streaming is available
-	LiveStreaming bool `json:"liveStreaming"`
-
-	// Whether eligible for phone support
-	PhoneSupport bool `json:"phoneSupport"`
-}
-
-// SubscriptionDetails represents the details of an organization's subscription.
-// It is the mirror struct of db.OrganizationSubscription.
-// swagger:model SubscriptionDetails
-type SubscriptionDetails struct {
-	// ID of the subscription plan (its Stripe product ID)
-	PlanID string `json:"planId"`
-
-	// Date when the subscription started
-	StartDate time.Time `json:"startDate"`
-
-	// Date when the subscription will renew
-	RenewalDate time.Time `json:"renewalDate"`
-
-	// Date of the last payment
-	LastPaymentDate time.Time `json:"lastPaymentDate"`
-
-	// Whether the subscription is active
-	Active bool `json:"active"`
-
-	// Email associated with the subscription
-	Email string `json:"email"`
-}
-
-// SubscriptionDetailsFromDB converts a db.OrganizationSubscription to a SubscriptionDetails.
-func SubscriptionDetailsFromDB(details *db.OrganizationSubscription) SubscriptionDetails {
-	if details == nil {
-		return SubscriptionDetails{}
-	}
-	return SubscriptionDetails{
-		PlanID:          details.PlanID,
-		StartDate:       details.StartDate,
-		RenewalDate:     details.RenewalDate,
-		LastPaymentDate: details.LastPaymentDate,
-		Active:          details.Active,
-		Email:           details.Email,
-	}
-}
-
-// SubscriptionUsage represents the usage metrics of an organization's subscription.
-// It is the mirror struct of db.OrganizationCounters.
-// swagger:model SubscriptionUsage
-type SubscriptionUsage struct {
-	// Number of SMS messages sent
-	SentSMS int `json:"sentSMS"`
-
-	// Number of emails sent
-	SentEmails int `json:"sentEmails"`
-
-	// Number of votes relayed
-	SentVotes int `json:"sentVotes"`
-
-	// Number of sub-organizations created
-	SubOrgs int `json:"subOrgs"`
-
-	// Number of users in the organization
-	Users int `json:"users"`
-
-	// Number of voting processes created
-	Processes int `json:"processes"`
-}
-
-// SubscriptionUsageFromDB converts a db.OrganizationCounters to a SubscriptionUsage.
-func SubscriptionUsageFromDB(usage *db.OrganizationCounters) SubscriptionUsage {
-	if usage == nil {
-		return SubscriptionUsage{}
-	}
-	return SubscriptionUsage{
-		SentSMS:    usage.SentSMS,
-		SentEmails: usage.SentEmails,
-		SentVotes:  usage.SentVotes,
-		SubOrgs:    usage.SubOrgs,
-		Users:      usage.Users,
-		Processes:  usage.Processes,
-	}
-}
-
-// SubscriptionCheckout represents the details required for a subscription checkout process.
-// swagger:model SubscriptionCheckout
-type SubscriptionCheckout struct {
-	// Plan lookup key (the plan's Stripe product ID)
-	LookupKey string `json:"lookupKey"`
-
-	// Billing period (e.g., "month" or "year")
-	BillingPeriod string `json:"billingPeriod"`
-
-	// URL to return to after checkout
-	ReturnURL string `json:"returnURL"`
-
-	// Organization address
-	Address common.Address `json:"address"`
-
-	// Locale for the checkout page
-	Locale string `json:"locale"`
 }
 
 // MemberNotification represents a notification sent to a member.

@@ -168,7 +168,7 @@ func electionStartDuration(startDate, endDate time.Time) (startTime, duration ui
 		if startDate.After(time.Now()) {
 			// range-check before truncating to the on-chain uint32 types: a wrapped
 			// start/duration would otherwise set a bogus election window and could slip a
-			// too-long duration under the plan limit (which compares the already-cast value).
+			// too-long duration under the duration limit (which compares the already-cast value).
 			startSec := startDate.Unix()
 			dur := endDate.Sub(startDate).Seconds()
 			if startSec < 0 || startSec > math.MaxUint32 {

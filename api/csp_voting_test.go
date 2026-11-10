@@ -86,8 +86,6 @@ func TestCSPVoting(t *testing.T) {
 	token := testCreateUser(t, "superpassword123")
 	vocdoniClient := testNewVocdoniClient(t)
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	// premium: this test publishes seven processes, one per census variant
-	setOrganizationSubscription(t, orgAddress, mockPremiumPlan.ID)
 
 	authFields := db.OrgMemberAuthFields{
 		db.OrgMemberAuthFieldsName,
@@ -321,7 +319,7 @@ func TestCSPVoting(t *testing.T) {
 	})
 
 	t.Run("Authenticate with Email and Vote", func(t *testing.T) {
-		orgBefore := getOrganization(t, orgAddress)
+		orgBefore := orgCounters(t, orgAddress)
 
 		testAuthenthicateAndVote(t, vocdoniClient, pid, processID, members[0].Weight,
 			&handlers.AuthRequest{
@@ -332,13 +330,13 @@ func TestCSPVoting(t *testing.T) {
 			})
 
 		// check only email counter is incremented
-		orgAfter := getOrganization(t, orgAddress)
-		qt.Assert(t, orgAfter.Counters.SentEmails, qt.Equals, orgBefore.Counters.SentEmails+1)
-		qt.Assert(t, orgAfter.Counters.SentSMS, qt.Equals, orgBefore.Counters.SentSMS)
+		orgAfter := orgCounters(t, orgAddress)
+		qt.Assert(t, orgAfter.SentEmails, qt.Equals, orgBefore.SentEmails+1)
+		qt.Assert(t, orgAfter.SentSMS, qt.Equals, orgBefore.SentSMS)
 	})
 
 	t.Run("Authenticate with SMS and Vote", func(t *testing.T) {
-		orgBefore := getOrganization(t, orgAddress)
+		orgBefore := orgCounters(t, orgAddress)
 
 		testAuthenthicateAndVote(t, vocdoniClient, pid, processID, members[0].Weight,
 			&handlers.AuthRequest{
@@ -349,9 +347,9 @@ func TestCSPVoting(t *testing.T) {
 			})
 
 		// check only sms counter is incremented
-		orgAfter := getOrganization(t, orgAddress)
-		qt.Assert(t, orgAfter.Counters.SentEmails, qt.Equals, orgBefore.Counters.SentEmails)
-		qt.Assert(t, orgAfter.Counters.SentSMS, qt.Equals, orgBefore.Counters.SentSMS+1)
+		orgAfter := orgCounters(t, orgAddress)
+		qt.Assert(t, orgAfter.SentEmails, qt.Equals, orgBefore.SentEmails)
+		qt.Assert(t, orgAfter.SentSMS, qt.Equals, orgBefore.SentSMS+1)
 	})
 
 	// Create a voting key for the member
@@ -477,7 +475,7 @@ func TestCSPVoting(t *testing.T) {
 
 		// Test case 7: Try to verify with invalid OTP code
 		t.Run("Invalid OTP Code", func(_ *testing.T) {
-			orgBefore := getOrganization(t, orgAddress)
+			orgBefore := orgCounters(t, orgAddress)
 
 			// First get a valid auth token
 			authToken := testCSPAuthenticateWithFields(t, pid, &handlers.AuthRequest{
@@ -496,8 +494,8 @@ func TestCSPVoting(t *testing.T) {
 			c.Assert(code, qt.Equals, http.StatusUnauthorized, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
 
 			// check counter is anyway incremented, since OTP was sent
-			orgAfter := getOrganization(t, orgAddress)
-			qt.Assert(t, orgAfter.Counters.SentEmails, qt.Equals, orgBefore.Counters.SentEmails+1)
+			orgAfter := orgCounters(t, orgAddress)
+			qt.Assert(t, orgAfter.SentEmails, qt.Equals, orgBefore.SentEmails+1)
 		})
 
 		// Test case 8: Member without memberNumber doesn't disrupt authentication when not required

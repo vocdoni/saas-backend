@@ -30,7 +30,7 @@ func TestBuildPaymentSessionParams(t *testing.T) {
 			MetadataKeyRequestedBy:    "admin@example.com",
 		},
 		ReturnURL: "https://app.example.com/payment",
-		Locale:    "ca", // unsupported by Stripe, must fall back to es like the subscription flow
+		Locale:    "ca", // unsupported by Stripe, must fall back to es
 	})
 
 	c.Assert(*params.Mode, qt.Equals, "payment")

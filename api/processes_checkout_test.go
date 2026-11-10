@@ -178,7 +178,6 @@ func TestProcessPrice(t *testing.T) {
 	c := qt.New(t)
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, adminToken, orgAddress)
 
 	// 26 voters, email 2FA free for a standard organization: only the base, 26 × €0.66 = €17.16
@@ -204,7 +203,6 @@ func TestProcessCheckoutFlow(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, adminToken, orgAddress)
 	checkoutReq := &apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}
 
@@ -273,7 +271,6 @@ func TestDeleteDraftWithCompletedTopUp(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	adminToken := testCreateUser(t, "deleterace123456")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, adminToken, orgAddress)
 
 	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](
@@ -295,7 +292,6 @@ func TestProcessCheckoutSessionStates(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	adminToken := testCreateUser(t, "sessionstates123")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	checkoutReq := &apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}
 
 	// the customer finished checkout (session complete) but the webhook is in flight:
@@ -333,7 +329,6 @@ func TestProcessCheckoutExcludesDelete(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	token := testCreateUser(t, "checkoutdelete123")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 
 	deleteCode := 0
@@ -360,11 +355,10 @@ func TestProcessCheckoutRefusals(t *testing.T) {
 	installFakePaymentGW(t)
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	checkoutReq := &apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}
 
 	// a managed organization has no wallet of its own: its integrator pays at publish
-	_, managedAddr := newIntegratorWithManagedOrg(t, adminToken, "prod_test_checkout_managed")
+	_, managedAddr := newIntegratorWithManagedOrg(t, adminToken)
 	managedMembers := postOrgMembers(t, adminToken, managedAddr, newOrgMembers(pricedProcessVoters)...)
 	managed := requestAndParse[apicommon.CreateVotingProcessResponse](t, http.MethodPost, adminToken,
 		newVotingProcessRequest(managedAddr, memberIDs(managedMembers)), processesCreateEndpoint)
@@ -411,7 +405,6 @@ func TestDeleteDraftFailsClosedWhenSessionUnverifiable(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	token := testCreateUser(t, "faildelete12345")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	oid, err := bson.ObjectIDFromHex(pid)
 	c.Assert(err, qt.IsNil)
@@ -457,7 +450,6 @@ func TestFreePublishRefusedOverOpenCheckout(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	token := testCreateUser(t, "freeoveropen123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(pricedProcessVoters)...))
 	pid := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, newVotingProcessRequest(orgAddress, ids), processesCreateEndpoint).ProcessID
@@ -505,7 +497,6 @@ func TestCheckoutRefusesDraftThatCannotPublish(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	token := testCreateUser(t, "checkoutpreflight")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	req := newVotingProcessRequest(orgAddress, postNewOrgMembers(t, token, orgAddress, pricedProcessVoters))
 	req.AddOns = db.ProcessAddOns{Branding: true}
 	req.StartDate = time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339)
@@ -531,7 +522,6 @@ func TestTopUpWebhookRefusalIsRecorded(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	token := testCreateUser(t, "refusalrecorded1")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	checkoutStatus := func(pid string) apicommon.ProcessPaymentStatusResponse {
 		return requestAndParse[apicommon.ProcessPaymentStatusResponse](
 			t, http.MethodGet, token, nil, "processes", pid, "checkout")
@@ -588,7 +578,6 @@ func TestCancelCheckoutAroundCompletedWebhook(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	token := testCreateUser(t, "cancelracewebhook")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	// the webhook credited and consumed the top-up, then the cancel landed before its publish
 	consumedFirst := newPricedVotingProcess(t, token, orgAddress)
@@ -634,7 +623,6 @@ func TestCancelCheckoutRefusesSpentTopUp(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	token := testCreateUser(t, "cancelspenttopup")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newBrandedVotingProcess(t, token, orgAddress)
 	oid := objectID(c, pid)
 	sessionID, _ := openProcessTopUp(t, fake, token, pid)
@@ -677,7 +665,6 @@ func TestCheckoutDropsObsoleteCheckout(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	adminToken := testCreateUser(t, "obsoletecheckout1")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	checkoutReq := &apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}
 	brandingClaimant := func() bson.ObjectID {
 		org, err := testDB.Organization(orgAddress)
@@ -702,7 +689,6 @@ func TestCheckoutDropsObsoleteCheckout(t *testing.T) {
 	// the draft became free (branding, all it paid for, is now the organization's): the same drop
 	other := testCreateUser(t, "obsoletecheckout2")
 	freeOrg := testCreateOrganization(t, other)
-	setOrganizationSubscription(t, freeOrg, mockEssentialPlan.ID)
 	req := newVotingProcessRequest(freeOrg, postNewOrgMembers(t, other, freeOrg, 10))
 	req.AddOns = db.ProcessAddOns{Branding: true}
 	pid = requestAndParse[apicommon.CreateVotingProcessResponse](
@@ -730,7 +716,6 @@ func TestCheckoutRefusesRefundedDraft(t *testing.T) {
 	installFakePaymentGW(t)
 	adminToken := testCreateUser(t, "refundedcheckout1")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, adminToken, orgAddress)
 	paidCents := markProcessPaid(t, pid)
 	creditRefund(t, orgAddress, objectID(c, pid), paidCents)

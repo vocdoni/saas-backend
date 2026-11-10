@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -20,6 +21,21 @@ import (
 	"github.com/vocdoni/saas-backend/stripe"
 	"go.vocdoni.io/dvote/util"
 )
+
+// newStripeService builds a Stripe service on the test database with mock secrets.
+func newStripeService(t *testing.T) *stripe.Service {
+	t.Helper()
+	c := qt.New(t)
+
+	_ = os.Setenv("VOCDONI_STRIPEAPISECRET", "mockAPISecret")
+	_ = os.Setenv("VOCDONI_STRIPEWEBHOOKSECRET", "mockWebhookSecret")
+
+	config, err := stripe.NewConfig()
+	c.Assert(err, qt.IsNil)
+	service, err := stripe.NewService(config, testDB)
+	c.Assert(err, qt.IsNil)
+	return service
+}
 
 // installStripeWebhookService builds a real stripe.Service with the mock webhook secret,
 // wires the process follow-ups of a top-up, and installs it as the API's webhook handler for
@@ -59,7 +75,7 @@ func postSignedStripeEvent(t *testing.T, secret, eventID, eventType string, obje
 		Secret:  secret,
 	})
 	req, err := http.NewRequest(http.MethodPost,
-		fmt.Sprintf("http://%s:%d/subscriptions/webhook", testHost, testPort),
+		fmt.Sprintf("http://%s:%d/payments/webhook", testHost, testPort),
 		bytes.NewReader(payload))
 	c.Assert(err, qt.IsNil)
 	req.Header.Set("Content-Type", "application/json")
@@ -131,7 +147,6 @@ func TestTopUpWebhookPublishNeverDebitsAboveTheCheckout(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	token := testCreateUser(t, "webhookceiling123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	oid := objectID(c, pid)
 	extra := postNewOrgMembers(t, token, orgAddress, 1)
@@ -197,7 +212,6 @@ func TestTopUpWebhookPublishesProcess(t *testing.T) {
 
 	token := testCreateUser(t, "webhookpass12345")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	oid := objectID(c, pid)
 	const balance = 400
@@ -258,7 +272,7 @@ func TestTopUpWebhookPublishesProcess(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPaid)
 
-	// a completed session carrying none of our metadata (the subscription checkout) passes
+	// a completed session carrying none of our metadata (a legacy subscription checkout) passes
 	code = postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8),
 		"checkout.session.completed", checkoutSessionObject("cs_sub_flow", "paid", 19_900, nil))
 	c.Assert(code, qt.Equals, http.StatusOK)
@@ -274,7 +288,6 @@ func TestStripeCheckoutWebhookStampsBranding(t *testing.T) {
 
 	token := testCreateUser(t, "brandingpaid1234")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 
 	// process A selects branding: 2 voters -> free base, +€149 branding = 14900 cents
@@ -314,7 +327,6 @@ func TestTopUpWebhookStaleSessionKeepsCredit(t *testing.T) {
 
 	token := testCreateUser(t, "webhookmismatch1")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	_, paid := openProcessTopUp(t, fake, token, pid)
 	paid["id"] = "cs_orphaned_session"
@@ -342,7 +354,6 @@ func TestTopUpWebhookRefusalKeepsCredit(t *testing.T) {
 
 	token := testCreateUser(t, "webhookunderpaid1")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	_, paid := openProcessTopUp(t, fake, token, pid)
 	paid["total_details"] = map[string]any{"amount_discount": 500}
@@ -381,7 +392,6 @@ func TestTopUpWebhookFailedDropsCheckout(t *testing.T) {
 
 	token := testCreateUser(t, "webhookfail12345")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	sessionID, paid := openProcessTopUp(t, fake, token, pid)
 	paid["payment_status"] = "unpaid"
@@ -441,7 +451,6 @@ func TestTopUpWebhookHealsCrashBeforeConsume(t *testing.T) {
 
 	token := testCreateUser(t, "replaypass123456")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	sessionID, paid := openProcessTopUp(t, fake, token, pid)
 
@@ -468,7 +477,6 @@ func TestStripeCheckoutWebhookRetriesTransientPublishFailure(t *testing.T) {
 
 	token := testCreateUser(t, "retrypass1234567")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	oid := objectID(c, pid)
 	_, paid := openProcessTopUp(t, fake, token, pid)
@@ -504,7 +512,6 @@ func TestTopUpWebhookReplayAfterCreditBackDoesNotDebit(t *testing.T) {
 
 	token := testCreateUser(t, "replaycredit1234")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	oid := objectID(c, pid)
 	_, paid := openProcessTopUp(t, fake, token, pid)

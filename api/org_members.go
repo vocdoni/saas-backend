@@ -278,7 +278,7 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 	// for it a bounded time (lockOrBusy) and answers 503.
 	growthLock, err := a.censusGrowthLocks.lockOrBusy(r.Context(), org.Address)
 	if err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	handedOff := false
@@ -289,7 +289,7 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 	}()
 	// check if the new members pass the organization members limit
 	if err := a.subscriptions.OrgCanAddNMembers(org.Address, len(members.Members)); err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	// the imported members join the auto "All members" group, so they join the censuses built from
@@ -302,7 +302,7 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := a.preflightCensusGrowth(org, autoCensuses, len(members.Members)); err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 
@@ -492,7 +492,7 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 	if !isUpdate {
 		growthLock, err := a.censusGrowthLocks.lockOrBusy(r.Context(), org.Address)
 		if err != nil {
-			writeSubscriptionError(w, err)
+			writeAPIError(w, err)
 			return
 		}
 		defer growthLock.Unlock()
@@ -508,11 +508,11 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		// the same member-base quota the bulk POST enforces: a creation grows the member base by
 		// one, while an edit of an existing member at the limit must stay allowed
 		if err := a.subscriptions.OrgCanAddNMembers(org.Address, 1); err != nil {
-			writeSubscriptionError(w, err)
+			writeAPIError(w, err)
 			return
 		}
 		if err := a.preflightCensusGrowth(org, autoCensuses, 1); err != nil {
-			writeSubscriptionError(w, err)
+			writeAPIError(w, err)
 			return
 		}
 	}

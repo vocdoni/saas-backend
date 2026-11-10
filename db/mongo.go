@@ -47,7 +47,6 @@ type MongoStorage struct {
 	verifications       *mongo.Collection
 	organizations       *mongo.Collection
 	organizationInvites *mongo.Collection
-	plans               *mongo.Collection
 	objects             *mongo.Collection
 	orgMembers          *mongo.Collection
 	orgMemberGroups     *mongo.Collection
@@ -194,7 +193,7 @@ func (ms *MongoStorage) dropAllCollections() error {
 	return nil
 }
 
-// DeleteAllDocuments removes all documents from all collections, except `plans` and `migrations`,
+// DeleteAllDocuments removes all documents from all collections, except `migrations`,
 // so it preserves all collection structures, indexes, and migration state.
 func (ms *MongoStorage) DeleteAllDocuments() error {
 	log.Infow("deleting all documents from database", "db", ms.database)
@@ -204,7 +203,7 @@ func (ms *MongoStorage) DeleteAllDocuments() error {
 	var errs []error
 
 	for name, collectionPtr := range ms.collectionsMap() {
-		if name == "migrations" || name == "plans" {
+		if name == "migrations" {
 			continue
 		}
 		if *collectionPtr != nil {

@@ -12,24 +12,24 @@ import (
 func TestCheckoutSessionStatus(t *testing.T) {
 	c := qt.New(t)
 
-	// A subscription-mode session with every sub-object present.
+	// A session with customer details and the organization address stamped at creation.
 	full := checkoutSessionStatus(&stripeapi.CheckoutSession{
 		Status:          stripeapi.CheckoutSessionStatusComplete,
 		CustomerDetails: &stripeapi.CheckoutSessionCustomerDetails{Email: "creator@example.com"},
-		Subscription:    &stripeapi.Subscription{Status: stripeapi.SubscriptionStatusActive},
+		Metadata:        map[string]string{MetadataKeyWalletTopUpOrg: "0x00000000000000000000000000000000000000AA"},
 	})
 	c.Assert(full, qt.DeepEquals, &CheckoutSessionStatus{
-		Status:             "complete",
-		CustomerEmail:      "creator@example.com",
-		SubscriptionStatus: "active",
+		Status:        "complete",
+		CustomerEmail: "creator@example.com",
+		OrgAddress:    "0x00000000000000000000000000000000000000AA",
 	})
 
-	// A one-time (mode "payment") session has no subscription, and an open session
-	// has no customer details yet — neither must panic.
+	// An open session has no customer details yet and no organization (an orphan).
 	oneTime := checkoutSessionStatus(&stripeapi.CheckoutSession{
 		Status: stripeapi.CheckoutSessionStatusOpen,
 	})
 	c.Assert(oneTime, qt.DeepEquals, &CheckoutSessionStatus{Status: "open"})
+	c.Assert(oneTime.OrgAddress, qt.Equals, "")
 
 	// A wallet top-up resolves to the organization whose wallet it credits.
 	topUp := checkoutSessionStatus(&stripeapi.CheckoutSession{

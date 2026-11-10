@@ -32,8 +32,8 @@
 //	@tag.name					organizations
 //	@tag.description			Organization management operations
 //
-//	@tag.name					plans
-//	@tag.description			Subscription plans operations
+//	@tag.name					payments
+//	@tag.description			Stripe wallet top-up checkout sessions and the payment webhook
 //
 //	@tag.name					processes
 //	@tag.description			Multi-question voting process operations (create, publish, results, voter CSP flow)
@@ -476,7 +476,6 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, organizationsEndpoint, a.createOrganizationHandler)
 		handle(r, http.MethodPut, organizationEndpoint, a.updateOrganizationHandler)
 		handle(r, http.MethodGet, organizationUsersEndpoint, a.organizationUsersHandler)
-		handle(r, http.MethodGet, organizationSubscriptionEndpoint, a.organizationSubscriptionHandler)
 		handle(r, http.MethodPost, organizationAddUserEndpoint, a.inviteOrganizationUserHandler)
 		handle(r, http.MethodPut, organizationUpdateUserEndpoint, a.updateOrganizationUserHandler)
 		handle(r, http.MethodDelete, organizationDeleteUserEndpoint, a.removeOrganizationUserHandler)
@@ -511,14 +510,8 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, integratorOrgAPIKeysEndpoint, a.apiKeysHandler)
 		handle(r, http.MethodDelete, integratorOrgAPIKeyEndpoint, a.revokeAPIKeyHandler)
 		// late-bound: a method value would capture a.stripeHandlers as it is at router-build time
-		handle(r, http.MethodPost, subscriptionsCheckout, func(w http.ResponseWriter, r *http.Request) {
-			a.stripeHandlers.CreateSubscriptionCheckout(w, r)
-		})
-		handle(r, http.MethodGet, subscriptionsCheckoutSession, func(w http.ResponseWriter, r *http.Request) {
+		handle(r, http.MethodGet, walletCheckoutSession, func(w http.ResponseWriter, r *http.Request) {
 			a.stripeHandlers.GetCheckoutSession(w, r)
-		})
-		handle(r, http.MethodGet, subscriptionsPortal, func(w http.ResponseWriter, r *http.Request) {
-			a.stripeHandlers.CreateSubscriptionPortalSession(w, r, a)
 		})
 		handle(r, http.MethodPost, objectStorageUploadTypedEndpoint, a.objectStorage.UploadImageWithFormHandler)
 		// multi-question voting processes: authoring (the GET reads are public — see below)
@@ -565,11 +558,10 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, organizationRolesEndpoint, a.organizationRolesHandler)
 		handle(r, http.MethodGet, organizationTypesEndpoint, a.organizationsTypesHandler)
 		handle(r, http.MethodGet, organizationLanguagesEndpoint, a.organizationsLanguagesHandler)
-		handle(r, http.MethodGet, plansEndpoint, a.plansHandler)
 		handle(r, http.MethodGet, pricingEndpoint, a.pricingHandler)
 		// late-bound: a method value would capture a.stripeHandlers as it is at
 		// router-build time (nil when Stripe init failed or a test installs it later)
-		handle(r, http.MethodPost, subscriptionsWebhook, func(w http.ResponseWriter, r *http.Request) {
+		handle(r, http.MethodPost, paymentsWebhook, func(w http.ResponseWriter, r *http.Request) {
 			a.stripeHandlers.HandleWebhook(w, r)
 		})
 		handle(r, http.MethodGet, objectStorageDownloadTypedEndpoint, a.objectStorage.DownloadImageInlineHandler)

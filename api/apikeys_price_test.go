@@ -16,7 +16,7 @@ func TestIntegratorAPIKeyReadsPrice(t *testing.T) {
 	c := qt.New(t)
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "keypricepass1234")
-	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_key_price")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token)
 	draft := newManagedDraft(t, token, managedAddr)
 	mintKey := func(scopes ...string) string {
 		data, code := testRequest(t, http.MethodPost, token,

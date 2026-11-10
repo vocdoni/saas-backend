@@ -66,7 +66,6 @@ var (
 	ErrOrganizationNotFound      = Error{Code: 40009, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("organization not found")}
 	ErrNoOrganizations           = Error{Code: 40012, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("user has no organizations")}
 	ErrUserNotFound              = Error{Code: 40018, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("user not found")}
-	ErrPlanNotFound              = Error{Code: 40023, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("subscription plan not found")}
 	ErrJobNotFound               = Error{Code: 40026, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("job not found")}
 	ErrCensusNotFound            = Error{Code: 40027, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("census not found")}
 	ErrCensusParticipantNotFound = Error{Code: 40029, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("census participant not found")}
@@ -81,10 +80,7 @@ var (
 	ErrProcessPartiallyPublished = Error{Code: 40904, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("process is partially published: some questions already have on-chain elections")}
 
 	// TODO: most of theses errors should be unauthorized
-	// Subscription errors (400)
-	ErrOrganizationHasNoSubscription    = Error{Code: 40020, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("organization has no subscription")}
-	ErrOrganizationSubscriptionInactive = Error{Code: 40021, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("organization subscription is not active")}
-	ErrNoDefaultPlan                    = Error{Code: 40022, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("no default plan available")}
+	// Subscription errors (400). Codes 40020-40023 and 40180 (subscription and plan errors) are retired: do not reuse them.
 	ErrMaxDraftsReached                 = Error{Code: 40031, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("max drafts reached")}
 	ErrUserHasNoAdminRole               = Error{Code: 40032, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("user does not have admin role")}
 	ErrMaxOrganizationsReached          = Error{Code: 40048, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("user has reached maximum number of organizations")}
@@ -138,12 +134,6 @@ var (
 	// ErrCheckoutSessionNotFound is the only answer for a checkout session the caller may not
 	// read, whatever the reason (missing, not theirs), so session existence is never revealed.
 	ErrCheckoutSessionNotFound = Error{Code: 40179, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("checkout session not found"), LogLevel: "info"}
-	// ErrOrganizationAlreadySubscribed refuses a new subscription checkout while the organization
-	// has a paid subscription: plan changes go through the billing portal.
-	ErrOrganizationAlreadySubscribed = Error{
-		Code: 40180, HTTPstatus: http.StatusConflict, LogLevel: "info",
-		Err: fmt.Errorf("organization already has a paid subscription, manage it from the billing portal"),
-	}
 
 	// CSP errors (408)
 	ErrZeroWeightVoter = Error{Code: 40801, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("voter weight cannot be zero")}

@@ -26,7 +26,6 @@ func TestDeleteDraftPaymentStates(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	token := testCreateUser(t, "deletestates1234")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	checkoutReq := &apicommon.ProcessCheckoutRequest{ReturnURL: "https://x.example"}
 	openCheckout := func() (string, bson.ObjectID, string) {
 		pid := newPricedVotingProcess(t, token, orgAddress)
@@ -125,7 +124,6 @@ func TestDeleteRetryReleasesBranding(t *testing.T) {
 	installFakePaymentGW(t)
 	adminToken := testCreateUser(t, "releaseretry1234")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newBrandedVotingProcess(t, adminToken, orgAddress)
 	oid, err := bson.ObjectIDFromHex(pid)
 	c.Assert(err, qt.IsNil)
@@ -161,7 +159,7 @@ func TestDeleteWalletPaidDraftCreditsIntegratorWallet(t *testing.T) {
 	c := qt.New(t)
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "walletrefund1234")
-	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_wallet_refund")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token)
 
 	members := postOrgMembers(t, token, managedAddr, newOrgMembers(pricedProcessVoters)...)
 	req := newVotingProcessRequest(managedAddr, memberIDs(members))
@@ -208,7 +206,7 @@ func TestDeleteWalletPaidDraftWaitsForHeadroomCharge(t *testing.T) {
 	c := qt.New(t)
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "walletraceref123")
-	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_wallet_refund_race")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token)
 
 	members := postOrgMembers(t, token, managedAddr, newOrgMembers(pricedProcessVoters)...)
 	req := newVotingProcessRequest(managedAddr, memberIDs(members))
@@ -262,7 +260,7 @@ func TestDeleteWalletPaidDraftWaitsForHeadroomCharge(t *testing.T) {
 func TestRefundedDraftIsDeleteOnly(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "refundedzombie12")
-	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_refunded_zombie")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token)
 
 	members := postOrgMembers(t, token, managedAddr, newOrgMembers(pricedProcessVoters)...)
 	req := newVotingProcessRequest(managedAddr, memberIDs(members))
@@ -313,7 +311,6 @@ func TestDeletePaidDraftCreditsStandardWallet(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	token := testCreateUser(t, "creditbackstd123")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	paid := newBrandedVotingProcess(t, token, orgAddress)
 	paidCents := markProcessPaid(t, paid)
@@ -362,7 +359,6 @@ func TestDeletePaidDraftWithholdsBrandingOfDraftBeingPublished(t *testing.T) {
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "withholdpublish1")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	paid := newBrandedVotingProcess(t, token, orgAddress)
 	c.Assert(markProcessPaid(t, paid), qt.Equals, pricedProcessCents+pricing.BrandingCents)
 	sibling := newBrandedVotingProcess(t, token, orgAddress)
@@ -397,7 +393,6 @@ func TestDeleteRefundAndSiblingPublishShareWalletLock(t *testing.T) {
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "refundracepub123")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	paid := newBrandedVotingProcess(t, token, orgAddress)
 	paidCents := markProcessPaid(t, paid)
 	c.Assert(paidCents, qt.Equals, pricedProcessCents+pricing.BrandingCents)
@@ -448,7 +443,6 @@ func TestDeleteDraftCreditsBackDebitWithOpenCheckout(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	token := testCreateUser(t, "lostdebitdelete1")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	oid := objectID(c, pid)
 	fundWallet(t, orgAddress, pricedProcessCents)
@@ -491,7 +485,6 @@ func TestFailedPublishCreditsBackHeadroom(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "lostheadroomrevert1")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	oid := objectID(c, pid)
 	const headroomCents pricing.Cents = 500
@@ -527,7 +520,6 @@ func TestRetriedDeleteCreditsCreditedBackDebitOnce(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "retrieddelete1234")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	oid := objectID(c, pid)
 	paidCents := markProcessPaid(t, pid)
@@ -552,7 +544,6 @@ func TestReversalOwesAddOnRelease(t *testing.T) {
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "releasefails1234")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	brandingPaid := func() bool {
 		o, err := testDB.Organization(orgAddress)
 		c.Assert(err, qt.IsNil)
@@ -594,7 +585,6 @@ func TestOwedReleaseSiblingPaysAddOn(t *testing.T) {
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "owedsibling12345")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	brandingClaimant := func() bson.ObjectID {
 		o, err := testDB.Organization(orgAddress)
 		c.Assert(err, qt.IsNil)
@@ -625,7 +615,6 @@ func TestOwedReleaseRefusesAddOnOnPaidDraft(t *testing.T) {
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "owedreleaseupdate")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	ids := postNewOrgMembers(t, token, orgAddress, pricedProcessVoters)
 	plain := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, newVotingProcessRequest(orgAddress, ids), processesCreateEndpoint).ProcessID
@@ -654,7 +643,6 @@ func TestReversalWithheldBrandingRepublishPaysBase(t *testing.T) {
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "withheldrepublish")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newBrandedVotingProcess(t, token, orgAddress)
 	oid := objectID(c, pid)
 	paidCents := markProcessPaid(t, pid)
@@ -693,7 +681,6 @@ func TestReversalAllWithheldKeptPaid(t *testing.T) {
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "keptpaidwithheld")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newBrandedVotingProcess(t, token, orgAddress)
 	oid := objectID(c, pid)
 	vp, err := testDB.VotingProcess(oid)
@@ -739,7 +726,6 @@ func TestPaidDraftAddOnUnstampedAtPublishRefused(t *testing.T) {
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "unstampededit123")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	brandingPaid := func() bool {
 		o, err := testDB.Organization(orgAddress)
 		c.Assert(err, qt.IsNil)
@@ -802,7 +788,6 @@ func TestWithheldAddOnStampedWhenChargeLostIt(t *testing.T) {
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "withheldnostamp1")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	brandingPaid := func() bool {
 		o, err := testDB.Organization(orgAddress)
 		c.Assert(err, qt.IsNil)

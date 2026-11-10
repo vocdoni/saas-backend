@@ -34,7 +34,6 @@ func TestStripeCheckoutWebhookStampsCustomURL(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	token := testCreateUser(t, "customurlpaid123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 
 	// 2 voters: free base, the custom URL is charged anyway
@@ -73,7 +72,6 @@ func TestOrgAddOnClaimsAreIndependent(t *testing.T) {
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "addonclaims12345")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	checkoutReq := &apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}
 	const bothCents = pricedProcessCents + pricing.BrandingCents + pricing.CustomURLCents
 
@@ -118,7 +116,6 @@ func TestPaidDraftCannotAddCustomURL(t *testing.T) {
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "customurlfixed12")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	ids := postNewOrgMembers(t, token, orgAddress, pricedProcessVoters)
 	pid := requestAndParse[apicommon.CreateVotingProcessResponse](
@@ -142,7 +139,6 @@ func TestDeletePaidDraftWithholdsEveryReliedOnAddOn(t *testing.T) {
 	fake := installFakePaymentGW(t)
 	token := testCreateUser(t, "withholdaddons12")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	paid := newAddOnsVotingProcess(t, token, orgAddress, db.ProcessAddOns{CustomURL: true, Branding: true})
 	net := pricedProcessCents + pricing.BrandingCents + pricing.CustomURLCents
@@ -185,7 +181,6 @@ func TestQuoteOnlyRefusedOnEveryPaymentPath(t *testing.T) {
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "quoteonlypaths12")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	draftOID := func(pid string) bson.ObjectID {
 		oid, err := bson.ObjectIDFromHex(pid)
 		c.Assert(err, qt.IsNil)
@@ -209,7 +204,7 @@ func TestQuoteOnlyRefusedOnEveryPaymentPath(t *testing.T) {
 	c.Assert(price.QuoteRequired, qt.IsTrue)
 	c.Assert(price.TotalCents, qt.Equals, pricing.Cents(0))
 	c.Assert(price.Lines, qt.HasLen, 0)
-	// the publish gate (the plan's own census cap answers first over HTTP on this branch)
+	// the publish gate (the census size cap answers first over HTTP on this branch)
 	draftVP, err := testDB.VotingProcess(draftOID(draft))
 	c.Assert(err, qt.IsNil)
 	err = testAPI.paymentDueForPublish(draftVP)

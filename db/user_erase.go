@@ -307,14 +307,8 @@ func (ms *MongoStorage) EraseUser(userID uint64) (*UserErasureReport, error) {
 			report.DeletedOrgs = append(report.DeletedOrgs, planOrg.Address)
 			continue
 		}
-		removed, err := ms.RemoveOrganizationUser(planOrg.Address, user.ID)
-		if err != nil {
+		if _, err := ms.RemoveOrganizationUser(planOrg.Address, user.ID); err != nil {
 			errs = append(errs, fmt.Errorf("removing membership in org %s: %w", planOrg.Address, err))
-		}
-		if removed {
-			if err := ms.DecrementOrganizationUsersCounter(planOrg.Address); err != nil {
-				errs = append(errs, fmt.Errorf("decrementing users counter of org %s: %w", planOrg.Address, err))
-			}
 		}
 		report.KeptOrgs = append(report.KeptOrgs, planOrg.Address)
 		if planOrg.CreatorEmailRetained {

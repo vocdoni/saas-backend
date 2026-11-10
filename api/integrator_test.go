@@ -80,6 +80,14 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 		t, http.MethodGet, token, nil, "integrator", "organizations",
 	)
 	c.Assert(list.Organizations, qt.HasLen, managedOrgs)
+	// each managed org lists its own usage counters
+	for _, org := range list.Organizations {
+		want := apicommon.ManagedOrganizationCounters{}
+		if org.Address == firstManaged {
+			want = apicommon.ManagedOrganizationCounters{SentVotes: 3, SentSMS: 2, SentEmails: 1}
+		}
+		c.Assert(org.Counters, qt.Equals, want)
+	}
 
 	// publish two priced processes under the managed org: both are paid from the wallet, with
 	// no pooled process quota in the way
@@ -89,6 +97,23 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 	}
 	publishCensusProcess(t, token, firstManaged, census, 1)
 	publishCensusProcess(t, token, firstManaged, census, 1)
+	// the listing counts the published processes live
+	list = requestAndParse[apicommon.ListManagedOrganizations](
+		t, http.MethodGet, token, nil, "integrator", "organizations",
+	)
+	for _, org := range list.Organizations {
+		var want int64
+		if org.Address == firstManaged {
+			want = 2
+		}
+		c.Assert(org.Counters.Processes, qt.Equals, want)
+	}
+	// the update response carries the same counters
+	updated := requestAndParse[apicommon.ManagedOrganizationInfo](t, http.MethodPut, token,
+		&apicommon.UpdateManagedOrganizationRequest{}, "integrator", "organizations", firstManaged.String())
+	c.Assert(updated.Counters, qt.Equals, apicommon.ManagedOrganizationCounters{
+		SentVotes: 3, SentSMS: 2, SentEmails: 1, Processes: 2,
+	})
 	wallet, err := testDB.Wallet(integratorAddr)
 	c.Assert(err, qt.IsNil)
 	c.Assert(wallet.BalanceCents < topUp, qt.IsTrue)

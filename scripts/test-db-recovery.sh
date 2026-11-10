@@ -148,7 +148,7 @@ VOCDONI_SERVERURL=http://$DR_HOST:$API_PORT
 VOCDONI_WEBURL=http://$DR_HOST:${UI_PORT}
 VOCDONI_PRIVATEKEY=${VOCDONI_PRIVATEKEY#0x}
 VOCDONI_SECRET=$RECOVERY_SECRET
-# non-empty dummies are enough to boot; the restored plans collection serves reads
+# non-empty dummies are enough to boot
 VOCDONI_STRIPEAPISECRET=sk_test_dummy
 VOCDONI_STRIPEWEBHOOKSECRET=whsec_dummy
 # blank: no real mail/SMS can be sent from the drill
@@ -247,10 +247,6 @@ curl -sf "http://localhost:$API_PORT/ping" >/dev/null || {
   fail "api /ping not responding"
 }
 pass "api /ping"
-
-PLANS="$(curl -sf "http://localhost:$API_PORT/plans")" && [[ "$PLANS" == *'"name"'* ]] ||
-  fail "GET /plans did not return restored plans"
-pass "api serves restored data (GET /plans)"
 
 # dump to a file first, then grep: piping into `grep -q` closes the pipe on the
 # first match, docker compose logs dies with SIGPIPE, and under pipefail the

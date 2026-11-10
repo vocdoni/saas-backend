@@ -2,7 +2,6 @@ package db
 
 import (
 	"testing"
-	"time"
 
 	qt "github.com/frankban/quicktest"
 )
@@ -21,9 +20,8 @@ func TestOrganizations(t *testing.T) {
 		// create a new organization with the address and a not found parent
 		parentAddress := testNonExistentOrg
 		c.Assert(testDB.SetOrganization(&Organization{
-			Address:      address,
-			Parent:       parentAddress,
-			Subscription: OrganizationSubscription{},
+			Address: address,
+			Parent:  parentAddress,
 		}), qt.IsNil)
 		// test not found parent organization
 		_, parentOrg, err := testDB.OrganizationWithParent(address)
@@ -100,40 +98,6 @@ func TestOrganizations(t *testing.T) {
 		org, err = testDB.Organization(address)
 		c.Assert(err, qt.IsNil)
 		c.Assert(org.DefaultLang, qt.Equals, "es")
-	})
-
-	t.Run("SetOrganizationWritesSubscriptionOnlyOnCreate", func(_ *testing.T) {
-		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
-
-		address := testOrgAddress
-		c.Assert(testDB.SetOrganization(&Organization{
-			Address:      address,
-			Subscription: OrganizationSubscription{PlanID: "plan-initial", Active: true},
-		}), qt.IsNil)
-		org, err := testDB.Organization(address)
-		c.Assert(err, qt.IsNil)
-		c.Assert(org.Subscription.PlanID, qt.Equals, "plan-initial")
-		c.Assert(org.Subscription.Active, qt.IsTrue)
-
-		// a whole-document write of an existing organization updates its other fields only
-		org.Website = "https://example.com"
-		org.Subscription.PlanID = "plan-stale"
-		org.Subscription.StripeSubscriptionID = "sub_stale"
-		c.Assert(testDB.SetOrganization(org), qt.IsNil)
-		org, err = testDB.Organization(address)
-		c.Assert(err, qt.IsNil)
-		c.Assert(org.Website, qt.Equals, "https://example.com")
-		c.Assert(org.Subscription.PlanID, qt.Equals, "plan-initial")
-		c.Assert(org.Subscription.StripeSubscriptionID, qt.Equals, "")
-
-		// the last payment date has its own writer
-		paidAt := time.Now().Truncate(time.Millisecond)
-		c.Assert(testDB.SetOrganizationLastPaymentDate(address, paidAt), qt.IsNil)
-		org, err = testDB.Organization(address)
-		c.Assert(err, qt.IsNil)
-		c.Assert(org.Subscription.LastPaymentDate.Equal(paidAt), qt.IsTrue)
-		c.Assert(org.Subscription.PlanID, qt.Equals, "plan-initial")
-		c.Assert(testDB.SetOrganizationLastPaymentDate(testAnotherOrgAddress, paidAt), qt.ErrorIs, ErrNotFound)
 	})
 
 	t.Run("DeleteOrganization", func(_ *testing.T) {
@@ -227,43 +191,6 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(users, qt.HasLen, 1)
 		singleUser := users[0]
 		c.Assert(singleUser.Email, qt.Equals, testUserEmail)
-	})
-
-	t.Run("AddOrganizationPlan", func(_ *testing.T) {
-		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
-
-		// create a new organization
-		address := testOrgAddress
-		c.Assert(testDB.SetOrganization(&Organization{
-			Address: address,
-		}), qt.IsNil)
-		// add a subscription to the organization
-		subscriptionName := "testPlan"
-		startDate := time.Now()
-		active := true
-		stripeID := "stripeID"
-		orgSubscription := &OrganizationSubscription{
-			PlanID:    "prod_nonexistent",
-			StartDate: startDate,
-			Active:    true,
-		}
-		// using a non existing subscription should fail
-		c.Assert(testDB.SetOrganizationSubscription(address, orgSubscription), qt.IsNotNil)
-		plan := &Plan{
-			ID:   stripeID,
-			Name: subscriptionName,
-		}
-		if err := testDB.SetPlan(plan); err != nil {
-			t.Error(err)
-		}
-		orgSubscription.PlanID = plan.ID
-		c.Assert(testDB.SetOrganizationSubscription(address, orgSubscription), qt.IsNil)
-		// retrieve the organization and check the subscription details
-		org, err := testDB.Organization(address)
-		c.Assert(err, qt.IsNil)
-		c.Assert(org, qt.Not(qt.IsNil))
-		c.Assert(org.Address, qt.DeepEquals, address)
-		c.Assert(org.Subscription.Active, qt.Equals, active)
 	})
 
 	t.Run("UpdateOrganizationUserRole", func(_ *testing.T) {
@@ -425,27 +352,4 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(secondUser.Organizations, qt.HasLen, 1)
 		c.Assert(secondUser.Organizations[0].Address, qt.DeepEquals, secondOrgAddress)
 	})
-}
-
-// TestOrganizationCountersIgnorePlanLimits asserts the users and suborgs counters keep counting
-// past the subscribed plan's limits: no plan caps them anymore.
-func TestOrganizationCountersIgnorePlanLimits(t *testing.T) {
-	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
-	plan := &Plan{ID: "prod_counters_limit", Organization: PlanLimits{Users: 1, SubOrgs: 1}}
-	err := testDB.SetPlan(plan)
-	c.Assert(err, qt.IsNil)
-	c.Assert(testDB.SetOrganization(&Organization{
-		Address:      testOrgAddress,
-		Subscription: OrganizationSubscription{PlanID: plan.ID, Active: true},
-	}), qt.IsNil)
-
-	for range 3 {
-		c.Assert(testDB.IncrementOrganizationUsersCounter(testOrgAddress), qt.IsNil)
-		c.Assert(testDB.IncrementOrganizationSubOrgsCounter(testOrgAddress), qt.IsNil)
-	}
-	org, err := testDB.Organization(testOrgAddress)
-	c.Assert(err, qt.IsNil)
-	c.Assert(org.Counters.Users, qt.Equals, 3)
-	c.Assert(org.Counters.SubOrgs, qt.Equals, 3)
 }

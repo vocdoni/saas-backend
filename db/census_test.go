@@ -487,6 +487,13 @@ func TestCensus(t *testing.T) {
 		err = testDB.DelCensus("invalid-id")
 		c.Assert(err, qt.Not(qt.IsNil))
 
+		// a group backing the census loses the link along with the census
+		groupID := bson.NewObjectID()
+		_, err = testDB.orgMemberGroups.InsertOne(t.Context(), &OrganizationMemberGroup{
+			ID: groupID, OrgAddress: testOrgAddress, CensusIDs: []string{censusID},
+		})
+		c.Assert(err, qt.IsNil)
+
 		// Test deleting with valid ID
 		err = testDB.DelCensus(censusID)
 		c.Assert(err, qt.IsNil)
@@ -494,6 +501,9 @@ func TestCensus(t *testing.T) {
 		// Verify the census was deleted
 		_, err = testDB.Census(censusID)
 		c.Assert(err, qt.Not(qt.IsNil))
+		group, err := testDB.OrganizationMemberGroup(groupID.Hex(), testOrgAddress)
+		c.Assert(err, qt.IsNil)
+		c.Assert(group.CensusIDs, qt.HasLen, 0)
 	})
 
 	t.Run("GetCensus", func(_ *testing.T) {

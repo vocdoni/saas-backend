@@ -20,7 +20,6 @@ func TestCSPAuthPassword(t *testing.T) {
 	c := qt.New(t)
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	alicePass, bobPass := testMemberPassword("alice-secret"), testMemberPassword("bob-secret")
 	members := postOrgMembers(t, adminToken, orgAddress,

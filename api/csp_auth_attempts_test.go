@@ -23,7 +23,6 @@ func TestCSPAuthAttemptBudget(t *testing.T) {
 
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	members := postOrgMembers(t, adminToken, orgAddress,
 		apicommon.OrgMember{MemberNumber: "B-001", Name: "Alice", Email: "alice.budget@example.com"},

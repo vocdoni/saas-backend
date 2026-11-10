@@ -97,11 +97,9 @@ service funds it on the local chain.
 ```bash
 # local chain + faucet funding + fake SMTP + API + Mongo (+ mongo-express on :8081)
 docker compose --profile with-vocone --profile local-smtp up -d
-# seed the default plan (organization creation requires one)
-docker compose --profile with-ui run --rm defaultplan
 # forward real signed webhooks from Stripe to the local API — keep this running;
 # it prints the whsec_… that must be in .env (restart the api after setting it)
-stripe listen --forward-to localhost:8080/subscriptions/webhook
+stripe listen --forward-to localhost:8080/payments/webhook
 ```
 
 The pinned `stripe-go` (v87, API version `2026-09-30.endive`) matches the current Stripe

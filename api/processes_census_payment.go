@@ -106,7 +106,7 @@ func (a *API) grandfatherProcessPayment(p processCensusProjection) (processPaid,
 // growing it past the price that was paid for it — or nil. It projects the size the census
 // would actually reach — only the memberIDs that are not participants yet — so re-sending a
 // batch that already landed is not refused as growth it is not. See censusGrowthPaymentError
-// for the check itself; write the result with writeSubscriptionError.
+// for the check itself; write the result with writeAPIError.
 func (a *API) censusGrowthRefusal(vp *db.VotingProcess, census *db.Census, memberIDs []string) error {
 	growth, err := a.db.CountNewCensusParticipants(census, memberIDs)
 	if err != nil {
@@ -265,7 +265,7 @@ func (a *API) createProcessCensusCheckoutHandler(w http.ResponseWriter, r *http.
 		return
 	}
 	if err := a.refuseRefundedDraft(vp); err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	census, err := a.db.Census(vp.CensusID.Hex())
@@ -275,7 +275,7 @@ func (a *API) createProcessCensusCheckoutHandler(w http.ResponseWriter, r *http.
 	}
 	p, projected, err := a.paidProcessProjection(vp, census, nil)
 	if err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	if !projected {
@@ -286,7 +286,7 @@ func (a *API) createProcessCensusCheckoutHandler(w http.ResponseWriter, r *http.
 	}
 	quote, err := quoteProcessAtCensusSize(p, req.CensusSize)
 	if err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	if quote.QuoteRequired {
@@ -321,7 +321,7 @@ func (a *API) createProcessCensusCheckoutHandler(w http.ResponseWriter, r *http.
 	shortfall, short := walletShortfall(err)
 	if !short {
 		// a managed organization's 40175, a payment that moved, or a failure
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	// The top-up covers the shortfall (at least the minimum charge); the webhook credits it and

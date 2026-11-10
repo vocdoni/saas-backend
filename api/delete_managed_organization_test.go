@@ -65,7 +65,6 @@ func TestDeleteManagedOrg(t *testing.T) {
 
 	// (D) active-election guard: a legacy process row owned by the managed org points at a READY
 	// on-chain election, so the delete must be blocked with 409 and leave everything in place.
-	enableProcessPlan(t, managed.Address)
 	cspPubKey, err := testCSP.PubKey()
 	c.Assert(err, qt.IsNil)
 	election := newSyncTestElection(t, managed.Address, cspPubKey)
@@ -134,7 +133,6 @@ func TestDeleteManagedOrgQuestionGuard(t *testing.T) {
 		"integrator", "organizations",
 	)
 	c.Assert(managed.Address, qt.Not(qt.Equals), common.Address{})
-	enableProcessPlan(t, managed.Address)
 
 	cspPubKey, err := testCSP.PubKey()
 	c.Assert(err, qt.IsNil)
@@ -182,12 +180,6 @@ func TestDeleteManagedOrgQuestionGuard(t *testing.T) {
 	keys, err := testDB.APIKeysByOrg(managed.Address)
 	c.Assert(err, qt.IsNil)
 	c.Assert(keys, qt.HasLen, 0)
-}
-
-// enableProcessPlan subscribes the managed org to a process-capable plan so publish is allowed.
-func enableProcessPlan(t *testing.T, orgAddress common.Address) {
-	t.Helper()
-	setOrganizationSubscription(t, orgAddress, mockPremiumPlan.ID)
 }
 
 // addMembersToManagedOrg seeds members directly into the managed org's memberbase via the DB

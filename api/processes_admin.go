@@ -69,7 +69,7 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := a.deleteDraftProcess(vp, nil); err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	apicommon.HTTPWriteOK(w)
@@ -80,7 +80,7 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 // add-on release a credit-back still owes is applied. Its payment row goes with it: the wallet
 // ledger is the record of what it paid and got back. It is what DELETE /processes/{processId}
 // does after authorization, and what an organization teardown does to each of its drafts. Errors are
-// errors.Error values carrying their HTTP semantics (write with writeSubscriptionError) or plain
+// errors.Error values carrying their HTTP semantics (write with writeAPIError) or plain
 // errors meaning 500; the draft is then kept and the delete can be retried. A non-nil teardown (an
 // organization teardown, deleteOrgDrafts) drops a partially published draft too: its mined
 // elections stay on chain like a published process's, nothing is credited back (they were
@@ -644,7 +644,7 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 	}
 	grown, err := a.addProcessCensusMembers(r.Context(), vp, req.MemberIDs)
 	if err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	census := grown.census
@@ -662,7 +662,7 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 	}
 	jobID, err := a.enqueueSetProcessCensus(vp.OrgAddress, targets)
 	if err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	resp := &apicommon.UpdateProcessCensusResponse{JobID: jobID, Added: uint32(grown.added), Errors: grown.memberErrs}
@@ -682,7 +682,7 @@ type processCensusGrowth struct {
 }
 
 // addProcessCensusMembers adds memberIDs to the census of the published process vp and stores
-// its recounted size. Its errors are errors.Error values (write them with writeSubscriptionError),
+// its recounted size. Its errors are errors.Error values (write them with writeAPIError),
 // or plain errors meaning 500.
 //
 // The growth check and the write it allows are one step per organization (censusGrowthLocks),
@@ -858,7 +858,7 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 	}
 	eligible, err := a.validateCensusParticipants(census.ID.Hex(), req.MemberIDs)
 	if err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 
@@ -887,7 +887,7 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 	// rather than the census lets a question narrow even once the census has outgrown its price.
 	if len(question.UpstreamID) > 0 {
 		if err := a.censusGrowthPaymentError(censusGrowth{vp: vp, census: census, size: int64(needed)}); err != nil {
-			writeSubscriptionError(w, err)
+			writeAPIError(w, err)
 			return
 		}
 	}
@@ -925,7 +925,7 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 		{question: *question, census: census, size: needed},
 	})
 	if err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	if jobID == "" {
@@ -1118,7 +1118,7 @@ func isOpenStatus(status string) bool {
 // to raise those elections' maxCensusSize. It returns an empty job id when nothing needs raising.
 //
 // It returns an error rather than writing a response, so one request can drive several processes —
-// a group census can back more than one. Callers map it with writeSubscriptionError, which
+// a group census can back more than one. Callers map it with writeAPIError, which
 // preserves ErrTxQueueFull's 503.
 //
 // It never enqueues a shrink. The chain accepts an increase only, and a census can now lose members,

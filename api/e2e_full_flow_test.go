@@ -34,10 +34,9 @@ func TestFullElectionLifecycle(t *testing.T) {
 	votePlan := []int{1, 1, 0}
 	numVoters := len(votePlan)
 
-	// --- organizer: user, org with on-chain account, plan subscription ---
+	// --- organizer: user, org with on-chain account ---
 	token := testCreateUser(t, "superpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	// --- members ---
 	members := newOrgMembers(numVoters)

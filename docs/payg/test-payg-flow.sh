@@ -97,9 +97,9 @@ PAYLOAD=$(jq -cn --arg id "evt_test_$(date +%s)" --arg sess "$SESSION" --arg pid
     metadata:{wallet_topup_org:$org, voting_process_id:$pid, requested_by:$email}}}}')
 TS=$(date +%s)
 SIG=$(printf '%s' "$TS.$PAYLOAD" | openssl dgst -sha256 -hmac "$SECRET" | sed 's/^.* //')
-WCODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API/subscriptions/webhook" \
+WCODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API/payments/webhook" \
   -H "Content-Type: application/json" -H "Stripe-Signature: t=$TS,v1=$SIG" --data-binary "$PAYLOAD")
-[ "$WCODE" = 200 ] && ok "POST /subscriptions/webhook (signed) -> 200" || die "webhook rejected ($WCODE) — check the secret matches .env"
+[ "$WCODE" = 200 ] && ok "POST /payments/webhook (signed) -> 200" || die "webhook rejected ($WCODE) — check the secret matches .env"
 
 step "7. observe paid + published"
 PSTATUS=$(curl -sf "$API/processes/$PID/checkout" -H "$AUTH" | jq -r .status)

@@ -30,7 +30,6 @@ func TestOrgLangInCSPEmails(t *testing.T) {
 		// Set up test environment with user, org, and census
 		token := testCreateUser(t, "superpassword123")
 		orgAddress := testCreateProvisionedOrganization(t, token)
-		setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 		if lang != "" {
 			requestAndAssertCode(200, t, "PUT", token, &apicommon.OrganizationInfo{DefaultLang: lang},
 				"organizations", orgAddress.String())
@@ -97,7 +96,6 @@ func TestOrgDefaultLangNotifications(t *testing.T) {
 	// set up an organization with catalan as default language
 	token := testCreateUser(t, "superpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	requestAndAssertCode(200, t, "PUT", token, &apicommon.OrganizationInfo{DefaultLang: "ca"},
 		"organizations", orgAddress.String())
 

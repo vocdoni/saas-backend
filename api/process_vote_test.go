@@ -109,7 +109,7 @@ func (f *relayVotingFixture) proofFor(t *testing.T, processID internal.HexBytes)
 }
 
 // setupRelayVoting builds the full CSP voting setup shared by the relay tests: a
-// provisioned organization with a plan, a published process with as many questions (each
+// provisioned organization, a published process with as many questions (each
 // its own on-chain election) and a voter authenticated against it.
 func setupRelayVoting(t *testing.T, processes int) *relayVotingFixture {
 	t.Helper()
@@ -117,7 +117,6 @@ func setupRelayVoting(t *testing.T, processes int) *relayVotingFixture {
 
 	token := testCreateUser(t, "superpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	authFields := db.OrgMemberAuthFields{
 		db.OrgMemberAuthFieldsName,

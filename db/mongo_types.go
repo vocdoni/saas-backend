@@ -14,10 +14,6 @@ type OrganizationCollection struct {
 	Organizations []Organization `json:"organizations" bson:"organizations"`
 }
 
-type PlanCollection struct {
-	Plans []Plan `json:"plans" bson:"plans"`
-}
-
 type OrganizationInvitesCollection struct {
 	OrganizationInvites []OrganizationInvite `json:"organizationInvites" bson:"organizationInvites"`
 }

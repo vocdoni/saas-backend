@@ -6,10 +6,6 @@ import (
 )
 
 // Config holds the complete Stripe configuration.
-//
-// Plans are no longer enumerated here: the service discovers them dynamically from Stripe
-// (the single source of truth) by listing active products that carry our plan metadata. See
-// stripe.Service.GetPlansFromStripe.
 type Config struct {
 	APIKey        string `yaml:"api_key" json:"api_key"`
 	WebhookSecret string `yaml:"webhook_secret" json:"webhook_secret"`

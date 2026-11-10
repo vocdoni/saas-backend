@@ -18,7 +18,6 @@ func TestVotingProcessDelete(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -52,13 +51,13 @@ func TestWithDraftID(t *testing.T) {
 	c.Assert(typed.Error(), qt.Contains, "draft abc")
 
 	rec := httptest.NewRecorder()
-	writeSubscriptionError(rec, typed)
+	writeAPIError(rec, typed)
 	c.Assert(rec.Code, qt.Equals, http.StatusConflict)
 	c.Assert(rec.Body.String(), qt.Contains, "draft abc")
 
 	plain := withDraftID(stderrors.New("boom"), "abc")
 	rec = httptest.NewRecorder()
-	writeSubscriptionError(rec, plain)
+	writeAPIError(rec, plain)
 	c.Assert(rec.Code, qt.Equals, http.StatusInternalServerError)
 	c.Assert(rec.Body.String(), qt.Contains, "draft abc")
 	c.Assert(rec.Body.String(), qt.Not(qt.Contains), "boom")

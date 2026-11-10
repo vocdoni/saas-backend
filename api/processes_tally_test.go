@@ -29,7 +29,6 @@ func TestVotingProcessMultichoiceTally(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 

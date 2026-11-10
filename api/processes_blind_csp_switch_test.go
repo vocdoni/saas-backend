@@ -49,7 +49,6 @@ func TestProcessBlindCSPSwitch(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(2)...))
 
 	anonymousReq := newVotingProcessRequest(orgAddress, ids)
@@ -117,7 +116,6 @@ func TestProcessBlindCSPSwitchResumesPartialPublish(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(2)...))
 
 	req := newVotingProcessRequest(orgAddress, ids)
@@ -156,7 +154,6 @@ func TestProcessBlindCSPSwitchStopsBlindSigning(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	voterMember := members[1]
 
@@ -202,50 +199,6 @@ func TestProcessBlindCSPSwitchStopsBlindSigning(t *testing.T) {
 	c.Assert(proof.GetCa(), qt.Not(qt.IsNil))
 }
 
-// TestPlansReportAnonymousVotingSwitch checks that the plan catalog and an organization's
-// subscription report anonymous voting as unavailable while it is off, without touching the
-// stored plan, and report the plan's own value otherwise.
-func TestPlansReportAnonymousVotingSwitch(t *testing.T) {
-	c := qt.New(t)
-	token := testCreateUser(t, "adminpassword123")
-	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-	c.Assert(mockEssentialPlan.Features.Anonymous, qt.IsTrue)
-
-	// reported reads the anonymous feature from the catalog and from the subscription
-	reported := func() (catalog, subscription bool) {
-		plans := requestAndParse[[]*db.Plan](t, http.MethodGet, "", nil, plansEndpoint)
-		found := false
-		for _, p := range plans {
-			if p.ID == mockEssentialPlan.ID {
-				catalog, found = p.Features.Anonymous, true
-			}
-		}
-		c.Assert(found, qt.IsTrue)
-		info := requestAndParse[apicommon.OrganizationSubscriptionInfo](
-			t, http.MethodGet, token, nil, "organizations", orgAddress.String(), "subscription")
-		c.Assert(info.Plan.ID, qt.Equals, mockEssentialPlan.ID)
-		return catalog, info.Plan.Features.Anonymous
-	}
-
-	catalog, subscription := reported()
-	c.Assert(catalog, qt.IsTrue)
-	c.Assert(subscription, qt.IsTrue)
-
-	setDisableBlindCSP(t, true)
-	catalog, subscription = reported()
-	c.Assert(catalog, qt.IsFalse)
-	c.Assert(subscription, qt.IsFalse)
-	stored, err := testDB.Plan(mockEssentialPlan.ID)
-	c.Assert(err, qt.IsNil)
-	c.Assert(stored.Features.Anonymous, qt.IsTrue)
-
-	setDisableBlindCSP(t, false)
-	catalog, subscription = reported()
-	c.Assert(catalog, qt.IsTrue)
-	c.Assert(subscription, qt.IsTrue)
-}
-
 // waitSentEmails polls the organization's sent-email counter, which is bumped asynchronously once a
 // challenge is delivered, until it reaches want, and returns its counters.
 func waitSentEmails(t *testing.T, orgAddress common.Address, want int) db.OrganizationCounters {
@@ -272,7 +225,6 @@ func TestProcessBlindCSPSwitchStopsAuthChallenges(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	authReq := func(i int) *handlers.AuthRequest {
 		return &handlers.AuthRequest{Name: members[i].Name, Surname: members[i].Surname, Email: members[i].Email}

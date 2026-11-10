@@ -76,7 +76,6 @@ func TestPublishedFreeProcessCensusGrowth(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "freegrowth12345")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(growthBaseVoters)...))
 
 	// within the free tier and no 2FA channel: nothing to pay
@@ -111,7 +110,6 @@ func TestPublishedConsumedCheckoutGetsEnvelope(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "consumedenvelope1")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(pricing.FreeCensusSize)...))
 	req := newVotingProcessRequest(orgAddress, ids)
 	req.Census.TwoFaFields = nil
@@ -151,7 +149,6 @@ func TestParallelCensusGrowthStaysWithinPrice(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "parallelgrowth12")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(pricing.FreeCensusSize+20)...))
 
 	req := newVotingProcessRequest(orgAddress, ids[:pricing.FreeCensusSize-5])
@@ -196,7 +193,6 @@ func TestPublishedCensusGrowthWithinPaidPrice(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "censusgrowth123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(growthTotalVoters)...)
 	ids := memberIDs(members)
 
@@ -297,7 +293,6 @@ func TestQuestionEligibilityPricedAtItsSize(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "eligibilityprice1")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(growthTotalVoters)...))
 
 	req := newVotingProcessRequest(orgAddress, ids[:growthBaseVoters])
@@ -338,7 +333,6 @@ func TestCensusGrowthIgnoresUnknownMembers(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "growthtypo12345")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(growthTierEnd)...))
 
 	// no 2FA channel: only the base price is billed
@@ -399,7 +393,6 @@ func TestMemberbaseGrowthBeyondPaidPrice(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "memberbasegrowth")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	all := newOrgMembers(growthTierEnd + 7)
 	ids := memberIDs(postOrgMembers(t, token, orgAddress, all[:growthTierEnd]...))
 
@@ -492,7 +485,6 @@ func TestGrandfatheredProcessCensusGrowth(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "grandfathered")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	all := newOrgMembers(growthTierEnd + 1)
 	ids := memberIDs(postOrgMembers(t, token, orgAddress, all...))
 
@@ -570,7 +562,7 @@ func TestManagedCensusGrowthChargesIntegratorWallet(t *testing.T) {
 	c := qt.New(t)
 	installFakePaymentGW(t)
 	token := testCreateUser(t, "managedgrowth123")
-	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_managed_growth")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token)
 
 	members := postOrgMembers(t, token, managedAddr, newOrgMembers(growthTotalVoters)...)
 	ids := memberIDs(members)
@@ -692,7 +684,6 @@ func TestCensusCheckoutChargesTheMinimum(t *testing.T) {
 	installStripeWebhookService(t)
 	token := testCreateUser(t, "censusminimum123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	oid, err := bson.ObjectIDFromHex(pid)
 	c.Assert(err, qt.IsNil)
@@ -728,7 +719,6 @@ func TestOverlappingHeadroomTopUpsKeepTheStaleCredit(t *testing.T) {
 	installStripeWebhookService(t)
 	token := testCreateUser(t, "overlaptopups123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	paidCents := markProcessPaid(t, pid)
 
@@ -775,7 +765,6 @@ func TestCensusCheckoutRefusesQuoteOnlySize(t *testing.T) {
 
 	// card: a standard organization's paid process
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	markProcessPaid(t, pid)
 	requestAndAssertError(errors.ErrQuoteRequired, t, http.MethodPost, token, quoteOnly,
@@ -783,7 +772,7 @@ func TestCensusCheckoutRefusesQuoteOnlySize(t *testing.T) {
 	c.Assert(fake.created, qt.HasLen, 0)
 
 	// wallet: a managed organization's published process
-	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_quote_only")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token)
 	members := postOrgMembers(t, token, managedAddr, newOrgMembers(pricedProcessVoters)...)
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, newVotingProcessRequest(managedAddr, memberIDs(members)), processesCreateEndpoint)
@@ -811,7 +800,6 @@ func TestPublishPricesTheCensusItPublishes(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "publishcensusrace1")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(growthBaseVoters+1)...))
 
 	// no 2FA channel, so only the base price is billed; Q1 takes the whole census
@@ -901,7 +889,6 @@ func TestDraftNeverRefusesMemberbaseGrowth(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "draftgrowth12345")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	all := newOrgMembers(growthTotalVoters + 1)
 	ids := memberIDs(postOrgMembers(t, token, orgAddress, all[:growthBaseVoters]...))
 	groupDraft := func(groupID string) string {
@@ -972,7 +959,6 @@ func TestMemberbaseGrowthWhilePublishing(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "growthpublishing1")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	all := newOrgMembers(growthBaseVoters + 2)
 	ids := memberIDs(postOrgMembers(t, token, orgAddress, all[:growthBaseVoters]...))
 	groupDraft := func(groupID string) *db.VotingProcess {
@@ -1051,7 +1037,6 @@ func TestPropagationDoesNotResizePastThePrice(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "propagationprice1")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(growthBaseVoters+1)...))
 	req := newVotingProcessRequest(orgAddress, ids[:growthBaseVoters])
 	req.StartDate = ""
@@ -1092,7 +1077,6 @@ func TestCensusCheckoutWithoutStripe(t *testing.T) {
 	t.Cleanup(func() { testAPI.paymentGW = prev })
 	token := testCreateUser(t, "censusnostripe123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	pid := newPricedVotingProcess(t, token, orgAddress)
 	paidCents := markProcessPaid(t, pid)
 	vp, err := testDB.VotingProcess(objectID(c, pid))

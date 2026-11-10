@@ -22,7 +22,6 @@ func TestCSPAuthNormalizesInput(t *testing.T) {
 
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	// Padded exactly the way a spreadsheet or CSV import pads them.
 	members := []apicommon.OrgMember{

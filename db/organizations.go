@@ -79,12 +79,6 @@ func (ms *MongoStorage) OrganizationWithParent(address common.Address) (org *Org
 // If the organization already exists, it updates the fields that have changed.
 // If the organization doesn't exist, it creates it. If an error occurs, it
 // returns the error.
-//
-// The subscription is only written when the organization is created. Callers
-// read-modify-write the whole organization, so a write of an existing one would
-// put back the subscription it read, undoing any change the billing webhooks made
-// in between. Subscription changes go through SetOrganizationSubscription,
-// UpdateOrganizationSubscription and SetOrganizationLastPaymentDate.
 func (ms *MongoStorage) SetOrganization(org *Organization) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
@@ -101,15 +95,10 @@ func (ms *MongoStorage) SetOrganization(org *Organization) error {
 	if err != nil {
 		return err
 	}
-	// fields written only when the document is created: the subscription (see above) and the
-	// signer seed, which takes part in the organization key derivation and is never rewritten.
-	// Both go into one $setOnInsert map so neither can overwrite the other.
+	// the signer seed is written only when the document is created: it takes part in the
+	// organization key derivation and is never rewritten
 	setOnInsert := bson.M{}
 	if set, ok := updateDoc["$set"].(bson.M); ok {
-		if subscription, ok := set["subscription"]; ok {
-			delete(set, "subscription")
-			setOnInsert["subscription"] = subscription
-		}
 		delete(set, "signerSeed")
 		// monotonic, written only by $inc: a stale read written back must not lower it
 		delete(set, "managedOrgsCreated")
@@ -307,27 +296,6 @@ func (ms *MongoStorage) RemoveOrganizationFromAllUsers(address common.Address) e
 	return nil
 }
 
-// SetOrganizationSubscription method adds the provided subscription to
-// the organization with the given address
-func (ms *MongoStorage) SetOrganizationSubscription(address common.Address, orgSubscription *OrganizationSubscription) error {
-	if _, err := ms.Plan(orgSubscription.PlanID); err != nil {
-		return ErrInvalidData
-	}
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-	// prepare the document to be updated in the database
-	filter := bson.M{"_id": address}
-	updateDoc := bson.M{"$set": bson.M{"subscription": orgSubscription}}
-	// update the organization in the database
-	if _, err := ms.organizations.UpdateOne(ctx, filter, updateDoc); err != nil {
-		return err
-	}
-	return nil
-}
-
 // OrgAddOnClaimStaleAfter is how long a claim its payment no longer backs is still respected.
 // Paying attempts refresh the claim first, so an older one is abandoned. A var for tests.
 var OrgAddOnClaimStaleAfter = 2 * time.Minute
@@ -409,33 +377,9 @@ func (ms *MongoStorage) ReleaseOrganizationAddOnClaim(c OrgAddOnClaim) error {
 	return nil
 }
 
-// UpdateOrganizationSubscription sets every field of the organization's subscription
-// except lastPaymentDate, which has its own writer (SetOrganizationLastPaymentDate), so
-// the subscription and payment webhooks never overwrite each other's field.
-func (ms *MongoStorage) UpdateOrganizationSubscription(address common.Address, sub *OrganizationSubscription) error {
-	if _, err := ms.Plan(sub.PlanID); err != nil {
-		return ErrInvalidData
-	}
-	return ms.updateOrganizationFields(address, bson.M{
-		"subscription.planID":               sub.PlanID,
-		"subscription.stripeSubscriptionID": sub.StripeSubscriptionID,
-		"subscription.billingPeriod":        sub.BillingPeriod,
-		"subscription.startDate":            sub.StartDate,
-		"subscription.renewalDate":          sub.RenewalDate,
-		"subscription.active":               sub.Active,
-		"subscription.email":                sub.Email,
-	})
-}
-
-// SetOrganizationLastPaymentDate sets only the last payment date of the organization's
-// subscription.
-func (ms *MongoStorage) SetOrganizationLastPaymentDate(address common.Address, date time.Time) error {
-	return ms.updateOrganizationFields(address, bson.M{"subscription.lastPaymentDate": date})
-}
-
 // UpdateOrganizationProfile $sets only the profile fields that are not zero on the existing
 // organization with profile's address. Unlike SetOrganization it never upserts, and it leaves
-// every other field (counters, subscription, limits, memberships...) alone, so a write based on
+// every other field (counters, add-ons, memberships...) alone, so a write based on
 // an earlier read cannot undo changes made since. Returns ErrNotFound if there is no organization
 // with that address.
 func (ms *MongoStorage) UpdateOrganizationProfile(profile *Organization) error {
@@ -770,33 +714,6 @@ func (ms *MongoStorage) DeleteOrganizationMetaKeys(address common.Address, keysT
 	}
 
 	return nil
-}
-
-// IncrementOrganizationUsersCounter atomically increments the users counter for the organization with the given address.
-func (ms *MongoStorage) IncrementOrganizationUsersCounter(address common.Address) error {
-	return ms.addToOrganizationCounter(address, "users", 1)
-}
-
-// DecrementOrganizationUsersCounter atomically decrements the users counter for the organization with the given address.
-func (ms *MongoStorage) DecrementOrganizationUsersCounter(address common.Address) error {
-	return ms.addToOrganizationCounter(address, "users", -1)
-}
-
-// IncrementOrganizationProcessesCounter atomically increments the processes counter for the organization with the
-// given address. No limit applies to it (published processes are pay-per-process); this uses an atomic $inc so
-// concurrent publishes cannot lose an update.
-func (ms *MongoStorage) IncrementOrganizationProcessesCounter(address common.Address) error {
-	return ms.addToOrganizationCounter(address, "processes", 1)
-}
-
-// IncrementOrganizationSubOrgsCounter atomically increments the suborgs counter for the organization with the given address.
-func (ms *MongoStorage) IncrementOrganizationSubOrgsCounter(address common.Address) error {
-	return ms.addToOrganizationCounter(address, "subOrgs", 1)
-}
-
-// DecrementOrganizationSubOrgsCounter atomically decrements the suborgs counter for the organization with the given address.
-func (ms *MongoStorage) DecrementOrganizationSubOrgsCounter(address common.Address) error {
-	return ms.addToOrganizationCounter(address, "subOrgs", -1)
 }
 
 // IncrementOrganizationSentEmailsCounter atomically increments the emails counter for the organization with the given address.

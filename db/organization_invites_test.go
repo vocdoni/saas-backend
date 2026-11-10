@@ -412,40 +412,6 @@ func TestDeleteInvitationsByInviter(t *testing.T) {
 	c.Assert(err, qt.ErrorIs, ErrInvalidData)
 }
 
-// TestRevokeInvitationByCode covers RevokeInvitationByCode: only the call that deletes the invitation reports true.
-func TestRevokeInvitationByCode(t *testing.T) {
-	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
-
-	orgA := common.HexToAddress("0xa3000000000000000000000000000000000000a3")
-	seedOrg(t, orgA)
-	inviter, err := testDB.SetUser(&User{
-		Email: "inviter-revoke@x.test", Password: "p", FirstName: "I", LastName: "R",
-		Organizations: []OrganizationUser{{Address: orgA, Role: AdminRole}},
-	})
-	c.Assert(err, qt.IsNil)
-	c.Assert(testDB.CreateInvitation(&OrganizationInvite{
-		OrganizationAddress: orgA,
-		CurrentUserID:       inviter,
-		NewUserEmail:        "revoke@x.test",
-		Role:                ViewerRole,
-		Expiration:          time.Now().Add(time.Hour),
-		InvitationCode:      "revokeOnce",
-	}), qt.IsNil)
-
-	revoked, err := testDB.RevokeInvitationByCode("revokeOnce")
-	c.Assert(err, qt.IsNil)
-	c.Assert(revoked, qt.IsTrue)
-
-	// a second revocation of the same code, or of an unknown one, deletes nothing
-	revoked, err = testDB.RevokeInvitationByCode("revokeOnce")
-	c.Assert(err, qt.IsNil)
-	c.Assert(revoked, qt.IsFalse)
-	revoked, err = testDB.RevokeInvitationByCode("unknownCode")
-	c.Assert(err, qt.IsNil)
-	c.Assert(revoked, qt.IsFalse)
-}
-
 // TestCountOrgWriters: users holding admin or manager in the org plus the non-expired invitations
 // to one; viewers, expired invitations and other organizations hold no seat.
 func TestCountOrgWriters(t *testing.T) {

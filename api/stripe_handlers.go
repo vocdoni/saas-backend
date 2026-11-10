@@ -1,8 +1,6 @@
 package api
 
 import (
-	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 
@@ -38,16 +36,16 @@ func NewStripeHandlers(service *stripe.Service) *StripeHandlers {
 // handleWebhook godoc
 //
 //	@Summary		Handle Stripe webhook events
-//	@Description	Process incoming webhook events from Stripe for subscription management. Handles subscription creation,
-//	@Description	updates, deletions, and payment events with idempotency and proper error handling.
-//	@Tags			plans
+//	@Description	Process incoming webhook events from Stripe: wallet top-up and process payment checkouts,
+//	@Description	refunds and disputes, with idempotency. Any other event is acknowledged and ignored.
+//	@Tags			payments
 //	@Accept			json
 //	@Produce		json
 //	@Param			body	body		string	true	"Stripe webhook payload"
 //	@Success		200		{string}	string	"OK"
 //	@Failure		400		{string}	string	"Bad Request"
 //	@Failure		500		{string}	string	"Internal Server Error"
-//	@Router			/subscriptions/webhook [post]
+//	@Router			/payments/webhook [post]
 func (h *StripeHandlers) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.service == nil {
 		errors.ErrStripeWebhookError.With("stripe service not available").Write(w)
@@ -78,87 +76,13 @@ func (h *StripeHandlers) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	apicommon.HTTPWriteOK(w)
 }
 
-// createSubscriptionCheckoutHandler godoc
-//
-//	@Summary		Create a subscription checkout session
-//	@Description	Create a new Stripe checkout session for subscription purchases
-//	@Tags			plans
-//	@Accept			json
-//	@Produce		json
-//	@Security		BearerAuth
-//	@Param			request	body		apicommon.SubscriptionCheckout	true	"Checkout information"
-//	@Success		200		{object}	map[string]string				"Contains clientSecret and sessionID"
-//	@Failure		400		{object}	errors.Error					"Invalid input data, or the plan has no price for the billing period"
-//	@Failure		401		{object}	errors.Error					"Unauthorized"
-//	@Failure		404		{object}	errors.Error					"Organization or plan not found"
-//	@Failure		409		{object}	errors.Error					"Organization already has a paid subscription"
-//	@Failure		500		{object}	errors.Error					"Internal server error"
-//	@Router			/subscriptions/checkout [post]
-func (h *StripeHandlers) CreateSubscriptionCheckout(w http.ResponseWriter, r *http.Request) {
-	if h == nil || h.service == nil {
-		errors.ErrStripeError.Withf("stripe service not available").Write(w)
-		return
-	}
-
-	user, ok := apicommon.UserFromContext(r.Context())
-	if !ok {
-		errors.ErrUnauthorized.Write(w)
-		return
-	}
-
-	checkout := &apicommon.SubscriptionCheckout{}
-	if err := json.NewDecoder(r.Body).Decode(checkout); err != nil {
-		errors.ErrMalformedBody.Write(w)
-		return
-	}
-
-	if checkout.Address.Cmp(common.Address{}) == 0 {
-		errors.ErrMalformedBody.Withf("missing required fields").Write(w)
-		return
-	}
-
-	if !user.HasRoleFor(checkout.Address, db.AdminRole) {
-		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
-		return
-	}
-
-	// Create checkout session by resolving the lookup key to get the plan
-	session, err := h.service.CreateCheckoutSessionWithLookupKey(
-		checkout.LookupKey,
-		checkout.BillingPeriod,
-		checkout.ReturnURL,
-		checkout.Address,
-		checkout.Locale,
-	)
-	// a refusal (unknown or private plan, already subscribed) is the caller's to see as is
-	var apiErr errors.Error
-	if errors.As(err, &apiErr) && apiErr.HTTPstatus < http.StatusInternalServerError {
-		apiErr.Write(w)
-		return
-	}
-	if err != nil {
-		errors.ErrStripeError.Withf("cannot create checkout session").WithErr(err).Write(w)
-		return
-	}
-
-	data := &struct {
-		ClientSecret string `json:"clientSecret"`
-		SessionID    string `json:"sessionId"`
-	}{
-		ClientSecret: session.ClientSecret,
-		SessionID:    session.ID,
-	}
-
-	apicommon.HTTPWriteJSON(w, data)
-}
-
 // checkoutSessionHandler godoc
 //
 //	@Summary		Get checkout session status
 //	@Description	Retrieve the status of a Stripe checkout session. Only an admin of the organization
 //	@Description	the session was created for may read it; any other session id answers 404, so the
 //	@Description	existence of a session is never revealed.
-//	@Tags			plans
+//	@Tags			payments
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
@@ -168,7 +92,7 @@ func (h *StripeHandlers) CreateSubscriptionCheckout(w http.ResponseWriter, r *ht
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		404			{object}	errors.Error	"Checkout session not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
-//	@Router			/subscriptions/checkout/{sessionId} [get]
+//	@Router			/wallet/checkout/{sessionId} [get]
 func (h *StripeHandlers) GetCheckoutSession(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.service == nil {
 		errors.ErrStripeError.Withf("stripe service not available").Write(w)
@@ -213,62 +137,6 @@ func (h *StripeHandlers) GetCheckoutSession(w http.ResponseWriter, r *http.Reque
 	apicommon.HTTPWriteJSON(w, status)
 }
 
-// createSubscriptionPortalSessionHandler godoc
-//
-//	@Summary		Create a subscription portal session
-//	@Description	Create a Stripe customer portal session for managing subscriptions
-//	@Tags			plans
-//	@Accept			json
-//	@Produce		json
-//	@Security		BearerAuth
-//	@Param			orgAddress	path		string				true	"Organization address"
-//	@Success		200			{object}	map[string]string	"Contains portalURL"
-//	@Failure		400			{object}	errors.Error		"Invalid input data"
-//	@Failure		401			{object}	errors.Error		"Unauthorized"
-//	@Failure		404			{object}	errors.Error		"Organization not found"
-//	@Failure		500			{object}	errors.Error		"Internal server error"
-//	@Router			/subscriptions/{orgAddress}/portal [get]
-func (h *StripeHandlers) CreateSubscriptionPortalSession(w http.ResponseWriter, r *http.Request, a *API) {
-	if h == nil || h.service == nil {
-		errors.ErrStripeError.Withf("stripe service not available").Write(w)
-		return
-	}
-
-	user, ok := apicommon.UserFromContext(r.Context())
-	if !ok {
-		errors.ErrUnauthorized.Write(w)
-		return
-	}
-
-	// Get the organization info from the request context
-	org, _, ok := a.organizationFromRequest(r)
-	if !ok {
-		errors.ErrNoOrganizationProvided.Write(w)
-		return
-	}
-
-	if !user.HasRoleFor(org.Address, db.AdminRole) {
-		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
-		return
-	}
-
-	session, err := h.service.CreatePortalSession(org)
-	if err != nil {
-		// the detail may name Stripe objects or other organizations: it stays in the log
-		log.Warnw("cannot create customer portal session", "org", org.Address, "error", err)
-		errors.ErrStripeError.With("cannot create customer portal session").Write(w)
-		return
-	}
-
-	data := &struct {
-		PortalURL string `json:"portalURL"`
-	}{
-		PortalURL: session.URL,
-	}
-
-	apicommon.HTTPWriteJSON(w, data)
-}
-
 // InitializeStripeService initializes the Stripe service with proper configuration
 func (a *API) InitializeStripeService() error {
 	// Create Stripe configuration
@@ -282,21 +150,6 @@ func (a *API) InitializeStripeService() error {
 	if err != nil {
 		return err
 	}
-
-	// Load plans from Stripe and populate the database
-	plans, err := service.GetPlansFromStripe()
-	if err != nil {
-		return fmt.Errorf("failed to load plans from Stripe: %w", err)
-	}
-
-	// Store plans in database
-	for _, plan := range plans {
-		if err := a.db.SetPlan(plan); err != nil {
-			return fmt.Errorf("failed to store plan %s: %w", plan.Name, err)
-		}
-	}
-
-	log.Infof("Loaded %d plans from Stripe", len(plans))
 
 	// Create handlers
 	a.stripeHandlers = NewStripeHandlers(service)

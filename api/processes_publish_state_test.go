@@ -19,7 +19,6 @@ func TestPartiallyPublishedDraftIsImmutable(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "partialpub123456")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -63,7 +62,6 @@ func TestStatusChangeNoOpAndPerQuestionOutcomes(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "statusnoop123456")
 	orgAddress := testCreateOrganization(t, token)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 

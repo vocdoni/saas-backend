@@ -20,7 +20,6 @@ func TestCSPAuthMissingData(t *testing.T) {
 
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 	members := postOrgMembers(t, adminToken, orgAddress,
 		apicommon.OrgMember{MemberNumber: "M-001", Name: "Twin", NationalID: "", Email: ""},

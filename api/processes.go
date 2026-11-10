@@ -117,16 +117,16 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	// until the draft and its questions are stored, so parallel creations cannot pass one count
 	draftLock, err := a.draftLocks.lockOrBusy(r.Context(), orgAddr)
 	if err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	defer draftLock.Unlock()
 	if err := a.subscriptions.OrgCanCreateVotingProcessDraft(orgAddr); err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	if err := a.refuseTearingDown(orgAddr); err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	start, end, err := parseProcessDates(req)
@@ -136,7 +136,7 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	}
 	// a draft that runs longer than publish allows could never be published
 	if err := subscriptions.DraftDurationAllowed(start, end); err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	initialStatus, err := account.NormalizeInitialStatus(req.InitialStatus)
@@ -146,7 +146,7 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	}
 	census, missing, err := a.resolveOrCreateDefaultCensus(req.Census, orgAddr)
 	if err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	// validate + build the questions (incl. eligibility against the census) before any process
@@ -154,7 +154,7 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	built, err := a.buildQuestions(orgAddr, req.Questions, census)
 	if err != nil {
 		_ = a.db.DelCensus(census.ID.Hex())
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 
@@ -529,7 +529,7 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	}
 	// a draft that runs longer than publish allows could never be published
 	if err := subscriptions.DraftDurationAllowed(start, end); err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	// a draft update re-resolves the census into a fresh unpublished db.Census; the previous
@@ -538,14 +538,14 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	oldCensusID := vp.CensusID
 	census, missing, err := a.resolveOrCreateDefaultCensus(req.Census, vp.OrgAddress)
 	if err != nil {
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	// validate + build the new questions against the new census before any destructive write.
 	built, err := a.buildQuestions(vp.OrgAddress, req.Questions, census)
 	if err != nil {
 		_ = a.db.DelCensus(census.ID.Hex())
-		writeSubscriptionError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	seen, err := parseUpdatedAt(req.UpdatedAt)
@@ -1399,8 +1399,8 @@ func questionSetProblem(vp *db.VotingProcess, questions []db.VotingProcessQuesti
 	)
 }
 
-// writeSubscriptionError writes a typed API error verbatim, falling back to 500.
-func writeSubscriptionError(w http.ResponseWriter, err error) {
+// writeAPIError writes a typed API error verbatim, falling back to 500.
+func writeAPIError(w http.ResponseWriter, err error) {
 	var apiErr errors.Error
 	if errors.As(err, &apiErr) {
 		apiErr.Write(w)

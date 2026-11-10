@@ -150,7 +150,7 @@ func (a *API) walletHandler(w http.ResponseWriter, r *http.Request) {
 //	@Description	the payment is verified by webhook — never before. The amount is EUR cents, VAT
 //	@Description	excluded (Stripe Tax adds VAT at checkout), between €1 and €100 000. 403 (40181) for
 //	@Description	a managed organization. Requires an Admin user session; not callable with an API key.
-//	@Description	GET /subscriptions/checkout/{sessionId} reports the session's Stripe state; the money
+//	@Description	GET /wallet/checkout/{sessionId} reports the session's Stripe state; the money
 //	@Description	is in once GET /organizations/{orgAddress}/wallet shows the `topup` row: poll that. A
 //	@Description	delayed payment (SEPA) shows nothing until it is paid; one that fails or expires never
 //	@Description	shows a row, and a new top-up is needed.

@@ -75,8 +75,6 @@ const (
 	organizationTypesEndpoint = "/organizations/types"
 	// GET /organizations/languages to get the supported notification languages
 	organizationLanguagesEndpoint = "/organizations/languages"
-	// GET /organizations/{orgAddress}/subscription to get the organization subscription
-	organizationSubscriptionEndpoint = "/organizations/{orgAddress}/subscription"
 	// GET /organizations/{orgAddress}/censuses to get the organization censuses
 	organizationCensusesEndpoint = "/organizations/{orgAddress}/censuses"
 
@@ -114,17 +112,10 @@ const (
 	// DELETE /integrator/organizations/{orgAddress}/apikeys/{keyId} to revoke an API key
 	integratorOrgAPIKeyEndpoint = "/integrator/organizations/{orgAddress}/apikeys/{keyId}"
 
-	// subscription routes
-	// GET /plans to get the public catalog of subscription plans
-	plansEndpoint = "/plans"
-	// POST /subscriptions/webhook to receive the subscription webhook from stripe
-	subscriptionsWebhook = "/subscriptions/webhook"
-	// POST /subscriptions/checkout to create a new subscription
-	subscriptionsCheckout = "/subscriptions/checkout"
-	// GET /subscriptions/checkout/{sessionId} to get the checkout session information
-	subscriptionsCheckoutSession = "/subscriptions/checkout/{sessionId}"
-	// GET /subscriptions/portal to get the stripe subscription portal URL
-	subscriptionsPortal = "/subscriptions/{orgAddress}/portal"
+	// POST /payments/webhook to receive the Stripe webhook
+	paymentsWebhook = "/payments/webhook"
+	// GET /wallet/checkout/{sessionId} to read a wallet top-up checkout session
+	walletCheckoutSession = "/wallet/checkout/{sessionId}"
 	// object storage routes
 	// POST /storage/{origin} to upload an image to the object storage
 	objectStorageUploadTypedEndpoint = "/storage"
