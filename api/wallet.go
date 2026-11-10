@@ -101,7 +101,10 @@ func (a *API) walletOrganization(w http.ResponseWriter, r *http.Request, roles .
 //	@Description	headroom; processOrgAddress names the managed organization that spent it),
 //	@Description	creditBack (a paid draft deleted, a publish that failed for good, or an organization
 //	@Description	teardown returning an add-on price no process received) and refund (a
-//	@Description	top-up refunded through Stripe). amountCents is signed. The balance is negative only
+//	@Description	top-up refunded through Stripe). amountCents is signed. A topup credited from a checkout
+//	@Description	opened for a process (a process checkout or census headroom) carries `pricing`, the
+//	@Description	breakdown of what it charged, as GET /wallet/checkout/{sessionId} returns it; any other
+//	@Description	row has none. The balance is negative only
 //	@Description	after a refund of credit already spent; the next top-up pays that first. 403 (40181)
 //	@Description	for a managed organization, which has no wallet. Requires Admin or Manager.
 //	@Description
