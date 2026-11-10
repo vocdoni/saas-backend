@@ -353,7 +353,9 @@ func (s *Service) creditWalletTopUp(session *stripeapi.CheckoutSession) error {
 // creditTopUpSession credits a paid top-up session's net amount to the wallet its metadata names,
 // keyed by the session id: crediting it again, from any event, is a no-op. A refund handled before
 // the completed event credits through it alone (topUpOfPaymentIntent): publishing a process from
-// money already returned is left to the completed event, which finds it gone.
+// money already returned is left to the completed event, which finds it gone. The session's pricing
+// breakdown is stored on the row for display; a missing or malformed one never refuses or delays
+// the credit, which is then stored without it.
 func (s *Service) creditTopUpSession(session *stripeapi.CheckoutSession) error {
 	rawOrg := session.Metadata[MetadataKeyWalletTopUpOrg]
 	if !common.IsHexAddress(rawOrg) {
@@ -367,6 +369,11 @@ func (s *Service) creditTopUpSession(session *stripeapi.CheckoutSession) error {
 	}
 	// a session discounted to nothing net credits nothing (and would be refused as invalid)
 	if net := netPaidCents(session); net > 0 {
+		breakdown, err := sessionPricing(session)
+		if err != nil {
+			log.Warnw("malformed pricing breakdown on a top-up session, credited without it",
+				"sessionId", session.ID, "error", err.Error())
+		}
 		if err := s.db.CreditWallet(db.WalletCredit{
 			OrgAddress:      orgAddress,
 			AmountCents:     net,
@@ -374,6 +381,7 @@ func (s *Service) creditTopUpSession(session *stripeapi.CheckoutSession) error {
 			Kind:            db.WalletEntryTopUp,
 			PaymentIntentID: paymentIntentID,
 			GrossCents:      pricing.Cents(session.AmountTotal),
+			Pricing:         breakdown,
 		}); err != nil {
 			return fmt.Errorf("failed to credit wallet top-up: %w", err)
 		}

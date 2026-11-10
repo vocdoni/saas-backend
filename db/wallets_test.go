@@ -479,3 +479,59 @@ func TestWalletLedgerEntryByID(t *testing.T) {
 	c.Assert(entry.IdempotencyKey, qt.Equals, "cs_unposted_byid")
 	assertWalletConsistent(c, testOrgAddress)
 }
+
+// TestWalletTopUpStoresPricing: a top-up credited with a pricing breakdown keeps it on its ledger
+// row, also while the row is still only in the wallet's unposted list; a credit without one
+// stores none.
+func TestWalletTopUpStoresPricing(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() {
+		walletStepHook = nil
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+	})
+	breakdown := &pricing.Breakdown{
+		Shortfall: pricing.Shortfall{
+			Quote: pricing.Quote{
+				Lines: []pricing.QuoteLine{
+					{Kind: pricing.LineBase, Description: "voting process (27 eligible voters)", AmountCents: 1_782},
+				},
+				TotalCents: 1_782,
+			},
+			BalanceCents:   -200,
+			ShortfallCents: 266,
+			PaidCents:      1_716,
+			CensusSize:     27,
+		},
+		Currency:    "eur",
+		ChargeCents: 266,
+	}
+	c.Assert(testDB.CreditWallet(WalletCredit{
+		OrgAddress: testOrgAddress, AmountCents: 266, IdempotencyKey: "cs_priced", Pricing: breakdown,
+	}), qt.IsNil)
+	entry, err := testDB.WalletEntry(testOrgAddress, "cs_priced")
+	c.Assert(err, qt.IsNil)
+	c.Assert(entry.Pricing, qt.DeepEquals, breakdown)
+
+	c.Assert(topUpTestWallet(1_000, "cs_plain"), qt.IsNil)
+	entry, err = testDB.WalletEntry(testOrgAddress, "cs_plain")
+	c.Assert(err, qt.IsNil)
+	c.Assert(entry.Pricing, qt.IsNil)
+
+	// a movement whose ledger insert a crash cut short carries it in the unposted list, and
+	// posts it with the row
+	walletStepHook = func(walletStep, string) error { return errSimulatedCrash }
+	c.Assert(testDB.CreditWallet(WalletCredit{
+		OrgAddress: testOrgAddress, AmountCents: 266, IdempotencyKey: "cs_priced_unposted", Pricing: breakdown,
+	}), qt.ErrorIs, errSimulatedCrash)
+	walletStepHook = nil
+	var wallet struct {
+		Unposted []WalletLedgerEntry `bson:"unposted"`
+	}
+	c.Assert(testDB.wallets.FindOne(context.Background(), bson.M{"_id": testOrgAddress}).Decode(&wallet), qt.IsNil)
+	c.Assert(wallet.Unposted, qt.HasLen, 1)
+	c.Assert(wallet.Unposted[0].Pricing, qt.DeepEquals, breakdown)
+	entry, err = testDB.WalletEntry(testOrgAddress, "cs_priced_unposted")
+	c.Assert(err, qt.IsNil)
+	c.Assert(entry.Pricing, qt.DeepEquals, breakdown)
+	assertWalletConsistent(c, testOrgAddress)
+}

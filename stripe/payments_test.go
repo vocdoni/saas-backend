@@ -243,3 +243,51 @@ func TestCreditTopUpStampsCustomer(t *testing.T) {
 	credit("cs_nosearch", "cus_nosearch", searchBroken)
 	c.Assert(stamped, qt.DeepEquals, map[string]string{"cus_fresh": common.Address{0x11}.String()})
 }
+
+// TestCreditTopUpStoresPricing: crediting a top-up opened for a process stores the pricing
+// breakdown of its session on the ledger row. A session without one, or with a malformed one,
+// is credited all the same, in full and with no breakdown on its row: the breakdown is display
+// data, and never decides whether or how much a payment credits.
+func TestCreditTopUpStoresPricing(t *testing.T) {
+	c := qt.New(t)
+	ms := newTestStorage(t)
+	s := &Service{db: ms}
+	org := common.Address{0x21}
+
+	credit := func(sessionID string, metadata map[string]string) *db.WalletLedgerEntry {
+		c.Helper()
+		metadata[MetadataKeyWalletTopUpOrg] = org.Hex()
+		raw, err := json.Marshal(map[string]any{
+			"id": sessionID, "object": "checkout.session", "payment_status": "paid",
+			"amount_subtotal": 1_916, "amount_total": 2_318, "metadata": metadata,
+		})
+		c.Assert(err, qt.IsNil)
+		var session stripeapi.CheckoutSession
+		c.Assert(json.Unmarshal(raw, &session), qt.IsNil)
+		c.Assert(s.creditTopUpSession(&session), qt.IsNil)
+		entry, err := ms.WalletEntry(org, sessionID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(entry.AmountCents, qt.Equals, pricing.Cents(1_916))
+		return entry
+	}
+	half := len(testPricingJSON) / 2
+	c.Assert(credit("cs_priced", map[string]string{"pricing_0": testPricingJSON}).Pricing, qt.DeepEquals, testPricing())
+	c.Assert(credit("cs_chunked", map[string]string{
+		"pricing_0": testPricingJSON[:half], "pricing_1": testPricingJSON[half:],
+	}).Pricing, qt.DeepEquals, testPricing())
+	c.Assert(credit("cs_plain", map[string]string{}).Pricing, qt.IsNil)
+	// malformed: a missing chunk, and a breakdown claiming far more than was paid in another currency
+	c.Assert(credit("cs_gap", map[string]string{
+		"pricing_0": testPricingJSON[:half], "pricing_2": testPricingJSON[half:],
+	}).Pricing, qt.IsNil)
+	c.Assert(credit("cs_usd", map[string]string{
+		"pricing_0": strings.Replace(testPricingJSON, `"eur"`, `"usd"`, 1),
+	}).Pricing, qt.IsNil)
+
+	// every one credited what was paid, net: the breakdown moved no money
+	wallet, err := ms.Wallet(org)
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.BalanceCents, qt.Equals, pricing.Cents(5*1_916))
+	// and a replay rewrites nothing
+	c.Assert(credit("cs_priced", map[string]string{}).Pricing, qt.DeepEquals, testPricing())
+}
