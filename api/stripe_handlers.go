@@ -81,7 +81,10 @@ func (h *StripeHandlers) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 //	@Summary		Get checkout session status
 //	@Description	Retrieve the status of a Stripe checkout session. Only an admin of the organization
 //	@Description	the session was created for may read it; any other session id answers 404, so the
-//	@Description	existence of a session is never revealed.
+//	@Description	existence of a session is never revealed. A top-up opened for a process (a process
+//	@Description	checkout or census headroom) also returns `pricing`: the quote, the wallet balance it was
+//	@Description	measured against, the shortfall and what the session charges (`censusSize` marks census
+//	@Description	headroom). It explains the amount and nothing else; any other session has none.
 //	@Tags			payments
 //	@Accept			json
 //	@Produce		json

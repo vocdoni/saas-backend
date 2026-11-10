@@ -1006,7 +1006,11 @@ type WalletLedgerEntry struct {
 	// ReleaseAddOns are the add-ons a creditBack gives back to the organization (charged and not
 	// withheld): released by whatever touches the process next until a later payment follows.
 	ReleaseAddOns []OrgAddOn `json:"-" bson:"releaseAddOns,omitempty"`
-	CreatedAt     time.Time  `json:"createdAt" bson:"createdAt"`
+	// Pricing is the breakdown behind the amount of a topup opened for a process (a process
+	// checkout or census headroom), as read from its checkout session when it was credited.
+	// Display data only: no amount or decision is ever taken from it.
+	Pricing   *pricing.Breakdown `json:"pricing,omitempty" bson:"pricing,omitempty"`
+	CreatedAt time.Time          `json:"createdAt" bson:"createdAt"`
 }
 
 // ProcessLedgerState is what a process's payer's wallet ledger says about it (ProcessLedgerState):

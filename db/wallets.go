@@ -253,6 +253,9 @@ type WalletCredit struct {
 	// ReleaseAddOns are the once-per-organization add-ons a credit-back gives back to the
 	// organization (ProcessLedgerState.OwedRelease).
 	ReleaseAddOns []OrgAddOn
+	// Pricing is the breakdown behind a top-up opened for a process, stored on its row for
+	// display only; nil for any other credit.
+	Pricing *pricing.Breakdown
 }
 
 // RefundWithholding is what a credit-back keeps back: the net cents of the once-per-organization
@@ -309,6 +312,7 @@ func (ms *MongoStorage) CreditWallet(c WalletCredit) error {
 			WithheldCents:     c.Withheld.Cents,
 			WithheldAddOns:    c.Withheld.AddOns,
 			ReleaseAddOns:     c.ReleaseAddOns,
+			Pricing:           c.Pricing,
 		},
 		upsert: true,
 	}

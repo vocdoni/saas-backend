@@ -36,11 +36,11 @@ func walletShortError(s walletShort) error {
 			"availableCents": s.balanceCents,
 		})
 	}
-	required := &apicommon.ProcessPaymentRequired{
+	required := &apicommon.ProcessPaymentRequired{Shortfall: pricing.Shortfall{
 		Quote:          s.quote,
 		BalanceCents:   s.balanceCents,
 		ShortfallCents: s.dueCents - s.balanceCents,
-	}
+	}}
 	if s.paidCents > 0 {
 		// a paid draft that outgrew its price has no process checkout to open (409): it buys the
 		// difference for the census it has now

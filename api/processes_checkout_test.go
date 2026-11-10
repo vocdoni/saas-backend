@@ -236,6 +236,23 @@ func TestProcessCheckoutFlow(t *testing.T) {
 	c.Assert(fake.created[0].Metadata[stripe.MetadataKeyProcessID], qt.Equals, pid)
 	c.Assert(fake.created[0].LineItems, qt.HasLen, 1)
 	c.Assert(fake.created[0].LineItems[0].AmountCents, qt.Equals, pricedProcessCents-balance)
+	// and carries why it charges that: the quote, against the balance it falls short of
+	c.Assert(fake.created[0].Pricing, qt.DeepEquals, &pricing.Breakdown{
+		Shortfall: pricing.Shortfall{
+			Quote: pricing.Quote{
+				Lines: []pricing.QuoteLine{{
+					Kind:        pricing.LineBase,
+					Description: fmt.Sprintf("voting process (%d eligible voters)", pricedProcessVoters),
+					AmountCents: pricedProcessCents,
+				}},
+				TotalCents: pricedProcessCents,
+			},
+			BalanceCents:   balance,
+			ShortfallCents: pricedProcessCents - balance,
+		},
+		Currency:    "eur",
+		ChargeCents: pricedProcessCents - balance,
+	})
 
 	// the pending payment holds the price it was opened for and what the session charges
 	payment, err := testDB.ProcessPayment(objectID(c, pid))
@@ -260,6 +277,11 @@ func TestProcessCheckoutFlow(t *testing.T) {
 		t, http.MethodPost, adminToken, checkoutReq, "processes", pid, "checkout")
 	c.Assert(moved.SessionID, qt.Equals, "cs_test_2")
 	c.Assert(moved.AmountCents, qt.Equals, pricedProcessCents-balance-100)
+	// the replacement is opened with the breakdown of the balance it was priced from
+	c.Assert(fake.created, qt.HasLen, 2)
+	c.Assert(fake.created[1].Pricing.BalanceCents, qt.Equals, pricing.Cents(balance+100))
+	c.Assert(fake.created[1].Pricing.ShortfallCents, qt.Equals, pricedProcessCents-balance-100)
+	c.Assert(fake.created[1].Pricing.ChargeCents, qt.Equals, moved.AmountCents)
 	c.Assert(fake.expired, qt.DeepEquals, []string{"cs_test_1"})
 
 	// editing the draft to a different price obsoletes the session just the same

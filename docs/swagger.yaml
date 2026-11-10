@@ -1246,6 +1246,8 @@ definitions:
   apicommon.ProcessPaymentRequired:
     properties:
       balanceCents:
+        description: BalanceCents is the wallet balance the shortfall was measured
+          against; it may be negative.
         type: integer
       censusSize:
         type: integer
@@ -1255,9 +1257,10 @@ definitions:
         type: array
       paidCents:
         description: |-
-          PaidCents and CensusSize are set for a process that already paid part of the price (its
-          census grew since): it buys the difference with POST /processes/{processId}/census/checkout
-          for CensusSize, not with a process checkout.
+          PaidCents and CensusSize are set for a process that already paid part of its price and buys
+          census headroom (POST /processes/{processId}/census/checkout for CensusSize). CensusSize (at
+          least 1 then) is what tells it apart: PaidCents is omitted when the process paid 0. The
+          headroom cost is TotalCents - PaidCents.
         type: integer
       quoteRecommended:
         description: 'census above 15 000: suggest a custom quote'
@@ -2264,6 +2267,13 @@ definitions:
         items:
           type: integer
         type: array
+      pricing:
+        allOf:
+        - $ref: '#/definitions/pricing.Breakdown'
+        description: |-
+          Pricing is the breakdown behind the amount of a topup opened for a process (a process
+          checkout or census headroom), as read from its checkout session when it was credited.
+          Display data only: no amount or decision is ever taken from it.
       processId:
         type: string
       processOrgAddress:
@@ -2309,6 +2319,13 @@ definitions:
           PaymentStatus is the payment outcome of the session, in every mode: "paid",
           "unpaid" or "no_payment_required".
         type: string
+      pricing:
+        allOf:
+        - $ref: '#/definitions/pricing.Breakdown'
+        description: |-
+          Pricing is the breakdown behind the amount of a top-up opened for a process (a process
+          checkout or census headroom): the quote, the wallet balance and the shortfall it charged.
+          Absent for any other session. Display data only.
       status:
         type: string
     type: object
@@ -2584,6 +2601,44 @@ definitions:
         example: 2a
         format: hex
         type: string
+    type: object
+  pricing.Breakdown:
+    properties:
+      balanceCents:
+        description: BalanceCents is the wallet balance the shortfall was measured
+          against; it may be negative.
+        type: integer
+      censusSize:
+        type: integer
+      chargeCents:
+        description: 'ChargeCents is what the session charges, net of VAT: max(ShortfallCents,
+          MinimumChargeCents).'
+        type: integer
+      currency:
+        type: string
+      lines:
+        items:
+          $ref: '#/definitions/pricing.QuoteLine'
+        type: array
+      paidCents:
+        description: |-
+          PaidCents and CensusSize are set for a process that already paid part of its price and buys
+          census headroom (POST /processes/{processId}/census/checkout for CensusSize). CensusSize (at
+          least 1 then) is what tells it apart: PaidCents is omitted when the process paid 0. The
+          headroom cost is TotalCents - PaidCents.
+        type: integer
+      quoteRecommended:
+        description: 'census above 15 000: suggest a custom quote'
+        type: boolean
+      quoteRequired:
+        description: |-
+          QuoteRequired: census above 50 000. The quote has no price (no lines, a zero total that
+          is never "free") and nothing may be paid or published through self-service.
+        type: boolean
+      shortfallCents:
+        type: integer
+      totalCents:
+        type: integer
     type: object
   pricing.QuoteLine:
     properties:
@@ -4741,7 +4796,10 @@ paths:
         headroom; processOrgAddress names the managed organization that spent it),
         creditBack (a paid draft deleted, a publish that failed for good, or an organization
         teardown returning an add-on price no process received) and refund (a
-        top-up refunded through Stripe). amountCents is signed. The balance is negative only
+        top-up refunded through Stripe). amountCents is signed. A topup credited from a checkout
+        opened for a process (a process checkout or census headroom) carries `pricing`, the
+        breakdown of what it charged, as GET /wallet/checkout/{sessionId} returns it; any other
+        row has none. The balance is negative only
         after a refund of credit already spent; the next top-up pays that first. 403 (40181)
         for a managed organization, which has no wallet. Requires Admin or Manager.
 
@@ -7506,7 +7564,10 @@ paths:
       description: |-
         Retrieve the status of a Stripe checkout session. Only an admin of the organization
         the session was created for may read it; any other session id answers 404, so the
-        existence of a session is never revealed.
+        existence of a session is never revealed. A top-up opened for a process (a process
+        checkout or census headroom) also returns `pricing`: the quote, the wallet balance it was
+        measured against, the shortfall and what the session charges (`censusSize` marks census
+        headroom). It explains the amount and nothing else; any other session has none.
       parameters:
       - description: Checkout session ID
         in: path

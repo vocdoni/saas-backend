@@ -1,8 +1,10 @@
 package stripe
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
@@ -38,6 +40,39 @@ func TestCheckoutSessionStatus(t *testing.T) {
 		Metadata: map[string]string{MetadataKeyWalletTopUpOrg: "0x000000000000000000000000000000000000bEEF"},
 	})
 	c.Assert(topUp.OrgAddress, qt.Equals, "0x000000000000000000000000000000000000bEEF")
+	c.Assert(topUp.Pricing, qt.IsNil)
+}
+
+// TestCheckoutSessionStatusPricing: the status of a top-up opened for a process serves the
+// pricing breakdown of its session, camelCase like the 402 payloads; a session without one, or
+// with a malformed one, still answers, with no pricing field at all.
+func TestCheckoutSessionStatusPricing(t *testing.T) {
+	c := qt.New(t)
+	session := func(pricing0 string) *stripeapi.CheckoutSession {
+		return &stripeapi.CheckoutSession{
+			ID:     "cs_priced",
+			Status: stripeapi.CheckoutSessionStatusOpen,
+			Metadata: map[string]string{
+				MetadataKeyWalletTopUpOrg: "0x000000000000000000000000000000000000bEEF",
+				"pricing_0":               pricing0,
+			},
+		}
+	}
+
+	status := checkoutSessionStatus(session(testPricingJSON))
+	c.Assert(status.Pricing, qt.DeepEquals, testPricing())
+	served, err := json.Marshal(status)
+	c.Assert(err, qt.IsNil)
+	c.Assert(string(served), qt.Equals, `{"status":"open","customer_email":"","pricing":`+testPricingJSON+`}`)
+
+	// tampered into another currency: left out, and the status still answers
+	malformed := checkoutSessionStatus(session(strings.Replace(testPricingJSON, `"eur"`, `"usd"`, 1)))
+	c.Assert(malformed.Pricing, qt.IsNil)
+	c.Assert(malformed.Status, qt.Equals, "open")
+	c.Assert(malformed.OrgAddress, qt.Equals, "0x000000000000000000000000000000000000bEEF")
+	served, err = json.Marshal(malformed)
+	c.Assert(err, qt.IsNil)
+	c.Assert(string(served), qt.Equals, `{"status":"open","customer_email":""}`)
 }
 
 // TestValidateWebhookEventAPIVersion pins the deploy precondition of the stripe-go bump: an event

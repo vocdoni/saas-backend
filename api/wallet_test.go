@@ -45,6 +45,8 @@ func TestWalletEndpoints(t *testing.T) {
 	c.Assert(fake.created, qt.HasLen, 1)
 	c.Assert(fake.created[0].Metadata[stripe.MetadataKeyWalletTopUpOrg], qt.Equals, orgAddress.String())
 	c.Assert(fake.created[0].Metadata[stripe.MetadataKeyProcessID], qt.Equals, "")
+	// a plain top-up charges what was asked for: it has no pricing breakdown
+	c.Assert(fake.created[0].Pricing, qt.IsNil)
 
 	// the balance moves only through the verified webhook credit, never the checkout call
 	wallet = requestAndParse[apicommon.WalletResponse](t, http.MethodGet, token, nil, walletPath...)

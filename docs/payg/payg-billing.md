@@ -91,7 +91,9 @@ organization, whose processes its integrator pays. It is created on its first cr
 - `POST /organizations/{orgAddress}/wallet/topup {amountCents, returnURL, locale}` (Admin, JWT
   only) opens a `mode: payment` checkout for €1–€100 000 net; Stripe Tax adds VAT on top. The
   balance moves only when the verified webhook credits it. `GET /wallet/checkout/{sessionId}`
-  reports the session's Stripe state to the organization's admins; the money is there once
+  reports the session's Stripe state to the organization's admins, with the
+  [`pricing` breakdown](#pricing-breakdown-of-a-process-top-up) of a top-up opened for a
+  process; the money is there once
   `GET /organizations/{orgAddress}/wallet` shows the `topup` row, so poll that. A
   delayed payment (SEPA) shows nothing until it is paid; one that fails or expires never shows a
   row, and the client opens a new top-up.
@@ -135,7 +137,8 @@ organization, whose processes its integrator pays. It is created on its first cr
 | `refund` | − | a top-up refunded by hand in the Stripe dashboard |
 
 Each row carries `kind`, `amountCents`, `createdAt`, and where they apply `processId`,
-`processOrgAddress`, `withheldCents` and `withheldAddOns`. The idempotency keys the service builds
+`processOrgAddress`, `withheldCents` and `withheldAddOns`. A `topup` credited from a checkout opened
+for a process also carries [`pricing`](#pricing-breakdown-of-a-process-top-up). The idempotency keys the service builds
 (`refund:<process id>`, `publishfail:<process id>:<attempt>`, `teardownaddon:<org>:<addOn>:<process id>`,
 `striperefund:<refund id>`, the session id of a checkout top-up, `invoice:<invoice id>` of a manual one) are
 internal and never in the response: a client
@@ -399,6 +402,51 @@ and opens a wallet top-up for the **shortfall** (`total − balance`, at least �
   release its claims; a newer checkout of the same draft, and a row whose top-up was already
   credited (consumed), are left alone.
 
+### Pricing breakdown of a process top-up
+
+A top-up opened for a process charges the shortfall raised to the minimum charge, not the quote.
+So the client can show why after the fact, both checkouts (`POST /processes/{id}/checkout` and
+`POST /processes/{id}/census/checkout`) attach a `pricing.Breakdown` to the session:
+
+| Field | What |
+|---|---|
+| `lines`, `totalCents`, `quoteRecommended`, `quoteRequired` | the quote the session was priced from (for census headroom: the quote at the requested `censusSize`) |
+| `currency` | `eur` |
+| `balanceCents` | the wallet balance the shortfall was measured against; negative after a refund of spent credit |
+| `shortfallCents` | `totalCents − balanceCents`; for census headroom `totalCents − paidCents − balanceCents` |
+| `chargeCents` | what the session charges, net of VAT: `max(shortfallCents, €1)` |
+| `paidCents`, `censusSize` | census headroom only: what the process had paid, and the size bought. `censusSize` is what marks a breakdown as headroom (`paidCents` is omitted when the process paid 0); the headroom cost is `totalCents − paidCents` |
+
+It is returned as `pricing` in two places, and nowhere else:
+
+- `GET /wallet/checkout/{sessionId}`, read from the session at Stripe on every call;
+- the `topup` row of `GET /organizations/{orgAddress}/wallet`, stored on the ledger row when the
+  top-up is credited (`WalletLedgerEntry.Pricing`), so the history needs no Stripe call. A top-up
+  credited by a refund handled before its completed event gets it too.
+
+A plain top-up, a manual invoice, and the `payment`, `creditBack` and `refund` rows have none.
+
+**On Stripe** it travels as JSON in the session metadata, cut over the keys `pricing_0`,
+`pricing_1`, … because a metadata value holds 500 characters: chunks of at most 500 bytes, cut on
+UTF-8 rune boundaries, at most 4 keys (the worst case, every add-on at 50 000 voters, takes 2).
+`buildPaymentSessionParams` writes them before any Stripe call, on the session and, like all its
+metadata, on the payment intent; a breakdown that does not fit fails the checkout with a Stripe
+error (50005) and opens no session. The checkout's invoice metadata is unchanged.
+
+**Reading it back** (`sessionPricing`) uses the session's metadata only, never the payment
+intent's. No `pricing_0` means no breakdown. It is malformed when a chunk is missing before
+another, there are more than 4, the JSON is not exactly a breakdown (unknown fields are refused),
+the currency is not `eur`, an amount other than `balanceCents` is negative, or `chargeCents` is
+not positive (not checked against the current minimum, which a later release may raise). A malformed breakdown is left out: the status still answers (logged at debug
+level), and the top-up is still credited, in full, with no `pricing` on its row (logged at warn
+level with the session id).
+
+**It is display data only.** Metadata can be edited by whoever has access to the Stripe account,
+so nothing takes an amount, a size or a decision from it: the credit is the session's net paid
+amount, and the headroom follow-up is driven by `process_topup_cents` /
+`process_topup_from_cents`. A well-formed breakdown is shown as stored. A reused open session
+keeps the breakdown it was opened with, so its balance, shortfall and lines are as of opening.
+
 When the top-up is paid the webhook credits the wallet and then follows up
 (`applyProcessTopUp`): it acts only on the row of **this** session, consumes it (a
 compare-and-set on the session id) and publishes as the requesting user
@@ -436,7 +484,9 @@ credit is in the wallet and the process is published by hand. The next payment r
   is not `paid` (a delayed method still clearing) credits nothing yet. The net paid amount
   (subtotal − discount, VAT excluded) is credited under the session id, with the payment intent
   and the VAT-included total a later refund needs; only then is `voting_process_id` (and the
-  headroom metadata) parsed, so metadata that names no process still keeps the credit.
+  headroom metadata) parsed, so metadata that names no process still keeps the credit. The
+  session's [pricing breakdown](#pricing-breakdown-of-a-process-top-up), if it has a well-formed
+  one, is stored on the row; it never decides or delays the credit.
 - `checkout.session.async_payment_failed` / `checkout.session.expired`: nothing was credited;
   a top-up opened for a process drops its pending row.
 - `refund.created` / `refund.updated`: [Stripe refunds of top-ups](#stripe-refunds-of-top-ups).
@@ -676,7 +726,8 @@ difference, for every payer, from the wallet:
 - **A managed organization's integrator wallet falls short** — 402 (40175), as at publish.
 - **A standard organization's wallet falls short** — a wallet top-up checkout for
   `max(shortfall, €1)`, carrying the target envelope in `process_topup_cents` and the envelope
-  it was priced from in `process_topup_from_cents`. No row is stored, so an abandoned top-up
+  it was priced from in `process_topup_from_cents` (and, for display only, its
+  [pricing breakdown](#pricing-breakdown-of-a-process-top-up)). No row is stored, so an abandoned top-up
   leaves nothing to reconcile. Once the webhook credits it, it debits the headroom only while the
   process still paid exactly `process_topup_from_cents`; a replay finds the envelope raised and
   debits nothing, and any refusal (the process deleted or refunded, the envelope moved — a failed
@@ -852,7 +903,7 @@ retrying it.
 
 Every payment session copies its metadata onto the payment intent
 (`payment_intent_data.metadata`), so a human in the dashboard sees which wallet a charge topped
-up.
+up, and for a top-up opened for a process the `pricing_N` chunks of its breakdown.
 
 ## Error codes
 

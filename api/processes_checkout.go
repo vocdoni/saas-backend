@@ -305,8 +305,13 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 		amountCents: chargeCents,
 		description: fmt.Sprintf("wallet top-up to publish voting process %s", oid.Hex()),
 		metadata:    map[string]string{stripe.MetadataKeyProcessID: oid.Hex()},
-		returnURL:   req.ReturnURL,
-		locale:      req.Locale,
+		// why this amount: the quote the session is priced from, against the balance read above
+		pricing: &pricing.Breakdown{
+			Shortfall: pricing.Shortfall{Quote: quote, BalanceCents: wallet.BalanceCents, ShortfallCents: shortfall},
+			Currency:  "eur", ChargeCents: chargeCents,
+		},
+		returnURL: req.ReturnURL,
+		locale:    req.Locale,
 	})
 	if err != nil {
 		errors.ErrStripeError.Withf("cannot create checkout session").WithErr(err).Write(w)

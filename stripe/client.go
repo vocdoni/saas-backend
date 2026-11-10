@@ -13,6 +13,8 @@ import (
 	striperefund "github.com/stripe/stripe-go/v87/refund"
 	stripewebhook "github.com/stripe/stripe-go/v87/webhook"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/pricing"
+	"go.vocdoni.io/dvote/log"
 )
 
 // Client wraps the Stripe API client with additional functionality
@@ -200,7 +202,8 @@ func (*Client) GetCheckoutSession(sessionID string) (*CheckoutSessionStatus, err
 }
 
 // checkoutSessionStatus maps a Stripe checkout session onto the API status shape.
-// CustomerDetails is nil until the customer fills the form.
+// CustomerDetails is nil until the customer fills the form. A malformed pricing breakdown is
+// left out and logged at debug level only: this is a polled read, and it still answers.
 func checkoutSessionStatus(session *stripeapi.CheckoutSession) *CheckoutSessionStatus {
 	status := &CheckoutSessionStatus{
 		Status:        string(session.Status),
@@ -211,6 +214,12 @@ func checkoutSessionStatus(session *stripeapi.CheckoutSession) *CheckoutSessionS
 	}
 	// a wallet top-up (a process checkout's included) names the wallet's organization
 	status.OrgAddress = session.Metadata[MetadataKeyWalletTopUpOrg]
+	breakdown, err := sessionPricing(session)
+	if err != nil {
+		log.Debugw("malformed pricing breakdown on a checkout session, left out of its status",
+			"sessionId", session.ID, "error", err.Error())
+	}
+	status.Pricing = breakdown
 	return status
 }
 
@@ -224,4 +233,8 @@ type CheckoutSessionStatus struct {
 	// OrgAddress is the organization the session was created for, used to authorize who
 	// may read the session; it never reaches the wire.
 	OrgAddress string `json:"-"`
+	// Pricing is the breakdown behind the amount of a top-up opened for a process (a process
+	// checkout or census headroom): the quote, the wallet balance and the shortfall it charged.
+	// Absent for any other session. Display data only.
+	Pricing *pricing.Breakdown `json:"pricing,omitempty"`
 }

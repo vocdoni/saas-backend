@@ -246,14 +246,7 @@ type ProcessCensusGrowthQuote struct {
 // not cover: the quote, the balance, and the shortfall POST /processes/{processId}/checkout tops
 // up (charged at least the minimum).
 type ProcessPaymentRequired struct {
-	pricing.Quote
-	BalanceCents   pricing.Cents `json:"balanceCents"`
-	ShortfallCents pricing.Cents `json:"shortfallCents"`
-	// PaidCents and CensusSize are set for a process that already paid part of the price (its
-	// census grew since): it buys the difference with POST /processes/{processId}/census/checkout
-	// for CensusSize, not with a process checkout.
-	PaidCents  pricing.Cents `json:"paidCents,omitempty"`
-	CensusSize int64         `json:"censusSize,omitempty"`
+	pricing.Shortfall
 }
 
 // ProcessCensusCheckoutRequest buys census headroom for a paid process: the difference between
