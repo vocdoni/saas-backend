@@ -312,3 +312,65 @@ read the impact report — a sole-admin org takes its entire voting history down
 Reserve `-yes` for scripted use. Watch for the `WARNING: creator email retained` lines in
 the output; those need manual follow-up. Stripe customer data and database backups are
 explicitly out of scope — handle those separately if the erasure request covers them.
+
+### [cmd/topup](cmd/topup/) — manual wallet top-up (Stripe invoice)
+
+**What it does.** Sells wallet credit paid outside the embedded checkout — a bank transfer, a
+negotiated amount — as a Stripe invoice billed to the organization's Stripe customer, with VAT
+by Stripe Tax. The invoice is created with `send_invoice` collection, due in 30 days and
+`auto_advance` off, so Stripe never charges a saved card on its own; then it is either marked
+paid out of band (`-paid-out-of-band`, the money already arrived) or emailed for the customer to
+pay from Stripe's hosted page (`-send`). The wallet is credited by the `invoice.paid` webhook,
+exactly once, keyed by the invoice; the command never writes the ledger. Its invoice downloads
+like a checkout top-up's (`GET /organizations/{orgAddress}/wallet/history/{entryId}/invoice`).
+
+**How to run.**
+
+```bash
+export VOCDONI_STRIPEAPISECRET=sk_live_...   # the Stripe key comes from the environment only
+go run ./cmd/topup -org 0x... -amount-cents 50000 -description "wallet top-up (bank transfer)" \
+    -paid-out-of-band
+go run ./cmd/topup -org 0x... -amount-cents 50000 -description "wallet top-up" -send
+go run ./cmd/topup -org 0x... -amount-cents 50000 -description "wallet top-up" -send \
+    -customer cus_...                        # when no customer is stamped with the organization
+go run ./cmd/topup ... -dry-run              # resolve the customer, print the invoice, write nothing
+```
+
+Running it twice would bill the same top-up twice, so a run (a dry run too) is refused when the
+organization already has a manual top-up invoice, billed to any customer, created in the last 7
+days and not void, for the same net amount and description (kept in the invoice metadata,
+`topup_amount_cents` and `topup_description`; the description is trimmed and at most 250
+characters). The refusal says what to do with each: delete a draft in the Dashboard and re-run;
+an open one needs nothing if that run finished, otherwise mark it paid out of band or send it
+from the Dashboard (or void it and re-run); a paid
+or uncollectible one was already issued, so there is nothing to do. Pass `-allow-duplicate` to
+issue another one on purpose.
+
+Mongo connection via `-mongoURL`/`-mongoDB` flags or `VOCDONI_MONGOURL`/`VOCDONI_MONGODB`
+env vars; the database is only read (no migrations, `VOCDONI_MONGO_RESET_DB` ignored). The
+organization must have a wallet of its own (a managed organization is refused:
+top up its integrator). The amount is EUR cents net of VAT, €1 to €100 000, the bounds of the
+top-up endpoint. The customer is the one stamped with the organization address
+(`metadata.address`); when none is found — customer search lags about a minute behind a fresh
+stamp, and a customer a checkout created is stamped only when its top-up is credited — pass
+`-customer` with the customer the organization's checkouts created (it holds the billing address
+and tax id Checkout collected), and the command stamps it. An organization that never checked
+out has no customer: create one in the Stripe Dashboard first, with the organization's billing
+email, address and tax id, then pass it with `-customer`. An unstamped customer is stamped only
+with evidence that it is not another tenant's: one of its checkout sessions carries this
+organization in `wallet_topup_org` (sessions of other organizations alone refuse it), or it has
+no checkout session at all and its email is an Admin of this organization who belongs to no
+other organization. Otherwise the run is refused: verify the customer and stamp
+`metadata.address` in the Dashboard by hand. `-dry-run` prints the resolved customer's email
+and billing address to check. The command never creates a customer, and refuses one with no
+address: automatic tax would fail at finalization, so complete it in the Dashboard first. When
+two customers end up stamped with the same organization, `-customer` picks the one to bill; one
+stamped with another organization is refused. A failed customer search refuses the run (retry),
+so it is never mistaken for "no customer".
+
+**Precautions.** Subscribe the webhook endpoint (`POST /payments/webhook`) to `invoice.paid`
+before issuing the first manual invoice, and keep the Dashboard setting "email finalized invoices" off, or `-send` emails
+twice. A run that dies before finalizing leaves a draft: delete it in the Dashboard; one that dies
+after finalizing leaves an open invoice: void it, or pay it by hand, in the Dashboard. Refunds
+of a manual invoice paid through Stripe are mirrored in the wallet like a checkout's; one paid
+out of band has no payment intent, so issue a credit note and adjust by hand.

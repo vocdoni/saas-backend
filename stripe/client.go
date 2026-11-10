@@ -8,6 +8,8 @@ import (
 	stripecheckoutsession "github.com/stripe/stripe-go/v87/checkout/session"
 	stripecustomer "github.com/stripe/stripe-go/v87/customer"
 	stripedispute "github.com/stripe/stripe-go/v87/dispute"
+	stripeinvoice "github.com/stripe/stripe-go/v87/invoice"
+	stripeinvoicepayment "github.com/stripe/stripe-go/v87/invoicepayment"
 	striperefund "github.com/stripe/stripe-go/v87/refund"
 	stripewebhook "github.com/stripe/stripe-go/v87/webhook"
 	"github.com/vocdoni/saas-backend/errors"
@@ -64,6 +66,40 @@ func (*Client) GetDispute(disputeID string) (*stripeapi.Dispute, error) {
 	return dispute, nil
 }
 
+// GetInvoice retrieves an invoice by ID with its payments and their payment intents expanded:
+// in this API version an invoice carries no payment intent of its own, and payments is only
+// returned on request.
+func (*Client) GetInvoice(invoiceID string) (*stripeapi.Invoice, error) {
+	params := &stripeapi.InvoiceParams{}
+	params.AddExpand("payments.data.payment.payment_intent")
+	invoice, err := stripeinvoice.Get(invoiceID, params)
+	if err != nil {
+		return nil, errors.ErrStripeError.Withf("failed to get invoice: %v", err)
+	}
+	return invoice, nil
+}
+
+// InvoiceByPaymentIntent returns the id of the invoice the payment intent paid, or "" when it
+// paid none (any payment not made against an invoice).
+func (*Client) InvoiceByPaymentIntent(paymentIntentID string) (string, error) {
+	iter := stripeinvoicepayment.List(&stripeapi.InvoicePaymentListParams{
+		Status: new("paid"),
+		Payment: &stripeapi.InvoicePaymentListPaymentParams{
+			Type:          new(string(stripeapi.InvoicePaymentPaymentTypePaymentIntent)),
+			PaymentIntent: new(paymentIntentID),
+		},
+	})
+	for iter.Next() {
+		if payment := iter.InvoicePayment(); payment.Invoice != nil && payment.Invoice.ID != "" {
+			return payment.Invoice.ID, nil
+		}
+	}
+	if err := iter.Err(); err != nil {
+		return "", errors.ErrStripeError.Withf("failed to list invoice payments: %v", err)
+	}
+	return "", nil
+}
+
 // TopUpSessionByPaymentIntent returns the wallet top-up checkout session that created the
 // payment intent, or nil when no top-up session did (any other payment).
 func (*Client) TopUpSessionByPaymentIntent(paymentIntentID string) (*stripeapi.CheckoutSession, error) {
@@ -81,7 +117,40 @@ func (*Client) TopUpSessionByPaymentIntent(paymentIntentID string) (*stripeapi.C
 	return nil, nil
 }
 
-// GetCustomerByAddress retrieves a customer by the organization EVM address
+// CheckoutSessionsOfCustomer returns every checkout session of a customer, of any mode and
+// status, oldest last as Stripe lists them; none is an empty slice, not an error.
+func (*Client) CheckoutSessionsOfCustomer(customerID string) ([]*stripeapi.CheckoutSession, error) {
+	var sessions []*stripeapi.CheckoutSession
+	iter := stripecheckoutsession.List(&stripeapi.CheckoutSessionListParams{
+		Customer: stripeapi.String(customerID),
+	})
+	for iter.Next() {
+		sessions = append(sessions, iter.CheckoutSession())
+	}
+	if err := iter.Err(); err != nil {
+		return nil, errors.ErrStripeError.Withf("failed to list the checkout sessions of customer %s: %v", customerID, err)
+	}
+	return sessions, nil
+}
+
+// UpdateCustomerMetadata updates a customer's metadata
+func (*Client) UpdateCustomerMetadata(customerID string, metadata map[string]string) error {
+	params := &stripeapi.CustomerParams{
+		Metadata: metadata,
+	}
+	_, err := stripecustomer.Update(customerID, params)
+	if err != nil {
+		return errors.ErrStripeError.Withf("failed to update customer metadata: %v", err)
+	}
+	return nil
+}
+
+// ErrCustomerNotFound is GetCustomerByAddress finding no customer stamped with the address;
+// a failed search (network, rate limit, outage) is errors.ErrStripeError instead.
+var ErrCustomerNotFound = fmt.Errorf("customer not found")
+
+// GetCustomerByAddress retrieves a customer by the organization EVM address: one stamped with
+// it in metadata.address. No such customer wraps ErrCustomerNotFound.
 func (*Client) GetCustomerByAddress(address string) (*stripeapi.Customer, error) {
 	customers := stripecustomer.Search(&stripeapi.CustomerSearchParams{
 		SearchParams: stripeapi.SearchParams{
@@ -89,12 +158,13 @@ func (*Client) GetCustomerByAddress(address string) (*stripeapi.Customer, error)
 			Limit: new(int64(1)),
 		},
 	})
-
-	if !customers.Next() {
-		return nil, errors.ErrStripeError.Withf("customer with address %s not found", address)
+	if customers.Next() {
+		return customers.Customer(), nil
 	}
-
-	return customers.Customer(), nil
+	if err := customers.Err(); err != nil {
+		return nil, errors.ErrStripeError.Withf("failed to search customers: %v", err)
+	}
+	return nil, fmt.Errorf("customer with address %s: %w", address, ErrCustomerNotFound)
 }
 
 // stripeLocale maps an organization language onto the locale of the embedded checkout

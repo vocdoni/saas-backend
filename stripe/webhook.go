@@ -65,6 +65,10 @@ func (s *Service) pruneProcessedEvents(now time.Time) {
 
 func (s *Service) HandleEvent(event *stripeapi.Event) error {
 	switch event.Type {
+	// a manual top-up invoice paid (through Stripe or marked paid out of band): credit its wallet;
+	// every other invoice event of the retired subscription model stays ignored
+	case stripeapi.EventTypeInvoicePaid:
+		return s.handleInvoicePaid(event)
 	case stripeapi.EventTypeCheckoutSessionCompleted,
 		stripeapi.EventTypeCheckoutSessionAsyncPaymentSucceeded:
 		return s.handleCheckoutSessionResult(event)

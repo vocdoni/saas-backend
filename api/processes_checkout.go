@@ -17,11 +17,14 @@ import (
 
 // paymentGateway is what the pay-per-process handlers need from Stripe, defined on the
 // consumer side so API tests can install a fake; *stripe.Service satisfies it. The service only
-// ever opens wallet top-ups: it never refunds.
+// ever opens wallet top-ups and serves their invoices: it never refunds.
 type paymentGateway interface {
 	CreatePaymentSession(params *stripe.PaymentSessionParams) (*stripe.PaymentSessionInfo, error)
 	GetPaymentSession(sessionID string) (*stripe.PaymentSessionInfo, error)
 	ExpirePaymentSession(sessionID string) error
+	// TopUpInvoicePDF serves the invoice of the top-up ledger row keyed idempotencyKey, or
+	// stripe.ErrNoInvoice when it has none.
+	TopUpInvoicePDF(idempotencyKey string) (*stripe.InvoicePDF, error)
 }
 
 // refuseOrgAddOnsAfterPayment refuses an edit that turns a once-per-organization add-on on for a

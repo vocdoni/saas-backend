@@ -117,6 +117,9 @@ var (
 	// ErrInsufficientWalletBalance: the integrator wallet cannot cover a managed organization's
 	// debit; data carries requiredCents and availableCents when the balance could be read.
 	ErrInsufficientWalletBalance = Error{Code: 40175, HTTPstatus: http.StatusPaymentRequired, Err: fmt.Errorf("insufficient integrator wallet balance")}
+	// ErrWalletInvoiceNotFound: the wallet has no such movement, or it is not a top-up, or the
+	// top-up's invoice is not available yet (Stripe attaches it shortly after the payment).
+	ErrWalletInvoiceNotFound = Error{Code: 40185, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("wallet movement not found or has no invoice"), LogLevel: "info"}
 	// ErrManagedOrgHasNoWallet: a managed organization's processes are paid from its integrator's
 	// wallet; it has none of its own and cannot top one up.
 	ErrManagedOrgHasNoWallet = Error{Code: 40181, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("managed organizations have no wallet; their integrator pays")}

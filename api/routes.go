@@ -161,6 +161,9 @@ const (
 	// POST starts a one-time checkout that tops up an organization's wallet
 	walletTopUpEndpoint = "/organizations/{orgAddress}/wallet/topup"
 
+	// GET downloads the Stripe invoice (PDF) of a topup row of the wallet history
+	walletInvoiceEndpoint = "/organizations/{orgAddress}/wallet/history/{entryId}/invoice"
+
 	// POST starts (or resumes) the wallet top-up checkout of a voting process;
 	// GET reports its payment status; DELETE cancels its open checkout
 	processesCheckoutEndpoint = "/processes/{processId}/checkout"
