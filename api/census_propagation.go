@@ -185,6 +185,10 @@ func (a *API) preflightCensusGrowth(org *db.Organization, censusIDs []string, co
 	}
 	for _, censusID := range censusIDs {
 		census, err := a.db.Census(censusID)
+		if stderrors.Is(err, db.ErrNotFound) {
+			// deleted while still linked (a draft reaped under a concurrent read): it cannot grow
+			continue
+		}
 		if err != nil {
 			return fmt.Errorf("could not load census %s: %w", censusID, err)
 		}

@@ -61,7 +61,12 @@ func withoutBillingEmail(value bson.RawValue) (bson.RawValue, error) {
 // The archive is written with $setOnInsert, so a re-run keeps the first run's values: a run cut
 // after the archive of an organization finds the archive in place and only repeats the unset, and
 // a run cut after the unset finds nothing left to do for it.
+//
+// It also runs unlinkDeletedGroupCensuses, first.
 func upRetireLegacyPlans(ctx context.Context, database *mongo.Database) error {
+	if err := unlinkDeletedGroupCensuses(ctx, database); err != nil {
+		return err
+	}
 	orgs := database.Collection("organizations")
 	plans := database.Collection("plans")
 	archive := database.Collection("legacySubscriptions")
@@ -141,6 +146,39 @@ func upRetireLegacyPlans(ctx context.Context, database *mongo.Database) error {
 	}
 	if err := subscriptions.Drop(ctx); err != nil {
 		return fmt.Errorf("failed to drop subscriptions: %w", err)
+	}
+	return nil
+}
+
+// unlinkDeletedGroupCensuses drops from every member group's censusIds the censuses that no
+// longer exist. Deleting a census (a draft deleted, or re-saved with a new census) left its id in
+// the groups backing it, and the census-growth preflight fails every member add on a dangling one.
+func unlinkDeletedGroupCensuses(ctx context.Context, database *mongo.Database) error {
+	groups := database.Collection("orgMemberGroups")
+	var linked []string
+	if err := groups.Distinct(ctx, "censusIds", bson.M{}).Decode(&linked); err != nil {
+		return fmt.Errorf("failed to list group censuses: %w", err)
+	}
+	var dangling []string
+	for _, id := range linked {
+		oid, err := bson.ObjectIDFromHex(id)
+		if err == nil {
+			n, err := database.Collection("census").CountDocuments(ctx, bson.M{"_id": oid})
+			if err != nil {
+				return fmt.Errorf("failed to look up census %s: %w", id, err)
+			}
+			if n > 0 {
+				continue
+			}
+		}
+		dangling = append(dangling, id)
+	}
+	if len(dangling) == 0 {
+		return nil
+	}
+	if _, err := groups.UpdateMany(ctx, bson.M{"censusIds": bson.M{"$in": dangling}},
+		bson.M{"$pull": bson.M{"censusIds": bson.M{"$in": dangling}}}); err != nil {
+		return fmt.Errorf("failed to unlink deleted censuses from groups: %w", err)
 	}
 	return nil
 }

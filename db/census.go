@@ -215,7 +215,7 @@ func (ms *MongoStorage) lockedPointWrite(write func(ctx context.Context) error) 
 	return write(ctx)
 }
 
-// DeleteCensus removes a census and all its members
+// DelCensus removes a census, all its participants and its links from member groups
 func (ms *MongoStorage) DelCensus(censusID string) error {
 	objID, err := bson.ObjectIDFromHex(censusID)
 	if err != nil {
@@ -228,7 +228,14 @@ func (ms *MongoStorage) DelCensus(censusID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), bulkTimeout)
 	defer cancel()
 
-	// delete the census participants first so removing a census does not orphan them (this
+	// unlink it from the groups backing it first: a dangling id there would fail every later
+	// member add to the organization (the census-growth preflight loads each group census), while
+	// a failure past this point only leaves an unlinked orphan census, which is harmless
+	if _, err := ms.orgMemberGroups.UpdateMany(ctx, bson.M{"censusIds": censusID},
+		bson.M{"$pull": bson.M{"censusIds": censusID}}); err != nil {
+		return fmt.Errorf("failed to unlink census from groups: %w", err)
+	}
+	// delete the census participants before the census so removing a census does not orphan them (this
 	// is done inline rather than via DeleteCensusParticipantsByCensus, which takes keysLock).
 	if _, err := ms.censusParticipants.DeleteMany(ctx, bson.M{"censusId": censusID}); err != nil { //nolint:goconst
 		return fmt.Errorf("failed to delete census participants: %w", err)
