@@ -318,8 +318,8 @@ func (a *API) createProcessCensusCheckoutHandler(w http.ResponseWriter, r *http.
 		apicommon.HTTPWriteJSON(w, &apicommon.ProcessCheckoutResponse{AmountCents: debited, Currency: "eur"})
 		return
 	}
-	shortfall, short := walletShortfall(err)
-	if !short {
+	short, ok := walletShortfall(err)
+	if !ok {
 		// a managed organization's 40175, a payment that moved, or a failure
 		writeAPIError(w, err)
 		return
@@ -332,7 +332,11 @@ func (a *API) createProcessCensusCheckoutHandler(w http.ResponseWriter, r *http.
 		errors.ErrStripeError.Withf("stripe service not available").Write(w)
 		return
 	}
-	chargeCents := max(shortfall, pricing.MinimumChargeCents)
+	chargeCents := max(short.ShortfallCents, pricing.MinimumChargeCents)
+	shortfall := short.Shortfall
+	// a top-up credited after the refused debit can leave it below zero: shown as nothing due
+	shortfall.ShortfallCents = max(shortfall.ShortfallCents, 0)
+	shortfall.Quote, shortfall.PaidCents, shortfall.CensusSize = quote, paidCents, req.CensusSize
 	session, err := a.openWalletTopUp(walletTopUp{
 		wallet:      *p.org,
 		user:        user,
@@ -343,6 +347,9 @@ func (a *API) createProcessCensusCheckoutHandler(w http.ResponseWriter, r *http.
 			stripe.MetadataKeyProcessTopUpCents:     strconv.FormatInt(int64(quote.TotalCents), 10),
 			stripe.MetadataKeyProcessTopUpFromCents: strconv.FormatInt(int64(paidCents), 10),
 		},
+		// why this amount: the quote at the requested size, less what the process paid, against
+		// the balance the refused debit found. The shortfall is totalCents - paidCents - balanceCents
+		pricing:   &pricing.Breakdown{Shortfall: shortfall, Currency: "eur", ChargeCents: chargeCents},
 		returnURL: req.ReturnURL,
 		locale:    req.Locale,
 	})
@@ -361,16 +368,14 @@ func (a *API) createProcessCensusCheckoutHandler(w http.ResponseWriter, r *http.
 	})
 }
 
-// walletShortfall reports what an organization's wallet lacks when err is its 402 (40178,
-// walletShortError); a managed organization's 40175 is not one: it cannot open a top-up.
-func walletShortfall(err error) (pricing.Cents, bool) {
+// walletShortfall returns the payload of an organization's wallet-short 402 (40178,
+// walletShortError) when err is one: the balance the debit found and what it lacks. A managed
+// organization's 40175 is not one: it cannot open a top-up.
+func walletShortfall(err error) (*apicommon.ProcessPaymentRequired, bool) {
 	var apiErr errors.Error
 	if !errors.Is(err, errors.ErrPaymentRequired) || !errors.As(err, &apiErr) {
-		return 0, false
+		return nil, false
 	}
-	due, ok := apiErr.Data.(*apicommon.ProcessPaymentRequired)
-	if !ok {
-		return 0, false
-	}
-	return due.ShortfallCents, true
+	short, ok := apiErr.Data.(*apicommon.ProcessPaymentRequired)
+	return short, ok
 }

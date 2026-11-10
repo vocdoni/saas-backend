@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -698,10 +699,39 @@ func TestCensusCheckoutChargesTheMinimum(t *testing.T) {
 	c.Assert(session.LineItems[0].AmountCents, qt.Equals, pricing.MinimumChargeCents)
 	targetCents := paidCents + 66 // one more voter in the first band
 	c.Assert(session.Metadata[stripe.MetadataKeyProcessTopUpCents], qt.Equals, strconv.FormatInt(int64(targetCents), 10))
+	// why it charges the minimum: the quote at the new size, less what the process paid, against
+	// an empty wallet. The census size marks the breakdown as headroom
+	c.Assert(session.Pricing, qt.Not(qt.IsNil))
+	c.Assert(session.Pricing.Lines, qt.HasLen, 1)
+	c.Assert(session.Pricing.TotalCents, qt.Equals, targetCents)
+	c.Assert(session.Pricing.PaidCents, qt.Equals, paidCents)
+	c.Assert(session.Pricing.CensusSize, qt.Equals, int64(pricedProcessVoters+1))
+	c.Assert(session.Pricing.BalanceCents, qt.Equals, pricing.Cents(0))
+	c.Assert(session.Pricing.ShortfallCents, qt.Equals, pricing.Cents(66))
+	c.Assert(session.Pricing.ChargeCents, qt.Equals, pricing.MinimumChargeCents)
+	c.Assert(session.Pricing.Currency, qt.Equals, "eur")
 
+	// Stripe hands the session back with the breakdown the service wrote into its metadata
+	written, err := json.Marshal(session.Pricing)
+	c.Assert(err, qt.IsNil)
+	metadata := maps.Clone(session.Metadata)
+	metadata["pricing_0"] = string(written)
 	code := postSignedStripeEvent(t, testWebhookSecret, "evt_headroom_minimum", "checkout.session.completed",
-		checkoutSessionObject(headroom.SessionID, "paid", pricing.MinimumChargeCents, session.Metadata))
+		checkoutSessionObject(headroom.SessionID, "paid", pricing.MinimumChargeCents, metadata))
 	c.Assert(code, qt.Equals, http.StatusOK)
+	// the top-up's row of the wallet history serves it, and no other row has one
+	history := requestAndParse[apicommon.WalletResponse](t, http.MethodGet, token, nil,
+		"organizations", orgAddress.String(), "wallet").History
+	var priced []db.WalletLedgerEntry
+	for _, row := range history {
+		if row.Pricing != nil {
+			priced = append(priced, row)
+		}
+	}
+	c.Assert(priced, qt.HasLen, 1)
+	c.Assert(priced[0].Kind, qt.Equals, db.WalletEntryTopUp)
+	c.Assert(priced[0].AmountCents, qt.Equals, pricing.MinimumChargeCents)
+	c.Assert(priced[0].Pricing, qt.DeepEquals, session.Pricing)
 	payment, err := testDB.ProcessPayment(oid)
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.AmountCents, qt.Equals, targetCents)

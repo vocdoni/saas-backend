@@ -24,13 +24,15 @@ const walletTopUpMaxCents = 100_000_00 // €100 000
 
 // walletTopUp is one wallet top-up checkout: amountCents (net, VAT added by Stripe Tax) for the
 // wallet of organization wallet, requested by user. metadata adds the process a top-up opened
-// for a process pays.
+// for a process pays, and pricing the breakdown behind its amount (nil for a plain top-up), which
+// is only ever shown back: nothing is decided from it.
 type walletTopUp struct {
 	wallet      db.Organization
 	user        *db.User
 	amountCents pricing.Cents
 	description string
 	metadata    map[string]string
+	pricing     *pricing.Breakdown
 	returnURL   string
 	locale      string
 }
@@ -47,6 +49,7 @@ func (a *API) openWalletTopUp(t walletTopUp) (*stripe.PaymentSessionInfo, error)
 	return a.paymentGW.CreatePaymentSession(&stripe.PaymentSessionParams{
 		LineItems:     []stripe.PaymentLineItem{{Description: t.description, AmountCents: t.amountCents}},
 		Metadata:      metadata,
+		Pricing:       t.pricing,
 		OrgAddress:    t.wallet.Address.String(),
 		CustomerEmail: t.user.Email,
 		ReturnURL:     t.returnURL,
