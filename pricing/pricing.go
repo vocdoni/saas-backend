@@ -80,19 +80,47 @@ type QuoteInput struct {
 
 // QuoteLine is one priced component of a quote.
 type QuoteLine struct {
-	Kind        string `json:"kind"`
-	Description string `json:"description"`
-	AmountCents Cents  `json:"amountCents"`
+	Kind        string `json:"kind" bson:"kind"`
+	Description string `json:"description" bson:"description"`
+	AmountCents Cents  `json:"amountCents" bson:"amountCents"`
 }
 
 // Quote is the computed price breakdown of a voting process, VAT excluded.
 type Quote struct {
-	Lines            []QuoteLine `json:"lines"`
-	TotalCents       Cents       `json:"totalCents"`
-	QuoteRecommended bool        `json:"quoteRecommended"` // census above 15 000: suggest a custom quote
+	Lines            []QuoteLine `json:"lines" bson:"lines"`
+	TotalCents       Cents       `json:"totalCents" bson:"totalCents"`
+	QuoteRecommended bool        `json:"quoteRecommended" bson:"quoteRecommended"` // census above 15 000: suggest a custom quote
 	// QuoteRequired: census above 50 000. The quote has no price (no lines, a zero total that
 	// is never "free") and nothing may be paid or published through self-service.
-	QuoteRequired bool `json:"quoteRequired"`
+	QuoteRequired bool `json:"quoteRequired" bson:"quoteRequired"`
+}
+
+// Shortfall is what a wallet lacks to pay a quote: the quote, the balance it was measured
+// against, and the shortfall. PaidCents and CensusSize are set for a process that already paid part
+// of its price (its census grew since): it buys the difference with the census checkout for
+// CensusSize, not with a process checkout.
+type Shortfall struct {
+	Quote `bson:",inline"`
+	// BalanceCents is the wallet balance the shortfall was measured against; it may be negative.
+	BalanceCents   Cents `json:"balanceCents" bson:"balanceCents"`
+	ShortfallCents Cents `json:"shortfallCents" bson:"shortfallCents"`
+	// PaidCents and CensusSize are set for a process that already paid part of its price and buys
+	// census headroom (POST /processes/{processId}/census/checkout for CensusSize). CensusSize (at
+	// least 1 then) is what tells it apart: PaidCents is omitted when the process paid 0. The
+	// headroom cost is TotalCents - PaidCents.
+	PaidCents  Cents `json:"paidCents,omitempty" bson:"paidCents,omitempty"`
+	CensusSize int64 `json:"censusSize,omitempty" bson:"censusSize,omitempty"`
+}
+
+// Breakdown explains the amount a wallet top-up checkout charged for a process: the shortfall
+// (the quote and the wallet balance it was measured against) raised to the minimum charge. It is
+// written to the checkout session's metadata and shown back on the checkout status and the
+// wallet history. Display data only: no amount, size or eligibility decision is ever taken from it.
+type Breakdown struct {
+	Shortfall `bson:",inline"`
+	Currency  string `json:"currency" bson:"currency"`
+	// ChargeCents is what the session charges, net of VAT: max(ShortfallCents, MinimumChargeCents).
+	ChargeCents Cents `json:"chargeCents" bson:"chargeCents"`
 }
 
 // Compute prices a voting process. A zero total means it publishes without checkout, unless
