@@ -18,7 +18,8 @@ Owner decisions so far (2026-11-11):
   untouched to the Go process. This is the setup cert-check's test UI already runs on
   (`testui/README.md` §4). Accepted trade-offs: a Railway-assigned port other than 443 in the URL,
   and ACME by DNS-01 with a Cloudflare token. Hostnames: `cert-dev.vocdoni.net` (dev) and
-  `cert.vocdoni.io` (prod). Staging has the feature off.
+  `cert.vocdoni.io` (prod). Staging uses the dev gateway, which routes each request to the dev or
+  the stg backend by the `returnUrl` origin (C1 "Backends").
 - D6 Pending-vote recovery: the backend returns a stable `voterRef`, and `@vocdoni/react-providers`
   gets a one-line additive change to use it (C2.5, C3).
 
@@ -164,7 +165,7 @@ ACME cache.
 - **`GET /v1/auth`.** Query parameters:
   - `processId`: a Mongo ObjectID, exactly 24 lowercase hex characters (`^[0-9a-f]{24}$`).
   - `returnUrl`: an absolute `https` URL of at most 2048 bytes, with no userinfo, query or fragment.
-    Its origin is exactly one of `ALLOWED_RETURN_ORIGINS`, and its path matches
+    Its origin is exactly one of the origins listed in `BACKENDS`, and its path matches
     `^(/[a-z]{2,3}(-[A-Za-z0-9]{2,8})?)?/processes/<processId>/?$`, where `<processId>` is the
     `processId` parameter of the same request. The code is therefore only ever delivered to the
     voting page of that process, the one page that checks `state`.
@@ -199,13 +200,30 @@ ACME cache.
   - The Railway TCP proxy's documentation does not say whether `RemoteAddr` is the client's
     address. The plan verifies it in dev. If every request shows the proxy's address, the per-IP
     bucket is switched off by config (`RATE_LIMIT_PER_MIN=0`) and the global bucket stays.
+- **Backends.** One gateway can serve several backends, so the dev gateway serves both dev and stg.
+  `BACKENDS` is a JSON array, read once at startup:
+
+  ```json
+  [{"name":"dev","url":"https://saas-api-dev.vocdoni.net","keyId":"dev-1","key":"<base64 seed>",
+    "origins":["https://app-dev.vocdoni.io"]},
+   {"name":"stg","url":"https://saas-api-stg.vocdoni.net","keyId":"stg-1","key":"<base64 seed>",
+    "origins":["https://app-stg.vocdoni.io"]}]
+  ```
+  - The `returnUrl` origin selects the backend. Each origin appears in exactly one entry, and
+    startup fails on a duplicate origin, a duplicate name, an empty list, a non-https URL or a
+    malformed key.
+  - The set of allowed return origins is the union of every entry's `origins`. There is no separate
+    allowlist variable.
+  - The production gateway has a single entry for the prod backend, listing `https://app.vocdoni.io`
+    and every custom organisation domain.
+  - Each backend has its own key pair. A key is never configured on two backends, so a request
+    signed for one is rejected by the other.
+  - Logs and metrics carry the backend `name`.
 - **Request to the backend.**
-  - `BACKEND_URL` is the backend's public hostname behind Cloudflare (for example
-    `https://saas-api.vocdoni.net`), so the edge adds `X-Origin-Secret` as it does for every client.
-    The gateway never holds the origin secret. The request URL is `BACKEND_URL + "/cert-auth/assertions"`.
-  - Key: an Ed25519 private key from `SIGNING_KEY` (base64 of the 32-byte seed), with id
-    `SIGNING_KEY_ID`. Each environment (dev, prod) has its own key pair; a key is never configured on
-    two backends.
+  - The entry's `url` is the backend's public hostname behind Cloudflare, so the edge adds
+    `X-Origin-Secret` as it does for every client. The gateway never holds the origin secret. The
+    request URL is `url + "/cert-auth/assertions"`.
+  - Key: the entry's Ed25519 private key (base64 of the 32-byte seed), with id `keyId`.
   - Header: `X-Cert-Gateway-Signature: t=<unix seconds>,k=<keyId>,v1=<base64url(sig), no padding>`.
   - The signature covers the bytes of
     `"cert-gateway-v1\n" + t + "\n" + "POST" + "\n" + "/cert-auth/assertions" + "\n" + hex(sha256(body))`.
@@ -227,9 +245,7 @@ ACME cache.
   | `CLOUDFLARE_API_TOKEN` | DNS-01 token (sealed) |
   | `ACME_DNS_OVERRIDE_DOMAIN` | optional full TXT record name for CNAME delegation |
   | `RATE_LIMIT_GLOBAL_PER_MIN` | default 1200 |
-  | `BACKEND_URL` | saas-backend base URL |
-  | `SIGNING_KEY`, `SIGNING_KEY_ID` | request-signing key and its id |
-  | `ALLOWED_RETURN_ORIGINS` | comma-separated origins `returnUrl` may use |
+  | `BACKENDS` | JSON array of backends: name, url, keyId, signing key and return origins (sealed, it holds keys) |
   | `RATE_LIMIT_PER_MIN` | default 60; `0` turns the per-IP bucket off |
   | `TLS13` | `true` (default) offers TLS 1.3 and 1.2; `false` offers 1.2 only. A restart applies it. |
   | `LOG_LEVEL` | log verbosity |
@@ -251,8 +267,8 @@ ACME cache.
     carries the Railway-assigned port, for example `https://cert.vocdoni.io:15140`.
     `CERT_GATEWAY_URL` in vocdoni-app includes that port. If the TCP proxy is ever recreated, the
     port changes, and `CERT_GATEWAY_URL` must be updated in the same change.
-  - Staging has the feature off: no gateway, no `CERT_GATEWAY_URL` on app-stg and no keys on the
-    stg backend.
+  - Staging has no gateway of its own: app-stg's `CERT_GATEWAY_URL` points at `cert-dev.vocdoni.net`,
+    whose `BACKENDS` has a `stg` entry, and the stg backend holds the stg public key.
 - **CI.** Run `go test -race ./...` and golangci-lint. The image is built on tag `v*`, with
   `GOPRIVATE=github.com/vocdoni/cert-check` and a read token for the private cert-check module.
 
@@ -409,7 +425,7 @@ ACME cache.
   come back by running the previous release's `scripts/repairlogins -apply`.
 - Before the deploy, the owner runs `scripts/repairlogins` (dry run) built from this branch against
   dev, stg and then prod and reads the collision count. The migration runs in every environment,
-  including stg where the feature is off, because it changes typed `nationalId` logins too.
+  because it changes typed `nationalId` logins too.
 - Version numbering follows the lts/main ledger rule (`migrations/repair_login_hashes.go:16-26`).
   The plan fixes the number against `origin/main` and `origin/lts`.
 
@@ -451,8 +467,8 @@ ACME cache.
 - **Configuration and strings.** `CERT_GATEWAY_URL` is a new env var. The option is hidden when it
   is unset. Strings go in en, es and ca. The other locales take English through the existing
   extraction.
-- **Gateway allowlist.** The gateway's `ALLOWED_RETURN_ORIGINS` must list every app origin and
-  every custom organisation domain that serves voting pages.
+- **Gateway allowlist.** The gateway's `BACKENDS` origins must list every app origin and every
+  custom organisation domain that serves voting pages, each under the backend it talks to.
 
 ### Alternatives considered
 
@@ -479,7 +495,7 @@ ACME cache.
   2. cert-gateway on Railway dev, first with `ACME_CA=staging`, then `production`.
   3. Backend dev keys.
   4. From the gateway (`railway run` or a one-off shell in the service),
-     `curl -i -X POST $BACKEND_URL/cert-auth/assertions` must answer 401 (bad signature), not 403
+     `curl -i -X POST <backend url>/cert-auth/assertions` must answer 401 (bad signature), not 403
      (origin secret or a Cloudflare WAF/bot challenge). If it is 403, add a Cloudflare WAF skip rule
      for that path before going on. Railway egress IPs are shared and not fixed, so the rule cannot
      rely on the source IP; it matches the path and the presence of `X-Cert-Gateway-Signature`.
@@ -489,8 +505,11 @@ ACME cache.
   6. react-providers release with the D6 change (and api-types fields).
   7. vocdoni-app dev with `CERT_GATEWAY_URL`.
   8. End-to-end test with real certificates, run manually by the owner (AC9).
-  9. Migration on stg (feature off), then the same steps in production.
-  10. Every deploy and DNS change waits for the owner's OK.
+  9. Staging: migration, stg keys on the stg backend, the `stg` entry in the dev gateway's
+     `BACKENDS`, the 401 check against the stg backend, then app-stg with
+     `CERT_GATEWAY_URL=https://cert-dev.vocdoni.net:<port>`.
+  10. Production: the same steps on its own gateway (`cert.vocdoni.io`).
+  11. Every deploy and DNS change waits for the owner's OK.
 - **Rollback.**
   - Unset `CERT_GATEWAY_PUBLIC_KEYS`. The assertion route returns 404 and new cert censuses are
     refused. Existing cert censuses can no longer authenticate, so the owner decides this during
@@ -595,6 +614,8 @@ ACME cache.
   - `/readyz` answers 503 until the auth certificate is present and valid, then 200.
   - A `Host` that differs from the SNI name gets a 421.
   - The signature verifies against the backend's verifier, using shared test vectors.
+  - With two `BACKENDS` entries, a `returnUrl` on each origin posts to its own backend with its own
+    key. A configuration with a duplicate origin or name fails at startup.
   - Over the limit gets a 429.
   - A captured log contains no document number.
 - [ ] AC8 vocdoni-app tests:
@@ -633,5 +654,4 @@ ACME cache.
 
 ## Open questions
 
-None. Hosting and hostnames are owner decisions (D7). Staging has the feature off unless the owner
-asks for a `cert-stg` gateway.
+None. Hosting and hostnames are owner decisions (D7); staging shares the dev gateway.
