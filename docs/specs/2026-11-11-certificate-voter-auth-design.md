@@ -13,7 +13,12 @@ Owner decisions so far (2026-11-11):
   certificates, and no beta providers.
 - D5 TLS: the gateway offers **TLS 1.3 and 1.2** (`certcheck.WithTLS13()`). Amended after the
   spec audit: there is no fallback between the two, so the gateway gets a `TLS13` switch and the
-  stg test covers Windows key stores (see "Passive observers" and AC9).
+  dev test covers Windows key stores (see "Passive observers" and AC9).
+- D7 Hosting: **Railway in every environment**, through Railway's TCP proxy, which passes TLS
+  untouched to the Go process. This is the setup cert-check's test UI already runs on
+  (`testui/README.md` §4). Accepted trade-offs: a Railway-assigned port other than 443 in the URL,
+  and ACME by DNS-01 with a Cloudflare token. Hostnames: `cert-dev.vocdoni.net` (dev) and
+  `cert.vocdoni.io` (prod). Staging has the feature off.
 - D6 Pending-vote recovery: the backend returns a stable `voterRef`, and `@vocdoni/react-providers`
   gets a one-line additive change to use it (C2.5, C3).
 
@@ -113,7 +118,7 @@ saas-backend cannot ask for a client certificate where it runs today:
 ### Components and flow
 
 ```
-voter browser                     cert-gateway (Droplet)            saas-backend (App Platform)
+voter browser                     cert-gateway (Railway)            saas-backend (App Platform)
  │ 1 click "certificado"           │                                  │
  │──GET /v1/auth?processId&returnUrl&state&codeChallenge&lang──▶      │
  │◀═══ TLS handshake: CertificateRequest(CAs of D4), cert picker ═══▶│
@@ -133,17 +138,24 @@ A single Go 1.27 binary, `cmd/cert-gateway`, with no database and no disk state 
 ACME cache.
 
 - **Listeners.**
-  - `:443` serves TLS with `handler.TLSConfig(getCert)`, adding `certcheck.WithTLS13()` when
-    `TLS13` is true. The `http.Server` has `Protocols` set to HTTP/1 only.
-  - `:80` serves ACME HTTP-01 challenges (`autocert.Manager.HTTPHandler`) and redirects everything
-    else to https.
-  - The server certificate comes from Let's Encrypt via `golang.org/x/crypto/acme/autocert`, with
-    `HostPolicy: autocert.HostWhitelist(DOMAIN)` and `Cache: autocert.DirCache(CACHE_DIR)`.
-    `CACHE_DIR` is a Docker named volume that survives image updates. The returned `tls.Config`
-    gets `acme.ALPNProto` appended to `NextProtos`, so `tls-alpn-01` succeeds on `:443`; `:80`
-    stays for the https redirect and as the `http-01` fallback. `acme-tls/1` carries no HTTP
-    requests, so cert-check's HTTP/1-only rule is unaffected.
-  - Every request is checked with `certcheck.CheckHost`; a mismatch answers 421.
+  - **Auth listener** `AUTH_LISTEN` (default `:8443`), reached through the Railway TCP proxy at
+    `https://<DOMAIN>:<AUTH_PUBLIC_PORT>`. It serves TLS with `handler.TLSConfig(getCert)`, adding
+    `certcheck.WithTLS13()` when `TLS13` is true. The `http.Server` has `Protocols` set to HTTP/1
+    only. It serves `/v1/auth` and nothing else.
+  - **Main listener** `PORT` (set by Railway, default `8080`), plain HTTP behind the Railway edge.
+    It serves only `/readyz`: 200 once the providers are built and the auth certificate is present
+    and valid, else 503. Railway's healthcheck polls it.
+  - The server certificate for `DOMAIN` comes from Let's Encrypt through **DNS-01 only**, using
+    `github.com/caddyserver/certmagic` with the `libdns/cloudflare` provider, as cert-check's test
+    UI does. HTTP-01 and TLS-ALPN-01 cannot reach a Railway-assigned port. The certificate and ACME
+    account live in `DATA_DIR/certmagic` on a Railway volume, so redeploys reuse them. The auth
+    listener starts once the certificate is ready, and a failed issuance is retried in the
+    background with backoff.
+  - The Cloudflare token has Zone:Read and Zone.DNS:Edit only. Preferably it is scoped to a
+    dedicated zone that holds nothing else, with `_acme-challenge.<DOMAIN>` delegated to it by CNAME
+    (`ACME_DNS_OVERRIDE_DOMAIN`), as in cert-check's test UI. The owner enters it as a sealed
+    Railway variable.
+  - Every auth request is checked with `certcheck.CheckHost`; a mismatch answers 421.
   - `http.Server`: `ReadHeaderTimeout` 10 s, `ReadTimeout` 15 s, `WriteTimeout` 60 s, `IdleTimeout`
     60 s, `MaxHeaderBytes` 16 KiB.
 - **Providers.** `fnmt.New`, `idcat.New`, `accv.New`, `digitel.New`, `bewor.New`,
@@ -179,15 +191,20 @@ ACME cache.
   - `Referrer-Policy: no-referrer`
   - `X-Frame-Options: DENY`
   - `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'`
-- **Rate limit.** Per client IP (`RemoteAddr`), 60 requests to `/v1/auth` per minute with a burst
-  of 30, in an in-process token bucket. Entries idle for 10 minutes are evicted, and the map is
-  capped at 100 000 entries (oldest evicted first). An exceeded limit gets a 429 page.
+- **Rate limit.** Two in-process token buckets on `/v1/auth`; an exceeded limit gets a 429 page.
+  - Per client IP (`RemoteAddr`): 60 requests a minute with a burst of 30. Entries idle for 10
+    minutes are evicted, and the map is capped at 100 000 entries (oldest evicted first).
+  - Global: `RATE_LIMIT_GLOBAL_PER_MIN` (default 1200) requests a minute. It caps the load on the
+    CAs' OCSP/CRL endpoints and on the backend.
+  - The Railway TCP proxy's documentation does not say whether `RemoteAddr` is the client's
+    address. The plan verifies it in dev. If every request shows the proxy's address, the per-IP
+    bucket is switched off by config (`RATE_LIMIT_PER_MIN=0`) and the global bucket stays.
 - **Request to the backend.**
   - `BACKEND_URL` is the backend's public hostname behind Cloudflare (for example
     `https://saas-api.vocdoni.net`), so the edge adds `X-Origin-Secret` as it does for every client.
     The gateway never holds the origin secret. The request URL is `BACKEND_URL + "/cert-auth/assertions"`.
   - Key: an Ed25519 private key from `SIGNING_KEY` (base64 of the 32-byte seed), with id
-    `SIGNING_KEY_ID`. Each environment (stg, prod) has its own key pair; a key is never configured on
+    `SIGNING_KEY_ID`. Each environment (dev, prod) has its own key pair; a key is never configured on
     two backends.
   - Header: `X-Cert-Gateway-Signature: t=<unix seconds>,k=<keyId>,v1=<base64url(sig), no padding>`.
   - The signature covers the bytes of
@@ -201,12 +218,19 @@ ACME cache.
   | Variable | Meaning |
   |---|---|
   | `DOMAIN` | the gateway's hostname |
+  | `AUTH_LISTEN` | auth listener address, default `:8443` |
+  | `AUTH_PUBLIC_PORT` | public port of the auth listener, default `$RAILWAY_TCP_PROXY_PORT` |
+  | `PORT` | main listener port (set by Railway) |
   | `ACME_EMAIL` | contact email for Let's Encrypt |
-  | `CACHE_DIR` | autocert cache directory |
+  | `ACME_CA` | `production` or `staging` (first issuance uses `staging`) |
+  | `DATA_DIR` | volume mount, default `/data` |
+  | `CLOUDFLARE_API_TOKEN` | DNS-01 token (sealed) |
+  | `ACME_DNS_OVERRIDE_DOMAIN` | optional full TXT record name for CNAME delegation |
+  | `RATE_LIMIT_GLOBAL_PER_MIN` | default 1200 |
   | `BACKEND_URL` | saas-backend base URL |
   | `SIGNING_KEY`, `SIGNING_KEY_ID` | request-signing key and its id |
   | `ALLOWED_RETURN_ORIGINS` | comma-separated origins `returnUrl` may use |
-  | `RATE_LIMIT_PER_MIN` | default 60 |
+  | `RATE_LIMIT_PER_MIN` | default 60; `0` turns the per-IP bucket off |
   | `TLS13` | `true` (default) offers TLS 1.3 and 1.2; `false` offers 1.2 only. A restart applies it. |
   | `LOG_LEVEL` | log verbosity |
 
@@ -215,14 +239,20 @@ ACME cache.
 - **Pages.** The 400 and 429 HTML pages are static and localised (es, ca, en), with no
   JavaScript.
 - **Deployment.**
-  - Host: one DigitalOcean Basic Droplet in fra1 (1 GiB, ~$6/month), running the
-    `ghcr.io/vocdoni/cert-gateway` image with `--restart=always`. `CACHE_DIR` is mounted from a
-    named volume (`-v certgw-acme:/var/cache/acme`).
-  - Firewall: inbound 80 and 443 from anywhere, 22 from admin IPs only.
-  - Time is synced with NTP.
-  - Hostnames are DNS-only (grey-cloud) A records on Cloudflare: `cert.vocdoni.io` (prod) and
-    `cert-stg.vocdoni.io` (stg). Dev has the feature off: no `CERT_GATEWAY_URL` on app-dev and no
-    keys on the dev backend.
+  - Host: Railway, one service per environment (`cert-gateway-dev`, `cert-gateway-prod`), with 1
+    replica, a volume at `/data`, a TCP proxy to `AUTH_LISTEN`, healthcheck `/readyz`, restart on
+    failure, and deploy from `main` after CI passes (wait for CI). The settings follow cert-check's
+    test UI (`testui/README.md` §4 "Railway service settings"). Railway mounts volumes as root, so
+    the container runs as root (`RAILWAY_RUN_UID=0`), as the test UI does.
+  - Expected cost: about 50–100 MB of RAM and almost no CPU, so roughly $1–2 a month of Railway
+    usage per environment, usually inside the plan's included usage.
+  - Hostnames are DNS-only (grey-cloud) CNAME records on Cloudflare pointing at the Railway TCP
+    proxy hostname: `cert-dev.vocdoni.net` (dev) and `cert.vocdoni.io` (prod). The public URL
+    carries the Railway-assigned port, for example `https://cert.vocdoni.io:15140`.
+    `CERT_GATEWAY_URL` in vocdoni-app includes that port. If the TCP proxy is ever recreated, the
+    port changes, and `CERT_GATEWAY_URL` must be updated in the same change.
+  - Staging has the feature off: no gateway, no `CERT_GATEWAY_URL` on app-stg and no keys on the
+    stg backend.
 - **CI.** Run `go test -race ./...` and golangci-lint. The image is built on tag `v*`, with
   `GOPRIVATE=github.com/vocdoni/cert-check` and a read token for the private cert-check module.
 
@@ -378,7 +408,8 @@ ACME cache.
 - It is idempotent (`RepairLoginHashes` is). Its `Down` is a no-op, as 0025's is: the old hashes
   come back by running the previous release's `scripts/repairlogins -apply`.
 - Before the deploy, the owner runs `scripts/repairlogins` (dry run) built from this branch against
-  stg and then prod and reads the collision count.
+  dev, stg and then prod and reads the collision count. The migration runs in every environment,
+  including stg where the feature is off, because it changes typed `nationalId` logins too.
 - Version numbering follows the lts/main ledger rule (`migrations/repair_login_hashes.go:16-26`).
   The plan fixes the number against `origin/main` and `origin/lts`.
 
@@ -411,6 +442,8 @@ ACME cache.
   5. The terms-and-privacy checkbox stays above the certificate button and is required before the
      redirect.
   6. The certificate path never calls `pushCrispUserFields`.
+  6b. Under the certificate button, a short note says that if the certificate page does not load,
+     the voter should try from another network, such as mobile data (see "Non-standard port").
   7. `feat/cert-auth` in vocdoni-app is cut from `origin/develop` (react-providers 4.x), and bumps
      react-providers to the release carrying the D6 change.
 - **react-providers** (D6): `auth0` sets `owner` to `res.voterRef` when present, else to
@@ -429,6 +462,7 @@ ACME cache.
 | Cloudflare Enterprise mTLS forwarding `Client-Cert` to App Platform | Enterprise only; 5 CAs per account; no revocation check for BYO CAs; whether it advertises the CA list and works with smart-card signatures is undocumented (D1) |
 | Gateway signs an attestation that travels through the browser to the backend | Puts the DNI in the browser and in URLs; the server-to-server call keeps it between the two services |
 | Gateway redirects with the auth token itself | A token in a URL is a bearer credential. The single-use code plus the PKCE verifier makes a leaked or misdirected code useless |
+| Gateway on a DigitalOcean Droplet (port 443, ACME HTTP-01, ~$6/month per environment) | Owner chose Railway in every environment (D7): no VM to maintain, same setup as cert-check's test UI |
 | Gateway code inside saas-backend (`cmd/`) or inside cert-check | Owner chose a dedicated repo (D2) |
 | Certificate-only census with no 2FA option | Owner chose optional 2FA (D3) |
 | Rewriting stored `nationalId` values to the canonical form | Changes what organisers see and export; folding at hash time follows the existing rule in `HashAuthTwoFaFields` |
@@ -441,17 +475,22 @@ ACME cache.
   canonicalised. A member stored as `1234567z` now logs in typing `01234567-Z`. Values that are not
   a valid DNI or NIE hash exactly as before.
 - **Rollout order:**
-  1. saas-backend with the feature off (no keys), migration run on stg.
-  2. cert-gateway on the stg Droplet.
-  3. Backend stg keys.
-  4. From the Droplet, `curl -i -X POST $BACKEND_URL/cert-auth/assertions` must answer 401 (bad
-     signature), not 403 (origin secret or a Cloudflare WAF/bot challenge). If it is 403, add a
-     Cloudflare WAF skip rule for that path and the Droplet's IP before going on.
-  5. react-providers release with the D6 change (and api-types fields).
-  6. vocdoni-app stg with `CERT_GATEWAY_URL`.
-  7. End-to-end test with real certificates, run manually by the owner (AC9).
-  8. The same steps in production.
-  9. Every deploy and DNS change waits for the owner's OK.
+  1. saas-backend with the feature off (no keys), migration run on dev.
+  2. cert-gateway on Railway dev, first with `ACME_CA=staging`, then `production`.
+  3. Backend dev keys.
+  4. From the gateway (`railway run` or a one-off shell in the service),
+     `curl -i -X POST $BACKEND_URL/cert-auth/assertions` must answer 401 (bad signature), not 403
+     (origin secret or a Cloudflare WAF/bot challenge). If it is 403, add a Cloudflare WAF skip rule
+     for that path before going on. Railway egress IPs are shared and not fixed, so the rule cannot
+     rely on the source IP; it matches the path and the presence of `X-Cert-Gateway-Signature`.
+     The signature is what authenticates.
+  5. Check in dev whether the auth listener's `RemoteAddr` is the client's address (rate limit
+     section).
+  6. react-providers release with the D6 change (and api-types fields).
+  7. vocdoni-app dev with `CERT_GATEWAY_URL`.
+  8. End-to-end test with real certificates, run manually by the owner (AC9).
+  9. Migration on stg (feature off), then the same steps in production.
+  10. Every deploy and DNS change waits for the owner's OK.
 - **Rollback.**
   - Unset `CERT_GATEWAY_PUBLIC_KEYS`. The assertion route returns 404 and new cert censuses are
     refused. Existing cert censuses can no longer authenticate, so the owner decides this during
@@ -466,9 +505,10 @@ ACME cache.
 
 - **Trust boundary.** The gateway is trusted to assert a DNI. A compromised gateway or signing
   key can mint assertions for any DNI in any cert census. Mitigations:
-  - The key lives only on the Droplet.
+  - The key lives only in the Railway service's sealed variables.
   - The backend accepts several keys, so a key can be rotated without downtime.
-  - The Droplet runs only the container: SSH from admin IPs, unattended upgrades.
+  - Access to the Railway project is limited to the people who operate it. The Cloudflare DNS
+    token is scoped as narrowly as the delegated-zone setup allows.
   - Assertions are logged per participant, so they can be audited.
   - Accepted residual risk: this is the same trust a CSP already holds.
 - **Code theft.** The `returnUrl` allowlist stops open redirects. The code travels in the
@@ -483,8 +523,8 @@ ACME cache.
   in the voter's language, that to use a different certificate they must close every window of the
   browser and open the voting link again. The retry button stays, for the retryable codes
   (`revocation_unavailable`, `internal`, `backend_unavailable`, `rate_limited`).
-  Not done: a fresh hostname per attempt would avoid the restart but needs a wildcard certificate
-  (DNS-01), which autocert does not do.
+  Not done for now: a fresh hostname per attempt would avoid the restart. DNS-01 makes a wildcard
+  certificate possible, so this is a later option if support load shows it is needed.
 - **Replay to the backend.** The signed request carries a timestamp valid for 60 s and travels
   over TLS. A replay can only create a new code, which goes back to the replayer and is useless
   without the verifier.
@@ -496,9 +536,15 @@ ACME cache.
   validates its query parameters, and the backend bounds the body and validates every field. A
   revocation lookup that is unavailable fails closed with a retryable error, and the UI says "try
   later".
-- **Availability.** The Droplet IP is exposed, with no Cloudflare in front: there is the
-  per-IP rate limit, and the IP can be changed. Gateway downtime only blocks cert censuses. If the
-  backend is unreachable, the gateway answers `backend_unavailable`.
+- **Availability.** The gateway sits behind Railway's TCP proxy with no Cloudflare in front: the
+  rate limits apply. Gateway downtime only blocks cert censuses. If the backend is unreachable, the
+  gateway answers `backend_unavailable`.
+- **Non-standard port (D7).** The auth URL uses a Railway-assigned port other than 443. Networks
+  that only allow outbound 80/443 (some corporate, hotel or university networks) cannot reach it.
+  The voter then sees a browser connection error that the app cannot detect. Mitigation: the voter
+  UI's certificate step tells the voter, in their language, that if the page does not load they
+  should try from another network (for example mobile data). Moving to a 443 host (a Droplet or a
+  Railway option for 443 TCP, if one appears) needs only a new `CERT_GATEWAY_URL` and DNS record.
 - **Concurrency.** Assertions are consumed with one atomic `FindOneAndUpdate`, so two redemptions
   of one code cannot both succeed. Step-0 budgets keep their existing claim and release semantics.
 - **Privacy.** The DNI exists only in the gateway's memory, in the signed request body and in the
@@ -544,7 +590,9 @@ ACME cache.
   - Each `certcheck` error code leads to `#certError`.
   - A disallowed `returnUrl` or a bad parameter gets a 400 with no redirect. So does a `returnUrl`
     on an allowed origin with any other path, a query, or another process id.
-  - An SNI name other than `DOMAIN` gets no certificate and triggers no ACME order.
+  - An SNI name other than `DOMAIN` gets no certificate and triggers no ACME order (certmagic
+    is configured for `DOMAIN` only, with no on-demand issuance).
+  - `/readyz` answers 503 until the auth certificate is present and valid, then 200.
   - A `Host` that differs from the SNI name gets a 421.
   - The signature verifies against the backend's verifier, using shared test vectors.
   - Over the limit gets a 429.
@@ -558,7 +606,7 @@ ACME cache.
   - A `state` mismatch strips the fragment and calls nothing.
   - After a reload and a second certificate login in the same tab, a pending vote saved before the
     reload is re-sent (react-providers test with `voterRef`).
-- [ ] AC9 Manual end-to-end on stg, run by the owner, with `TLS13=true`: an FNMT and an idCAT
+- [ ] AC9 Manual end-to-end on dev (`cert-dev.vocdoni.net`), run by the owner, with `TLS13=true`: an FNMT and an idCAT
   software certificate, each on Windows (Chrome or Edge, certificate in the Windows store), on
   Firefox (its own store) and on macOS or Android. Auth-only and email-2FA censuses, plus a
   certificate whose DNI is outside the census. Cancel the picker once and confirm the message
@@ -585,5 +633,5 @@ ACME cache.
 
 ## Open questions
 
-None. Hostnames (`cert.vocdoni.io` and `cert-stg.vocdoni.io`) and the Droplet size are proposed
-defaults that the owner confirms when approving the spec.
+None. Hosting and hostnames are owner decisions (D7). Staging has the feature off unless the owner
+asks for a `cert-stg` gateway.
