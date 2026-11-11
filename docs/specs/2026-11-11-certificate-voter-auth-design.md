@@ -140,23 +140,28 @@ ACME cache.
 
 - **Listeners.**
   - **Auth listener** `AUTH_LISTEN` (default `:8443`), reached through the Railway TCP proxy at
-    `https://<DOMAIN>:<AUTH_PUBLIC_PORT>`. It serves TLS with `handler.TLSConfig(getCert)`, adding
-    `certcheck.WithTLS13()` when `TLS13` is true. The `http.Server` has `Protocols` set to HTTP/1
-    only. It serves `/v1/auth` and nothing else.
-  - **Main listener** `PORT` (set by Railway, default `8080`), plain HTTP behind the Railway edge.
-    It serves only `/readyz`: 200 once the providers are built and the auth certificate is present
-    and valid, else 503. Railway's healthcheck polls it.
+    `https://<DOMAIN>:<port assigned to the TCP proxy>`. It serves TLS with
+    `handler.TLSConfig(getCert)`, adding `certcheck.WithTLS13()` when `TLS13` is true. The
+    `http.Server` has `Protocols` set to HTTP/1 only. It serves `/v1/auth` and nothing else.
+  - **Main listener** `PORT` (`8080`, set as a service variable), plain HTTP with no public
+    domain. It serves only `GET /readyz`: 200 once the providers are built, both listeners are up
+    and the auth certificate is present and valid, else 503. Railway's healthcheck polls it from
+    inside the platform. It is up from process start, so a missing certificate shows as 503, not
+    as a crash.
   - The server certificate for `DOMAIN` comes from Let's Encrypt through **DNS-01 only**, using
     `github.com/caddyserver/certmagic` with the `libdns/cloudflare` provider, as cert-check's test
     UI does. HTTP-01 and TLS-ALPN-01 cannot reach a Railway-assigned port. The certificate and ACME
     account live in `DATA_DIR/certmagic` on a Railway volume, so redeploys reuse them. The auth
     listener starts once the certificate is ready, and a failed issuance is retried in the
-    background with backoff.
-  - The Cloudflare token has Zone:Read and Zone.DNS:Edit only. Preferably it is scoped to a
-    dedicated zone that holds nothing else, with `_acme-challenge.<DOMAIN>` delegated to it by CNAME
-    (`ACME_DNS_OVERRIDE_DOMAIN`), as in cert-check's test UI. The owner enters it as a sealed
-    Railway variable.
-  - Every auth request is checked with `certcheck.CheckHost`; a mismatch answers 421.
+    background with backoff. certmagic manages `DOMAIN` only, with no on-demand issuance.
+  - The Cloudflare token is never zone-wide on `vocdoni.io` or `vocdoni.net`: both zones hold
+    production records. `_acme-challenge.<DOMAIN>` is a CNAME to a TXT name in a dedicated
+    Cloudflare zone that holds nothing else, `ACME_DNS_OVERRIDE_DOMAIN` is that full TXT record
+    name (including its `_acme-challenge.` label), and the token has Zone:Read and Zone.DNS:Edit
+    on that zone only. `ACME_DNS_OVERRIDE_DOMAIN` is required when `CLOUDFLARE_API_TOKEN` is set.
+    Dev and prod use separate tokens. The owner enters each as a sealed Railway variable.
+  - Every auth request is checked with `certcheck.CheckHost`; a mismatch answers 421. `CheckHost`
+    strips the port from `Host`, so the Railway port in the URL is fine.
   - `http.Server`: `ReadHeaderTimeout` 10 s, `ReadTimeout` 15 s, `WriteTimeout` 60 s, `IdleTimeout`
     60 s, `MaxHeaderBytes` 16 KiB.
 - **Providers.** `fnmt.New`, `idcat.New`, `accv.New`, `digitel.New`, `bewor.New`,
@@ -178,7 +183,8 @@ ACME cache.
   1. Run `handler.Auth(r.WithContext(ctx))` with a 40 s deadline.
   2. On `*certcheck.Error`, redirect 303 to `returnUrl#certError=<code>&state=<state>`. Log
      `Diagnostics.LogAttrs()` plus `DiagnosticID`.
-  3. On success, POST the assertion to saas-backend (C2.4) with a 10 s deadline.
+  3. On success, POST the assertion to the backend selected by the `returnUrl` origin (C2.4) with
+     a 10 s deadline.
      - 201: redirect 303 to `returnUrl#certCode=<code>&state=<state>`.
      - A backend error code: redirect 303 to `returnUrl#certError=<backendCode>&state=<state>`.
        `backendCode` is one of `not_in_census`, `zero_weight`, `not_cert_census`,
@@ -186,7 +192,6 @@ ACME cache.
        (see the response contract in C2.4).
 
   The parameters travel in the **fragment**, so they never reach any server log or `Referer`.
-- **`GET /healthz`** returns 200 once the handler is built.
 - **Response hardening** on every response:
   - `Cache-Control: no-store`
   - `Referrer-Policy: no-referrer`
@@ -195,23 +200,34 @@ ACME cache.
 - **Rate limit.** Two in-process token buckets on `/v1/auth`; an exceeded limit gets a 429 page.
   - Per client IP (`RemoteAddr`): 60 requests a minute with a burst of 30. Entries idle for 10
     minutes are evicted, and the map is capped at 100 000 entries (oldest evicted first).
-  - Global: `RATE_LIMIT_GLOBAL_PER_MIN` (default 1200) requests a minute. It caps the load on the
-    CAs' OCSP/CRL endpoints and on the backend.
+  - Global: `RATE_LIMIT_GLOBAL_PER_MIN` (default 1200) requests a minute, counted only for
+    requests that present a client certificate (`len(r.TLS.PeerCertificates) > 0`), after the
+    per-IP bucket. It caps the load on the CAs' OCSP/CRL endpoints and on the backend. A request
+    without a certificate never touches it.
   - The Railway TCP proxy's documentation does not say whether `RemoteAddr` is the client's
-    address. The plan verifies it in dev. If every request shows the proxy's address, the per-IP
-    bucket is switched off by config (`RATE_LIMIT_PER_MIN=0`) and the global bucket stays.
+    address. At `LOG_LEVEL=debug` the gateway logs `remoteAddr` for each auth request, and the
+    owner compares it in dev with their own public IP. If every request shows the proxy's
+    address, the per-IP bucket is switched off by config (`RATE_LIMIT_PER_MIN=0`) and the global
+    bucket stays.
 - **Backends.** One gateway can serve several backends, so the dev gateway serves both dev and stg.
   `BACKENDS` is a JSON array, read once at startup:
 
   ```json
-  [{"name":"dev","url":"https://saas-api-dev.vocdoni.net","keyId":"dev-1","key":"<base64 seed>",
+  [{"name":"dev","url":"https://saas-api-dev.vocdoni.net","keyId":"dev-1","keyEnv":"SIGNING_KEY_DEV",
     "origins":["https://app-dev.vocdoni.io"]},
-   {"name":"stg","url":"https://saas-api-stg.vocdoni.net","keyId":"stg-1","key":"<base64 seed>",
+   {"name":"stg","url":"https://saas-api-stg.vocdoni.net","keyId":"stg-1","keyEnv":"SIGNING_KEY_STG",
     "origins":["https://app-stg.vocdoni.io"]}]
   ```
-  - The `returnUrl` origin selects the backend. Each origin appears in exactly one entry, and
-    startup fails on a duplicate origin, a duplicate name, an empty list, a non-https URL or a
-    malformed key.
+  - `BACKENDS` holds no secret and is a plain variable. `keyEnv` names a sealed variable whose
+    value is the base64 of the 32-byte Ed25519 seed.
+  - The `returnUrl` origin selects the backend. Origins are compared in canonical form:
+    `https://` plus the lowercase host, with no path, no trailing slash and no default port. An
+    origin in `BACKENDS` that is not already in that form fails startup, and the origin of
+    `returnUrl` is canonicalised the same way before the lookup.
+  - Startup fails, naming the entry and never printing a key, on: invalid JSON or an unknown
+    field; an empty list; an entry with an empty `name`, `keyId` or `origins`; a duplicate `name`,
+    `keyId`, `url`, `keyEnv`, key value or origin; a `url` that is not `https` or has a path,
+    query or userinfo; a `keyEnv` variable that is unset or does not decode to 32 bytes.
   - The set of allowed return origins is the union of every entry's `origins`. There is no separate
     allowlist variable.
   - The production gateway has a single entry for the prod backend, listing `https://app.vocdoni.io`
@@ -223,7 +239,7 @@ ACME cache.
   - The entry's `url` is the backend's public hostname behind Cloudflare, so the edge adds
     `X-Origin-Secret` as it does for every client. The gateway never holds the origin secret. The
     request URL is `url + "/cert-auth/assertions"`.
-  - Key: the entry's Ed25519 private key (base64 of the 32-byte seed), with id `keyId`.
+  - Key: the Ed25519 seed in the entry's `keyEnv` variable, with id `keyId`.
   - Header: `X-Cert-Gateway-Signature: t=<unix seconds>,k=<keyId>,v1=<base64url(sig), no padding>`.
   - The signature covers the bytes of
     `"cert-gateway-v1\n" + t + "\n" + "POST" + "\n" + "/cert-auth/assertions" + "\n" + hex(sha256(body))`.
@@ -231,46 +247,61 @@ ACME cache.
     request, so a path prefix or rewrite at the edge cannot break verification. `body` is the raw
     request body; the backend hashes the bytes it read (bounded at 4 KiB) before decoding JSON.
   - `Content-Type: application/json`. `User-Agent: vocdoni-cert-gateway/<version>`.
+- **Backend check at startup.** For each `BACKENDS` entry the gateway sends one unsigned
+  `POST url + "/cert-auth/assertions"` with an empty body and a 10 s deadline, and logs
+  `backend check` with the entry `name` and the HTTP status: info for 401 or 404, error for
+  anything else or a transport failure. It does not block startup or `/readyz`.
 - **Configuration** (env):
 
   | Variable | Meaning |
   |---|---|
   | `DOMAIN` | the gateway's hostname |
   | `AUTH_LISTEN` | auth listener address, default `:8443` |
-  | `AUTH_PUBLIC_PORT` | public port of the auth listener, default `$RAILWAY_TCP_PROXY_PORT` |
-  | `PORT` | main listener port (set by Railway) |
+  | `PORT` | main listener port, `8080` |
   | `ACME_EMAIL` | contact email for Let's Encrypt |
   | `ACME_CA` | `production` or `staging` (first issuance uses `staging`) |
   | `DATA_DIR` | volume mount, default `/data` |
-  | `CLOUDFLARE_API_TOKEN` | DNS-01 token (sealed) |
-  | `ACME_DNS_OVERRIDE_DOMAIN` | optional full TXT record name for CNAME delegation |
-  | `RATE_LIMIT_GLOBAL_PER_MIN` | default 1200 |
-  | `BACKENDS` | JSON array of backends: name, url, keyId, signing key and return origins (sealed, it holds keys) |
+  | `CLOUDFLARE_API_TOKEN` | DNS-01 token for the dedicated ACME zone only (sealed) |
+  | `ACME_DNS_OVERRIDE_DOMAIN` | required: full TXT record name in the dedicated ACME zone that `_acme-challenge.<DOMAIN>` is a CNAME to |
+  | `BACKENDS` | JSON array of backends: name, url, keyId, keyEnv and return origins (not secret) |
+  | `SIGNING_KEY_<NAME>` | one per backend, named by its `keyEnv`: base64 of the Ed25519 seed (sealed) |
   | `RATE_LIMIT_PER_MIN` | default 60; `0` turns the per-IP bucket off |
+  | `RATE_LIMIT_GLOBAL_PER_MIN` | default 1200 |
   | `TLS13` | `true` (default) offers TLS 1.3 and 1.2; `false` offers 1.2 only. A restart applies it. |
-  | `LOG_LEVEL` | log verbosity |
+  | `LOG_LEVEL` | log verbosity; `debug` adds `remoteAddr` per auth request |
 
 - **Logging.** The gateway never logs the document number, names, the certificate, `returnUrl`
-  or `state`. It logs the outcome code, provider id, `DiagnosticID` and latency.
+  or `state`. It logs the outcome code, provider id, backend name, `DiagnosticID` and latency.
 - **Pages.** The 400 and 429 HTML pages are static and localised (es, ca, en), with no
   JavaScript.
 - **Deployment.**
-  - Host: Railway, one service per environment (`cert-gateway-dev`, `cert-gateway-prod`), with 1
-    replica, a volume at `/data`, a TCP proxy to `AUTH_LISTEN`, healthcheck `/readyz`, restart on
-    failure, and deploy from `main` after CI passes (wait for CI). The settings follow cert-check's
-    test UI (`testui/README.md` §4 "Railway service settings"). Railway mounts volumes as root, so
-    the container runs as root (`RAILWAY_RUN_UID=0`), as the test UI does.
+  - Host: Railway, one project per environment (`cert-gateway-dev`, `cert-gateway-prod`), each with
+    one service: 1 replica, a volume at `/data`, a TCP proxy to `AUTH_LISTEN`, no public HTTP
+    domain, `PORT=8080`, healthcheck `/readyz` with a 600 s timeout, restart on failure (10
+    retries), Dockerfile builder, and wait for CI. The settings follow cert-check's test UI
+    (`testui/README.md` §4 "Railway service settings"). Railway mounts volumes as root, so the
+    container runs as root (`RAILWAY_RUN_UID=0`), as the test UI does.
+  - Region: Railway's EU West region (Amsterdam) for both services. The service is never moved
+    to a region outside the EU.
+  - Deploy trigger: the dev service tracks `main`. The prod service tracks the branch `release`,
+    which only the owner advances, by fast-forward to a commit of `main` that dev has run.
+  - Private module: the Dockerfile's build stage declares `ARG CERT_CHECK_READ_TOKEN` and uses it
+    to fetch `github.com/vocdoni/cert-check` (`GOPRIVATE`, a git `insteadOf` URL). The value is a
+    sealed service variable holding a read-only token for that one repository. The final stage
+    does not contain it.
   - Expected cost: about 50–100 MB of RAM and almost no CPU, so roughly $1–2 a month of Railway
     usage per environment, usually inside the plan's included usage.
   - Hostnames are DNS-only (grey-cloud) CNAME records on Cloudflare pointing at the Railway TCP
     proxy hostname: `cert-dev.vocdoni.net` (dev) and `cert.vocdoni.io` (prod). The public URL
     carries the Railway-assigned port, for example `https://cert.vocdoni.io:15140`.
     `CERT_GATEWAY_URL` in vocdoni-app includes that port. If the TCP proxy is ever recreated, the
-    port changes, and `CERT_GATEWAY_URL` must be updated in the same change.
+    port and possibly the proxy hostname change: `CERT_GATEWAY_URL` and the CNAME are updated in
+    the same change.
   - Staging has no gateway of its own: app-stg's `CERT_GATEWAY_URL` points at `cert-dev.vocdoni.net`,
     whose `BACKENDS` has a `stg` entry, and the stg backend holds the stg public key.
-- **CI.** Run `go test -race ./...` and golangci-lint. The image is built on tag `v*`, with
+- **CI.** Run `go test -race ./...`, golangci-lint and a Docker build, with
   `GOPRIVATE=github.com/vocdoni/cert-check` and a read token for the private cert-check module.
+  CI publishes no image: Railway builds the Dockerfile.
 
 ### C2. saas-backend
 
