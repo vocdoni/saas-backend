@@ -1,6 +1,6 @@
 # Certificate voter authentication: design
 
-Status: audited (2026-11-11, 18 findings folded in)   Class: architectural
+Status: audited (2026-11-11, 18 findings; delta audit of D7 hosting, 12 findings folded in)   Class: architectural
 Owner decisions so far (2026-11-11):
 - D1 Architecture: a separate, stateless **certificate gateway** service terminates TLS and checks
   the client certificate with `github.com/vocdoni/cert-check`. It hands the proven identity to
@@ -17,7 +17,7 @@ Owner decisions so far (2026-11-11):
 - D7 Hosting: **Railway in every environment**, through Railway's TCP proxy, which passes TLS
   untouched to the Go process. This is the setup cert-check's test UI already runs on
   (`testui/README.md` §4). Accepted trade-offs: a Railway-assigned port other than 443 in the URL,
-  and ACME by DNS-01 with a Cloudflare token. Hostnames: `cert-dev.vocdoni.net` (dev) and
+  and ACME by DNS-01 with a Cloudflare token limited to a dedicated ACME zone. Hostnames: `cert-dev.vocdoni.net` (dev) and
   `cert.vocdoni.io` (prod). Staging uses the dev gateway, which routes each request to the dev or
   the stg backend by the `returnUrl` origin (C1 "Backends").
 - D6 Pending-vote recovery: the backend returns a stable `voterRef`, and `@vocdoni/react-providers`
@@ -523,23 +523,35 @@ ACME cache.
   a valid DNI or NIE hash exactly as before.
 - **Rollout order:**
   1. saas-backend with the feature off (no keys), migration run on dev.
-  2. cert-gateway on Railway dev, first with `ACME_CA=staging`, then `production`.
+  2. cert-gateway on Railway dev. Before the first issuance:
+     - Check that no CAA record on the hostname's zone excludes `letsencrypt.org`.
+     - Check that the assigned port is not on Chromium's restricted-port list or Firefox's banned
+       list. If it is, recreate the proxy.
+
+     Issue first with `ACME_CA=staging`, then `production`.
   3. Backend dev keys.
-  4. From the gateway (`railway run` or a one-off shell in the service),
-     `curl -i -X POST <backend url>/cert-auth/assertions` must answer 401 (bad signature), not 403
-     (origin secret or a Cloudflare WAF/bot challenge). If it is 403, add a Cloudflare WAF skip rule
-     for that path before going on. Railway egress IPs are shared and not fixed, so the rule cannot
-     rely on the source IP; it matches the path and the presence of `X-Cert-Gateway-Signature`.
-     The signature is what authenticates.
-  5. Check in dev whether the auth listener's `RemoteAddr` is the client's address (rate limit
-     section).
+  4. Read the gateway's `backend check` log line (`railway logs`). The status must be 401 (bad
+     signature): not 403 (origin secret or a Cloudflare WAF/bot challenge) and not 404 (keys not
+     set).
+     - If it is 403, add a Cloudflare WAF custom rule with action Skip (managed rules, rate
+       limiting rules and Super Bot Fight Mode). It matches requests whose path is
+       `/cert-auth/assertions` and that carry `X-Cert-Gateway-Signature`. Then redeploy the gateway
+       and read the line again.
+     - Railway egress IPs are shared and not fixed, so the rule cannot rely on the source IP. The
+       signature is what authenticates.
+     - If the zone runs the free Bot Fight Mode, a skip rule does not apply to it: stop and ask the
+       owner.
+  5. In dev, set `LOG_LEVEL=debug`, make two auth requests from two networks and compare the
+     logged `remoteAddr` values with the clients' public IPs. If they are not the clients'
+     addresses, set `RATE_LIMIT_PER_MIN=0` on every gateway. Reset `LOG_LEVEL` to `info`.
   6. react-providers release with the D6 change (and api-types fields).
   7. vocdoni-app dev with `CERT_GATEWAY_URL`.
   8. End-to-end test with real certificates, run manually by the owner (AC9).
   9. Staging: migration, stg keys on the stg backend, the `stg` entry in the dev gateway's
-     `BACKENDS`, the 401 check against the stg backend, then app-stg with
+     `BACKENDS`, the `backend check` line for `stg` showing 401, then app-stg with
      `CERT_GATEWAY_URL=https://cert-dev.vocdoni.net:<port>`.
-  10. Production: the same steps on its own gateway (`cert.vocdoni.io`).
+  10. Production: the same steps on its own gateway (`cert.vocdoni.io`), deployed by the owner
+      advancing the `release` branch.
   11. Every deploy and DNS change waits for the owner's OK.
 - **Rollback.**
   - Unset `CERT_GATEWAY_PUBLIC_KEYS`. The assertion route returns 404 and new cert censuses are
@@ -555,10 +567,12 @@ ACME cache.
 
 - **Trust boundary.** The gateway is trusted to assert a DNI. A compromised gateway or signing
   key can mint assertions for any DNI in any cert census. Mitigations:
-  - The key lives only in the Railway service's sealed variables.
+  - Each signing key lives only in a sealed variable of the Railway service. The dev gateway holds
+    the dev and the stg key, so the stg backend trusts whatever `main` deploys to dev.
   - The backend accepts several keys, so a key can be rotated without downtime.
-  - Access to the Railway project is limited to the people who operate it. The Cloudflare DNS
-    token is scoped as narrowly as the delegated-zone setup allows.
+  - Access to each Railway project is limited to the people who operate it. The Cloudflare DNS
+    token can write only to the dedicated ACME zone, so a leak cannot change any record of
+    `vocdoni.io` or `vocdoni.net`.
   - Assertions are logged per participant, so they can be audited.
   - Accepted residual risk: this is the same trust a CSP already holds.
 - **Code theft.** The `returnUrl` allowlist stops open redirects. The code travels in the
@@ -587,7 +601,13 @@ ACME cache.
   revocation lookup that is unavailable fails closed with a retryable error, and the UI says "try
   later".
 - **Availability.** The gateway sits behind Railway's TCP proxy with no Cloudflare in front: the
-  rate limits apply. Gateway downtime only blocks cert censuses. If the backend is unreachable, the
+  rate limits apply. Accepted residual risk: Railway offers no filtering in front of the TCP proxy,
+  and with the per-IP bucket off a client that holds any certificate can spend the global bucket
+  and block certificate logins until it stops.
+  A redeploy stops the gateway for a short time, because a Railway service with a volume cannot
+  run two deployments at once. Variable changes redeploy, so `BACKENDS` and other variables are
+  not changed on the production gateway while a certificate vote is open.
+  Gateway downtime only blocks cert censuses. If the backend is unreachable, the
   gateway answers `backend_unavailable`.
 - **Non-standard port (D7).** The auth URL uses a Railway-assigned port other than 443. Networks
   that only allow outbound 80/443 (some corporate, hotel or university networks) cannot reach it.
@@ -599,7 +619,8 @@ ACME cache.
   of one code cannot both succeed. Step-0 budgets keep their existing claim and release semantics.
 - **Privacy.** The DNI exists only in the gateway's memory, in the signed request body and in the
   backend's lookup. It is never stored in assertions, never logged and never placed in URLs or
-  browser storage.
+  browser storage. Railway is the processor that hosts the gateway, in the EU region. It sees the
+  TLS stream, which with TLS 1.2 includes the client certificate.
 
 ## Acceptance criteria
 
@@ -647,7 +668,15 @@ ACME cache.
   - The signature verifies against the backend's verifier, using shared test vectors.
   - With two `BACKENDS` entries, a `returnUrl` on each origin posts to its own backend with its own
     key. A configuration with a duplicate origin or name fails at startup.
-  - Over the limit gets a 429.
+  - Over the per-IP limit gets a 429. With `RATE_LIMIT_PER_MIN=0` the per-IP bucket never
+    refuses. Over the global limit, a request with a client certificate gets a 429 and a request
+    without one still gets its `no_certificate` redirect.
+  - Each startup failure of `BACKENDS` listed in C1 fails with a message that names the entry and
+    contains no key material.
+  - A `returnUrl` whose origin differs from a configured one only by host case or `:443` selects
+    that backend.
+  - The startup `backend check` logs the entry name and status for 401, 404, 403 and a transport
+    error, and never blocks `/readyz`.
   - A captured log contains no document number.
 - [ ] AC8 vocdoni-app tests:
   - The organiser option builds `certAuth:true` with `["nationalId"]` and round-trips the draft.
