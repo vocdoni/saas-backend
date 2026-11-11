@@ -359,6 +359,10 @@ func (u *OrgMemberUpdate) applyTo(stored OrgMember) *OrgMember {
 // (see internal.HashLoginFields), so any drift between how a field is stored
 // and how it is compared silently locks the member out.
 //
+// The nationalId is only trimmed: it is stored as the organizer entered it. Its
+// canonical DNI/NIE comparison form (internal.NormalizeNationalID) is applied to
+// both sides in the hash layer, calculateParticipantHashes, never at rest.
+//
 // It only normalizes. Invalid values are passed through in their trimmed form
 // rather than rejected, leaving validation to the caller: at login an
 // unparseable value should simply fail to match a participant, while at write
@@ -518,6 +522,9 @@ type OrgMemberAggregationResults struct {
 	// NotFound is a list of requested member IDs that matched no member of the organization
 	// (unknown, or belonging to another org). Only populated for the explicit-memberIds path.
 	NotFound []bson.ObjectID `json:"notFound" bson:"notFound"`
+	// NationalIDWarnings are the non-blocking nationalId problems of the members, reported only when
+	// nationalId is an auth field. They never make the census invalid.
+	NationalIDWarnings []NationalIDWarning `json:"nationalIdWarnings,omitempty" bson:"nationalIdWarnings,omitempty"`
 }
 
 const (
@@ -1320,4 +1327,9 @@ type Job struct {
 	// touching the jobs another live replica is still running (see FailInterruptedTxJobs).
 	Instance    string    `json:"-" bson:"instance,omitempty"`
 	HeartbeatAt time.Time `json:"-" bson:"heartbeatAt,omitempty"`
+
+	// NationalIDWarnings are the nationalId warnings of a member import job (JobTypeOrgMembers).
+	// They carry no values (member id, line and class only); GET /jobs/{jobId} still hides them from
+	// anonymous callers like Errors, for shape consistency.
+	NationalIDWarnings []NationalIDWarning `json:"nationalIdWarnings,omitempty" bson:"nationalIdWarnings,omitempty"`
 }

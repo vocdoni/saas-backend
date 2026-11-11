@@ -84,6 +84,15 @@ definitions:
         example: deadbeef
         format: hex
         type: string
+      nationalIdWarnings:
+        description: |-
+          NationalIDWarnings are the non-blocking nationalId problems of the submitted members (sync
+          path; an async import reports them on GET /jobs/{jobId}). line is the member's 1-based
+          position in the submitted list. duplicate_after_normalization only compares the submitted
+          members with each other.
+        items:
+          $ref: '#/definitions/db.NationalIDWarning'
+        type: array
     type: object
   apicommon.CensusSpec:
     properties:
@@ -541,6 +550,13 @@ definitions:
         type: array
       jobId:
         type: string
+      nationalIdWarnings:
+        description: |-
+          NationalIDWarnings are the nationalId warnings of a member import job, returned only to a
+          Manager/Admin of the job's organization (like the import errors).
+        items:
+          $ref: '#/definitions/db.NationalIDWarning'
+        type: array
       result:
         $ref: '#/definitions/apicommon.UnifiedJobResult'
       status:
@@ -786,7 +802,9 @@ definitions:
         description: Member's name
         type: string
       nationalId:
-        description: Member's National ID No
+        description: |-
+          Member's National ID No, stored as entered (trimmed); DNI/NIE variants are matched by their
+          canonical form at login
         type: string
       other:
         additionalProperties: {}
@@ -1747,6 +1765,13 @@ definitions:
         format: hex
         type: string
     type: object
+  apicommon.ValidateProcessCensusResponse:
+    properties:
+      nationalIdWarnings:
+        items:
+          $ref: '#/definitions/db.NationalIDWarning'
+        type: array
+    type: object
   apicommon.VerifiedVote:
     properties:
       blockHeight:
@@ -2048,6 +2073,17 @@ definitions:
   db.MultiLangString:
     additionalProperties:
       type: string
+    type: object
+  db.NationalIDWarning:
+    properties:
+      class:
+        type: string
+      line:
+        description: Line is the 1-based position of the member in the submitted import
+          list.
+        type: integer
+      memberId:
+        type: string
     type: object
   db.OrgAddOn:
     enum:
@@ -3308,9 +3344,10 @@ paths:
         `failed`) and `result` carries only the attributes the job produced (import counters
         `added`/`total`/`progress`, or tx `address`/`voteID`/`status`), each omitted when empty.
         Public endpoint: the 32-byte job id is the capability and results carry only public
-        data. Per-row import error detail (which may reference member data) is returned only
-        to an authenticated manager/admin of the job's organization (as on GET /jobs);
-        anonymous callers get status and counters only.
+        data. Per-row import error detail (which may reference member data) and nationalId warnings
+        (which carry no values, gated like the errors for a consistent shape) are returned only to
+        an authenticated manager/admin of the job's organization (as on GET /jobs); anonymous
+        callers get status and counters only.
       parameters:
       - description: Job id returned by the async endpoint (hex)
         in: path
@@ -6172,8 +6209,10 @@ paths:
         anonymous (blind) census hasVoted is always false and hasSigned is the only signal. When
         the chain cannot be asked about a signed question, that question is reported with
         hasVotedUnknown=true (and hasVoted=false) instead of failing the whole list. For `phone`
-        pass the plaintext number; it is hashed server-side. Requires Manager/Admin of the
-        owning organization.
+        pass the plaintext number; it is hashed server-side. For `nationalId` a Spanish DNI/NIE
+        also matches its canonical form when the member is stored in canonical form; a member stored
+        verbatim with separators or non-canonical casing is found only by that exact value.
+        Requires Manager/Admin of the owning organization.
 
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
@@ -6916,6 +6955,12 @@ paths:
         voting temporarily off, an `anonymous: true` spec is a 400 (40037) "anonymous voting is
         temporarily unavailable".
 
+        When `nationalId` is an auth field, both answers carry `nationalIdWarnings` (in the 400 under
+        `data`): one entry per member whose nationalId is missing, a DNI/NIE with a wrong check
+        letter (`letter_mismatch`), another tax id (`unsupported_document`), not a DNI/NIE at all
+        (`invalid`), plus a `duplicate_after_normalization` entry for every member sharing a
+        canonical DNI/NIE with another. Warnings never make the census invalid.
+
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Org address + census spec
@@ -6928,9 +6973,9 @@ paths:
       - application/json
       responses:
         "200":
-          description: OK
+          description: Usable census, with its nationalId warnings
           schema:
-            type: string
+            $ref: '#/definitions/apicommon.ValidateProcessCensusResponse'
         "400":
           description: Invalid census (duplicates, missing data), or anonymous voting
             unavailable
