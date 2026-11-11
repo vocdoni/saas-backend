@@ -1,6 +1,6 @@
 # Certificate voter authentication: design
 
-Status: draft   Class: architectural
+Status: audited (2026-11-11, 18 findings folded in)   Class: architectural
 Owner decisions so far (2026-11-11):
 - D1 Architecture: a separate, stateless **certificate gateway** service terminates TLS and checks
   the client certificate with `github.com/vocdoni/cert-check`. It hands the proven identity to
@@ -11,21 +11,25 @@ Owner decisions so far (2026-11-11):
 - D4 Accepted certificates at launch: **stable natural-person providers only**. These are FNMT,
   idCAT, ACCV, DIGITEL, Bewor and Sectigo. No DNIe, no representative or public-employee
   certificates, and no beta providers.
-- D5 TLS: the gateway offers **TLS 1.3 and 1.2** (`certcheck.WithTLS13()`).
+- D5 TLS: the gateway offers **TLS 1.3 and 1.2** (`certcheck.WithTLS13()`). Amended after the
+  spec audit: there is no fallback between the two, so the gateway gets a `TLS13` switch and the
+  stg test covers Windows key stores (see "Passive observers" and AC9).
+- D6 Pending-vote recovery: the backend returns a stable `voterRef`, and `@vocdoni/react-providers`
+  gets a one-line additive change to use it (C2.5, C3).
 
 ## Problem
 
 Organisers can already make the member `nationalId` a voter login field
-(`db/types.go:478-488`, `OrgMemberAuthFieldsNationalID`). The voter proves nothing, though: they
+(`db/types.go:386-404`, `OrgMemberAuthFieldsNationalID`). The voter proves nothing, though: they
 type the value into step 0 (`csp/handlers/auth.go:270`). A census whose only login field is
-`nationalId` and has no 2FA is census type `auth` (`db/types.go:529-538`). Step 0 then mints an
+`nationalId` and has no 2FA is census type `auth` (`db/types.go:451-460`). Step 0 then mints an
 already-verified token (`csp/auth.go:36-39`, `createAuthOnlyToken` `csp/auth.go:466`). Anyone who
 knows or guesses a member's DNI can therefore vote as that member. Spanish organisations
 (associations, cooperatives, political parties) want voters to prove their identity with the
 official personal certificates they already hold.
 
 saas-backend cannot ask for a client certificate where it runs today:
-- It serves plain HTTP (`api/api.go:388-396`). TLS ends at the edge. DigitalOcean App Platform
+- It serves plain HTTP (`api/api.go:393-407`). TLS ends at the edge. DigitalOcean App Platform
   terminates TLS and offers no client-certificate, TLS-passthrough or TCP ingress.
 - The `vocdoni.io` / `vocdoni.net` zones are proxied by Cloudflare. Cloudflare checks client
   certificates from your own CAs only on Enterprise, limits them to 5 CAs per account and does not
@@ -54,28 +58,29 @@ saas-backend cannot ask for a client certificate where it runs today:
 - Moving saas-backend off App Platform, or Cloudflare Enterprise mTLS.
 - Certificate login for organiser (admin) accounts.
 - Changes to saas-admin-dashboard (the backoffice). Showing the auth method there is a follow-up.
-- Changes to `@vocdoni/react-providers`, `@vocdoni/api-client` or `@vocdoni/api-types`. The app
-  passes the new step-0 fields through `auth0(participant)` as they are (see Current state).
+- Changes to `@vocdoni/api-client`. `@vocdoni/react-providers` gets one additive change (D6): in
+  `auth0`, `setOwner(res.voterRef ?? await ownerHash(participant))`. `@vocdoni/api-types` adds the
+  optional `certAuth`, `certCode`, `codeVerifier` and `voterRef` fields.
 - Alerting and monitoring dashboards beyond the logs and metrics named here.
 
 ## Current state
 
-- **Census model** (`db/types.go:331-347`): `Type`, `Weighted`, `Anonymous`, `GroupID`,
+- **Census model** (`db/types.go:253-269`): `Type`, `Weighted`, `Anonymous`, `GroupID`,
   `AuthFields`, `TwoFaFields`. The census type comes from `TwoFaFields` (`GetCensusType`,
-  `db/types.go:529-538`). The API input is `apicommon.CensusSpec` (`api/apicommon/voting_processes.go:20-45`).
-  The census is built in `resolveOrCreateDefaultCensus` (`api/processes_census.go:37`). Census
-  validation and the missing-data report are in `api/processes_census_validate.go:60-90`.
-- **Login hash.** `db.HashAuthTwoFaFields` (`db/types.go:564-587`) lowercases each auth-field
+  `db/types.go:451-460`). The API input is `apicommon.CensusSpec` (`api/apicommon/voting_processes.go:16-41`).
+  The census is built in `resolveOrCreateDefaultCensus` (`api/processes_census.go:48`). Census
+  validation and the missing-data report are in `api/processes_census_validate.go:60-99`.
+- **Login hash.** `db.HashAuthTwoFaFields` (`db/types.go:486-509`) lowercases each auth-field
   value (`memberAuthFieldValue`, `db/census_missing_data.go:64-80`) and hashes the name→value map
   with unsalted SHA-256 (`internal.HashLoginFields`, `internal/utils.go:57`). Each participant
   stores `loginHash`, plus `loginHashEmail` and `loginHashPhone` when both 2FA fields are set
   (`calculateParticipantHashes`, `db/census_participant.go:860-875`). Each has a unique index per
   census. `migrations.hashMemberFields` (`migrations/login_hash.go:46`) must mirror the hash byte
   for byte; `db.TestRepairMatchesCanonicalHash` guards this.
-- **Normalisation.** `OrgMember.Normalized` (`db/types.go:444-453`) only trims `NationalID`.
-- **Voter flow.** The routes are at `api/routes.go:202-216` and the handlers in
+- **Normalisation.** `OrgMember.Normalized` (`db/types.go:366-375`) only trims `NationalID`.
+- **Voter flow.** The routes are at `api/routes.go:197-210` and the handlers in
   `csp/handlers/processes.go`.
-  - Step 0, `authFirstStep` (`csp/handlers/auth.go:270-439`):
+  - Step 0, `authFirstStep` (`csp/handlers/auth.go:270-438`):
     1. Decode `AuthRequest` (`csp/handlers/types.go:16-28`).
     2. Refuse an anonymous census when anonymous voting is off.
     3. Build and normalise the input member.
@@ -83,11 +88,11 @@ saas-backend cannot ask for a client certificate where it runs today:
     5. Claim the failed-attempt budget (`authAttemptKeys` `:193`, `ClaimAuthAttempt`).
     6. Look up the participant by login hash.
     7. Check the password.
-    8. Run `determineContactMethod` (`:153-191`), which compares the submitted email or phone with
+    8. Run `determineContactMethod` (`:154-184`), which compares the submitted email or phone with
        the stored member.
     9. Check the weight.
     10. Call `csp.AuthToken`, which queues an OTP or mints a pre-verified token.
-  - Step 1 (`authSecondStep`, `:447`) verifies the OTP or returns a pre-verified token.
+  - Step 1 (`authSecondStep`, `:451`) verifies the OTP or returns a pre-verified token.
 - **Voter UI** (vocdoni-app, `src/components/Process/CSP/`). `Step0.tsx` renders
   `census.authFields`/`twoFaFields`. Calls go through `useElectionAuth().auth0(participant)` from
   `@vocdoni/react-providers` 4.x. It POSTs `participant` unchanged as the step-0 body and treats
@@ -128,20 +133,29 @@ A single Go 1.27 binary, `cmd/cert-gateway`, with no database and no disk state 
 ACME cache.
 
 - **Listeners.**
-  - `:443` serves TLS with `handler.TLSConfig(acme.GetCertificate, certcheck.WithTLS13())`. The
-    `http.Server` has `Protocols` set to HTTP/1 only.
-  - `:80` serves only ACME HTTP-01 challenges (`autocert.Manager.HTTPHandler`) and redirects
-    everything else to https.
-  - The server certificate comes from Let's Encrypt via `golang.org/x/crypto/acme/autocert`. Its
-    cache directory is `CACHE_DIR`. HTTP-01 is required because the cert-check TLS config
-    advertises only `http/1.1` and so cannot answer TLS-ALPN-01.
+  - `:443` serves TLS with `handler.TLSConfig(getCert)`, adding `certcheck.WithTLS13()` when
+    `TLS13` is true. The `http.Server` has `Protocols` set to HTTP/1 only.
+  - `:80` serves ACME HTTP-01 challenges (`autocert.Manager.HTTPHandler`) and redirects everything
+    else to https.
+  - The server certificate comes from Let's Encrypt via `golang.org/x/crypto/acme/autocert`, with
+    `HostPolicy: autocert.HostWhitelist(DOMAIN)` and `Cache: autocert.DirCache(CACHE_DIR)`.
+    `CACHE_DIR` is a Docker named volume that survives image updates. The returned `tls.Config`
+    gets `acme.ALPNProto` appended to `NextProtos`, so `tls-alpn-01` succeeds on `:443`; `:80`
+    stays for the https redirect and as the `http-01` fallback. `acme-tls/1` carries no HTTP
+    requests, so cert-check's HTTP/1-only rule is unaffected.
+  - Every request is checked with `certcheck.CheckHost`; a mismatch answers 421.
+  - `http.Server`: `ReadHeaderTimeout` 10 s, `ReadTimeout` 15 s, `WriteTimeout` 60 s, `IdleTimeout`
+    60 s, `MaxHeaderBytes` 16 KiB.
 - **Providers.** `fnmt.New`, `idcat.New`, `accv.New`, `digitel.New`, `bewor.New`,
   `sectigo.New`. They share one `certcheck.NewRevocation` with `UserAgent: "vocdoni-cert-gateway/<version>"`.
   `NewHandler` fails at startup on any misconfiguration.
 - **`GET /v1/auth`.** Query parameters:
-  - `processId`: 64 hex characters.
-  - `returnUrl`: an absolute `https` URL whose origin is exactly one of `ALLOWED_RETURN_ORIGINS`,
-    with no userinfo and no fragment. At most 2048 bytes.
+  - `processId`: a Mongo ObjectID, exactly 24 lowercase hex characters (`^[0-9a-f]{24}$`).
+  - `returnUrl`: an absolute `https` URL of at most 2048 bytes, with no userinfo, query or fragment.
+    Its origin is exactly one of `ALLOWED_RETURN_ORIGINS`, and its path matches
+    `^(/[a-z]{2,3}(-[A-Za-z0-9]{2,8})?)?/processes/<processId>/?$`, where `<processId>` is the
+    `processId` parameter of the same request. The code is therefore only ever delivered to the
+    voting page of that process, the one page that checks `state`.
   - `state`: base64url, 16–64 characters.
   - `codeChallenge`: base64url SHA-256, exactly 43 characters.
   - `lang`: optional, one of `es|ca|en`, default `es`.
@@ -155,7 +169,8 @@ ACME cache.
      - 201: redirect 303 to `returnUrl#certCode=<code>&state=<state>`.
      - A backend error code: redirect 303 to `returnUrl#certError=<backendCode>&state=<state>`.
        `backendCode` is one of `not_in_census`, `zero_weight`, `not_cert_census`,
-       `process_not_open`, `rate_limited` or `backend_unavailable`.
+       `anonymous_unavailable`, `process_not_open`, `rate_limited` or `backend_unavailable`
+       (see the response contract in C2.4).
 
   The parameters travel in the **fragment**, so they never reach any server log or `Referer`.
 - **`GET /healthz`** returns 200 once the handler is built.
@@ -164,12 +179,23 @@ ACME cache.
   - `Referrer-Policy: no-referrer`
   - `X-Frame-Options: DENY`
   - `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'`
-- **Rate limit.** Per client IP, 20 requests to `/v1/auth` per minute, in a token bucket held in
-  process. An exceeded limit gets a 429 page.
-- **Request signing to the backend.**
-  - Key: an Ed25519 private key from `SIGNING_KEY` (base64 of the 32-byte seed), with id `SIGNING_KEY_ID`.
-  - Header: `X-Cert-Gateway-Signature: t=<unix seconds>,k=<keyId>,v1=<base64url(sig)>`.
-  - The signature covers `"cert-gateway-v1\n" + t + "\n" + method + "\n" + path + "\n" + hex(sha256(body))`.
+- **Rate limit.** Per client IP (`RemoteAddr`), 60 requests to `/v1/auth` per minute with a burst
+  of 30, in an in-process token bucket. Entries idle for 10 minutes are evicted, and the map is
+  capped at 100 000 entries (oldest evicted first). An exceeded limit gets a 429 page.
+- **Request to the backend.**
+  - `BACKEND_URL` is the backend's public hostname behind Cloudflare (for example
+    `https://saas-api.vocdoni.net`), so the edge adds `X-Origin-Secret` as it does for every client.
+    The gateway never holds the origin secret. The request URL is `BACKEND_URL + "/cert-auth/assertions"`.
+  - Key: an Ed25519 private key from `SIGNING_KEY` (base64 of the 32-byte seed), with id
+    `SIGNING_KEY_ID`. Each environment (stg, prod) has its own key pair; a key is never configured on
+    two backends.
+  - Header: `X-Cert-Gateway-Signature: t=<unix seconds>,k=<keyId>,v1=<base64url(sig), no padding>`.
+  - The signature covers the bytes of
+    `"cert-gateway-v1\n" + t + "\n" + "POST" + "\n" + "/cert-auth/assertions" + "\n" + hex(sha256(body))`.
+    Method and path are these literals on both sides: the backend does not read them from the
+    request, so a path prefix or rewrite at the edge cannot break verification. `body` is the raw
+    request body; the backend hashes the bytes it read (bounded at 4 KiB) before decoding JSON.
+  - `Content-Type: application/json`. `User-Agent: vocdoni-cert-gateway/<version>`.
 - **Configuration** (env):
 
   | Variable | Meaning |
@@ -180,7 +206,8 @@ ACME cache.
   | `BACKEND_URL` | saas-backend base URL |
   | `SIGNING_KEY`, `SIGNING_KEY_ID` | request-signing key and its id |
   | `ALLOWED_RETURN_ORIGINS` | comma-separated origins `returnUrl` may use |
-  | `RATE_LIMIT_PER_MIN` | default 20 |
+  | `RATE_LIMIT_PER_MIN` | default 60 |
+  | `TLS13` | `true` (default) offers TLS 1.3 and 1.2; `false` offers 1.2 only. A restart applies it. |
   | `LOG_LEVEL` | log verbosity |
 
 - **Logging.** The gateway never logs the document number, names, the certificate, `returnUrl`
@@ -189,11 +216,13 @@ ACME cache.
   JavaScript.
 - **Deployment.**
   - Host: one DigitalOcean Basic Droplet in fra1 (1 GiB, ~$6/month), running the
-    `ghcr.io/vocdoni/cert-gateway` image with `--restart=always`.
+    `ghcr.io/vocdoni/cert-gateway` image with `--restart=always`. `CACHE_DIR` is mounted from a
+    named volume (`-v certgw-acme:/var/cache/acme`).
   - Firewall: inbound 80 and 443 from anywhere, 22 from admin IPs only.
   - Time is synced with NTP.
   - Hostnames are DNS-only (grey-cloud) A records on Cloudflare: `cert.vocdoni.io` (prod) and
-    `cert-stg.vocdoni.io` (stg). Dev reuses stg.
+    `cert-stg.vocdoni.io` (stg). Dev has the feature off: no `CERT_GATEWAY_URL` on app-dev and no
+    keys on the dev backend.
 - **CI.** Run `go test -race ./...` and golangci-lint. The image is built on tag `v*`, with
   `GOPRIVATE=github.com/vocdoni/cert-check` and a read token for the private cert-check module.
 
@@ -212,11 +241,12 @@ ACME cache.
 
 **C2.2 Canonical national ID.**
 - New `internal.CanonicalNationalID(s string) (canonical string, ok bool)`:
-  1. Uppercase the value and remove spaces, `.` and `-`.
-  2. If the result matches `^[0-9]{1,8}[A-Z]$` and the check letter is valid, left-pad the digits
-     to 8 and return the DNI with `ok=true`.
-  3. If it matches `^[XYZ][0-9]{1,7}[A-Z]$` and the check letter is valid, left-pad to 7 digits
-     and return the NIE with `ok=true`.
+  1. Uppercase the value (`strings.ToUpper`) and remove every rune for which `unicode.IsSpace` is
+     true, plus `.`, `-`, `_` and `/`.
+  2. If the result matches `^0*([0-9]{1,8})([A-Z])$` and the letter is the check letter of the
+     number, return the digits left-padded to 8 plus the letter, `ok=true`.
+  3. If it matches `^([XYZ])0*([0-9]{1,7})([A-Z])$` and the letter is the check letter (X=0, Y=1,
+     Z=2 prefixed), return the prefix, the digits left-padded to 7 and the letter, `ok=true`.
   4. Otherwise return the trimmed input unchanged with `ok=false`.
 - `memberAuthFieldValue` returns `CanonicalNationalID(m.NationalID)` for `nationalId`, so the
   hash lowercases the canonical form. The stored and displayed `NationalID` is not rewritten.
@@ -229,18 +259,32 @@ ACME cache.
   `loginHashEmail` or `loginHashPhone` is stored.
 - As a result one canonical DNI is one participant per census, and the census duplicate check
   reports duplicates by DNI.
-- A single helper decides which fields are hashed for a census:
-  `func (c Census) LoginHashFields() (OrgMemberAuthFields, OrgMemberTwoFaFields)`. Every hash site
-  uses it: `calculateParticipantHashes`, the duplicate and missing-data aggregation, and the repair
-  tooling.
-- For a cert census, the missing-data and validation report adds `invalidNationalId`: the members
-  whose `nationalId` gives `ok=false`. These members cannot log in with a certificate.
+- A single helper decides which fields are **hashed** for a census:
+  `func (c Census) LoginHashFields() (OrgMemberAuthFields, OrgMemberTwoFaFields)`. For `CertAuth` it
+  returns `(["nationalId"], nil)`; otherwise `(c.AuthFields, c.TwoFaFields)`.
+  `calculateParticipantHashes` is its only caller, and every other hash site already goes through
+  `calculateParticipantHashes` (`db/census_missing_data.go:139`, `db/census_participant.go:184,565`,
+  `db/org_members.go:625`).
+- **Missing data is not hashing.** `MissingLoginData` keeps receiving `census.AuthFields` and
+  `census.TwoFaFields`, so a member with no 2FA channel is still left out of a cert census with 2FA.
+- The validation path takes the flag too: `CheckGroupMembersFields`, `CheckMembersFields` and
+  `aggregateMemberFields` gain a `certAuth bool` parameter (they take field lists today, not a census).
+- The repair tooling mirrors the helper: `migrations.censusHashDoc` gains
+  `CertAuth bool \`bson:"certAuth"\``, and `computeParticipantHashes` hashes `(["nationalId"], nil)`
+  and emits no email or phone hash when it is set. `TestRepairMatchesCanonicalHash` gains cert-census
+  cases (no 2FA, email, email+phone) comparing `computeParticipantHashes` with
+  `calculateParticipantHashes`.
+- For a cert census, a member whose `nationalId` gives `ok=false` is treated exactly like a member
+  with missing login data: it could never log in. `MissingLoginData` gains that test when called for
+  a cert census, so such members are listed in the existing `missingData` array, make
+  `POST /processes/census/validation` answer 400, and are left out of the census and returned in the
+  `missing` list at create, update and `PUT /processes/{id}/census`. No new response field is added.
 
 **C2.4 Assertion endpoint** (internal, gateway only).
 - Route: `POST /cert-auth/assertions`. The body is at most 4 KiB:
 
   ```json
-  {"processId":"<hex64>","nationalId":"<9 chars>","documentType":"DNI|NIE",
+  {"processId":"<hex24>","nationalId":"<9 chars>","documentType":"DNI|NIE",
    "provider":"fnmt","profile":"fnmt-citizen-g2","certSha256":"<hex64>",
    "codeChallenge":"<b64url 43>"}
   ```
@@ -250,8 +294,10 @@ ACME cache.
   2. Require `|now − t| ≤ 60 s`.
   3. Compare in constant time.
   4. Without keys configured, the route answers 404 (feature off).
-- **Steps.** Each failure maps to a code from C1:
-  1. Load the process. It must be published and open for voting, else `process_not_open`.
+- **Steps.** Each failure maps to a code of the response contract below:
+  0. Parse `processId` with `bson.ObjectIDFromHex`, else 400.
+  1. Load the process. It must exist and be published (`vp.Published`, the same test step 0
+     applies), else `process_not_open`.
   2. Its census must have `CertAuth`, else `not_cert_census`.
   3. Refuse an anonymous census exactly as `anonymousCensusRefused` does.
   4. Compute `CanonicalNationalID(nationalId)`. It must give `ok=true`, else 400.
@@ -259,8 +305,28 @@ ACME cache.
      404 `not_in_census`.
   6. Check the weight, else `zero_weight`.
   7. Spend the rate budget: at most 10 assertions per participant per process per hour, else 429
-     `rate_limited`.
+     `rate_limited`. The budget is a `ClaimCSPCounter` counter keyed by process and participant id,
+     like the step-0 budgets.
   8. Create the assertion and answer `201 {"certCode":"<b64url 32 random bytes>","expiresAt":…}`.
+- **Response contract.** Success is `201` with `{"certCode":"…","expiresAt":"<RFC 3339 UTC>"}`.
+  Every failure is JSON `{"error":"<code>"}` with these statuses and no other body fields:
+
+  | Status | `error` | When |
+  |---|---|---|
+  | 400 | `bad_request` | malformed body, bad `processId`, `nationalId` with `ok=false` |
+  | 401 | `bad_signature` | missing, malformed, stale, unknown-key or invalid signature |
+  | 404 | (plain 404, no body) | no keys configured |
+  | 404 | `process_not_open` | process unknown or `!vp.Published` |
+  | 409 | `not_cert_census` | census without `CertAuth` |
+  | 409 | `anonymous_unavailable` | anonymous census while blind CSP is off |
+  | 404 | `not_in_census` | no participant for the DNI |
+  | 403 | `zero_weight` | weighted census, member weight 0 |
+  | 429 | `rate_limited` | assertion budget spent |
+
+  The gateway forwards to the browser only `process_not_open`, `not_cert_census`,
+  `anonymous_unavailable`, `not_in_census`, `zero_weight` and `rate_limited`. Anything else —
+  another code, a non-JSON body, a 5xx, a timeout — becomes `backend_unavailable`, and the gateway
+  logs the status.
 - **Storage.** New collection `certAuthAssertions`:
 
   ```
@@ -276,12 +342,15 @@ ACME cache.
 - `AuthRequest` gains `CertCode string \`json:"certCode,omitempty"\`` and
   `CodeVerifier string \`json:"codeVerifier,omitempty"\``.
 - **Census with `CertAuth`.**
-  1. The request must carry `certCode` and `codeVerifier` (43–128 characters). The typed login
-     fields must be empty, else `ErrInvalidUserData`.
+  1. Shape check, before anything is consumed: the request must carry `certCode` (43 characters,
+     base64url) and `codeVerifier` (43–128 characters, base64url), and `name`, `surname`,
+     `memberNumber`, `nationalId`, `birthDate` and `password` must be empty. Otherwise
+     `ErrInvalidUserData`, and no code is consumed.
   2. Consume the assertion atomically:
      `FindOneAndUpdate({codeHash, processId, usedAt: null, expiresAt > now}, {$set: {usedAt: now}})`.
   3. Check `base64url(sha256(codeVerifier)) == codeChallenge` in constant time.
-  4. Any failure answers `ErrCSPAuthFailed`.
+  4. A code that is unknown, expired, used or of another process, or a verifier that does not match,
+     answers the bare `ErrCSPAuthFailed`.
   5. Load the `OrgMember` by `participantId`, then continue the existing flow from
      `determineContactMethod`: the submitted email or phone against the stored member, the weight,
      then `csp.AuthToken`.
@@ -289,18 +358,27 @@ ACME cache.
      contact comparison, as today.
   7. A consumed code is spent even if the contact check then fails. The voter goes through the
      certificate step again.
+  8. The step-0 response of a cert census carries `voterRef` (D6): lowercase hex of
+     `sha256("vocdoni-voter-ref:" + processId hex + ":" + participantId hex)`. It is the same on
+     every login of one voter to one process, so the client can recognise that voter's pending
+     votes. `AuthResponse` gains `VoterRef string \`json:"voterRef,omitempty"\``.
 - **Census without `CertAuth`.** A request carrying `certCode` is refused with `ErrInvalidUserData`.
 - **Unchanged.** Step 1, resend, sign and blind-sign do not change. The token is bound to the
   member id and process exactly as today.
 
 **C2.6 Migration.**
-- A registered migration rehashes participants for the new canonical `nationalId`. It covers every
-  census whose `AuthFields` contains `nationalId`, and only participants whose canonical value
-  differs from the lowercased trimmed value.
-- A participant whose new hash collides with another participant of the same census keeps its old
-  hashes and is counted and logged by participant id. The migration reports how many it rehashed
-  and how many collided.
-- It is idempotent.
+- A registered migration calls `RepairLoginHashes(ctx, db, RepairOptions{Apply: true})` and logs its
+  report, exactly as migration 0025 does. With `hashMemberFields` canonicalising `nationalId`
+  (C2.2), that rewrites the participants whose hash changed and nothing else. No new selection or
+  collision code is written.
+- Collisions follow the existing rule: rows of one census that share a recomputed hash are all
+  skipped and listed in `RepairReport.SkippedMembers`. They are members stored twice under two
+  spellings of one DNI. They keep logging in with the exact spelling stored until the organiser
+  removes the duplicate; the migration log line carries the count.
+- It is idempotent (`RepairLoginHashes` is). Its `Down` is a no-op, as 0025's is: the old hashes
+  come back by running the previous release's `scripts/repairlogins -apply`.
+- Before the deploy, the owner runs `scripts/repairlogins` (dry run) built from this branch against
+  stg and then prod and reads the collision count.
 - Version numbering follows the lts/main ledger rule (`migrations/repair_login_hashes.go:16-26`).
   The plan fixes the number against `origin/main` and `origin/lts`.
 
@@ -314,19 +392,29 @@ ACME cache.
     credentials to `["nationalId"]`, disables the other credential choices and keeps the existing
     2FA choices.
   - `buildCensusSpec` sends `certAuth: true`, and the draft mapping round-trips it.
-  - The census validation step shows the `invalidNationalId` count.
+  - For a cert census, the existing missing-data alert reads "missing or invalid DNI/NIE".
 - **Voter side**, when `election.census.certAuth`:
   1. Step 0 shows a single "Acceder con certificado digital" button instead of the login fields.
   2. On click, generate `state` (16 random bytes) and `codeVerifier` (32 random bytes, base64url).
      Store both in `sessionStorage` under `certAuth:<processId>`, then navigate (top level) to
      `${CERT_GATEWAY_URL}/v1/auth` with
-     `returnUrl = location.origin + location.pathname`.
+     `returnUrl = location.origin + localizedProcessPath(processId)` (the `/[lang/]processes/<id>`
+     route, also when the voter started from a home-process root page).
   3. On page load with `#certCode`/`#certError`, compare `state` with the stored one, then strip
-     the fragment (`history.replaceState`) and delete the `sessionStorage` entry.
+     the fragment (`history.replaceState`) and delete the `sessionStorage` entry. If `state` does
+     not match, or nothing is stored, strip the fragment, show the generic error and call nothing.
+     The stored entry is deleted only on a match.
      - For a census without 2FA, call `auth0({certCode, codeVerifier})`.
      - For a census with 2FA, show the existing email or phone input, call
        `auth0({certCode, codeVerifier, email|phone})`, then the existing Step1.
-  4. Show `#certError` codes as localised messages.
+  4. Show `#certError` codes as localised messages (see "Sticky certificate choice").
+  5. The terms-and-privacy checkbox stays above the certificate button and is required before the
+     redirect.
+  6. The certificate path never calls `pushCrispUserFields`.
+  7. `feat/cert-auth` in vocdoni-app is cut from `origin/develop` (react-providers 4.x), and bumps
+     react-providers to the release carrying the D6 change.
+- **react-providers** (D6): `auth0` sets `owner` to `res.voterRef` when present, else to
+  `ownerHash(participant)` as today. Released before the app.
 - **Configuration and strings.** `CERT_GATEWAY_URL` is a new env var. The option is hidden when it
   is unset. Strings go in en, es and ca. The other locales take English through the existing
   extraction.
@@ -356,16 +444,22 @@ ACME cache.
   1. saas-backend with the feature off (no keys), migration run on stg.
   2. cert-gateway on the stg Droplet.
   3. Backend stg keys.
-  4. vocdoni-app stg with `CERT_GATEWAY_URL`.
-  5. End-to-end test with real certificates, run manually by the owner.
-  6. The same steps in production.
-  7. Every deploy and DNS change waits for the owner's OK.
+  4. From the Droplet, `curl -i -X POST $BACKEND_URL/cert-auth/assertions` must answer 401 (bad
+     signature), not 403 (origin secret or a Cloudflare WAF/bot challenge). If it is 403, add a
+     Cloudflare WAF skip rule for that path and the Droplet's IP before going on.
+  5. react-providers release with the D6 change (and api-types fields).
+  6. vocdoni-app stg with `CERT_GATEWAY_URL`.
+  7. End-to-end test with real certificates, run manually by the owner (AC9).
+  8. The same steps in production.
+  9. Every deploy and DNS change waits for the owner's OK.
 - **Rollback.**
   - Unset `CERT_GATEWAY_PUBLIC_KEYS`. The assertion route returns 404 and new cert censuses are
     refused. Existing cert censuses can no longer authenticate, so the owner decides this during
     open votes.
   - Rolling the backend back past C2.2 makes typed logins of non-canonical stored IDs fail until
-    the repair tooling is run with the old hash. The plan documents that command.
+    the previous release's `scripts/repairlogins -apply` is run. A rolled-back backend starts
+    against a newer migration ledger (`db/migrations.go:87-125` only applies versions above the
+    stored one), which is safe.
   - The gateway has no state, so it can be stopped at any time.
 
 ## Failure modes and security
@@ -378,15 +472,26 @@ ACME cache.
   - Assertions are logged per participant, so they can be audited.
   - Accepted residual risk: this is the same trust a CSP already holds.
 - **Code theft.** The `returnUrl` allowlist stops open redirects. The code travels in the
-  fragment, is single-use and expires in 5 minutes. PKCE binds it to the browser that started the
-  flow, so a code that leaks through history, an extension or a misdirect cannot be redeemed
-  without the `codeVerifier` in that tab's `sessionStorage`. `state` blocks login CSRF, where a
-  victim's tab would be fed the attacker's code.
+  fragment, is single-use and expires in 5 minutes. PKCE binds the code to the browser that started
+  the flow. A flow started by an attacker is not bound to the victim, so the defence there is the
+  `returnUrl` path rule: the code only reaches the voting page, which discards it because `state` is
+  not the one it stored. `state` also blocks login CSRF, where a victim's tab would be fed the
+  attacker's code.
+- **Sticky certificate choice.** Browsers remember the chosen certificate, or the choice of none,
+  for the gateway's host until they are restarted. For `no_certificate`, `not_in_census`,
+  `zero_weight`, `provider_mismatch`, `untrusted_issuer` and `unsupported_profile` the voter UI says,
+  in the voter's language, that to use a different certificate they must close every window of the
+  browser and open the voting link again. The retry button stays, for the retryable codes
+  (`revocation_unavailable`, `internal`, `backend_unavailable`, `rate_limited`).
+  Not done: a fresh hostname per attempt would avoid the restart but needs a wildcard certificate
+  (DNS-01), which autocert does not do.
 - **Replay to the backend.** The signed request carries a timestamp valid for 60 s and travels
   over TLS. A replay can only create a new code, which goes back to the replayer and is useless
   without the verifier.
-- **Passive observers.** TLS 1.3 encrypts the client certificate. A 1.2 fallback exposes it
-  (D5).
+- **Passive observers.** TLS 1.3 encrypts the client certificate; TLS 1.2 sends it in clear. There
+  is no fallback between them: a browser that negotiates 1.3 with a key that cannot sign RSA-PSS
+  fails the handshake and cannot authenticate. `TLS13=false` is the switch if AC9 or production
+  shows such keys.
 - **Untrusted input.** cert-check bounds the chain and certificate sizes. The gateway bounds and
   validates its query parameters, and the backend bounds the body and validates every field. A
   revocation lookup that is unavailable fails closed with a retryable error, and the UI says "try
@@ -402,36 +507,45 @@ ACME cache.
 
 ## Acceptance criteria
 
-- [ ] AC1 `internal.CanonicalNationalID` table test: DNI and NIE with case, spaces, dots and
-  hyphens, short digits, an invalid letter, a foreign ID and the empty string.
-- [ ] AC2 Hash parity: `TestRepairMatchesCanonicalHash` passes with the canonical `nationalId`. A
-  new test shows a typed `1234567-z` matching a stored `01234567Z`.
+- [ ] AC1 `internal.CanonicalNationalID` table test: DNI and NIE with case, spaces, tab and U+00A0
+  separators, dots and hyphens, short digits, `001234567Z`, `X01234567L`, an invalid letter, a
+  foreign ID and the empty string.
+- [ ] AC2 Hash parity: `TestRepairMatchesCanonicalHash` passes with the canonical `nationalId`,
+  including cert-census cases (no 2FA, email, email+phone). A new test shows a typed `1234567-z`
+  matching a stored `01234567Z`. For a cert census with email+phone 2FA, a dry run of
+  `RepairLoginHashes` reports zero rows to rehash.
 - [ ] AC3 Census validation tests:
   - `certAuth` with `authFields≠[nationalId]` is rejected.
   - `certAuth` with the feature off is rejected.
   - `certAuth` with each 2FA subset is accepted.
-  - `invalidNationalId` is reported.
+  - A member with an invalid DNI is reported in `missingData` and left out of the census.
+  - A member without an email is left out of a cert census with email 2FA.
 - [ ] AC4 Assertion endpoint tests:
   - Valid signature leads to 201.
   - Bad or old signature, an unknown key and the feature off are each rejected.
-  - Each error code: `not_cert_census`, `not_in_census`, `zero_weight`, `process_not_open`,
-    `rate_limited`.
+  - Each row of the response contract, with its exact status and body.
   - No DNI is present in the stored document.
 - [ ] AC5 Step-0 tests:
   - Cert census without 2FA: `{certCode, codeVerifier}` gives a verified token, then sign
     succeeds.
   - Cert census with email 2FA: an OTP is queued, then step 1 succeeds.
-  - Each of these fails with `ErrCSPAuthFailed`: wrong verifier, expired code, reused code, a code
-    from another process, and typed login fields on a cert census.
+  - Each of these fails with `ErrCSPAuthFailed`: wrong verifier, expired code, reused code and a
+    code from another process.
+  - Typed login fields, or no `certCode`, on a cert census are rejected with `ErrInvalidUserData`
+    and the code stays unused.
   - `certCode` on a non-cert census is rejected.
   - Two concurrent redemptions give exactly one success.
+  - Two certificate logins of one voter return the same `voterRef`; two voters differ.
 - [ ] AC6 Migration test: non-canonical IDs are rehashed, collisions keep their old hashes and are
   counted, and a second run changes nothing.
 - [ ] AC7 Gateway tests, using a fake `certcheck.Provider` and an `httptest` TLS server with
   client certificates:
   - Valid certificate leads to a signed POST, then a 303 to `returnUrl#certCode`.
   - Each `certcheck` error code leads to `#certError`.
-  - A disallowed `returnUrl` or a bad parameter gets a 400 with no redirect.
+  - A disallowed `returnUrl` or a bad parameter gets a 400 with no redirect. So does a `returnUrl`
+    on an allowed origin with any other path, a query, or another process id.
+  - An SNI name other than `DOMAIN` gets no certificate and triggers no ACME order.
+  - A `Host` that differs from the SNI name gets a 421.
   - The signature verifies against the backend's verifier, using shared test vectors.
   - Over the limit gets a 429.
   - A captured log contains no document number.
@@ -439,9 +553,23 @@ ACME cache.
   - The organiser option builds `certAuth:true` with `["nationalId"]` and round-trips the draft.
   - The voter flow stores and checks `state`, strips the fragment, and calls `auth0` with
     `certCode`/`codeVerifier` (plus contact when 2FA).
-  - Error codes render localised messages.
-- [ ] AC9 Manual end-to-end on stg with at least one real FNMT and one idCAT certificate, run by
-  the owner: auth-only and email-2FA censuses, plus a certificate whose DNI is outside the census.
+  - Error codes render localised messages. Each non-retryable code renders the "close the
+    browser" instruction; each retryable code renders the retry button.
+  - A `state` mismatch strips the fragment and calls nothing.
+  - After a reload and a second certificate login in the same tab, a pending vote saved before the
+    reload is re-sent (react-providers test with `voterRef`).
+- [ ] AC9 Manual end-to-end on stg, run by the owner, with `TLS13=true`: an FNMT and an idCAT
+  software certificate, each on Windows (Chrome or Edge, certificate in the Windows store), on
+  Firefox (its own store) and on macOS or Android. Auth-only and email-2FA censuses, plus a
+  certificate whose DNI is outside the census. Cancel the picker once and confirm the message
+  shown. Any handshake failure is recorded with the gateway's TLS log line; if one occurs,
+  production starts with `TLS13=false`.
+- [ ] AC10 Gateway: a test builds the production handler and asserts its provider ids are exactly
+  `fnmt, idcat, accv, digitel, bewor, sectigo`, and that none has `Info().Beta`.
+- [ ] AC11 No PII: a backend test captures the log of a full assertion + step-0 run and finds no
+  document number, name, email or phone; a vocdoni-app test asserts `sessionStorage` holds only
+  `state` and `codeVerifier` during the flow and that the cert path never calls
+  `pushCrispUserFields`.
 
 ## Constraints
 
