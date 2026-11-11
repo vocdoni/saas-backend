@@ -426,8 +426,6 @@ func (a *API) initRouter() http.Handler {
 	if a.originSecret != "" {
 		r.Use(requireOriginSecret(a.originSecret))
 	}
-	r.Use(middleware.Throttle(100))
-	r.Use(middleware.ThrottleBacklog(5000, 40000, 60*time.Second))
 	r.Use(middleware.Timeout(45 * time.Second))
 	// set lang param in context
 	r.Use(a.setLang)
@@ -457,8 +455,19 @@ func (a *API) initRouter() http.Handler {
 		}
 	}
 
+	// the health check stays outside the throttle, so a saturated instance still answers it
+	handle(r, http.MethodGet, "/ping", func(w http.ResponseWriter, _ *http.Request) {
+		if _, err := w.Write([]byte(".")); err != nil {
+			log.Warnw("failed to write ping response", "error", err)
+		}
+	})
+
+	// every route group takes its slots from this one throttle (see api/throttle.go)
+	throttle := newRequestThrottle()
+
 	// protected routes
 	r.Group(func(r chi.Router) {
+		r.Use(throttle)
 		// seek, verify and validate JWT tokens
 		r.Use(jwtauth.Verifier(a.auth))
 		// handle valid JWT tokens
@@ -536,14 +545,27 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPut, processesQuestionCensusEndpoint, a.updateVotingProcessQuestionCensusHandler)
 	})
 
+	// Public routes that may wait on the chain: their own throttle comes first, so while they queue
+	// for it they hold none of the slots of the routes below.
+	r.Group(func(r chi.Router) {
+		r.Use(newChainRequestThrottle(throttle))
+		r.Use(limitBody(maxPublicBodyBytes))
+		handle(r, http.MethodPost, votesVerifyEndpoint, a.verifyVotesHandler)
+		// the CSP check reads the chain to report hasVoted
+		handle(r, http.MethodPost, processesCheckEndpoint, cspHandlers.ProcessCheckHandler)
+		// multi-question voting processes: public voter reads. The process list and single-read are
+		// public for published processes; drafts + per-question eligibility are gated in-handler to
+		// a manager/admin (or a voting:write API key) via optionalManager.
+		handle(r, http.MethodGet, processesCreateEndpoint, a.listVotingProcessesHandler)
+		handle(r, http.MethodGet, processesEndpoint, a.votingProcessInfoHandler)
+		handle(r, http.MethodGet, processesQuestionEndpoint, a.votingProcessQuestionHandler)
+		handle(r, http.MethodGet, processesResultsEndpoint, a.votingProcessResultsHandler)
+	})
+
 	// Public routes
 	r.Group(func(r chi.Router) {
+		r.Use(throttle)
 		r.Use(limitBody(maxPublicBodyBytes))
-		handle(r, http.MethodGet, "/ping", func(w http.ResponseWriter, _ *http.Request) {
-			if _, err := w.Write([]byte(".")); err != nil {
-				log.Warnw("failed to write ping response", "error", err)
-			}
-		})
 		handle(r, http.MethodGet, infoEndpoint, a.InfoHandler)
 
 		handle(r, http.MethodPost, authLoginEndpoint, a.authLoginHandler)
@@ -569,16 +591,8 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, jobStatusEndpoint, a.jobStatusHandler)
 		handle(r, http.MethodPost, voteEndpoint, a.relayVoteHandler)
 		handle(r, http.MethodPost, votesEndpoint, a.relayVotesHandler)
-		handle(r, http.MethodPost, votesVerifyEndpoint, a.verifyVotesHandler)
-		// multi-question voting processes: public voter reads + CSP. The process list and single-read
-		// are public for published processes; drafts + per-question eligibility are gated in-handler to
-		// a manager/admin (or a voting:write API key) via optionalManager.
-		handle(r, http.MethodGet, processesCreateEndpoint, a.listVotingProcessesHandler)
-		handle(r, http.MethodGet, processesEndpoint, a.votingProcessInfoHandler)
-		handle(r, http.MethodGet, processesQuestionEndpoint, a.votingProcessQuestionHandler)
+		// multi-question voting processes: participant lookup + CSP
 		handle(r, http.MethodGet, processesParticipantEndpoint, a.votingProcessParticipantHandler)
-		handle(r, http.MethodGet, processesResultsEndpoint, a.votingProcessResultsHandler)
-		handle(r, http.MethodPost, processesCheckEndpoint, cspHandlers.ProcessCheckHandler)
 		handle(r, http.MethodPost, processesAuthEndpoint, cspHandlers.ProcessAuthHandler)
 		handle(r, http.MethodPost, processesAuthResendEndpoint, cspHandlers.ProcessAuthResendHandler)
 		handle(r, http.MethodPost, processesSignEndpoint, cspHandlers.ProcessSignHandler)
