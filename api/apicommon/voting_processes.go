@@ -5,6 +5,8 @@ package apicommon
 import (
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
+
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/pricing"
@@ -38,6 +40,23 @@ type CensusSpec struct {
 	// equals Size for a non-weighted census. Needed by clients (e.g. the results report) to turn
 	// per-answer weights into percentages.
 	TotalWeight int64 `json:"totalWeight,omitempty"`
+	// Attested makes the census an attested one: an integrator vouches for each voter with an EIP-712
+	// attestation instead of a member list. It excludes groupId, memberIds, authFields, weighted,
+	// anonymous and question eligibility, and allows twoFaFields [], ["email"] or ["phone"].
+	Attested *AttestedCensusSpec `json:"attested,omitempty"`
+}
+
+// AttestedCensusSpec configures an attested census.
+type AttestedCensusSpec struct {
+	// Signer is the address whose attestations the CSP accepts.
+	Signer common.Address `json:"signer" swaggertype:"string" example:"0x71C7656EC7ab88b098defB751B7401B5f6d8976F"`
+	// MaxCensusSize is the declared maximum number of voters; it prices and sizes the process.
+	MaxCensusSize int64 `json:"maxCensusSize"`
+	// SignerHistory lists every signer with the time it became active. Response-only.
+	SignerHistory []db.AttestationSigner `json:"signerHistory,omitempty"`
+	// VerifyingContract is the verifyingContract of the attestation EIP-712 domain: the address of
+	// the CSP signer of this environment. Response-only.
+	VerifyingContract *common.Address `json:"verifyingContract,omitempty" swaggertype:"string"`
 }
 
 // EligibilitySpec is an optional per-question subset of the process census, resolved to a
@@ -100,6 +119,57 @@ type CreateVotingProcessRequest struct {
 type ValidateProcessCensusRequest struct {
 	OrgAddress internal.HexBytes `json:"orgAddress" swaggertype:"string" format:"hex" example:"a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"` //nolint:lll
 	Census     CensusSpec        `json:"census"`
+}
+
+// ProcessAttestationsResponse is the public audit of an attested census: the EIP-712 domain, the
+// signer history and a page of attestation records.
+type ProcessAttestationsResponse struct {
+	Domain        AttestationDomainInfo    `json:"domain"`
+	SignerHistory []db.AttestationSigner   `json:"signerHistory"`
+	MaxCensusSize int64                    `json:"maxCensusSize"`
+	Attestations  []AttestationRecordEntry `json:"attestations"`
+	Pagination    *Pagination              `json:"pagination"`
+}
+
+// AttestationDomainInfo is the EIP-712 domain every attestation of the process is signed under.
+type AttestationDomainInfo struct {
+	Name              string         `json:"name"`
+	Version           string         `json:"version"`
+	VerifyingContract common.Address `json:"verifyingContract" swaggertype:"string"`
+}
+
+// AttestationRecordEntry is the attestation the CSP signed an attested voter's ballots against, with
+// the questions it signed for them. ContactHash is absent for a census without 2FA.
+type AttestationRecordEntry struct {
+	VoterID     internal.HexBytes  `json:"voterId" swaggertype:"string" format:"hex"`
+	ContactHash internal.HexBytes  `json:"contactHash,omitempty" swaggertype:"string" format:"hex"`
+	ExpiresAt   int64              `json:"expiresAt"`
+	Signature   internal.HexBytes  `json:"signature" swaggertype:"string" format:"hex"`
+	Signer      common.Address     `json:"signer" swaggertype:"string"`
+	Questions   []AttestedQuestion `json:"questions"`
+}
+
+// AttestedQuestion is a question the CSP signed an attested voter's ballot for.
+type AttestedQuestion struct {
+	QuestionID string            `json:"questionId"`
+	UpstreamID internal.HexBytes `json:"upstreamId" swaggertype:"string" format:"hex"`
+}
+
+// AttestedCensusSizeRequest is the body of PUT /processes/{processId}/census/size.
+type AttestedCensusSizeRequest struct {
+	Size int64 `json:"size"`
+}
+
+// AttestedCensusSizeResponse answers PUT /processes/{processId}/census/size: the stored size and,
+// when open questions are resized on chain, the job doing it.
+type AttestedCensusSizeResponse struct {
+	Size  int64  `json:"size"`
+	JobID string `json:"jobId,omitempty"`
+}
+
+// AttestationSignerRequest is the body of PUT /processes/{processId}/attestation-signer.
+type AttestationSignerRequest struct {
+	Signer common.Address `json:"signer" swaggertype:"string" example:"0x71C7656EC7ab88b098defB751B7401B5f6d8976F"`
 }
 
 // UpdateProcessCensusResponse is the result of PUT and DELETE /processes/{processId}/census: the
@@ -344,7 +414,9 @@ type ProcessParticipantQuestionVote struct {
 // ProcessParticipantEntry is a matched org member that is also a participant of the process
 // census, with its per-question voted status.
 type ProcessParticipantEntry struct {
-	MemberID     string                           `json:"memberId"`
+	MemberID string `json:"memberId"`
+	// VoterID is the attested voter an attested census looks up, which has no member behind it.
+	VoterID      internal.HexBytes                `json:"voterId,omitempty" swaggertype:"string" format:"hex"`
 	Name         string                           `json:"name,omitempty"`
 	Surname      string                           `json:"surname,omitempty"`
 	Email        string                           `json:"email,omitempty"`
@@ -497,6 +569,13 @@ func VotingProcessResponseFromDB(
 		// the empty string, but a zero ObjectID hexes to 24 zeros and would serialize as a real group.
 		if !census.GroupID.IsZero() {
 			resp.Census.GroupID = census.GroupID.Hex()
+		}
+		if census.Attested != nil {
+			resp.Census.Attested = &AttestedCensusSpec{
+				Signer:        census.Attested.Signer,
+				MaxCensusSize: census.Size,
+				SignerHistory: census.Attested.SignerHistory,
+			}
 		}
 	}
 	return resp

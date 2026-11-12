@@ -532,6 +532,8 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodDelete, processesEndpoint, a.deleteVotingProcessHandler)
 		handle(r, http.MethodGet, processesParticipantsEndpoint, a.votingProcessParticipantsHandler)
 		handle(r, http.MethodPut, processesCensusEndpoint, a.updateVotingProcessCensusHandler)
+		handle(r, http.MethodPut, processesCensusSizeEndpoint, a.updateAttestedCensusSizeHandler)
+		handle(r, http.MethodPut, processesAttestationSignerEndpoint, a.updateAttestationSignerHandler)
 		handle(r, http.MethodDelete, processesCensusEndpoint, a.removeVotingProcessCensusHandler)
 		handle(r, http.MethodPut, processesQuestionCensusEndpoint, a.updateVotingProcessQuestionCensusHandler)
 	})
@@ -539,6 +541,7 @@ func (a *API) initRouter() http.Handler {
 	// Public routes
 	r.Group(func(r chi.Router) {
 		r.Use(limitBody(maxPublicBodyBytes))
+		handle(r, http.MethodGet, processesAttestationsEndpoint, a.processAttestationsHandler)
 		handle(r, http.MethodGet, "/ping", func(w http.ResponseWriter, _ *http.Request) {
 			if _, err := w.Write([]byte(".")); err != nil {
 				log.Warnw("failed to write ping response", "error", err)

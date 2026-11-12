@@ -290,6 +290,9 @@ func (c *CSPHandlers) authFirstStep(
 	if c.anonymousCensusRefused(census) {
 		return nil, errors.ErrInvalidData.With(csp.AnonymousVotingUnavailable)
 	}
+	if census.Attested != nil {
+		return c.attestedFirstStep(r, &req, anchorID, census)
+	}
 
 	org, err := c.mainDB.Organization(census.OrgAddress)
 	if err != nil {

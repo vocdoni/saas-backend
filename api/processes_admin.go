@@ -438,6 +438,15 @@ func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
+	census, err := a.db.Census(vp.CensusID.Hex())
+	if err != nil {
+		errors.ErrCensusNotFound.WithErr(err).Write(w)
+		return
+	}
+	if census.Attested != nil {
+		a.attestedParticipants(w, r, vp, questions)
+		return
+	}
 	field := db.OrgMemberLookupField(r.URL.Query().Get("field"))
 	if !field.IsValid() {
 		errors.ErrMalformedBody.Withf("invalid field: must be one of email, phone, memberNumber, nationalId").Write(w)
@@ -700,6 +709,9 @@ func (a *API) addProcessCensusMembers(
 	census, err := a.db.Census(vp.CensusID.Hex())
 	if err != nil {
 		return nil, err
+	}
+	if census.Attested != nil {
+		return nil, errors.ErrInvalidData.With("an attested census has no members: grow it with PUT /processes/{processId}/census/size")
 	}
 	// pay-per-process: the price is a function of the census size, so the census may grow
 	// only as far as the price already paid reaches. Past that the 402 carries what the

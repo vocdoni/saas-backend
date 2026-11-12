@@ -10,6 +10,7 @@ import (
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/pricing"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -40,6 +41,80 @@ func (a *API) anonymousCensusRefused(anonymous bool) bool {
 	return anonymous && a.csp.BlindCSPDisabled()
 }
 
+// attestedCensusProblem returns why an attested census spec cannot be used, or "" when the spec is
+// valid or not attested. An attested census has no member list, so every member-based option is
+// refused, and its 2FA is the one channel the integrator attests a contact for.
+func attestedCensusProblem(spec apicommon.CensusSpec, questions []apicommon.VotingProcessQuestionRequest) string {
+	att := spec.Attested
+	if att == nil {
+		return ""
+	}
+	switch {
+	case att.Signer == (common.Address{}):
+		return "attested census needs a signer"
+	case att.MaxCensusSize <= 0 || att.MaxCensusSize > pricing.MaxCensusSize:
+		return fmt.Sprintf("attested census maxCensusSize must be between 1 and %d", pricing.MaxCensusSize)
+	case spec.GroupID != "" || len(spec.MemberIDs) > 0:
+		return "attested census cannot have groupId or memberIds"
+	case len(spec.AuthFields) > 0:
+		return "attested census cannot have authFields"
+	case spec.Weighted:
+		return "attested census cannot be weighted"
+	case spec.Anonymous:
+		return "attested census cannot be anonymous"
+	case !attestedTwoFaFields(spec.TwoFaFields):
+		return `attested census twoFaFields must be [], ["email"] or ["phone"]`
+	}
+	for i := range questions {
+		if questions[i].Eligibility != nil {
+			return fmt.Sprintf("question %d: attested census cannot restrict eligibility", i)
+		}
+	}
+	return ""
+}
+
+// attestedCensusPublishProblems re-checks a stored attested census at publish time, so a census that
+// reached the database without the create and update checks cannot publish.
+func attestedCensusPublishProblems(census *db.Census, questions []db.VotingProcessQuestion) []string {
+	var problems []string
+	if census.Attested.Signer == (common.Address{}) {
+		problems = append(problems, "attested census has no signer")
+	}
+	if census.Size <= 0 {
+		problems = append(problems, "attested census has no maxCensusSize")
+	}
+	if census.Weighted || census.Anonymous || len(census.AuthFields) > 0 || !census.GroupID.IsZero() ||
+		!attestedTwoFaFields(census.TwoFaFields) {
+		problems = append(problems, "attested census combines member-based options")
+	}
+	for i := range questions {
+		if len(questions[i].EligibleMemberIDs) > 0 {
+			problems = append(problems, fmt.Sprintf("question %d: attested census cannot restrict eligibility", i))
+		}
+	}
+	return problems
+}
+
+// attestedTwoFaFields reports whether fields is a 2FA setting an attested census allows: none, or
+// exactly one channel.
+func attestedTwoFaFields(fields db.OrgMemberTwoFaFields) bool {
+	return len(fields) == 0 || (len(fields) == 1 &&
+		(fields[0] == db.OrgMemberTwoFaFieldEmail || fields[0] == db.OrgMemberTwoFaFieldPhone))
+}
+
+// echoAttestationDomain adds the verifying contract of the attestation domain to the census echo of
+// an attested process, so the integrator signs for the environment it talks to.
+func (a *API) echoAttestationDomain(spec *apicommon.CensusSpec) {
+	if spec.Attested == nil || a.csp == nil {
+		return
+	}
+	domain, err := a.csp.AttestationDomain()
+	if err != nil {
+		return
+	}
+	spec.Attested.VerifyingContract = &domain.VerifyingContract
+}
+
 // resolveOrCreateDefaultCensus materializes the inline census spec of a voting process into
 // a db.Census (auth/2FA policy + participants) and returns it. The census type is inferred
 // from the 2FA fields (SetCensus does this). The census is created unpublished; publishing happens at
@@ -58,6 +133,14 @@ func (a *API) resolveOrCreateDefaultCensus(
 		AuthFields:  spec.AuthFields,
 		TwoFaFields: spec.TwoFaFields,
 		CreatedAt:   time.Now(),
+	}
+	if spec.Attested != nil {
+		// an attested census has no members: its declared maximum sizes and prices the process
+		census.Size = spec.Attested.MaxCensusSize
+		census.Attested = &db.AttestedCensus{
+			Signer:        spec.Attested.Signer,
+			SignerHistory: []db.AttestationSigner{{Signer: spec.Attested.Signer, From: census.CreatedAt}},
+		}
 	}
 	censusID, err := a.db.SetCensus(census)
 	if err != nil {
@@ -86,6 +169,9 @@ func (a *API) resolveOrCreateDefaultCensus(
 		if _, missing, err = a.db.PopulateMembersCensus(census, spec.MemberIDs); err != nil {
 			return nil, nil, censusBuildError(err)
 		}
+	case spec.Attested != nil:
+		committed = true
+		return census, nil, nil
 	default:
 		// no members and no group: an empty (auth-only shell) census
 	}
