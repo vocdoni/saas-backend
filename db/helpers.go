@@ -35,6 +35,7 @@ func (ms *MongoStorage) collectionsMap() map[string]**mongo.Collection {
 		"cspTokens":           &ms.cspTokens,
 		"cspTokensStatus":     &ms.cspTokensStatus,
 		"cspCounters":         &ms.cspCounters,
+		"certAuthAssertions":  &ms.certAuthAssertions,
 		"jobs":                &ms.jobs,
 		"apiKeys":             &ms.apiKeys,
 		"meteredVotes":        &ms.meteredVotes,

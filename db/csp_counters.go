@@ -26,6 +26,9 @@ const (
 	// login fields a request submits, without the contact) on one voting process, per UTC hour. It
 	// is the coarser bound on guessing one voter's contact with ever-changing values.
 	CSPCounterVoterAuthFailures = "voterAuthFailures"
+	// CSPCounterCertAssertions counts the certificate assertions the certificate gateway created for
+	// one census participant on one voting process, per UTC hour.
+	CSPCounterCertAssertions = "certAssertions"
 )
 
 // CSPCounterWindow returns the length of the window a counter kind resets after. Failed
@@ -33,7 +36,7 @@ const (
 // that voter's coarse budget, and an hour bounds such a lockout while still capping contact
 // guessing at 24 windows a day. Challenge sends cost money per unit, so their budget is daily.
 func CSPCounterWindow(kind string) time.Duration {
-	if kind == CSPCounterAuthFailures || kind == CSPCounterVoterAuthFailures {
+	if kind == CSPCounterAuthFailures || kind == CSPCounterVoterAuthFailures || kind == CSPCounterCertAssertions {
 		return time.Hour
 	}
 	return 24 * time.Hour

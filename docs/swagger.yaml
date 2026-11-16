@@ -2460,6 +2460,47 @@ definitions:
           $ref: '#/definitions/handlers.SignBatchResult'
         type: array
     type: object
+  handlers.CertAssertionError:
+    properties:
+      error:
+        type: string
+    type: object
+  handlers.CertAssertionRequest:
+    properties:
+      certSha256:
+        description: CertSHA256 is the lowercase hex SHA-256 of the certificate.
+        type: string
+      codeChallenge:
+        description: CodeChallenge is base64url(sha256(codeVerifier)), unpadded, 43
+          characters (PKCE S256).
+        type: string
+      documentType:
+        description: DocumentType is DNI or NIE.
+        type: string
+      nationalId:
+        description: NationalID is the certificate's DNI or NIE, 9 characters as cert-check
+          reports it.
+        type: string
+      processId:
+        description: ProcessID is the voting process id, 24 lowercase hex characters.
+        type: string
+      profile:
+        type: string
+      provider:
+        description: Provider and Profile are the cert-check provider and profile
+          that accepted the certificate.
+        type: string
+    type: object
+  handlers.CertAssertionResponse:
+    properties:
+      certCode:
+        description: CertCode is the single-use code the voter redeems at step 0 with
+          the PKCE verifier.
+        type: string
+      expiresAt:
+        description: ExpiresAt is when the code expires, RFC 3339 UTC.
+        type: string
+    type: object
   handlers.CheckMembershipRequest:
     properties:
       authToken:
@@ -2836,6 +2877,66 @@ paths:
       summary: Refresh JWT token
       tags:
       - auth
+  /cert-auth/assertions:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Called by the certificate gateway, server to server, once it has verified a voter's
+        certificate. The body is signed with the gateway's Ed25519 key in the X-Cert-Gateway-Signature
+        header: t=<unix seconds>,k=<keyId>,v1=<base64url signature> over
+        "cert-gateway-v1\n" + t + "\nPOST\n/cert-auth/assertions\n" + hex(sha256(body)), within 60 s of
+        the server clock. On success it stores a single-use code, valid for 5 minutes, that the voter
+        redeems at POST /processes/{processId}/auth/0 with the PKCE verifier of codeChallenge. At most
+        10 assertions per census participant per process per hour.
+        Without certificate gateway keys configured the route answers a plain 404.
+      parameters:
+      - description: Gateway signature
+        in: header
+        name: X-Cert-Gateway-Signature
+        required: true
+        type: string
+      - description: Verified certificate identity
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.CertAssertionRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handlers.CertAssertionResponse'
+        "400":
+          description: bad_request
+          schema:
+            $ref: '#/definitions/handlers.CertAssertionError'
+        "401":
+          description: bad_signature
+          schema:
+            $ref: '#/definitions/handlers.CertAssertionError'
+        "403":
+          description: zero_weight
+          schema:
+            $ref: '#/definitions/handlers.CertAssertionError'
+        "404":
+          description: process_not_open, not_in_census; or no body when the feature
+            is off
+          schema:
+            $ref: '#/definitions/handlers.CertAssertionError'
+        "409":
+          description: not_cert_census, anonymous_unavailable
+          schema:
+            $ref: '#/definitions/handlers.CertAssertionError'
+        "429":
+          description: rate_limited
+          schema:
+            $ref: '#/definitions/handlers.CertAssertionError'
+      summary: Create a certificate auth assertion (certificate gateway only)
+      tags:
+      - processes
   /info:
     get:
       description: Returns the service version, build information and the Vocdoni

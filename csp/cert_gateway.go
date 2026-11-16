@@ -9,6 +9,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 )
 
 // CertGatewaySignatureHeader carries the certificate gateway's signature of an assertion request.
@@ -96,4 +99,19 @@ func VerifyCertGatewaySignature(keys CertGatewayKeys, header string, body []byte
 		return fmt.Errorf("%w: signature mismatch", ErrCertGatewaySignature)
 	}
 	return nil
+}
+
+// MaxHourlyCertAssertions caps the certificate assertions created for one census participant on
+// one voting process per UTC hour.
+const MaxHourlyCertAssertions = 10
+
+// ClaimCertAssertion spends one unit of the participant's hourly certificate assertion budget on
+// the process, and reports false once it is spent.
+func (c *CSP) ClaimCertAssertion(processID, participantID internal.HexBytes) (bool, error) {
+	res, err := c.Storage.ClaimCSPCounter(db.CSPCounterCertAssertions,
+		counterKey(participantID, processID), MaxHourlyCertAssertions)
+	if err != nil {
+		return false, fmt.Errorf("claiming cert assertion: %w", err)
+	}
+	return res.Granted, nil
 }
