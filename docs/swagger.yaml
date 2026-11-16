@@ -2949,6 +2949,8 @@ paths:
           description: rate_limited
           schema:
             $ref: '#/definitions/handlers.CertAssertionError'
+        "500":
+          description: internal failure, no body (the gateway reports backend_unavailable)
       summary: Create a certificate auth assertion (certificate gateway only)
       tags:
       - processes

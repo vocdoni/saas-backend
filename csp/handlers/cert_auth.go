@@ -124,6 +124,7 @@ func writeCertAssertionError(w http.ResponseWriter, status int, code string, log
 //	@Failure		404							{object}	handlers.CertAssertionError	"process_not_open, not_in_census; or no body when the feature is off"
 //	@Failure		409							{object}	handlers.CertAssertionError	"not_cert_census, anonymous_unavailable"
 //	@Failure		429							{object}	handlers.CertAssertionError	"rate_limited"
+//	@Failure		500							"internal failure, no body (the gateway reports backend_unavailable)"
 //	@Router			/cert-auth/assertions [post]
 func (c *CSPHandlers) CertAssertionHandler(w http.ResponseWriter, r *http.Request) {
 	keys := c.csp.CertGatewayKeys()
