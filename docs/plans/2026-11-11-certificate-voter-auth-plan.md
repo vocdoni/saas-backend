@@ -16,12 +16,14 @@ Repos and branches:
    `python3 -c "print('TRWAGMYFPDXBNJZSQVHLCKE'[1234567%23])"` prints `L`. The plan keeps the intent with the valid
    spelling: typed `1234567-l` matches stored `01234567L` (Task 1). AC1's `001234567Z` is tested as an invalid-letter
    case (`ok=false`) and `001234567L` as the extra-leading-zero case (`01234567L`). No behaviour changes.
-2. **Local development cannot post to an `http` backend.** C1 "Backends" fails startup on a `url` that is not `https`,
-   and D8's only exception is for `origins` (`http://localhost:<port>` in a devca binary). The local saas-backend serves
-   plain HTTP on :8080, so `make dev` as described cannot work. Without changing behaviour, the plan puts Caddy with a
-   mkcert certificate in front of the local backend (`https://saas-api.localtest.me:8444`, a compose network alias) and
-   points the devca gateway's `SSL_CERT_FILE` at the mkcert root (Task 14). If the owner prefers it, the alternative is a
-   spec change: accept `http://` backend URLs in devca binaries too.
+2. **Local development cannot post to an `http` backend.** C1 "Backends" failed startup on a `url` that is not `https`,
+   and D8's only exception was for `origins`, while the local saas-backend serves plain HTTP on :8080. Resolved by owner
+   ruling (2026-11-16; spec D8 "Stack" amended at 748a3d7): a devca binary also accepts a backend `url` of exactly
+   `http://localhost:<port>`, through the same `allowLocalhost` switch (`const devCA`, set by the build tag) as the
+   origin exception, and a binary without the tag rejects it at startup (Task 10 `TestLocalhostBackendURL`, Task 12
+   `TestProductionBuildHasNoDevCA`, Task 13 `TestDevCABuildConfig`). The compose gateway runs with
+   `network_mode: "service:api"`, so the backend really is at `http://localhost:8080` (Task 14). No Caddy, no mkcert
+   certificate for the backend.
 3. **Variable name.** The spec names the backend variable `CERT_GATEWAY_PUBLIC_KEYS`; saas-backend reads every setting
    through Viper with the `VOCDONI_` prefix (`cmd/service/main.go:38-42`). The plan uses flag `cert_gateway_public_keys`,
    read from `VOCDONI_CERT_GATEWAY_PUBLIC_KEYS`, exactly as `disable_blindcsp` ⇄ `VOCDONI_DISABLE_BLINDCSP`
@@ -29,9 +31,14 @@ Repos and branches:
 4. **"Compare in constant time" (C2.4 step 3).** An Ed25519 signature is verified, not compared; there is no secret to
    leak. The plan uses `ed25519.Verify`; the constant-time comparison applies where a secret-derived value is compared,
    the PKCE check of C2.5 (`subtle.ConstantTimeCompare`).
-5. **AC12's devca test is not CI-gated.** C1 says "The Dockerfile and CI never pass the tag", so the `-tags devca`
-   end-to-end test (Task 13) runs only locally (`make test-devca`); CI runs the untagged suite, which includes AC12's
-   "built without the tag" checks. Flag for the owner if CI should run the tagged tests too.
+5. **AC12's devca tests in CI.** C1 said "The Dockerfile and CI never pass the tag". Resolved by owner ruling
+   (2026-11-16; spec C1 amended at 748a3d7): CI runs the untagged suite (AC12's "built without the tag" checks) and, as
+   a separate test-only step, `go vet -tags devca ./... && go test -race -tags devca ./...` (Task 13's end-to-end test
+   included); it builds no image. The Dockerfile and every image build stay untagged (Task 14).
+6. **C2.6 "They keep logging in with the exact spelling stored" is wrong after C2.2.** A login hashes the
+   canonical form, so a skipped member stored under a non-canonical spelling cannot log in at all. The plan
+   documents the real effect (Task 3, "Merge and release" 4.9). No code changes. Resolved: spec C2.6 amended at
+   748a3d7.
 
 ## Details the spec leaves to the plan (resolved from the code)
 
@@ -73,15 +80,17 @@ Repos and branches:
 ## Global Constraints
 
 - **Never sign commits.** Every commit, merge, cherry-pick, revert or rebase runs with `git -c commit.gpgsign=false …`;
-  `~/.gitconfig` sets `commit.gpgsign=true`, so never rely on the config and never change it. Commit with explicit paths:
-  `git -c commit.gpgsign=false commit -m "<type(scope): lowercase summary>" -- <paths>`.
+  `~/.gitconfig` sets `commit.gpgsign=true`, so never rely on the config and never change it. Commit with explicit paths, staging them first (a new file is not known to git until it is added; never use
+  `git add -A` or `git add .`):
+  `git add -- <paths> && git -c commit.gpgsign=false commit -m "<type(scope): lowercase summary>" -- <paths>`.
 - Conventional commits, `type(scope): lowercase summary`; no AI attribution, no `Co-Authored-By` trailers.
 - No pushes, tags, deploys, DNS changes, GitHub repository creation, npm publishing, Railway changes or key generation for
   real environments. Those are owner-OK steps in "Merge and release".
 - No PII (DNI/NIE, names, certificate subject or serial, email, phone) in logs, error messages, URLs or browser storage. The
   only browser storage the flow adds is `sessionStorage["certAuth:<processId>"] = {state, codeVerifier}`.
 - Build output and scratch files under `~/.cache/<project>/` (e.g. `~/.cache/cert-gateway/bin`), never `/tmp`, never in a
-  repository.
+  repository. Go tests use `t.TempDir()`, which is removed when the test ends; run them with
+  `TMPDIR=$HOME/.cache/<project>/tmp` (create it first) so nothing lands in `/tmp`.
 - saas-backend never imports `github.com/vocdoni/cert-check`, and adds no dependency (stdlib `crypto/ed25519`,
   `crypto/sha256` only).
 - cert-gateway needs the private module: `export GOPRIVATE=github.com/vocdoni/cert-check` and git credentials that can read
@@ -123,7 +132,7 @@ Repos and branches:
 - Census validation: `api/processes_census.go:47` (`certAuthSpecError`), `api/processes_census_validate.go`.
 - Gateway auth handler: `internal/gateway/gateway.go:109` (parameter and `returnUrl` validation), `:147` (order: path,
   method, `CheckHost`, per-IP, params, global bucket), `:188` (cert-check, logging), `:235` (backend post, answer
-  mapping), `:217` (fragment redirect); `internal/gateway/config.go:145,209` (BACKENDS validation, canonical origins);
+  mapping), `:217` (fragment redirect); `internal/gateway/config.go:145,215` (BACKENDS validation, canonical origins);
   `internal/gateway/signing.go:31`; `internal/certs/certs.go:192` (SNI guard before certmagic).
 - devca isolation: `internal/devca/devca.go` (build tag), `cmd/cert-gateway/providers_prod.go` / `providers_devca.go`.
 - Voter flow: `src/components/Process/CSP/cert-auth.ts:57,87` (state/verifier storage, fragment parsing, state check),
@@ -137,7 +146,7 @@ Repos and branches:
 | 1 Canonical national ID + hash parity | – | saas-backend `internal/`, `db/`, `migrations/` | 9–14 |
 | 2 Census `CertAuth`, `LoginHashFields`, missing data | 1 | saas-backend `db/`, `migrations/`, `api/processes_census_validate.go` | 9–14 |
 | 3 Migration 0037 | 1, 2 | saas-backend `migrations/`, `db/` test | 9–14 |
-| 4 Gateway signature verification + keys (shared vectors) | – | saas-backend `csp/`, `cmd/service/`, `example.env` | 1–3, 9–14 |
+| 4 Gateway signature verification + keys (shared vectors) | – | saas-backend `csp/`, `cmd/service/`, `example.env` | 9–14 |
 | 5 API census field and validation | 2, 4 | saas-backend `api/` | 9–14 |
 | 6 Assertion storage, counter, endpoint | 4, 5 | saas-backend `db/`, `migrations/`, `csp/`, `api/` | 9–14 |
 | 7 Step 0 with certCode, PKCE, voterRef | 6 | saas-backend `csp/handlers/`, `api/` test | 9–14 |
@@ -150,9 +159,11 @@ Repos and branches:
 | 14 Dockerfile, CI, compose, Makefile, README | 13 | cert-gateway | 1–8 |
 | 15 SDK types + react-providers voterRef + changeset | 7 (API shape) | vocdoni-integrator-sdk | 8–14 |
 | 16 App: bump SDK packages | 15 **and its npm release (owner OK)** | vocdoni-app `package.json`, lockfile | 1–14 |
-| 17 App: env + organiser option | 16 | vocdoni-app `src/app-env*`, `src/components/Process/Create/` | 18 (disjoint files) |
+| 17 App: env + organiser option | 16 | vocdoni-app `src/app-env*`, `src/components/Process/Create/`, `.env.example`, `README.md` | – |
 | 18 App: voter certificate flow | 16, 17 (env) | vocdoni-app `src/components/Process/CSP/` | – |
 | 19 App: i18n en/es/ca (+ English elsewhere) | 17, 18 | vocdoni-app `src/i18n/locales/` | – |
+
+Tasks of one repository share one working tree: run them one at a time, in number order.
 
 Parts A (saas-backend) and B (cert-gateway) touch disjoint repos and run in parallel once Task 4 has fixed the shared
 vectors. Part C waits for the backend wire shape (Task 7). Part D waits for the npm release of Part C, which needs the
@@ -396,7 +407,7 @@ Run: `cd /home/lucasmenendez/saas-backend/.worktrees/feature-cert-auth && go tes
 Expected: `ok  	github.com/vocdoni/saas-backend/internal`, then `ok  	github.com/vocdoni/saas-backend/db` (twice) and `ok  	github.com/vocdoni/saas-backend/migrations` (`TestRepairMatchesCanonicalHash` keeps passing: its fixtures use non-DNI values such as `DnI001`).
 
 Step 3: commit
-`git -c commit.gpgsign=false commit -m "feat(csp): hash the national id in its canonical dni/nie form" -- internal/national_id.go internal/national_id_test.go db/census_missing_data.go db/types.go migrations/login_hash.go db/national_id_hash_test.go`
+`git add -- internal/national_id.go internal/national_id_test.go db/census_missing_data.go db/types.go migrations/login_hash.go db/national_id_hash_test.go && git -c commit.gpgsign=false commit -m "feat(csp): hash the national id in its canonical dni/nie form" -- internal/national_id.go internal/national_id_test.go db/census_missing_data.go db/types.go migrations/login_hash.go db/national_id_hash_test.go`
 
 Interfaces this task provides to later tasks: `internal.CanonicalNationalID(s string) (canonical string, ok bool)`; `db.HashAuthTwoFaFields` and `migrations.hashMemberFields` hash the canonical `nationalId`.
 
@@ -930,7 +941,7 @@ Run: `cd /home/lucasmenendez/saas-backend/.worktrees/feature-cert-auth && go vet
 Expected: `--- PASS: TestCertCensusLoginHashFields`, `--- PASS: TestRepairMatchesCanonicalHashCertCensus`, `--- PASS: TestCertCensusMissingData`, then `ok` for `db`, `migrations` and `internal`.
 
 Step 3: commit
-`git -c commit.gpgsign=false commit -m "feat(csp): hash a certificate census on the national id alone" -- db/types.go db/census_participant.go db/census_missing_data.go db/org_members.go db/org_members_groups.go api/processes_census_validate.go migrations/login_hash.go migrations/repair_login_hashes.go db/census_missing_data_test.go db/org_members_groups_test.go db/census_cert_auth_test.go`
+`git add -- db/types.go db/census_participant.go db/census_missing_data.go db/org_members.go db/org_members_groups.go api/processes_census_validate.go migrations/login_hash.go migrations/repair_login_hashes.go db/census_missing_data_test.go db/org_members_groups_test.go db/census_cert_auth_test.go && git -c commit.gpgsign=false commit -m "feat(csp): hash a certificate census on the national id alone" -- db/types.go db/census_participant.go db/census_missing_data.go db/org_members.go db/org_members_groups.go api/processes_census_validate.go migrations/login_hash.go migrations/repair_login_hashes.go db/census_missing_data_test.go db/org_members_groups_test.go db/census_cert_auth_test.go`
 
 Interfaces this task provides to later tasks: `db.Census.CertAuth bool` (bson `certAuth`); `func (c Census) LoginHashFields() (OrgMemberAuthFields, OrgMemberTwoFaFields)`; `func (c *Census) MemberMissingLoginData(m *OrgMember) bool`; `CheckGroupMembersFields(org, groupID, auth, twoFa, certAuth bool)`, `CheckMembersFields(org, ids, auth, twoFa, certAuth bool)`.
 
@@ -1040,8 +1051,9 @@ func init() {
 // ID that is a valid DNI or NIE written in a non-canonical form, now that hashMemberFields hashes it
 // canonically (internal.CanonicalNationalID). It is RepairLoginHashes applied, as in migration 0025:
 // rows of one census that would share a recomputed hash (a member stored twice under two spellings
-// of one DNI) are all skipped and keep their old hashes, so they keep logging in with the exact
-// spelling stored until the organiser removes the duplicate.
+// of one DNI) are all skipped and keep their old hashes. A login always hashes the canonical form, so
+// of such twins only one stored in canonical form still logs in; the others cannot until the organiser
+// removes the duplicate and scripts/repairlogins -apply rehashes the row that is left.
 func upCanonicalNationalIDHashes(ctx context.Context, database *mongo.Database) error {
 	report, err := RepairLoginHashes(ctx, database, RepairOptions{Apply: true})
 	if err != nil {
@@ -1063,7 +1075,7 @@ Run: `cd /home/lucasmenendez/saas-backend/.worktrees/feature-cert-auth && go tes
 Expected: `--- PASS: TestMigrationCanonicalNationalIDHashes`, `--- PASS: TestMigrations`, `ok  	github.com/vocdoni/saas-backend/db`
 
 Step 3: commit
-`git -c commit.gpgsign=false commit -m "feat(migrations): rehash login hashes with canonical national ids" -- migrations/0037_canonical_national_id_hashes.go db/migration_canonical_national_id_test.go`
+`git add -- migrations/0037_canonical_national_id_hashes.go db/migration_canonical_national_id_test.go && git -c commit.gpgsign=false commit -m "feat(migrations): rehash login hashes with canonical national ids" -- migrations/0037_canonical_national_id_hashes.go db/migration_canonical_national_id_test.go`
 
 Interfaces this task provides to later tasks: migration version 37 (`canonical_national_id_hashes`); the next free version on main is 38.
 
@@ -1147,6 +1159,7 @@ func TestParseCertGatewayKeys(t *testing.T) {
 		"test-1:not-base64!",  // not base64
 		"test-1:AAEC",         // wrong length
 		"test-1:" + vectorPublicKey + ",test-1:" + vectorPublicKey, // duplicate id
+		"test=1:" + vectorPublicKey, // '=' breaks the signature header
 	} {
 		_, err := ParseCertGatewayKeys(bad)
 		c.Assert(err, qt.Not(qt.IsNil), qt.Commentf("%q", bad))
@@ -1200,7 +1213,7 @@ func ParseCertGatewayKeys(s string) (CertGatewayKeys, error) {
 	}
 	for entry := range strings.SplitSeq(s, ",") {
 		id, encoded, found := strings.Cut(strings.TrimSpace(entry), ":")
-		if !found || id == "" {
+		if !found || id == "" || strings.ContainsAny(id, ",= ") {
 			return nil, fmt.Errorf("certificate gateway key %q: want keyId:base64(publicKey)", id)
 		}
 		if _, dup := keys[id]; dup {
@@ -1417,7 +1430,7 @@ Run: `cd /home/lucasmenendez/saas-backend/.worktrees/feature-cert-auth && go tes
 Expected: `--- PASS: TestCertGatewaySignatureVectors`, `--- PASS: TestParseCertGatewayKeys`, `ok  	github.com/vocdoni/saas-backend/csp`, `ok  	github.com/vocdoni/saas-backend/cmd/service`, and a clean build.
 
 Step 3: commit
-`git -c commit.gpgsign=false commit -m "feat(csp): verify certificate gateway signatures" -- csp/cert_gateway.go csp/cert_gateway_test.go csp/csp.go cmd/service/main.go cmd/service/main_test.go example.env`
+`git add -- csp/cert_gateway.go csp/cert_gateway_test.go csp/csp.go cmd/service/main.go cmd/service/main_test.go example.env && git -c commit.gpgsign=false commit -m "feat(csp): verify certificate gateway signatures" -- csp/cert_gateway.go csp/cert_gateway_test.go csp/csp.go cmd/service/main.go cmd/service/main_test.go example.env`
 
 Interfaces this task provides to later tasks: `csp.CertGatewayKeys` (`map[string]ed25519.PublicKey`), `csp.ParseCertGatewayKeys(string)`, `csp.CertGatewaySignedMessage(t int64, body []byte) []byte`, `csp.VerifyCertGatewaySignature(keys, header, body, now) error` (wraps `csp.ErrCertGatewaySignature`), `csp.CertGatewaySignatureHeader`, `(*csp.CSP).CertGatewayKeys()`, `SetCertGatewayKeys(keys)`, `CertAuthEnabled() bool`; the shared vector constants.
 
@@ -1815,7 +1828,7 @@ Run: `cd /home/lucasmenendez/saas-backend/.worktrees/feature-cert-auth && go tes
 Expected: `--- PASS: TestCertCensusValidation` with its four subtests, `ok  	github.com/vocdoni/saas-backend/api`
 
 Step 3: commit
-`git -c commit.gpgsign=false commit -m "feat(processes): add certificate censuses" -- api/apicommon/voting_processes.go api/apicommon/types.go api/processes_census.go api/processes_census_validate.go api/processes_cert_census_test.go`
+`git add -- api/apicommon/voting_processes.go api/apicommon/types.go api/processes_census.go api/processes_census_validate.go api/processes_cert_census_test.go && git -c commit.gpgsign=false commit -m "feat(processes): add certificate censuses" -- api/apicommon/voting_processes.go api/apicommon/types.go api/processes_census.go api/processes_census_validate.go api/processes_cert_census_test.go`
 
 Interfaces this task provides to later tasks: `apicommon.CensusSpec.CertAuth` (`json:"certAuth,omitempty"`); test helpers in package `api`: `testCertGatewayKeyID`, `testCertGatewayKey` (vector key), `setCertGatewayKeys(t, keys)`, `enableCertAuth(t)`, `testDNI(n int) string`, `certCensus(twoFa, memberIDs...) apicommon.CensusSpec`.
 
@@ -2650,7 +2663,7 @@ Run: `cd /home/lucasmenendez/saas-backend/.worktrees/feature-cert-auth && go tes
 Expected: `ok  	github.com/vocdoni/saas-backend/db`; `--- PASS: TestCertAssertions` with subtests `a_valid_signature_creates_a_code,_stored_without_the_DNI`, `bad_signatures` (5), `malformed_requests`, `process_unknown_or_not_published`, `census_without_certAuth`, `anonymous_census_while_anonymous_voting_is_off`, `not_in_census`, `zero_weight`, `rate_limited_after_10_an_hour`, `feature_off:_a_plain_404`; `ok  	github.com/vocdoni/saas-backend/api`
 
 Step 3: commit
-`git -c commit.gpgsign=false commit -m "feat(csp): accept signed certificate assertions from the gateway" -- db/cert_auth_assertions.go db/cert_auth_assertions_test.go db/mongo.go db/helpers.go db/csp_counters.go migrations/0038_cert_auth_assertions_indexes.go csp/cert_gateway.go csp/handlers/cert_auth.go api/routes.go api/api.go api/cert_assertions_test.go`
+`git add -- db/cert_auth_assertions.go db/cert_auth_assertions_test.go db/mongo.go db/helpers.go db/csp_counters.go migrations/0038_cert_auth_assertions_indexes.go csp/cert_gateway.go csp/handlers/cert_auth.go api/routes.go api/api.go api/cert_assertions_test.go && git -c commit.gpgsign=false commit -m "feat(csp): accept signed certificate assertions from the gateway" -- db/cert_auth_assertions.go db/cert_auth_assertions_test.go db/mongo.go db/helpers.go db/csp_counters.go migrations/0038_cert_auth_assertions_indexes.go csp/cert_gateway.go csp/handlers/cert_auth.go api/routes.go api/api.go api/cert_assertions_test.go`
 
 Interfaces this task provides to later tasks: `db.CertAuthAssertion`, `(*MongoStorage).CreateCertAuthAssertion(*CertAuthAssertion) error`, `(*MongoStorage).ConsumeCertAuthAssertion(codeHash []byte, processID bson.ObjectID, now time.Time) (*CertAuthAssertion, error)` (`db.ErrNotFound` for unknown/used/expired/foreign); `db.CSPCounterCertAssertions`; `(*csp.CSP).ClaimCertAssertion(processID, memberID internal.HexBytes) (bool, error)`, `csp.MaxHourlyCertAssertions`; `handlers.CertAssertionRequest`, `CertAssertionResponse`, `CertAssertionError`, `base64URL43`; migration version 38; API test helpers `testCertPKCE`, `newCertAssertionRequest`, `postCertAssertionRaw`, `signCertAssertion`, `postCertAssertion`, `newCertCode(t, pid, nationalID, challenge) string`.
 
@@ -2794,6 +2807,10 @@ func TestCertAuthStep0(t *testing.T) {
 
 		otherProcess := newCertCode(t, withEmail, alice, challenge)
 		failed(&handlers.AuthRequest{CertCode: otherProcess, CodeVerifier: verifier}, authOnly)
+
+		wrongContact := newCertCode(t, withEmail, alice, challenge)
+		failed(&handlers.AuthRequest{CertCode: wrongContact, CodeVerifier: verifier, Email: "other@example.com"}, withEmail)
+		failed(&handlers.AuthRequest{CertCode: wrongContact, CodeVerifier: verifier, Email: members[0].Email}, withEmail)
 	})
 
 	t.Run("typed fields or no code on a cert census: 40005, and the code stays unused", func(t *testing.T) {
@@ -2923,7 +2940,7 @@ index d2a6b74..cedd9cb 100644
  }
  
  // validateContactInfo checks if at least one contact method is provided
-@@ -267,37 +268,60 @@ func passwordCheckFailed(err error) error {
+@@ -267,36 +268,59 @@ func passwordCheckFailed(err error) error {
  // unknown participant pays for a password check too (see unknownParticipant), so the two cannot be
  // told apart by their timing either. When no argon2 slot frees up in time, both answer
  // ErrServerBusy, which spends no budget.
@@ -3168,7 +3185,7 @@ Run: `cd /home/lucasmenendez/saas-backend/.worktrees/feature-cert-auth && gofump
 Expected: no gofumpt output; `ok` for `csp` and `csp/handlers`; `--- PASS: TestCertAuthStep0` (subtests: auth-only token that signs and stable voterRef, email 2FA then step 1, bad codes and verifiers 40802, typed fields 40005 with the code unused, code on a non-cert census 40005, two concurrent redemptions one success, no PII in the logs), `--- PASS: TestCertAssertions`, `--- PASS: TestCertCensusValidation`, the existing `TestProcessCSP`/`TestCSPAuth*` still `PASS`, `ok  	github.com/vocdoni/saas-backend/api`.
 
 Step 3: commit
-`git -c commit.gpgsign=false commit -m "feat(csp): authenticate certificate census voters with a gateway code" -- csp/handlers/types.go csp/handlers/auth.go csp/handlers/auth_test.go csp/handlers/cert_auth.go csp/handlers/processes.go api/cert_auth_step0_test.go`
+`git add -- csp/handlers/types.go csp/handlers/auth.go csp/handlers/auth_test.go csp/handlers/cert_auth.go csp/handlers/processes.go api/cert_auth_step0_test.go && git -c commit.gpgsign=false commit -m "feat(csp): authenticate certificate census voters with a gateway code" -- csp/handlers/types.go csp/handlers/auth.go csp/handlers/auth_test.go csp/handlers/cert_auth.go csp/handlers/processes.go api/cert_auth_step0_test.go`
 
 Interfaces this task provides to later tasks: step-0 body fields `certCode`, `codeVerifier`; response field `voterRef` (lowercase hex sha256 of `"vocdoni-voter-ref:" + processId + ":" + memberId`); error codes 40005 (shape) and 40802 (bad code/verifier).
 
@@ -3317,13 +3334,13 @@ Run: `cd /home/lucasmenendez/cert-gateway && export GOPRIVATE=github.com/vocdoni
 Expected: `--- PASS: TestSignatureVectors`, `ok  	github.com/vocdoni/cert-gateway/internal/gateway`
 
 Step 3: commit
-`git -c commit.gpgsign=false commit -m "feat(gateway): sign backend assertions with ed25519" -- go.mod .gitignore internal/gateway/signing.go internal/gateway/signing_test.go`
+`git add -- go.mod .gitignore internal/gateway/signing.go internal/gateway/signing_test.go && git -c commit.gpgsign=false commit -m "feat(gateway): sign backend assertions with ed25519" -- go.mod .gitignore internal/gateway/signing.go internal/gateway/signing_test.go`
 
 Interfaces this task provides to later tasks: package `gateway` with `AssertionPath`, `SignatureHeader`, `SignedMessage(t int64, body []byte) []byte`, `Sign(key ed25519.PrivateKey, keyID string, t int64, body []byte) string`; test helpers `vectorSeed`, `vectorKey(t)`, `vectorKeyID`.
 
 ### Task 10: Gateway configuration and BACKENDS validation
 Model: standard   Repo: cert-gateway   Files: `internal/gateway/config.go`, `internal/gateway/config_test.go`
-Goal: C1 "Configuration", "Backends", D8 static mode — every variable, canonical origins, and each BACKENDS startup failure naming the entry without key material (AC7 config bullets; AC12 "refuses an http://localhost origin").
+Goal: C1 "Configuration", "Backends", D8 static mode — every variable, canonical origins, and each BACKENDS startup failure naming the entry without key material (AC7 config bullets; AC12 "refuses an http://localhost origin"). D8's two devca exceptions (owner, 2026-11-16), both through `allowLocalhost`, which only a devca build passes: an origin `http://localhost:<port>` and a backend `url` `http://localhost:<port>`; a binary without the tag rejects both at startup.
 
 Step 1: write the failing test
 Create `internal/gateway/config_test.go`:
@@ -3420,6 +3437,9 @@ func TestLoadConfigFailures(t *testing.T) {
 		"duplicate key":    {map[string]string{"SIGNING_KEY_STG": vectorSeed}, "duplicate key"},
 		"duplicate origin": {map[string]string{"BACKENDS": backends(dev, stg(func(f map[string]string) { f["origin"] = "https://app-dev.vocdoni.io" }))}, "duplicate origin"},
 		"http url":         {map[string]string{"BACKENDS": backends(dev, stg(func(f map[string]string) { f["url"] = "http://saas-api-stg.vocdoni.net" }))}, "url must be"},
+		"localhost url":    {map[string]string{"BACKENDS": backends(dev, stg(func(f map[string]string) { f["url"] = "http://localhost:8080" }))}, "url must be"},
+		"keyId comma":      {map[string]string{"BACKENDS": backends(dev, stg(func(f map[string]string) { f["keyId"] = "stg,1" }))}, "keyId must not"},
+		"keyId equals":     {map[string]string{"BACKENDS": backends(dev, stg(func(f map[string]string) { f["keyId"] = "stg=1" }))}, "keyId must not"},
 		"url with path":    {map[string]string{"BACKENDS": backends(dev, stg(func(f map[string]string) { f["url"] = "https://saas-api-stg.vocdoni.net/v1" }))}, "url must be"},
 		"url with query":   {map[string]string{"BACKENDS": backends(dev, stg(func(f map[string]string) { f["url"] = "https://saas-api-stg.vocdoni.net?x=1" }))}, "url must be"},
 		"url with user":    {map[string]string{"BACKENDS": backends(dev, stg(func(f map[string]string) { f["url"] = "https://u:p@saas-api-stg.vocdoni.net" }))}, "url must be"},
@@ -3460,6 +3480,32 @@ func TestLoadConfigFailures(t *testing.T) {
 	acme["CLOUDFLARE_API_TOKEN"] = "token"
 	if _, err := load(acme, false); err == nil || !strings.Contains(err.Error(), "ACME_DNS_OVERRIDE_DOMAIN") {
 		t.Errorf("a token without ACME_DNS_OVERRIDE_DOMAIN: %v", err)
+	}
+}
+
+// TestLocalhostBackendURL: only a devca build (allowLocalhost) accepts a backend url, and then
+// exactly http://localhost:<port>.
+func TestLocalhostBackendURL(t *testing.T) {
+	const local = `[{"name":"local","url":"http://localhost:8080","keyId":"local-1","keyEnv":"SIGNING_KEY_DEV",` +
+		`"origins":["https://app-dev.vocdoni.io"]}]`
+	vars := testEnvVars()
+	vars["BACKENDS"] = local
+	if _, err := load(vars, false); err == nil || !strings.Contains(err.Error(), "url must be") {
+		t.Errorf("without devca: %v, want a url error", err)
+	}
+	cfg, err := load(vars, true)
+	if err != nil || cfg.Backends[0].URL != "http://localhost:8080" {
+		t.Fatalf("devca: %+v, %v", cfg.Backends, err)
+	}
+	for _, url := range []string{
+		"http://localhost", "http://localhost:8080/", "http://localhost:8080/v1", "http://localhost:8080?x=1",
+		"http://LOCALHOST:8080", "http://127.0.0.1:8080", "http://api:8080", "http://u@localhost:8080",
+		"http://localhost:99999",
+	} {
+		vars["BACKENDS"] = strings.Replace(local, "http://localhost:8080", url, 1)
+		if _, err := load(vars, true); err == nil || !strings.Contains(err.Error(), "url must be") {
+			t.Errorf("devca %s: %v, want a url error", url, err)
+		}
 	}
 }
 
@@ -3513,7 +3559,7 @@ import (
 // URL, signed with Key (id KeyID).
 type Backend struct {
 	Name    string
-	URL     string // https://host, no path
+	URL     string // https://host, no path (or http://localhost:<port> in a devca build)
 	KeyID   string
 	Key     ed25519.PrivateKey
 	Origins []string // canonical form, see CanonicalOrigin
@@ -3550,8 +3596,8 @@ type Config struct {
 }
 
 // LoadConfig reads the configuration from getenv. allowLocalhost lets BACKENDS list
-// http://localhost:<port> origins; only a devca build passes true. Errors name the variable or the
-// BACKENDS entry and never contain key material.
+// http://localhost:<port> origins and backend urls; only a devca build passes true. Errors name the
+// variable or the BACKENDS entry and never contain key material.
 func LoadConfig(getenv func(string) string, allowLocalhost bool) (Config, error) {
 	cfg := Config{
 		Domain:                strings.ToLower(strings.TrimSpace(getenv("DOMAIN"))),
@@ -3666,16 +3712,22 @@ func ParseBackends(raw string, getenv func(string) string, allowLocalhost bool) 
 		if e.Name == "" || e.KeyID == "" || len(e.Origins) == 0 || e.KeyEnv == "" {
 			return nil, fmt.Errorf("BACKENDS %s: name, keyId, keyEnv and origins are required", entry)
 		}
+		if strings.ContainsAny(e.KeyID, ",=: ") {
+			return nil, fmt.Errorf("BACKENDS %s: keyId must not contain ',', '=', ':' or spaces", entry)
+		}
 		u, err := url.Parse(e.URL)
-		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") ||
-			u.RawQuery != "" || u.Fragment != "" {
+		// a devca build also accepts exactly http://localhost:<port> (the local saas-backend serves plain HTTP)
+		local, _ := CanonicalOrigin(e.URL, allowLocalhost)
+		localHTTP := strings.HasPrefix(e.URL, "http://") && local == e.URL
+		if err != nil || (u.Scheme != "https" && !localHTTP) || u.Host == "" || u.User != nil ||
+			(u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
 			return nil, fmt.Errorf("BACKENDS %s: url must be https://host with no path, query or userinfo", entry)
 		}
 		seed, err := base64.StdEncoding.DecodeString(getenv(e.KeyEnv))
 		if err != nil || len(seed) != ed25519.SeedSize {
 			return nil, fmt.Errorf("BACKENDS %s: %s is unset or not the base64 of a 32-byte Ed25519 seed", entry, e.KeyEnv)
 		}
-		b := Backend{Name: e.Name, URL: "https://" + u.Host, KeyID: e.KeyID, Key: ed25519.NewKeyFromSeed(seed)}
+		b := Backend{Name: e.Name, URL: u.Scheme + "://" + u.Host, KeyID: e.KeyID, Key: ed25519.NewKeyFromSeed(seed)}
 		for _, check := range [][2]string{
 			{"name", e.Name}, {"keyId", e.KeyID}, {"url", b.URL}, {"keyEnv", e.KeyEnv}, {"key", string(seed)},
 		} {
@@ -3748,10 +3800,10 @@ func intVar(getenv func(string) string, name string, def int) (int, error) {
 }
 ```
 Run: `cd /home/lucasmenendez/cert-gateway && export GOPRIVATE=github.com/vocdoni/cert-check && go test ./internal/gateway/ -run 'Config|Canonical' -v 2>&1 | grep -E '^(--- |ok)'`
-Expected: `--- PASS: TestLoadConfig`, `--- PASS: TestLoadConfigFailures`, `--- PASS: TestCanonicalOrigin`, `ok`
+Expected: `--- PASS: TestLoadConfig`, `--- PASS: TestLoadConfigFailures`, `--- PASS: TestLocalhostBackendURL`, `--- PASS: TestCanonicalOrigin`, `ok`
 
 Step 3: commit
-`git -c commit.gpgsign=false commit -m "feat(gateway): read and validate the configuration" -- internal/gateway/config.go internal/gateway/config_test.go`
+`git add -- internal/gateway/config.go internal/gateway/config_test.go && git -c commit.gpgsign=false commit -m "feat(gateway): read and validate the configuration" -- internal/gateway/config.go internal/gateway/config_test.go`
 
 Interfaces this task provides to later tasks: `gateway.Config`, `gateway.Backend{Name, URL, KeyID, Key, Origins}`, `gateway.CertMode` (`CertACME`, `CertStatic`), `gateway.LoadConfig(getenv, allowLocalhost bool) (Config, error)`, `gateway.ParseBackends(raw, getenv, allowLocalhost)`, `gateway.CanonicalOrigin(raw string, allowLocalhost bool) (string, bool)`.
 
@@ -4452,6 +4504,7 @@ func TestHostMismatch(t *testing.T) {
 	if resp.StatusCode != http.StatusMisdirectedRequest {
 		t.Fatalf("status %d, want 421", resp.StatusCode)
 	}
+	assertHardened(t, resp.Header)
 }
 
 func TestOtherServerNameGetsNoCertificate(t *testing.T) {
@@ -4537,9 +4590,11 @@ func TestRateLimits(t *testing.T) {
 	t.Run("per IP", func(t *testing.T) {
 		e := startEnv(t, func(c *Config) { c.RateLimitPerMin = 2 }) // burst 1
 		assertRedirect(t, e.get(authQuery(devReturnURL()), false), devReturnURL(), "certCode="+strings.Repeat("C", 43))
-		if resp := e.get(authQuery(devReturnURL()), false); resp.StatusCode != http.StatusTooManyRequests {
+		resp := e.get(authQuery(devReturnURL()), false)
+		if resp.StatusCode != http.StatusTooManyRequests {
 			t.Fatalf("status %d over the per-IP limit, want 429", resp.StatusCode)
 		}
+		assertHardened(t, resp.Header)
 	})
 	t.Run("per IP off", func(t *testing.T) {
 		e := startEnv(t, func(c *Config) { c.RateLimitPerMin = 0 })
@@ -4552,9 +4607,11 @@ func TestRateLimits(t *testing.T) {
 	t.Run("global, certificate requests only", func(t *testing.T) {
 		e := startEnv(t, func(c *Config) { c.RateLimitGlobalPerMin = 1 }) // burst 1
 		assertRedirect(t, e.get(authQuery(devReturnURL()), false), devReturnURL(), "certCode="+strings.Repeat("C", 43))
-		if resp := e.get(authQuery(devReturnURL()), false); resp.StatusCode != http.StatusTooManyRequests {
+		resp := e.get(authQuery(devReturnURL()), false)
+		if resp.StatusCode != http.StatusTooManyRequests {
 			t.Fatalf("status %d over the global limit, want 429", resp.StatusCode)
 		}
+		assertHardened(t, resp.Header)
 		assertRedirect(t, e.get(authQuery(devReturnURL()), true), devReturnURL(), "certError=no_certificate")
 	})
 }
@@ -4594,19 +4651,6 @@ func TestCheckBackends(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("log lacks %s:\n%s", want, out)
 		}
-	}
-}
-
-// TestCheckBackendsNeverBlocksReadyz: a backend that hangs does not delay readiness.
-func TestCheckBackendsNeverBlocksReadyz(t *testing.T) {
-	hang := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { time.Sleep(2 * time.Second) }))
-	defer hang.Close()
-	e := startEnv(t, func(c *Config) { c.Backends[0].URL = hang.URL })
-	go e.gateway.CheckBackends(context.Background())
-	start := time.Now()
-	e.waitReady()
-	if time.Since(start) > time.Second {
-		t.Fatal("readiness waited for the backend check")
 	}
 }
 
@@ -5132,6 +5176,9 @@ func (s *Server) MainHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
 		setHardeningHeaders(w.Header())
+		if s.gateway.devCA {
+			w.Header().Set("X-Cert-Gateway-Dev", "devca")
+		}
 		if s.mainUp.Load() && s.authUp.Load() && s.certs.Ready() {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -5238,11 +5285,11 @@ func (g *Gateway) CheckBackends(ctx context.Context) {
 }
 ```
 Run: `cd /home/lucasmenendez/cert-gateway && export GOPRIVATE=github.com/vocdoni/cert-check && go mod tidy && gofumpt -l . ; go vet ./... && go test -race -count=1 ./... -v 2>&1 | grep -E '^(--- |ok|FAIL)'`
-Expected: no gofumpt output; `--- PASS` for `TestAuthSuccess`, `TestAuthTwoBackends`, `TestAuthCertcheckErrors`, `TestAuthBackendAnswers`, `TestAuthBadParameters`, `TestProductionProviders`, `TestIPLimiter`, `TestHostMismatch`, `TestOtherServerNameGetsNoCertificate`, `TestReadyz`, `TestReadyzWaitsForTheCertificate`, `TestRateLimits`, `TestCheckBackends`, `TestCheckBackendsNeverBlocksReadyz`, `TestSignatureVectors`, `TestLoadConfig`, `TestLoadConfigFailures`, `TestCanonicalOrigin`; `ok  	github.com/vocdoni/cert-gateway/internal/gateway`
+Expected: no gofumpt output; `--- PASS` for `TestAuthSuccess`, `TestAuthTwoBackends`, `TestAuthCertcheckErrors`, `TestAuthBackendAnswers`, `TestAuthBadParameters`, `TestProductionProviders`, `TestIPLimiter`, `TestHostMismatch`, `TestOtherServerNameGetsNoCertificate`, `TestReadyz`, `TestReadyzWaitsForTheCertificate`, `TestRateLimits`, `TestCheckBackends`, `TestSignatureVectors`, `TestLoadConfig`, `TestLoadConfigFailures`, `TestLocalhostBackendURL`, `TestCanonicalOrigin`; `ok  	github.com/vocdoni/cert-gateway/internal/gateway`
 Run: `cd /home/lucasmenendez/cert-gateway && export GOPRIVATE=github.com/vocdoni/cert-check && golangci-lint run ./...` → `0 issues.`
 
 Step 3: commit
-`git -c commit.gpgsign=false commit -m "feat(gateway): verify certificates and hand the identity to the backend" -- go.mod go.sum internal/gateway/gateway.go internal/gateway/pages.go internal/gateway/ratelimit.go internal/gateway/ratelimit_test.go internal/gateway/providers.go internal/gateway/providers_test.go internal/gateway/server.go internal/gateway/gateway_test.go internal/gateway/server_test.go internal/testpki/testpki.go`
+`git add -- go.mod go.sum internal/gateway/gateway.go internal/gateway/pages.go internal/gateway/ratelimit.go internal/gateway/ratelimit_test.go internal/gateway/providers.go internal/gateway/providers_test.go internal/gateway/server.go internal/gateway/gateway_test.go internal/gateway/server_test.go internal/testpki/testpki.go && git -c commit.gpgsign=false commit -m "feat(gateway): verify certificates and hand the identity to the backend" -- go.mod go.sum internal/gateway/gateway.go internal/gateway/pages.go internal/gateway/ratelimit.go internal/gateway/ratelimit_test.go internal/gateway/providers.go internal/gateway/providers_test.go internal/gateway/server.go internal/gateway/gateway_test.go internal/gateway/server_test.go internal/testpki/testpki.go`
 
 Interfaces this task provides to later tasks: `gateway.Deps{Config, Handler, Client, Logger, Version, DevCA, Now}`, `gateway.New(Deps) *Gateway` (an `http.Handler`), `(*Gateway).CheckBackends(ctx)`, `gateway.CertSource` (`GetCertificate`, `Ready`), `gateway.NewServer(g, certs) *Server`, `(*Server).Run(ctx, mainLn, authLn) error`, `(*Server).MainHandler()`, `gateway.ProductionProviders(opts ...certcheck.Option) []certcheck.Provider`; package `testpki` (`NewCA`, `(*CA).Server`, `(*CA).Client`, `(*CA).Pool`).
 
@@ -5349,6 +5396,23 @@ func TestRunRetriesWithBackoff(t *testing.T) {
 		t.Fatalf("%d attempts, ready=%v; want 3, true", calls, m.ready.Load())
 	}
 }
+
+func TestNewACMEManagesTheDomainOnly(t *testing.T) {
+	m, err := NewACME(Options{
+		Domain: "cert.example", DataDir: t.TempDir(), Email: "ops@example.org",
+		CloudflareToken: "token", OverrideDomain: "_acme-challenge.cert.acme.example",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if m.cfg.OnDemand != nil || m.Ready() {
+		t.Fatalf("on-demand=%v ready=%v, want nil and false", m.cfg.OnDemand, m.Ready())
+	}
+	if _, err := m.GetCertificate(&tls.ClientHelloInfo{ServerName: "other.example"}); err == nil {
+		t.Fatal("another server name got a certificate")
+	}
+}
 ```
 Create `cmd/cert-gateway/main_test.go`:
 
@@ -5375,7 +5439,7 @@ import (
 
 // TestProductionBuildHasNoDevCA (AC12): a binary built without -tags devca lists no devca
 // provider even with DEVCA_CERT_FILE set, rejects a test CA certificate with untrusted_issuer and
-// refuses an http://localhost origin in BACKENDS.
+// refuses an http://localhost origin and an http://localhost backend url in BACKENDS.
 func TestProductionBuildHasNoDevCA(t *testing.T) {
 	if devCA {
 		t.Fatal("devCA is set in a build without the devca tag")
@@ -5416,6 +5480,12 @@ func TestProductionBuildHasNoDevCA(t *testing.T) {
 	_, err = gateway.LoadConfig(func(k string) string { return env[k] }, devCA)
 	if err == nil || !strings.Contains(err.Error(), "http://localhost:3000") {
 		t.Fatalf("an http://localhost origin got %v, want a startup error", err)
+	}
+	env["BACKENDS"] = `[{"name":"local","url":"http://localhost:8080","keyId":"local-1","keyEnv":"SIGNING_KEY_LOCAL",` +
+		`"origins":["https://app.localtest.me"]}]`
+	_, err = gateway.LoadConfig(func(k string) string { return env[k] }, devCA)
+	if err == nil || !strings.Contains(err.Error(), "url must be") {
+		t.Fatalf("an http://localhost backend url got %v, want a startup error", err)
 	}
 }
 ```
@@ -5784,7 +5854,7 @@ Run: `cd /home/lucasmenendez/cert-gateway && export GOPRIVATE=github.com/vocdoni
 Expected: `ok` for `cmd/cert-gateway`, `internal/certs`, `internal/gateway`; the binary at `~/.cache/cert-gateway/bin/cert-gateway`; `0 issues.`
 
 Step 3: commit
-`git -c commit.gpgsign=false commit -m "feat(gateway): obtain the auth certificate and wire the service" -- go.mod go.sum internal/certs/certs.go internal/certs/certs_test.go cmd/cert-gateway/main.go cmd/cert-gateway/providers_prod.go cmd/cert-gateway/main_test.go`
+`git add -- go.mod go.sum internal/certs/certs.go internal/certs/certs_test.go cmd/cert-gateway/main.go cmd/cert-gateway/providers_prod.go cmd/cert-gateway/main_test.go && git -c commit.gpgsign=false commit -m "feat(gateway): obtain the auth certificate and wire the service" -- go.mod go.sum internal/certs/certs.go internal/certs/certs_test.go cmd/cert-gateway/main.go cmd/cert-gateway/providers_prod.go cmd/cert-gateway/main_test.go`
 
 Interfaces this task provides to later tasks: `certs.NewACME(Options)`, `certs.LoadStatic(domain, certFile, keyFile)`, `certs.NewStatic(domain, tls.Certificate)`, `(*certs.Manager).Run/Close/GetCertificate/Ready`; in `package main`: `const devCA bool`, `withDevProviders(providers, cfg, log) ([]certcheck.Provider, error)`.
 
@@ -5951,6 +6021,28 @@ func TestDevCAFlow(t *testing.T) {
 		t.Fatalf("backend got %v", fields)
 	}
 }
+
+// TestDevCABuildConfig (AC12): a devca build accepts a backend url http://localhost:<port> (the
+// local stack's plain-HTTP saas-backend), and without DEVCA_CERT_FILE adds no provider.
+func TestDevCABuildConfig(t *testing.T) {
+	env := map[string]string{
+		"DOMAIN": "cert.localtest.me", "TLS_CERT_FILE": "c", "TLS_KEY_FILE": "k",
+		"SIGNING_KEY_LOCAL": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+		"BACKENDS": `[{"name":"local","url":"http://localhost:8080","keyId":"local-1","keyEnv":"SIGNING_KEY_LOCAL",` +
+			`"origins":["http://localhost:3000"]}]`,
+	}
+	cfg, err := gateway.LoadConfig(func(k string) string { return env[k] }, devCA)
+	if err != nil || cfg.Backends[0].URL != "http://localhost:8080" {
+		t.Fatalf("an http://localhost backend url: %+v, %v", cfg.Backends, err)
+	}
+	providers, err := withDevProviders(gateway.ProductionProviders(), gateway.Config{}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(providers) != 6 {
+		t.Fatalf("%d providers without DEVCA_CERT_FILE, want the 6 production ones", len(providers))
+	}
+}
 ```
 Run: `cd /home/lucasmenendez/cert-gateway && export GOPRIVATE=github.com/vocdoni/cert-check && go test -tags devca ./cmd/...`
 Expected: `FAIL	github.com/vocdoni/cert-gateway/cmd/cert-gateway [build failed]` (`undefined: devCA`: with the tag, `providers_prod.go` is excluded and nothing defines it yet)
@@ -6104,8 +6196,8 @@ import (
 	"github.com/vocdoni/cert-gateway/internal/gateway"
 )
 
-// devCA reports a devca build: http://localhost origins are accepted and every response carries
-// X-Cert-Gateway-Dev: devca.
+// devCA reports a devca build: http://localhost origins and backend urls are accepted and every
+// response carries X-Cert-Gateway-Dev: devca.
 const devCA = true
 
 // withDevProviders adds the local test CA provider when DEVCA_CERT_FILE is set.
@@ -6183,17 +6275,17 @@ issue)
 esac
 ```
 Run: `cd /home/lucasmenendez/cert-gateway && export GOPRIVATE=github.com/vocdoni/cert-check && chmod +x scripts/devca && go vet -tags devca ./... && go test -race -count=1 -tags devca ./... && go test -race -count=1 ./... && golangci-lint run --build-tags devca ./... && golangci-lint run ./...`
-Expected: `ok` for every package with and without the tag (`TestDevCAFlow` runs only with it, `TestProductionBuildHasNoDevCA` only without it), `0 issues.` twice.
+Expected: `ok` for every package with and without the tag (`TestDevCAFlow` and `TestDevCABuildConfig` run only with it, `TestProductionBuildHasNoDevCA` only without it), `0 issues.` twice.
 Manual check: `DEVCA_DIR=~/.cache/cert-gateway/devca-check scripts/devca init && DEVCA_DIR=~/.cache/cert-gateway/devca-check scripts/devca issue X1234567L "Ana" "Pérez Gómez"` prints `certificate: …/X1234567L.p12` and `password: <16 hex>`; `openssl x509 -in ~/.cache/cert-gateway/devca-check/X1234567L.pem -noout -subject -nameopt utf8` shows `serialNumber=IDCES-X1234567L, GN=Ana, SN=Pérez Gómez`. Remove `~/.cache/cert-gateway/devca-check` afterwards.
 
 Step 3: commit
-`git -c commit.gpgsign=false commit -m "feat(gateway): add a local test ca behind the devca build tag" -- internal/devca/devca.go cmd/cert-gateway/providers_devca.go cmd/cert-gateway/devca_test.go scripts/devca`
+`git add -- internal/devca/devca.go cmd/cert-gateway/providers_devca.go cmd/cert-gateway/devca_test.go scripts/devca && git -c commit.gpgsign=false commit -m "feat(gateway): add a local test ca behind the devca build tag" -- internal/devca/devca.go cmd/cert-gateway/providers_devca.go cmd/cert-gateway/devca_test.go scripts/devca`
 
 Interfaces this task provides to later tasks: `devca.Load(path) (*devca.Provider, error)`, provider id `devca`; `scripts/devca init|issue <DNI|NIE> <given> <surnames>` with `DEVCA_DIR` override; `make test-devca` (Task 14).
 
 ### Task 14: Dockerfile with the private-module ARG, CI, local stack and README
-Model: fast   Repo: cert-gateway   Files: `Dockerfile`, `dev/Dockerfile.devca`, `dev/Caddyfile`, `docker-compose.dev.yml`, `Makefile`, `.github/workflows/ci.yml`, `README.md`
-Goal: C1 "Deployment", "CI", D8 "Stack"/"Scripts" docs — the production image never contains the token or the devca tag; Railway settings and the DNS/ACME runbook in the README (AC12 `make dev` walkthrough, owner-checked).
+Model: fast   Repo: cert-gateway   Files: `Dockerfile`, `dev/Dockerfile.devca`, `docker-compose.dev.yml`, `Makefile`, `.github/workflows/ci.yml`, `README.md`
+Goal: C1 "Deployment", "CI", D8 "Stack"/"Scripts" docs — the production image never contains the token or the devca tag; CI also runs the devca tests, test-only; Railway settings and the DNS/ACME runbook in the README (AC12 `make dev` walkthrough, owner-checked).
 
 Step 1: write the files
 Create `Dockerfile`:
@@ -6228,8 +6320,9 @@ ENTRYPOINT ["/cert-gateway"]
 Create `dev/Dockerfile.devca`:
 
 ```dockerfile
-# Local development image ONLY: built with -tags devca, so it accepts the local test CA and
-# http://localhost voting pages. Used by docker-compose.dev.yml; never deploy it.
+# Local development image ONLY: built with -tags devca, so it accepts the local test CA,
+# http://localhost voting pages and an http://localhost backend. Used by docker-compose.dev.yml;
+# never deploy it.
 FROM golang:1.27@sha256:2920bb124f1a2e12a1d39f0cab756ae0068441ee1da7655dec7f5e374944095b AS build
 ENV GOTOOLCHAIN=local GOPRIVATE=github.com/vocdoni/cert-check CGO_ENABLED=0
 WORKDIR /src
@@ -6247,15 +6340,6 @@ FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c
 COPY --from=build /out/cert-gateway /cert-gateway
 ENTRYPOINT ["/cert-gateway"]
 ```
-Create `dev/Caddyfile`:
-
-```text
-# TLS in front of the local saas-backend: the gateway only posts to https backends.
-saas-api.localtest.me:8444 {
-	tls /certs/cert.pem /certs/key.pem
-	reverse_proxy api:8080
-}
-```
 Create `docker-compose.dev.yml`:
 
 ```yaml
@@ -6266,18 +6350,11 @@ services:
     environment:
       # public key of the test signing seed below (the shared signature test vector)
       - VOCDONI_CERT_GATEWAY_PUBLIC_KEYS=local-1:A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=
-
-  api-tls:
-    image: caddy:2.10.2
-    volumes:
-      - ${CERT_GATEWAY_DIR:?run make dev}/dev/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ${DEVCERTS_DIR:?run make dev}:/certs:ro
-    networks:
-      default:
-        aliases:
-          - saas-api.localtest.me
-    depends_on:
-      - api
+    # the gateway runs in this service's network namespace (see network_mode below), so its two
+    # listeners are published here
+    ports:
+      - 8443:8443
+      - 8082:8082
 
   cert-gateway:
     build:
@@ -6286,25 +6363,28 @@ services:
       args:
         CERT_CHECK_READ_TOKEN: ${CERT_CHECK_READ_TOKEN:?set CERT_CHECK_READ_TOKEN}
     image: cert-gateway-devca
+    # the image's default user (65532) cannot read the developer's 0600 key and 0700 devca directory;
+    # run as root here, as Railway does with RAILWAY_RUN_UID=0
+    user: "0:0"
+    # share the api container's network, so the plain-HTTP backend is at http://localhost:<port>,
+    # the only non-https backend url a devca binary accepts
+    network_mode: "service:api"
     environment:
       DOMAIN: cert.localtest.me
+      PORT: "8082" # the main listener (/readyz); api already listens on 8080 in this network
       TLS_CERT_FILE: /certs/cert.pem
       TLS_KEY_FILE: /certs/key.pem
-      SSL_CERT_FILE: /certs/rootCA.pem
       DEVCA_CERT_FILE: /devca/ca.pem
       SIGNING_KEY_LOCAL: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
       BACKENDS: >-
-        [{"name":"local","url":"https://saas-api.localtest.me:8444","keyId":"local-1","keyEnv":"SIGNING_KEY_LOCAL",
+        [{"name":"local","url":"http://localhost:${VOCDONI_PORT:-8080}","keyId":"local-1","keyEnv":"SIGNING_KEY_LOCAL",
         "origins":["http://localhost:3000"]}]
       LOG_LEVEL: debug
-    ports:
-      - 8443:8443
-      - 8082:8080
     volumes:
       - ${DEVCERTS_DIR:?run make dev}:/certs:ro
       - ${DEVCA_DIR:?run make dev}:/devca:ro
     depends_on:
-      - api-tls
+      - api
 ```
 Create `Makefile`:
 
@@ -6322,8 +6402,8 @@ build:
 test:
 	go test -race ./...
 
-# The devca build and its end-to-end test (scripts/devca needs openssl). Local only: CI never
-# passes the tag.
+# The devca build and its end-to-end test (scripts/devca needs openssl). CI runs it as a separate
+# test-only step; no image is ever built with the tag.
 test-devca:
 	go test -race -tags devca ./...
 
@@ -6331,8 +6411,8 @@ lint:
 	golangci-lint run ./...
 	golangci-lint run --build-tags devca ./...
 
-# Mongo, vocone and saas-backend (its own compose file), with TLS in front of the backend and the
-# devca gateway on https://cert.localtest.me:8443. See the README, "Local development".
+# Mongo, vocone and saas-backend (its own compose file), and the devca gateway in the backend
+# container's network on https://cert.localtest.me:8443. See the README, "Local development".
 dev:
 	CERT_GATEWAY_DIR=$(CURDIR) DEVCERTS_DIR=$(DEVCERTS_DIR) DEVCA_DIR=$(DEVCA_DIR) \
 		docker compose --project-directory $(SAAS_BACKEND_DIR) -f $(SAAS_BACKEND_DIR)/docker-compose.yml \
@@ -6362,8 +6442,8 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Private module access
@@ -6376,8 +6456,10 @@ jobs:
         run: go mod tidy -diff
       - name: Test
         run: go test -race ./...
+      - name: Test the devca build (test only; no image is built with the tag)
+        run: go vet -tags devca ./... && go test -race -tags devca ./...
       - name: Lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.15.0
       - name: Docker build
@@ -6443,7 +6525,9 @@ The design is saas-backend's `docs/specs/2026-11-11-certificate-voter-auth-desig
 Origins are canonical: `https://` plus the lowercase host, no path, no trailing slash, no `:443`.
 The production gateway has one entry for the prod backend listing `https://app.vocdoni.io` and every
 custom organisation domain that serves voting pages. Startup fails, naming the entry and never
-printing a key, on any invalid or duplicate value.
+printing a key, on any invalid or duplicate value. Only a devca binary (see "Local development")
+also accepts an origin and a backend `url` of the form `http://localhost:<port>`; any other binary
+refuses both at startup.
 
 Generate a key pair (the seed goes to the gateway, the public key to the backend's
 `VOCDONI_CERT_GATEWAY_PUBLIC_KEYS` as `<keyId>:<public key>`):
@@ -6476,8 +6560,7 @@ vocdoni-app, and a read token for cert-check in `CERT_CHECK_READ_TOKEN`.
    ```sh
    mkdir -p ~/.cache/cert-gateway/devcerts && cd ~/.cache/cert-gateway/devcerts
    mkcert -install
-   mkcert -cert-file cert.pem -key-file key.pem cert.localtest.me saas-api.localtest.me
-   cp "$(mkcert -CAROOT)/rootCA.pem" rootCA.pem
+   mkcert -cert-file cert.pem -key-file key.pem cert.localtest.me
    ```
 2. The test CA and a certificate for a test DNI (the CA is created once, in
    `~/.cache/cert-gateway/devca`, never in the repository):
@@ -6489,9 +6572,10 @@ vocdoni-app, and a read token for cert-check in `CERT_CHECK_READ_TOKEN`.
    Import; Chrome/Edge: the operating system's certificate store).
 3. `cp ../saas-backend/example.env ../saas-backend/.env`, set `VOCDONI_VOCDONIAPI=http://vocone:9090/v2`
    and the keys it needs, then `make dev`. It starts Mongo, vocone, saas-backend (with the test
-   gateway key in `VOCDONI_CERT_GATEWAY_PUBLIC_KEYS`), Caddy with TLS in front of it
-   (`saas-api.localtest.me:8444`, the gateway only posts to https backends) and the devca gateway on
-   `https://cert.localtest.me:8443` (`/readyz` on `http://localhost:8082`).
+   gateway key in `VOCDONI_CERT_GATEWAY_PUBLIC_KEYS`) and the devca gateway on
+   `https://cert.localtest.me:8443` (`/readyz` on `http://localhost:8082`). The gateway shares the
+   backend container's network and posts to it at `http://localhost:8080`, a backend `url` only a
+   devca binary accepts.
 4. Run vocdoni-app on `http://localhost:3000`:
    `SAAS_URL=http://localhost:8080 CERT_GATEWAY_URL=https://cert.localtest.me:8443 pnpm dev`.
 5. In the app: create an organisation, add a member with DNI `12345678Z`, create a process whose
@@ -6606,12 +6690,12 @@ The gateway has no state: stop it or redeploy the previous commit at any time. U
 Step 2: check what can be checked without credentials
 Run: `cd /home/lucasmenendez/cert-gateway && export GOPRIVATE=github.com/vocdoni/cert-check && make test && make build && grep -c devca Dockerfile`
 Expected: `ok` for every package, the binary at `~/.cache/cert-gateway/bin/cert-gateway`, and `1` (the Dockerfile only mentions the tag in its "never pass -tags devca" comment).
-Run (from the cert-gateway directory, with saas-backend checked out next to it and an empty `../saas-backend/.env`): `CERT_GATEWAY_DIR=$PWD DEVCERTS_DIR=$HOME/.cache/cert-gateway/devcerts DEVCA_DIR=$HOME/.cache/cert-gateway/devca CERT_CHECK_READ_TOKEN=unused docker compose --project-directory ../saas-backend -f ../saas-backend/docker-compose.yml -f docker-compose.dev.yml --profile with-vocone config >/dev/null && echo ok`
-Expected: `ok` (the merged file is valid; the `api` service gains `VOCDONI_CERT_GATEWAY_PUBLIC_KEYS`). Do not leave an empty `.env` behind in saas-backend if you created one for this check.
+Run: `cd /home/lucasmenendez/cert-gateway && B=/home/lucasmenendez/saas-backend/.worktrees/feature-cert-auth && created= && { [ -e $B/.env ] || { touch $B/.env; created=1; }; } && CERT_GATEWAY_DIR=$PWD DEVCERTS_DIR=$HOME/.cache/cert-gateway/devcerts DEVCA_DIR=$HOME/.cache/cert-gateway/devca CERT_CHECK_READ_TOKEN=unused docker compose --project-directory $B -f $B/docker-compose.yml -f docker-compose.dev.yml --profile with-vocone config >/dev/null && echo ok; [ -z "$created" ] || rm $B/.env`
+Expected: `ok` (the merged file is valid; the `api` service gains `VOCDONI_CERT_GATEWAY_PUBLIC_KEYS` and publishes 8443 and 8082; `cert-gateway` runs with `network_mode: service:api` and posts to `http://localhost:8080`).
 Not verifiable here: `docker build .` and the CI run need a read token for cert-check (`CERT_CHECK_READ_TOKEN`, an owner-provided secret), and `make dev` needs that token, mkcert and the README steps; the owner runs the walkthrough once (AC12).
 
 Step 3: commit
-`git -c commit.gpgsign=false commit -m "build(gateway): add the image, ci, local stack and operations guide" -- Dockerfile dev/Dockerfile.devca dev/Caddyfile docker-compose.dev.yml Makefile .github/workflows/ci.yml README.md`
+`git add -- Dockerfile dev/Dockerfile.devca docker-compose.dev.yml Makefile .github/workflows/ci.yml README.md && git -c commit.gpgsign=false commit -m "build(gateway): add the image, ci, local stack and operations guide" -- Dockerfile dev/Dockerfile.devca docker-compose.dev.yml Makefile .github/workflows/ci.yml README.md`
 
 Interfaces this task provides to later tasks: `make build|test|test-devca|lint|dev`; the Railway settings and runbook used in "Merge and release".
 
@@ -6619,7 +6703,7 @@ Interfaces this task provides to later tasks: `make build|test|test-devca|lint|d
 ## Part C — vocdoni-integrator-sdk (D6)
 
 ### Task 15: SDK types, `voterRef` in react-providers, changeset
-Model: standard   Repo: vocdoni-integrator-sdk (`/home/lucasmenendez/vocdoni-integrator-sdk`)   Files: `packages/api-types/src/index.ts`, `packages/react-providers/src/election/use-election-auth.ts`, `packages/react-providers/src/election/ElectionProvider.mount.test.tsx`, `skills/vocdoni-integrator-sdk/references/react.md`, `.changeset/cert-auth-voter-ref.md` (new)
+Model: standard   Repo: vocdoni-integrator-sdk (`/home/lucasmenendez/vocdoni-integrator-sdk`)   Files: `packages/api-types/src/index.ts`, `packages/react-providers/src/election/use-election-auth.ts`, `packages/react-providers/src/election/ElectionProvider.mount.test.tsx`, `skills/vocdoni-integrator-sdk/references/react.md`, `skills/vocdoni-integrator-sdk/references/client.md`, `.changeset/cert-auth-voter-ref.md` (new)
 Goal: D6/C3 — `@vocdoni/api-types` gains `certAuth`, `certCode`, `codeVerifier`, `voterRef`; `auth0` sets `owner` to `res.voterRef ?? ownerHash(participant)` (AC8 last bullet).
 
 Step 0: branch from the recorded base
@@ -6794,6 +6878,15 @@ with:
 `voterRef` when the backend returns one (certificate censuses, `census.certAuth`,
 where the payload is a fresh `{ certCode, codeVerifier }` on every login). So:
 ```
+Edit `skills/vocdoni-integrator-sdk/references/client.md`, after the line
+`// A wrong one fails like an unknown voter (401, error code 40802).` insert:
+
+```ts
+// A census with `certAuth: true` takes no typed field: step 0 is
+// authStep0(processId, { certCode, codeVerifier /*, email | phone when the census has 2FA */ }),
+// with the single-use code the certificate gateway returned to the voting page and its PKCE verifier.
+// The answer also carries `voterRef`, a stable reference of that voter on the process.
+```
 Create `.changeset/cert-auth-voter-ref.md`:
 
 ```markdown
@@ -6808,7 +6901,7 @@ Run: `cd /home/lucasmenendez/vocdoni-integrator-sdk && pnpm vitest run packages/
 Expected: `Tests  9 passed (9)`; then `Test Files  62 passed (62)` / `Tests  906 passed (906)`; then `Tasks:    6 successful, 6 total` (tsc in every package)
 
 Step 3: commit
-`git -c commit.gpgsign=false commit -m "feat(react-providers): bind pending votes to the certificate voter ref" -- packages/api-types/src/index.ts packages/react-providers/src/election/use-election-auth.ts packages/react-providers/src/election/ElectionProvider.mount.test.tsx skills/vocdoni-integrator-sdk/references/react.md .changeset/cert-auth-voter-ref.md`
+`git add -- packages/api-types/src/index.ts packages/react-providers/src/election/use-election-auth.ts packages/react-providers/src/election/ElectionProvider.mount.test.tsx skills/vocdoni-integrator-sdk/references/react.md skills/vocdoni-integrator-sdk/references/client.md .changeset/cert-auth-voter-ref.md && git -c commit.gpgsign=false commit -m "feat(react-providers): bind pending votes to the certificate voter ref" -- packages/api-types/src/index.ts packages/react-providers/src/election/use-election-auth.ts packages/react-providers/src/election/ElectionProvider.mount.test.tsx skills/vocdoni-integrator-sdk/references/react.md skills/vocdoni-integrator-sdk/references/client.md .changeset/cert-auth-voter-ref.md`
 
 Interfaces this task provides to later tasks: after the release, `@vocdoni/api-types` (minor, expected 2.6.0) with `CensusSpec.certAuth`, `AuthRequest.certCode`/`codeVerifier`, `AuthResponse.voterRef`; `@vocdoni/react-providers` (patch, expected 4.0.3) whose `auth0` binds `owner` to `voterRef`. Dependents get patch bumps through `updateInternalDependents: always`.
 
@@ -6838,7 +6931,7 @@ Step 3: commit
 Interfaces this task provides to later tasks: `CensusSpec.certAuth`, `AuthRequest.certCode`/`codeVerifier`, `AuthResponse.voterRef` types; `auth0` binding pending votes to `voterRef`.
 
 ### Task 17: `CERT_GATEWAY_URL` and the organiser's "digital certificate" option
-Model: standard   Repo: vocdoni-app   Files: `src/app-env-build.ts`, `src/app-env-build.test.ts`, `src/components/Process/Create/common.ts`, `src/components/Process/Create/census-spec.ts`, `src/components/Process/Create/draft-mapping.ts`, `src/components/Process/Create/draft-mapping.test.ts`, `src/components/Process/Create/VoterAuthentication/utils.ts`, `src/components/Process/Create/VoterAuthentication/useCensusCheck.ts`, `src/components/Process/Create/VoterAuthentication/VoterAuthForm.tsx`, `src/components/Process/Create/VoterAuthentication/index.test.tsx`
+Model: standard   Repo: vocdoni-app   Files: `src/app-env-build.ts`, `src/app-env-build.test.ts`, `src/components/Process/Create/common.ts`, `src/components/Process/Create/census-spec.ts`, `src/components/Process/Create/draft-mapping.ts`, `src/components/Process/Create/draft-mapping.test.ts`, `src/components/Process/Create/VoterAuthentication/utils.ts`, `src/components/Process/Create/VoterAuthentication/useCensusCheck.ts`, `src/components/Process/Create/VoterAuthentication/VoterAuthForm.tsx`, `src/components/Process/Create/VoterAuthentication/index.test.tsx`, `.env.example`, `README.md`
 Goal: C3 organiser side and configuration — the option is shown only with `CERT_GATEWAY_URL`, fixes the credentials to `["nationalId"]`, keeps the 2FA choices, sends `certAuth: true`, round-trips drafts and clones, and names "a valid DNI/NIE (missing or invalid)" in the missing-data alert (AC8 first bullet). `useCensusCheck` drops `certAuth` from its contact-only breakdown query (the backend refuses `certAuth` without `["nationalId"]`).
 
 Step 1: write the failing tests (apply with `git apply`)
@@ -7109,7 +7202,7 @@ diff --git a/src/components/Process/Create/VoterAuthentication/useCensusCheck.ts
 index 9fd77a68..af325db6 100644
 --- a/src/components/Process/Create/VoterAuthentication/useCensusCheck.ts
 +++ b/src/components/Process/Create/VoterAuthentication/useCensusCheck.ts
-@@ -100,7 +100,13 @@ const fieldParts = (spec: CensusSpec) => [
+@@ -100,6 +100,12 @@ const fieldParts = (spec: CensusSpec) => [
        spec: { ...spec, authFields: [field], twoFaFields: undefined },
      })),
    ...(spec.twoFaFields?.length
@@ -7235,17 +7328,31 @@ index dbfe919f..bab74340 100644
                            >
                              <CheckboxCard.HiddenInput />
 ```
+Edit `.env.example`, after the line `DISABLE_ANONYMOUS_VOTING=` insert:
+
+```
+# Certificate gateway origin, port included (e.g. https://cert.vocdoni.io:15140). Unset hides the
+# "digital certificate" voter sign-in option.
+CERT_GATEWAY_URL=
+```
+Edit `README.md`, after the `DISABLE_ANONYMOUS_VOTING` bullet (it ends with `creation wizard. Unset or any other value
+leaves the option available. Read at runtime.`) insert:
+
+```markdown
+- `CERT_GATEWAY_URL` the https origin of the certificate gateway, port included (for example
+  `https://cert.vocdoni.io:15140`). When unset, the "digital certificate" voter sign-in option is hidden.
+```
 Run: `cd /home/lucasmenendez/vocdoni-app && npx prettier --check src && npx tsc --noEmit -p . && npx vitest run src/app-env-build.test.ts src/components/Process/Create`
 Expected: `All matched files use Prettier code style!`, no tsc output, `Test Files  18 passed (18)` / `Tests  240 passed (240)`
 
 Step 3: commit
-`git -c commit.gpgsign=false commit -m "feat(process): offer certificate sign-in to organisers" -- src/app-env-build.ts src/app-env-build.test.ts src/components/Process/Create/common.ts src/components/Process/Create/census-spec.ts src/components/Process/Create/draft-mapping.ts src/components/Process/Create/draft-mapping.test.ts src/components/Process/Create/VoterAuthentication/utils.ts src/components/Process/Create/VoterAuthentication/useCensusCheck.ts src/components/Process/Create/VoterAuthentication/VoterAuthForm.tsx src/components/Process/Create/VoterAuthentication/index.test.tsx`
+`git -c commit.gpgsign=false commit -m "feat(process): offer certificate sign-in to organisers" -- src/app-env-build.ts src/app-env-build.test.ts src/components/Process/Create/common.ts src/components/Process/Create/census-spec.ts src/components/Process/Create/draft-mapping.ts src/components/Process/Create/draft-mapping.test.ts src/components/Process/Create/VoterAuthentication/utils.ts src/components/Process/Create/VoterAuthentication/useCensusCheck.ts src/components/Process/Create/VoterAuthentication/VoterAuthForm.tsx src/components/Process/Create/VoterAuthentication/index.test.tsx .env.example README.md`
 
 Interfaces this task provides to later tasks: `AppEnv.CERT_GATEWAY_URL?: string` (an https origin, port included); `Census.certAuth?: boolean`; `VoterAuthFormData.certAuth`; `CERT_AUTH_CREDENTIALS`.
 
 ### Task 18: Voter certificate flow (state, PKCE, fragment, errors)
 Model: strong   Repo: vocdoni-app   Files: `src/components/Process/CSP/cert-auth.ts` (new), `src/components/Process/CSP/cert-auth.test.ts` (new), `src/components/Process/CSP/CertAuth.tsx` (new), `src/components/Process/CSP/CertAuth.test.tsx` (new), `src/components/Process/CSP/CSPStepsProvider.tsx`, `src/components/Process/CSP/CSPAuthModal.tsx`, `src/components/Process/CSP/Step0.tsx`, `src/components/Process/CSP/basics.tsx`
-Goal: C3 voter side 1–6b — a single certificate button (terms required), `state` (16 bytes) and `codeVerifier` (32 bytes) in `sessionStorage["certAuth:<processId>"]`, top-level navigation to `${CERT_GATEWAY_URL}/v1/auth` with `returnUrl = origin + /[lang/]processes/<id>`, on return: state check, fragment stripped, entry deleted only on a match, `auth0({certCode, codeVerifier[, email|phone]})`, localised errors with the "close the browser" note (sticky codes) or a retry (retryable codes), the network note, never `pushCrispUserFields` (AC8 bullets 2–4, AC11 app half).
+Goal: C3 voter side 1–6b — a single certificate button (terms required), `state` (16 bytes) and `codeVerifier` (32 bytes) in `sessionStorage["certAuth:<processId>"]`, top-level navigation to `${CERT_GATEWAY_URL}/v1/auth` with `returnUrl = origin + /[lang/]processes/<id>`, on return: state check, fragment stripped, entry deleted only on a match, `auth0({certCode, codeVerifier[, email|phone]})`, localised errors with the "close the browser" note (every non-retryable code) or a retry (retryable codes), the network note, never `pushCrispUserFields` (AC8 bullets 2–4, AC11 app half).
 
 Step 1: write the failing tests
 Create `src/components/Process/CSP/cert-auth.test.ts`:
@@ -7521,14 +7628,30 @@ Create `src/components/Process/CSP/cert-auth.ts`:
 // The page accepts the code only when `state` matches the stored one, and redeems it at step 0 with
 // the verifier. Nothing else is stored: no DNI, name or certificate data ever reaches the browser.
 
-/** Gateway and backend error codes after which the browser keeps offering the same certificate. */
+/**
+ * Every non-retryable gateway and backend error code: retrying as is gets the same answer, because
+ * the browser keeps offering the same certificate (or none) until it is restarted.
+ */
 export const STICKY_CERT_ERRORS = [
   'no_certificate',
   'not_in_census',
   'zero_weight',
+  'not_cert_census',
+  'anonymous_unavailable',
+  'process_not_open',
   'provider_mismatch',
   'untrusted_issuer',
   'unsupported_profile',
+  'invalid_chain',
+  'expired',
+  'not_yet_valid',
+  'unsupported_purpose',
+  'weak_algorithm',
+  'test_certificate',
+  'identity_invalid',
+  'identity_unsupported_document',
+  'revoked',
+  'revocation_unknown',
 ] as const
 
 /** Error codes worth retrying as is, a bit later. */
@@ -8092,10 +8215,10 @@ index 4787c71e..857c1725 100644
    const { setCurrentStep, setAuthData, authFields, twoFaFields } = useCspAuthContext()
 ```
 Run: `cd /home/lucasmenendez/vocdoni-app && npx prettier --check src && npx tsc --noEmit -p . && npx vitest run src/components/Process/CSP && pnpm lint`
-Expected: Prettier clean, no tsc output, `Test Files  8 passed (8)` / `Tests  73 passed (73)`, and `pnpm lint` passing (knip reports no unused export)
+Expected: Prettier clean, no tsc output, `Test Files  8 passed (8)` / `Tests  86 passed (86)`, and `pnpm lint` passing (knip reports no unused export)
 
 Step 3: commit
-`git -c commit.gpgsign=false commit -m "feat(csp): sign voters in with a digital certificate" -- src/components/Process/CSP/cert-auth.ts src/components/Process/CSP/cert-auth.test.ts src/components/Process/CSP/CertAuth.tsx src/components/Process/CSP/CertAuth.test.tsx src/components/Process/CSP/CSPStepsProvider.tsx src/components/Process/CSP/CSPAuthModal.tsx src/components/Process/CSP/Step0.tsx src/components/Process/CSP/basics.tsx`
+`git add -- src/components/Process/CSP/cert-auth.ts src/components/Process/CSP/cert-auth.test.ts src/components/Process/CSP/CertAuth.tsx src/components/Process/CSP/CertAuth.test.tsx src/components/Process/CSP/CSPStepsProvider.tsx src/components/Process/CSP/CSPAuthModal.tsx src/components/Process/CSP/Step0.tsx src/components/Process/CSP/basics.tsx && git -c commit.gpgsign=false commit -m "feat(csp): sign voters in with a digital certificate" -- src/components/Process/CSP/cert-auth.ts src/components/Process/CSP/cert-auth.test.ts src/components/Process/CSP/CertAuth.tsx src/components/Process/CSP/CertAuth.test.tsx src/components/Process/CSP/CSPStepsProvider.tsx src/components/Process/CSP/CSPAuthModal.tsx src/components/Process/CSP/Step0.tsx src/components/Process/CSP/basics.tsx`
 
 Interfaces this task provides to later tasks: i18n keys `csp.cert.*` and `voter_auth.cert.*` with English `defaultValue`s (Task 19 extracts them).
 
@@ -8206,6 +8329,11 @@ Interfaces this task provides to later tasks: none (last task).
    - saas-backend: `go test -failfast -timeout=45m ./... -count=1` → `ok` for every package (scratch run: all 24 packages,
      `api` 384 s); `golangci-lint run --new-from-rev=origin/main ./...` → `0 issues.`; `./scripts/check-qt-patterns.sh` →
      no anti-patterns; `go mod tidy -diff` → empty; `PATH="$(go env GOPATH)/bin:$PATH" make swagger` → no diff.
+   - saas-backend, before opening the PR and again immediately before merging it:
+     `git fetch origin && git ls-tree --name-only origin/main migrations/ | grep -E '/00(3[7-9]|[4-9][0-9])_'` → no
+     output. If it prints anything, renumber this branch's two migrations above the highest one on main (file names,
+     the `AddMigration` versions, `migrationByVersion(c, 37)` in `db/migration_canonical_national_id_test.go`) and
+     re-run `go test ./db/ ./migrations/`.
    - cert-gateway: `make test && make test-devca && make lint` → `ok` for `cmd/cert-gateway`, `internal/certs`,
      `internal/gateway` (both builds), `0 issues.` twice; `go mod tidy -diff` → empty.
    - vocdoni-integrator-sdk: `pnpm test` → `Test Files  62 passed (62)`, `Tests  906 passed (906)` at base 2be5f7e;
@@ -8237,6 +8365,10 @@ Interfaces this task provides to later tasks: none (last task).
    8. Merging the integrator-sdk release PR, which publishes the npm packages.
    9. Running `scripts/repairlogins` (dry run, built from this branch) against dev, then stg, then prod, and reading the
       collision count before each backend deploy (C2.6).
+       A non-zero count is not harmless: each skipped member whose stored national ID is not already canonical
+       cannot log in after the deploy (typed or by certificate) until the duplicate is removed and
+       `scripts/repairlogins -apply` is run again. List the `SkippedMembers` of open processes and have the
+       duplicates removed before deploying.
    10. Each saas-backend deploy (dev, stg, prod): migrations 0037 and 0038 run on start.
    11. Generating the Ed25519 key pairs (`dev-1`, `stg-1`, prod's) and entering each seed as a sealed
        `SIGNING_KEY_<NAME>` on the right Railway service, and each public key in the backend's
@@ -8262,8 +8394,12 @@ Interfaces this task provides to later tasks: none (last task).
      parameters answers the 400 page with the hardening headers.
    - The `LOG_LEVEL=debug` `remoteAddr` check from two networks, then `LOG_LEVEL=info`.
    - AC9 manual end-to-end on dev by the owner (FNMT and idCAT software certificates; Windows store with Chrome/Edge,
-     Firefox, macOS or Android; auth-only and email-2FA censuses; a DNI outside the census; one cancelled picker).
+     Firefox, macOS or Android; auth-only and email-2FA censuses; a DNI outside the census; one cancelled picker; in each
+     browser, also leave the certificate picker open for more than 10 seconds before choosing, and record what the voter
+     sees).
    - Logs of gateway and backend during AC9 contain no DNI, name, email, phone, `returnUrl` or `state`.
+   - AC12 `make dev` walkthrough by the owner (cert-gateway README, "Local development"); until saas-backend is merged,
+     run `make dev SAAS_BACKEND_DIR=<the feat/cert-auth worktree>`.
    - Staging: the `stg` entry's `backend check` shows 401 before app-stg gets `CERT_GATEWAY_URL`.
    - Rollback paths as in the spec: unset `VOCDONI_CERT_GATEWAY_PUBLIC_KEYS` (route 404, new cert censuses refused); the
      gateway is stateless.
