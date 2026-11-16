@@ -476,6 +476,9 @@ func (f OrgMemberTwoFaFields) GetCensusType() CensusType {
 // scripts, but diverging from the existing convention would be worse: the two
 // sides of the comparison only agree because they fold identically.
 //
+// The national ID is hashed in its canonical DNI/NIE form when it is a valid one (see
+// memberAuthFieldValue and internal.CanonicalNationalID), so its formatting does not matter.
+//
 // The password auth field is not part of the hash (memberAuthFieldValue reports it unknown): it is
 // checked after the participant lookup instead, so passwords never affect loginHash, uniqueness or
 // duplicate detection.

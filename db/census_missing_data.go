@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
@@ -70,7 +71,9 @@ func memberAuthFieldValue(m *OrgMember, field OrgMemberAuthField) (value string,
 	case OrgMemberAuthFieldsMemberNumber:
 		return m.MemberNumber, true
 	case OrgMemberAuthFieldsNationalID:
-		return m.NationalID, true
+		// a valid DNI/NIE is compared in its canonical form, so its formatting does not matter
+		nationalID, _ := internal.CanonicalNationalID(m.NationalID)
+		return nationalID, true
 	case OrgMemberAuthFieldsBirthDate:
 		return m.BirthDate, true
 	default:

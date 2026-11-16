@@ -54,7 +54,8 @@ func hashMemberFields(m memberHashDoc, authFields, twoFaFields []string) []byte 
 		case "memberNumber":
 			fields[field] = strings.ToLower(m.MemberNumber)
 		case "nationalId":
-			fields[field] = strings.ToLower(m.NationalID)
+			nationalID, _ := internal.CanonicalNationalID(m.NationalID)
+			fields[field] = strings.ToLower(nationalID)
 		case "birthDate": //nolint:goconst
 			fields[field] = strings.ToLower(m.BirthDate)
 		default:
