@@ -165,8 +165,14 @@ ACME cache.
     Dev and prod use separate tokens. The owner enters each as a sealed Railway variable.
   - Every auth request is checked with `certcheck.CheckHost`; a mismatch answers 421. `CheckHost`
     strips the port from `Host`, so the Railway port in the URL is fine.
+  - Only top-level navigations reach the certificate check: a request whose `Sec-Fetch-Dest` header
+    is present and not `document` (an `<img>`, `<iframe>` or `fetch()` from another page) gets the
+    400 page and no backend call, so another site cannot spend a voter's assertion budget. A browser
+    that sends no `Sec-Fetch-Dest` is served as before (owner, 2026-11-16, gate audit).
   - `http.Server`: `ReadHeaderTimeout` 10 s, `ReadTimeout` 15 s, `WriteTimeout` 60 s, `IdleTimeout`
-    60 s, `MaxHeaderBytes` 16 KiB.
+    60 s, `MaxHeaderBytes` 16 KiB. The auth listener uses 60 s for `ReadHeaderTimeout` and
+    `ReadTimeout`: net/http bounds the TLS handshake by the smallest of these timeouts, and the
+    certificate picker and any key-store prompt happen inside it (owner, 2026-11-16, gate audit).
 - **Providers.** `fnmt.New`, `idcat.New`, `accv.New`, `digitel.New`, `bewor.New`,
   `sectigo.New`. They share one `certcheck.NewRevocation` with `UserAgent: "vocdoni-cert-gateway/<version>"`.
   `NewHandler` fails at startup on any misconfiguration.
@@ -250,8 +256,9 @@ ACME cache.
     request, so a path prefix or rewrite at the edge cannot break verification. `body` is the raw
     request body; the backend hashes the bytes it read (bounded at 4 KiB) before decoding JSON.
   - `Content-Type: application/json`. `User-Agent: vocdoni-cert-gateway/<version>`.
-- **Backend check at startup.** For each `BACKENDS` entry the gateway sends one unsigned
-  `POST url + "/cert-auth/assertions"` with an empty body and a 10 s deadline, and logs
+- **Backend check at startup.** For each `BACKENDS` entry the gateway sends one invalidly signed
+  `POST url + "/cert-auth/assertions"` (header `X-Cert-Gateway-Signature: t=0,k=backend-check,v1=`,
+  so it matches the same edge rules as a real assertion but never verifies) with an empty body and a 10 s deadline, and logs
   `backend check` with the entry `name` and the HTTP status: info for 401 or 404, error for
   anything else or a transport failure. It does not block startup or `/readyz`.
 - **Configuration** (env):
