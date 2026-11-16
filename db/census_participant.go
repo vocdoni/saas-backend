@@ -543,7 +543,7 @@ func (ms *MongoStorage) AddCensusParticipantsByMemberIDs(censusID string, member
 		}
 
 		// a member missing login data could never log in: it is left out of the census
-		if member.MissingLoginData(census.AuthFields, census.TwoFaFields) {
+		if census.MemberMissingLoginData(member) {
 			memberErrors = append(memberErrors, fmt.Errorf("%s: %w", memberID, ErrMissingLoginData))
 			continue
 		}
@@ -858,15 +858,16 @@ func (ms *MongoStorage) CensusParticipantsByMemberIDs(
 // the census, keyed by the censusParticipants field holding each one. Every such field carries its
 // own unique (censusId, field) index.
 func calculateParticipantHashes(census Census, member OrgMember) map[string][]byte {
+	authFields, twoFaFields := census.LoginHashFields()
 	hashes := map[string][]byte{
-		"loginHash": HashAuthTwoFaFields(member, census.AuthFields, census.TwoFaFields),
+		"loginHash": HashAuthTwoFaFields(member, authFields, twoFaFields),
 	}
 	// a whitespace-only email is no channel, as MissingLoginData has it
-	if len(census.TwoFaFields) == 2 && strings.TrimSpace(member.Email) != "" {
-		hashes["loginHashEmail"] = HashAuthTwoFaFields(member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail})
+	if len(twoFaFields) == 2 && strings.TrimSpace(member.Email) != "" {
+		hashes["loginHashEmail"] = HashAuthTwoFaFields(member, authFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail})
 	}
-	if len(census.TwoFaFields) == 2 && !member.Phone.IsEmpty() {
-		hashes["loginHashPhone"] = HashAuthTwoFaFields(member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone})
+	if len(twoFaFields) == 2 && !member.Phone.IsEmpty() {
+		hashes["loginHashPhone"] = HashAuthTwoFaFields(member, authFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone})
 	}
 	return hashes
 }

@@ -28,6 +28,7 @@ type censusHashDoc struct {
 	ID          bson.ObjectID `bson:"_id"`
 	AuthFields  []string      `bson:"orgMemberAuthFields"`
 	TwoFaFields []string      `bson:"orgMemberTwoFaFields"`
+	CertAuth    bool          `bson:"certAuth"`
 }
 
 // hashMemberFields mirrors db.HashAuthTwoFaFields exactly: it collects the

@@ -76,11 +76,11 @@ func (a *API) validateProcessCensusHandler(w http.ResponseWriter, r *http.Reques
 	var err error
 	switch {
 	case census.GroupID != "":
-		results, err = a.db.CheckGroupMembersFields(orgAddr, census.GroupID, census.AuthFields, census.TwoFaFields)
+		results, err = a.db.CheckGroupMembersFields(orgAddr, census.GroupID, census.AuthFields, census.TwoFaFields, false)
 	case len(census.MemberIDs) > 0:
-		results, err = a.db.CheckMembersFields(orgAddr, census.MemberIDs, census.AuthFields, census.TwoFaFields)
+		results, err = a.db.CheckMembersFields(orgAddr, census.MemberIDs, census.AuthFields, census.TwoFaFields, false)
 	default:
-		results, err = a.db.CheckGroupMembersFields(orgAddr, "", census.AuthFields, census.TwoFaFields)
+		results, err = a.db.CheckGroupMembersFields(orgAddr, "", census.AuthFields, census.TwoFaFields, false)
 	}
 	if err != nil {
 		// bad input (malformed member id, unknown group) is a client error, not a 500.

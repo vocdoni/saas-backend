@@ -684,7 +684,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			OrgMemberAuthFieldsName,
 		}
 		twoFaFields := OrgMemberTwoFaFields{}
-		results, err := testDB.CheckGroupMembersFields(testOrgAddress, validGroupID, authFields, twoFaFields)
+		results, err := testDB.CheckGroupMembersFields(testOrgAddress, validGroupID, authFields, twoFaFields, false)
 		c.Assert(err, qt.IsNil)
 		c.Assert(results, qt.Not(qt.IsNil))
 		c.Assert(results.Members, qt.HasLen, 1)     // Only 1 member in valid group
@@ -698,7 +698,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			OrgMemberAuthFieldsMemberNumber,
 		}
 		twoFaFields = OrgMemberTwoFaFields{}
-		results, err = testDB.CheckGroupMembersFields(testOrgAddress, duplicatesGroupID, authFields, twoFaFields)
+		results, err = testDB.CheckGroupMembersFields(testOrgAddress, duplicatesGroupID, authFields, twoFaFields, false)
 		c.Assert(err, qt.IsNil)
 		c.Assert(results, qt.Not(qt.IsNil))
 		// The function only adds members to the Members field if they don't have duplicates
@@ -723,7 +723,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			OrgMemberAuthFieldsMemberNumber,
 		}
 		twoFaFields = OrgMemberTwoFaFields{}
-		results, err = testDB.CheckGroupMembersFields(testOrgAddress, allMembersGroupID, authFields, twoFaFields)
+		results, err = testDB.CheckGroupMembersFields(testOrgAddress, allMembersGroupID, authFields, twoFaFields, false)
 		c.Assert(err, qt.IsNil)
 		c.Assert(results, qt.Not(qt.IsNil))
 
@@ -740,21 +740,21 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		c.Assert(contains(emptyIDs, member4ID), qt.IsTrue)
 
 		// Test 4: Edge case - invalid organization address
-		_, err = testDB.CheckGroupMembersFields(common.Address{}, validGroupID, authFields, twoFaFields)
+		_, err = testDB.CheckGroupMembersFields(common.Address{}, validGroupID, authFields, twoFaFields, false)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test 5: Edge case - empty auth fields but with twoFa fields
 		twoFaFields = OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail}
-		_, err = testDB.CheckGroupMembersFields(testOrgAddress, validGroupID, OrgMemberAuthFields{}, twoFaFields)
+		_, err = testDB.CheckGroupMembersFields(testOrgAddress, validGroupID, OrgMemberAuthFields{}, twoFaFields, false)
 		c.Assert(err, qt.IsNil) // Should NOT return an error when twoFaFields are provided
 
 		// Test 5b: Edge case - both auth fields and twoFa fields empty
-		_, err = testDB.CheckGroupMembersFields(testOrgAddress, validGroupID, OrgMemberAuthFields{}, OrgMemberTwoFaFields{})
+		_, err = testDB.CheckGroupMembersFields(testOrgAddress, validGroupID, OrgMemberAuthFields{}, OrgMemberTwoFaFields{}, false)
 		c.Assert(err, qt.Not(qt.IsNil)) // Should return an error for empty auth fields
 
 		// Test 6: Edge case - non-existent group ID
 		nonExistentGroupID := bson.NewObjectID().Hex()
-		_, err = testDB.CheckGroupMembersFields(testOrgAddress, nonExistentGroupID, authFields, twoFaFields)
+		_, err = testDB.CheckGroupMembersFields(testOrgAddress, nonExistentGroupID, authFields, twoFaFields, false)
 		c.Assert(err, qt.Not(qt.IsNil)) // Should return an error for non-existent group
 
 		// Test 7: Edge case - group from different organization
@@ -788,7 +788,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Try to use the other organization's group with our organization
-		_, err = testDB.CheckGroupMembersFields(testOrgAddress, otherGroupID, authFields, twoFaFields)
+		_, err = testDB.CheckGroupMembersFields(testOrgAddress, otherGroupID, authFields, twoFaFields, false)
 		c.Assert(err, qt.Not(qt.IsNil)) // Should return an error (group not found for this org)
 
 		// Test 8: Test with all members group to ensure filtering works correctly
@@ -796,7 +796,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			OrgMemberAuthFieldsName,
 		}
 		twoFaFields = OrgMemberTwoFaFields{}
-		results, err = testDB.CheckGroupMembersFields(testOrgAddress, allMembersGroupID, authFields, twoFaFields)
+		results, err = testDB.CheckGroupMembersFields(testOrgAddress, allMembersGroupID, authFields, twoFaFields, false)
 		c.Assert(err, qt.IsNil)
 		c.Assert(results, qt.Not(qt.IsNil))
 		// The function only adds members to the Members field if they don't have duplicates or empty fields
@@ -812,7 +812,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			OrgMemberTwoFaFieldEmail,
 			OrgMemberTwoFaFieldPhone,
 		}
-		results, err = testDB.CheckGroupMembersFields(testOrgAddress, validGroupID, authFields, twoFaFields)
+		results, err = testDB.CheckGroupMembersFields(testOrgAddress, validGroupID, authFields, twoFaFields, false)
 		c.Assert(err, qt.IsNil)
 		c.Assert(results, qt.Not(qt.IsNil))
 		c.Assert(len(results.Members) >= 0, qt.IsTrue)     // May or may not have members
@@ -826,7 +826,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		twoFaFields = OrgMemberTwoFaFields{
 			OrgMemberTwoFaFieldEmail,
 		}
-		results, err = testDB.CheckGroupMembersFields(testOrgAddress, allMembersGroupID, authFields, twoFaFields)
+		results, err = testDB.CheckGroupMembersFields(testOrgAddress, allMembersGroupID, authFields, twoFaFields, false)
 		c.Assert(err, qt.IsNil)
 		c.Assert(results, qt.Not(qt.IsNil))
 
@@ -885,7 +885,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		twoFaFields = OrgMemberTwoFaFields{
 			OrgMemberTwoFaFieldPhone,
 		}
-		results, err = testDB.CheckGroupMembersFields(testOrgAddress, emptyPhoneGroupID, authFields, twoFaFields)
+		results, err = testDB.CheckGroupMembersFields(testOrgAddress, emptyPhoneGroupID, authFields, twoFaFields, false)
 		c.Assert(err, qt.IsNil)
 		c.Assert(results, qt.Not(qt.IsNil))
 		c.Assert(results.MissingData, qt.HasLen, 1) // Should detect empty phone
@@ -968,7 +968,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			OrgMemberTwoFaFieldEmail,
 			OrgMemberTwoFaFieldPhone,
 		}
-		results, err = testDB.CheckGroupMembersFields(testOrgAddress, twoFaGroupID, authFields, twoFaFields)
+		results, err = testDB.CheckGroupMembersFields(testOrgAddress, twoFaGroupID, authFields, twoFaFields, false)
 		c.Assert(err, qt.IsNil)
 		c.Assert(results, qt.Not(qt.IsNil))
 
@@ -1046,7 +1046,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 		// Before fix: These would be flagged as duplicates based on name+surname
 		// After fix: These should NOT be duplicates because emails are different
-		results, err = testDB.CheckGroupMembersFields(testOrgAddress, sameAuthGroupID, authFields, twoFaFields)
+		results, err = testDB.CheckGroupMembersFields(testOrgAddress, sameAuthGroupID, authFields, twoFaFields, false)
 		c.Assert(err, qt.IsNil)
 		c.Assert(results, qt.Not(qt.IsNil))
 		c.Assert(results.Duplicates, qt.HasLen, 0, qt.Commentf("Should NOT detect duplicates when 2FA fields make members unique"))
@@ -1117,6 +1117,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			regGroupID,
 			OrgMemberAuthFields{},
 			OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone},
+			false,
 		)
 		c.Assert(err, qt.IsNil)
 		c.Assert(results, qt.Not(qt.IsNil))
