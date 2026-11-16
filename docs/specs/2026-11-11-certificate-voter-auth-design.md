@@ -1,6 +1,6 @@
 # Certificate voter authentication: design
 
-Status: audited (2026-11-11, 18 findings; delta audit of D7 hosting, 12 findings folded in)   Class: architectural
+Status: approved (2026-11-16; audited 2026-11-11: 18 findings + delta audit 12 findings folded in)   Class: architectural
 Owner decisions so far (2026-11-11):
 - D1 Architecture: a separate, stateless **certificate gateway** service terminates TLS and checks
   the client certificate with `github.com/vocdoni/cert-check`. It hands the proven identity to
