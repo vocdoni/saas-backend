@@ -317,9 +317,11 @@ ACME cache.
       (`IDCES-<number>`), applying the same canonical form as cert-check.
     - It is added to the handler only when the binary is built with `-tags devca` **and**
       `DEVCA_CERT_FILE` is set.
-    - The Dockerfile and CI never pass the tag. A test builds the binary without the tag and checks
-      that a `devca` client certificate gets `untrusted_issuer` and that `devca` is not among the
-      provider ids.
+    - The Dockerfile and every image build never pass the tag. CI runs the untagged suite and, as
+      a separate test-only step, `go vet -tags devca ./... && go test -race -tags devca ./...`,
+      which builds no image (owner, 2026-11-16). A test builds the binary without the tag and
+      checks that a `devca` client certificate gets `untrusted_issuer` and that `devca` is not
+      among the provider ids.
     - A `devca` binary logs a warning at startup and answers `X-Cert-Gateway-Dev: devca` on every
       response.
   - **Scripts.** `scripts/devca` creates the local CA (once, under `~/.cache/cert-gateway/devca`,
@@ -329,8 +331,9 @@ ACME cache.
     local saas-backend with test gateway keys, the gateway (`devca`, static certificate, `BACKENDS`
     pointing at the local backend with origin `http://localhost:3000`) and documents running
     vocdoni-app with `CERT_GATEWAY_URL=https://cert.localtest.me:8443`.
-    - The `https`-only origin rule gets one exception: `http://localhost:<port>` is accepted only in
-      a `devca` binary.
+    - The `https`-only rules get two exceptions, both only in a `devca` binary (owner, 2026-11-16):
+      an origin `http://localhost:<port>`, and a backend `url` `http://localhost:<port>` (the local
+      saas-backend serves plain HTTP). A binary without the tag rejects both at startup.
     - The README walks through: create the CA, issue a certificate, import it, create a member with
       that DNI and a cert census, then vote.
   - A real certificate (FNMT, idCAT…) also works locally against a binary without `devca`. It
@@ -483,8 +486,11 @@ ACME cache.
   collision code is written.
 - Collisions follow the existing rule: rows of one census that share a recomputed hash are all
   skipped and listed in `RepairReport.SkippedMembers`. They are members stored twice under two
-  spellings of one DNI. They keep logging in with the exact spelling stored until the organiser
-  removes the duplicate; the migration log line carries the count.
+  spellings of one DNI. They keep their old hashes, but a login always hashes the canonical form,
+  so of such twins only one stored in canonical form still logs in; the others cannot (typed or by
+  certificate) until the organiser removes the duplicate and `scripts/repairlogins -apply` rehashes
+  the row that is left. The migration log line carries the count, and the duplicates of open
+  processes are removed before each deploy (corrected after the plan pre-flight audit).
 - It is idempotent (`RepairLoginHashes` is). Its `Down` is a no-op, as 0025's is: the old hashes
   come back by running the previous release's `scripts/repairlogins -apply`.
 - Before the deploy, the owner runs `scripts/repairlogins` (dry run) built from this branch against
@@ -615,10 +621,14 @@ ACME cache.
   not the one it stored. `state` also blocks login CSRF, where a victim's tab would be fed the
   attacker's code.
 - **Sticky certificate choice.** Browsers remember the chosen certificate, or the choice of none,
-  for the gateway's host until they are restarted. For `no_certificate`, `not_in_census`,
-  `zero_weight`, `provider_mismatch`, `untrusted_issuer` and `unsupported_profile` the voter UI says,
-  in the voter's language, that to use a different certificate they must close every window of the
-  browser and open the voting link again. The retry button stays, for the retryable codes
+  for the gateway's host until they are restarted. For every non-retryable code (`no_certificate`,
+  `not_in_census`, `zero_weight`, `not_cert_census`, `anonymous_unavailable`, `process_not_open` and
+  every cert-check code except `revocation_unavailable` and `internal`: `provider_mismatch`,
+  `untrusted_issuer`, `invalid_chain`, `expired`, `not_yet_valid`, `unsupported_profile`,
+  `unsupported_purpose`, `weak_algorithm`, `test_certificate`, `identity_invalid`,
+  `identity_unsupported_document`, `revoked`, `revocation_unknown`) the voter UI says, in the
+  voter's language, that to use a different certificate they must close every window of the
+  browser and open the voting link again (owner, 2026-11-16). The retry button stays, for the retryable codes
   (`revocation_unavailable`, `internal`, `backend_unavailable`, `rate_limited`).
   Not done for now: a fresh hostname per attempt would avoid the restart. DNS-01 makes a wildcard
   certificate possible, so this is a later option if support load shows it is needed.
