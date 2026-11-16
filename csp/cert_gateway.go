@@ -1,0 +1,99 @@
+package csp
+
+import (
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// CertGatewaySignatureHeader carries the certificate gateway's signature of an assertion request.
+const CertGatewaySignatureHeader = "X-Cert-Gateway-Signature"
+
+// CertGatewaySignatureMaxSkew is how far the signature timestamp may be from the server clock.
+const CertGatewaySignatureMaxSkew = 60 * time.Second
+
+// certGatewaySignedPath is the request path the signature covers. It is a literal on both sides,
+// never read from the request, so a path prefix or rewrite at the edge cannot break verification.
+const certGatewaySignedPath = "/cert-auth/assertions"
+
+// ErrCertGatewaySignature is returned for a missing, malformed, stale, unknown-key or invalid
+// certificate gateway signature.
+var ErrCertGatewaySignature = fmt.Errorf("invalid certificate gateway signature")
+
+// CertGatewayKeys maps a certificate gateway key id to its Ed25519 public key. Several keys can be
+// configured at once, so a key can be rotated without downtime.
+type CertGatewayKeys map[string]ed25519.PublicKey
+
+// ParseCertGatewayKeys parses CERT_GATEWAY_PUBLIC_KEYS: a comma-separated list of
+// keyId:base64(public key) entries. An empty value is no keys (the feature is off).
+func ParseCertGatewayKeys(s string) (CertGatewayKeys, error) {
+	keys := CertGatewayKeys{}
+	if strings.TrimSpace(s) == "" {
+		return keys, nil
+	}
+	for entry := range strings.SplitSeq(s, ",") {
+		id, encoded, found := strings.Cut(strings.TrimSpace(entry), ":")
+		if !found || id == "" || strings.ContainsAny(id, ",= ") {
+			return nil, fmt.Errorf("certificate gateway key %q: want keyId:base64(publicKey)", id)
+		}
+		if _, dup := keys[id]; dup {
+			return nil, fmt.Errorf("certificate gateway key %q: duplicate key id", id)
+		}
+		raw, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil || len(raw) != ed25519.PublicKeySize {
+			return nil, fmt.Errorf("certificate gateway key %q: not a base64 Ed25519 public key", id)
+		}
+		keys[id] = ed25519.PublicKey(raw)
+	}
+	return keys, nil
+}
+
+// CertGatewaySignedMessage returns the bytes the certificate gateway signs for an assertion
+// request body sent at unix time t.
+func CertGatewaySignedMessage(t int64, body []byte) []byte {
+	sum := sha256.Sum256(body)
+	return []byte("cert-gateway-v1\n" + strconv.FormatInt(t, 10) + "\nPOST\n" + certGatewaySignedPath + "\n" +
+		hex.EncodeToString(sum[:]))
+}
+
+// VerifyCertGatewaySignature verifies header, the X-Cert-Gateway-Signature value
+// "t=<unix seconds>,k=<keyId>,v1=<base64url(signature), no padding>", over body, the raw request
+// body, with the key named by k. The timestamp must be within CertGatewaySignatureMaxSkew of now.
+// Every failure wraps ErrCertGatewaySignature.
+func VerifyCertGatewaySignature(keys CertGatewayKeys, header string, body []byte, now time.Time) error {
+	fields := map[string]string{}
+	for part := range strings.SplitSeq(header, ",") {
+		name, value, found := strings.Cut(part, "=")
+		if _, dup := fields[name]; !found || dup {
+			return fmt.Errorf("%w: malformed header", ErrCertGatewaySignature)
+		}
+		fields[name] = value
+	}
+	if len(fields) != 3 {
+		return fmt.Errorf("%w: malformed header", ErrCertGatewaySignature)
+	}
+	t, err := strconv.ParseInt(fields["t"], 10, 64)
+	if err != nil {
+		return fmt.Errorf("%w: malformed timestamp", ErrCertGatewaySignature)
+	}
+	if skew := now.Sub(time.Unix(t, 0)); skew > CertGatewaySignatureMaxSkew || skew < -CertGatewaySignatureMaxSkew {
+		return fmt.Errorf("%w: stale timestamp", ErrCertGatewaySignature)
+	}
+	key, ok := keys[fields["k"]]
+	if !ok {
+		return fmt.Errorf("%w: unknown key", ErrCertGatewaySignature)
+	}
+	sig, err := base64.RawURLEncoding.DecodeString(fields["v1"])
+	if err != nil || len(sig) != ed25519.SignatureSize {
+		return fmt.Errorf("%w: malformed signature", ErrCertGatewaySignature)
+	}
+	if !ed25519.Verify(key, CertGatewaySignedMessage(t, body), sig) {
+		return fmt.Errorf("%w: signature mismatch", ErrCertGatewaySignature)
+	}
+	return nil
+}

@@ -99,6 +99,10 @@ type Config struct {
 	// DisableBlindCSP temporarily stops offering anonymous voting: no blind signing, and no new
 	// anonymous processes (the API reads it through BlindCSPDisabled).
 	DisableBlindCSP bool
+	// CertGatewayKeys are the certificate gateway public keys (CERT_GATEWAY_PUBLIC_KEYS). Empty turns
+	// certificate voter authentication off: the assertion route answers 404 and certificate
+	// censuses are refused (see CertAuthEnabled).
+	CertGatewayKeys CertGatewayKeys
 }
 
 // CSP struct contains the CSP service. It includes the storage, the
@@ -117,6 +121,27 @@ type CSP struct {
 	maxHourlyAuthFailures    int
 	notifySync               bool
 	blindCSPDisabled         atomic.Bool
+	certGatewayKeys          atomic.Pointer[CertGatewayKeys]
+}
+
+// CertGatewayKeys returns the configured certificate gateway public keys; empty when certificate
+// voter authentication is off.
+func (c *CSP) CertGatewayKeys() CertGatewayKeys {
+	if keys := c.certGatewayKeys.Load(); keys != nil {
+		return *keys
+	}
+	return nil
+}
+
+// SetCertGatewayKeys replaces the certificate gateway public keys at runtime.
+func (c *CSP) SetCertGatewayKeys(keys CertGatewayKeys) {
+	c.certGatewayKeys.Store(&keys)
+}
+
+// CertAuthEnabled reports whether certificate voter authentication is on: at least one
+// certificate gateway key is configured.
+func (c *CSP) CertAuthEnabled() bool {
+	return len(c.CertGatewayKeys()) > 0
 }
 
 // BlindCSPDisabled reports whether anonymous voting is temporarily off (Config.DisableBlindCSP).
@@ -214,6 +239,7 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 		notifySync:               config.SyncDelivery,
 	}
 	c.blindCSPDisabled.Store(config.DisableBlindCSP)
+	c.SetCertGatewayKeys(config.CertGatewayKeys)
 	return c, nil
 }
 
