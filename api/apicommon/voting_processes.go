@@ -24,6 +24,12 @@ type CensusSpec struct {
 	// one other auth field or a 2FA field.
 	AuthFields  db.OrgMemberAuthFields  `json:"authFields,omitempty"`
 	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
+	// CertAuth makes voters prove their national ID with a Spanish personal certificate, through the
+	// certificate gateway, instead of typing it. It requires authFields to be exactly ["nationalId"];
+	// twoFaFields may add an email or SMS code. Refused (40025) while the service has no certificate
+	// gateway keys configured. Members whose nationalId is not a valid DNI or NIE are reported as
+	// missing data and left out of the census. Echoed on process reads.
+	CertAuth bool `json:"certAuth,omitempty"`
 	// GroupID is the org member group the census was built from. Round-trips: it is echoed back on
 	// process reads, so a client can restore the group a draft targeted. Absent (not a zero id) when
 	// the census is organization-wide.
@@ -445,6 +451,7 @@ func PublicQuestionResponseFromDB(q *db.VotingProcessQuestion, census *db.Census
 			Anonymous:   census.Anonymous,
 			AuthFields:  census.AuthFields,
 			TwoFaFields: census.TwoFaFields,
+			CertAuth:    census.CertAuth,
 		}
 	}
 	return resp
@@ -491,6 +498,7 @@ func VotingProcessResponseFromDB(
 			Anonymous:   census.Anonymous,
 			AuthFields:  census.AuthFields,
 			TwoFaFields: census.TwoFaFields,
+			CertAuth:    census.CertAuth,
 			Size:        census.Size,
 		}
 		// guard the zero id so an organization-wide census reports no group at all: omitempty keys off
