@@ -552,7 +552,7 @@ ACME cache.
 - **API.** `certAuth`, `certCode` and `codeVerifier` are additive and omitted when empty. Old
   clients never send them and old censuses lack the field, so they behave as today.
 - **Login hashes.** After C2.6, typed logins match more leniently, because both sides are
-  canonicalised. A member stored as `1234567z` now logs in typing `01234567-Z`. Values that are not
+  canonicalised. A member stored as `1234567l` now logs in typing `01234567-L`. Values that are not
   a valid DNI or NIE hash exactly as before.
 - **Rollout order:**
   1. saas-backend with the feature off (no keys), migration run on dev.
@@ -658,11 +658,11 @@ ACME cache.
 ## Acceptance criteria
 
 - [ ] AC1 `internal.CanonicalNationalID` table test: DNI and NIE with case, spaces, tab and U+00A0
-  separators, dots and hyphens, short digits, `001234567Z`, `X01234567L`, an invalid letter, a
+  separators, dots and hyphens, short digits, `001234567L` (and `001234567Z` as an invalid letter), `X01234567L`, an invalid letter, a
   foreign ID and the empty string.
 - [ ] AC2 Hash parity: `TestRepairMatchesCanonicalHash` passes with the canonical `nationalId`,
-  including cert-census cases (no 2FA, email, email+phone). A new test shows a typed `1234567-z`
-  matching a stored `01234567Z`. For a cert census with email+phone 2FA, a dry run of
+  including cert-census cases (no 2FA, email, email+phone). A new test shows a typed `1234567-l`
+  matching a stored `01234567L`. For a cert census with email+phone 2FA, a dry run of
   `RepairLoginHashes` reports zero rows to rehash.
 - [ ] AC3 Census validation tests:
   - `certAuth` with `authFields≠[nationalId]` is rejected.
