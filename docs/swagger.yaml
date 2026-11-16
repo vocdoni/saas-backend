@@ -2345,6 +2345,16 @@ definitions:
     properties:
       birthDate:
         type: string
+      certCode:
+        description: |-
+          CertCode is the single-use code the certificate gateway returned to the voting page, for a
+          census with certAuth (43 base64url characters). It replaces every typed login field.
+        type: string
+      codeVerifier:
+        description: |-
+          CodeVerifier is the PKCE verifier (43 to 128 base64url characters) whose
+          base64url(sha256(...)) the voting page sent to the certificate gateway as codeChallenge.
+        type: string
       email:
         type: string
       memberNumber:
@@ -2385,6 +2395,11 @@ definitions:
       signature:
         example: deadbeef
         format: hex
+        type: string
+      voterRef:
+        description: |-
+          VoterRef identifies the voter of a certificate census on the process, the same on every login:
+          lowercase hex of sha256("vocdoni-voter-ref:" + process id + ":" + member id). Step 0 only.
         type: string
       weight:
         example: 2a
@@ -5518,6 +5533,10 @@ paths:
         40017 with data.retryAfter.
         Step 0 for an anonymous census is refused (400, 40037, "anonymous voting is temporarily
         unavailable") while the service has anonymous voting off.
+        For a census with certAuth, step 0 takes certCode and codeVerifier (plus the email or phone when
+        the census has 2FA) and no typed login field, else 40005; an unknown, expired, used or foreign
+        code, or a wrong verifier, answers 40802 and the code is spent. The answer carries voterRef. A
+        certCode sent to any other census answers 40005.
       parameters:
       - description: Process ID
         in: path

@@ -122,6 +122,10 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 //	@Description	40017 with data.retryAfter.
 //	@Description	Step 0 for an anonymous census is refused (400, 40037, "anonymous voting is temporarily
 //	@Description	unavailable") while the service has anonymous voting off.
+//	@Description	For a census with certAuth, step 0 takes certCode and codeVerifier (plus the email or phone when
+//	@Description	the census has 2FA) and no typed login field, else 40005; an unknown, expired, used or foreign
+//	@Description	code, or a wrong verifier, answers 40802 and the code is spent. The answer carries voterRef. A
+//	@Description	certCode sent to any other census answers 40005.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json

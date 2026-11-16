@@ -68,7 +68,7 @@ func TestAuthFirstStepUnknownParticipantPasswordWork(t *testing.T) {
 		body, err := json.Marshal(&AuthRequest{MemberNumber: memberNumber, Password: password})
 		c.Assert(err, qt.IsNil)
 		r := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
-		_, err = h.authFirstStep(r, internal.HexBytes{0x01}, censusID)
+		_, _, err = h.authFirstStep(r, internal.HexBytes{0x01}, censusID)
 		apiErr, ok := err.(errors.Error)
 		c.Assert(ok, qt.IsTrue, qt.Commentf("error: %v", err))
 		return apiErr.Code, checks

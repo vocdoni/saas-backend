@@ -35,10 +35,11 @@ func (c *CSPHandlers) handleAuthStep(w http.ResponseWriter, r *http.Request,
 	step int, anchorID internal.HexBytes, censusID string,
 ) {
 	var authToken internal.HexBytes
+	var voterRef string
 	var err error
 
 	if step == 0 {
-		authToken, err = c.authFirstStep(r, anchorID, censusID)
+		authToken, voterRef, err = c.authFirstStep(r, anchorID, censusID)
 	} else {
 		authToken, err = c.authSecondStep(r)
 	}
@@ -53,7 +54,7 @@ func (c *CSPHandlers) handleAuthStep(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	apicommon.HTTPWriteJSON(w, &AuthResponse{AuthToken: authToken})
+	apicommon.HTTPWriteJSON(w, &AuthResponse{AuthToken: authToken, VoterRef: voterRef})
 }
 
 // validateContactInfo checks if at least one contact method is provided
@@ -267,37 +268,60 @@ func passwordCheckFailed(err error) error {
 // unknown participant pays for a password check too (see unknownParticipant), so the two cannot be
 // told apart by their timing either. When no argon2 slot frees up in time, both answer
 // ErrServerBusy, which spends no budget.
+//
+// A census with CertAuth is authenticated with a certificate code instead (certAuthFirstStep), which
+// also returns the voter's voterRef; any other census refuses a request carrying one.
 func (c *CSPHandlers) authFirstStep(
 	r *http.Request,
 	anchorID internal.HexBytes,
 	censusID string,
-) (token internal.HexBytes, err error) {
+) (token internal.HexBytes, voterRef string, err error) {
 	// Parse request
 	var req AuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		return nil, errors.ErrMalformedBody.Withf("invalid JSON request")
+		return nil, "", errors.ErrMalformedBody.Withf("invalid JSON request")
 	}
 
 	// Get census and org information first (needed for validation)
 	census, err := c.mainDB.Census(censusID)
 	if err != nil {
 		if err == db.ErrNotFound {
-			return nil, errors.ErrCensusNotFound
+			return nil, "", errors.ErrCensusNotFound
 		}
-		return nil, errors.ErrGenericInternalServerError.WithErr(err)
+		return nil, "", errors.ErrGenericInternalServerError.WithErr(err)
 	}
 	// before any budget is claimed or challenge sent: the token could not be blind-signed anyway
 	if c.anonymousCensusRefused(census) {
-		return nil, errors.ErrInvalidData.With(csp.AnonymousVotingUnavailable)
+		return nil, "", errors.ErrInvalidData.With(csp.AnonymousVotingUnavailable)
 	}
 
 	org, err := c.mainDB.Organization(census.OrgAddress)
 	if err != nil {
 		if err == db.ErrNotFound {
-			return nil, errors.ErrOrganizationNotFound
+			return nil, "", errors.ErrOrganizationNotFound
 		}
-		return nil, errors.ErrGenericInternalServerError.WithErr(err)
+		return nil, "", errors.ErrGenericInternalServerError.WithErr(err)
 	}
+
+	if census.CertAuth {
+		return c.certAuthFirstStep(r, &req, census, org, anchorID)
+	}
+	if req.CertCode != "" {
+		return nil, "", errors.ErrInvalidUserData.Withf("this census does not use certificate authentication")
+	}
+	token, err = c.typedAuthFirstStep(r, &req, census, org, anchorID)
+	return token, "", err
+}
+
+// typedAuthFirstStep is step 0 of a census whose voters type their login fields (see authFirstStep).
+func (c *CSPHandlers) typedAuthFirstStep(
+	r *http.Request,
+	in *AuthRequest,
+	census *db.Census,
+	org *db.Organization,
+	anchorID internal.HexBytes,
+) (token internal.HexBytes, err error) {
+	req := *in
 
 	lang := apicommon.NotificationLang(r.Context(), org)
 

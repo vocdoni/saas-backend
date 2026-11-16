@@ -3,13 +3,16 @@ package handlers
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
 	"regexp"
 	"time"
 
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
@@ -245,4 +248,104 @@ func (c *CSPHandlers) CertAssertionHandler(w http.ResponseWriter, r *http.Reques
 func (*CSPHandlers) certAssertionFailed(w http.ResponseWriter, err error, logFields []any) {
 	log.Warnw("cert assertion failed", append([]any{"error", err.Error()}, logFields...)...)
 	w.WriteHeader(http.StatusInternalServerError)
+}
+
+// base64URLVerifier is a PKCE code verifier: 43 to 128 base64url characters.
+var base64URLVerifier = regexp.MustCompile(`^[A-Za-z0-9_-]{43,128}$`)
+
+// voterRef is the stable reference of a voter of a certificate census on a process (AuthResponse).
+func voterRef(processID, memberID string) string {
+	sum := sha256.Sum256([]byte("vocdoni-voter-ref:" + processID + ":" + memberID))
+	return hex.EncodeToString(sum[:])
+}
+
+// certAuthFirstStep is step 0 of a census with CertAuth. The request carries the certificate code
+// the gateway returned to the voting page and the PKCE verifier of its code challenge, plus the
+// email or phone when the census has 2FA, and no typed login field.
+//
+// The request is checked in full before the code is consumed, so a malformed one spends nothing.
+// The code is then consumed atomically, and is spent from then on whatever the outcome: a
+// verifier, contact or weight that fails sends the voter through the certificate again. An unknown,
+// expired, used or foreign code and a wrong verifier all answer the bare ErrCSPAuthFailed. The
+// failed-attempt budget is the participant's (its login hash), claimed before the contact check as
+// in the typed flow. The rest is the typed flow's: contact check, weight, then csp.AuthToken.
+func (c *CSPHandlers) certAuthFirstStep(
+	r *http.Request,
+	req *AuthRequest,
+	census *db.Census,
+	org *db.Organization,
+	anchorID internal.HexBytes,
+) (token internal.HexBytes, ref string, err error) {
+	if !base64URL43.MatchString(req.CertCode) || !base64URLVerifier.MatchString(req.CodeVerifier) ||
+		req.Name != "" || req.Surname != "" || req.MemberNumber != "" || req.NationalID != "" ||
+		req.BirthDate != "" || req.Password != "" {
+		return nil, "", errors.ErrInvalidUserData.Withf("a certificate login takes certCode and codeVerifier only")
+	}
+	if err := validateAuthRequest(req, census); err != nil {
+		return nil, "", err
+	}
+	var phone *voterPhone
+	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone) {
+		if phone, err = parseVoterPhone(r.Context(), req.Phone, org); err != nil {
+			return nil, "", phoneParseFailed(err)
+		}
+	}
+	lang := apicommon.NotificationLang(r.Context(), org)
+
+	var processID bson.ObjectID
+	copy(processID[:], anchorID)
+	codeHash := sha256.Sum256([]byte(req.CertCode))
+	assertion, err := c.mainDB.ConsumeCertAuthAssertion(codeHash[:], processID, time.Now())
+	if errors.Is(err, db.ErrNotFound) {
+		return nil, "", errors.ErrCSPAuthFailed
+	}
+	if err != nil {
+		return nil, "", errors.ErrGenericInternalServerError.WithErr(err)
+	}
+	verifierHash := sha256.Sum256([]byte(req.CodeVerifier))
+	challenge := base64.RawURLEncoding.EncodeToString(verifierHash[:])
+	if subtle.ConstantTimeCompare([]byte(challenge), []byte(assertion.CodeChallenge)) != 1 ||
+		assertion.CensusID != census.ID.Hex() {
+		return nil, "", errors.ErrCSPAuthFailed
+	}
+
+	participant, err := c.mainDB.CensusParticipant(census.ID.Hex(), assertion.ParticipantID)
+	if errors.Is(err, db.ErrNotFound) {
+		return nil, "", errors.ErrCSPAuthFailed
+	}
+	if err != nil {
+		return nil, "", errors.ErrGenericInternalServerError.WithErr(err)
+	}
+	claim, err := c.csp.ClaimAuthAttempt(anchorID, participant.LoginHash, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	defer func() {
+		if !errors.Is(err, errors.ErrCSPAuthFailed) {
+			c.csp.ReleaseAuthAttempt(claim)
+		}
+	}()
+
+	member, err := c.mainDB.OrgMember(census.OrgAddress, participant.ParticipantID)
+	if errors.Is(err, db.ErrNotFound) {
+		log.Warnw("census participant without org member", "participantID", participant.ParticipantID)
+		return nil, "", errors.ErrCSPAuthFailed
+	}
+	if err != nil {
+		return nil, "", errors.ErrGenericInternalServerError.WithErr(err)
+	}
+	toDestinations, challengeType, err := determineContactMethod(census, req, phone, member)
+	if err != nil {
+		return nil, "", err
+	}
+	if census.Weighted && member.Weight == 0 {
+		return nil, "", errors.ErrZeroWeightVoter
+	}
+	name, logo := orgNameAndLogo(org)
+	token, err = c.csp.AuthToken(anchorID, internal.HexBytesFromString(member.ID.Hex()), toDestinations,
+		challengeType, lang, name, logo, org.Address)
+	if err != nil {
+		return nil, "", err
+	}
+	return token, voterRef(processID.Hex(), member.ID.Hex()), nil
 }
