@@ -3222,7 +3222,7 @@ Expected: `Initialized empty Git repository in /home/lucasmenendez/cert-gateway/
 Create `go.mod`:
 
 ```go
-module github.com/vocdoni/cert-gateway
+module github.com/vocdoni/saas-cert-gateway
 
 go 1.27
 ```
@@ -3289,7 +3289,7 @@ func TestSignatureVectors(t *testing.T) {
 }
 ```
 Run: `cd /home/lucasmenendez/cert-gateway && export GOPRIVATE=github.com/vocdoni/cert-check && go test ./internal/gateway/`
-Expected: `FAIL	github.com/vocdoni/cert-gateway/internal/gateway [build failed]` (`undefined: SignedMessage`)
+Expected: `FAIL	github.com/vocdoni/saas-cert-gateway/internal/gateway [build failed]` (`undefined: SignedMessage`)
 
 Step 2: implement
 Create `internal/gateway/signing.go`:
@@ -3331,7 +3331,7 @@ func Sign(key ed25519.PrivateKey, keyID string, t int64, body []byte) string {
 }
 ```
 Run: `cd /home/lucasmenendez/cert-gateway && export GOPRIVATE=github.com/vocdoni/cert-check && go vet ./... && go test ./internal/gateway/ -run TestSignatureVectors -v 2>&1 | grep -E '^(--- |ok)'`
-Expected: `--- PASS: TestSignatureVectors`, `ok  	github.com/vocdoni/cert-gateway/internal/gateway`
+Expected: `--- PASS: TestSignatureVectors`, `ok  	github.com/vocdoni/saas-cert-gateway/internal/gateway`
 
 Step 3: commit
 `git add -- go.mod .gitignore internal/gateway/signing.go internal/gateway/signing_test.go && git -c commit.gpgsign=false commit -m "feat(gateway): sign backend assertions with ed25519" -- go.mod .gitignore internal/gateway/signing.go internal/gateway/signing_test.go`
@@ -3534,7 +3534,7 @@ func TestCanonicalOrigin(t *testing.T) {
 }
 ```
 Run: `cd /home/lucasmenendez/cert-gateway && export GOPRIVATE=github.com/vocdoni/cert-check && go test ./internal/gateway/ -run 'Config|Canonical'`
-Expected: `FAIL	github.com/vocdoni/cert-gateway/internal/gateway [build failed]` (`undefined: LoadConfig`)
+Expected: `FAIL	github.com/vocdoni/saas-cert-gateway/internal/gateway [build failed]` (`undefined: LoadConfig`)
 
 Step 2: implement
 Create `internal/gateway/config.go`:
@@ -4033,7 +4033,7 @@ import (
 	"time"
 
 	certcheck "github.com/vocdoni/cert-check"
-	"github.com/vocdoni/cert-gateway/internal/testpki"
+	"github.com/vocdoni/saas-cert-gateway/internal/testpki"
 )
 
 const (
@@ -4485,7 +4485,7 @@ import (
 	"time"
 
 	certcheck "github.com/vocdoni/cert-check"
-	"github.com/vocdoni/cert-gateway/internal/testpki"
+	"github.com/vocdoni/saas-cert-gateway/internal/testpki"
 )
 
 func TestHostMismatch(t *testing.T) {
@@ -4665,7 +4665,7 @@ func testHandler(t *testing.T) *certcheck.Handler {
 }
 ```
 Run: `cd /home/lucasmenendez/cert-gateway && export GOPRIVATE=github.com/vocdoni/cert-check && go test ./internal/gateway/`
-Expected: `FAIL	github.com/vocdoni/cert-gateway/internal/gateway [build failed]` (`undefined: New`, `undefined: newIPLimiter`, …)
+Expected: `FAIL	github.com/vocdoni/saas-cert-gateway/internal/gateway [build failed]` (`undefined: New`, `undefined: newIPLimiter`, …)
 
 Step 2: implement
 Create `internal/gateway/ratelimit.go`:
@@ -5285,7 +5285,7 @@ func (g *Gateway) CheckBackends(ctx context.Context) {
 }
 ```
 Run: `cd /home/lucasmenendez/cert-gateway && export GOPRIVATE=github.com/vocdoni/cert-check && go mod tidy && gofumpt -l . ; go vet ./... && go test -race -count=1 ./... -v 2>&1 | grep -E '^(--- |ok|FAIL)'`
-Expected: no gofumpt output; `--- PASS` for `TestAuthSuccess`, `TestAuthTwoBackends`, `TestAuthCertcheckErrors`, `TestAuthBackendAnswers`, `TestAuthBadParameters`, `TestProductionProviders`, `TestIPLimiter`, `TestHostMismatch`, `TestOtherServerNameGetsNoCertificate`, `TestReadyz`, `TestReadyzWaitsForTheCertificate`, `TestRateLimits`, `TestCheckBackends`, `TestSignatureVectors`, `TestLoadConfig`, `TestLoadConfigFailures`, `TestLocalhostBackendURL`, `TestCanonicalOrigin`; `ok  	github.com/vocdoni/cert-gateway/internal/gateway`
+Expected: no gofumpt output; `--- PASS` for `TestAuthSuccess`, `TestAuthTwoBackends`, `TestAuthCertcheckErrors`, `TestAuthBackendAnswers`, `TestAuthBadParameters`, `TestProductionProviders`, `TestIPLimiter`, `TestHostMismatch`, `TestOtherServerNameGetsNoCertificate`, `TestReadyz`, `TestReadyzWaitsForTheCertificate`, `TestRateLimits`, `TestCheckBackends`, `TestSignatureVectors`, `TestLoadConfig`, `TestLoadConfigFailures`, `TestLocalhostBackendURL`, `TestCanonicalOrigin`; `ok  	github.com/vocdoni/saas-cert-gateway/internal/gateway`
 Run: `cd /home/lucasmenendez/cert-gateway && export GOPRIVATE=github.com/vocdoni/cert-check && golangci-lint run ./...` → `0 issues.`
 
 Step 3: commit
@@ -5433,8 +5433,8 @@ import (
 	"testing"
 
 	certcheck "github.com/vocdoni/cert-check"
-	"github.com/vocdoni/cert-gateway/internal/gateway"
-	"github.com/vocdoni/cert-gateway/internal/testpki"
+	"github.com/vocdoni/saas-cert-gateway/internal/gateway"
+	"github.com/vocdoni/saas-cert-gateway/internal/testpki"
 )
 
 // TestProductionBuildHasNoDevCA (AC12): a binary built without -tags devca lists no devca
@@ -5490,7 +5490,7 @@ func TestProductionBuildHasNoDevCA(t *testing.T) {
 }
 ```
 Run: `cd /home/lucasmenendez/cert-gateway && export GOPRIVATE=github.com/vocdoni/cert-check && go test ./internal/certs/ ./cmd/...`
-Expected: `FAIL	github.com/vocdoni/cert-gateway/internal/certs [build failed]` (`undefined: NewStatic`) and `FAIL	github.com/vocdoni/cert-gateway/cmd/cert-gateway [build failed]` (`undefined: devCA`)
+Expected: `FAIL	github.com/vocdoni/saas-cert-gateway/internal/certs [build failed]` (`undefined: NewStatic`) and `FAIL	github.com/vocdoni/saas-cert-gateway/cmd/cert-gateway [build failed]` (`undefined: devCA`)
 
 Step 2: implement
 Create `internal/certs/certs.go`:
@@ -5748,8 +5748,8 @@ import (
 	"syscall"
 
 	certcheck "github.com/vocdoni/cert-check"
-	"github.com/vocdoni/cert-gateway/internal/certs"
-	"github.com/vocdoni/cert-gateway/internal/gateway"
+	"github.com/vocdoni/saas-cert-gateway/internal/certs"
+	"github.com/vocdoni/saas-cert-gateway/internal/gateway"
 )
 
 // version is set with -ldflags "-X main.version=<commit>".
@@ -5839,7 +5839,7 @@ import (
 	"log/slog"
 
 	certcheck "github.com/vocdoni/cert-check"
-	"github.com/vocdoni/cert-gateway/internal/gateway"
+	"github.com/vocdoni/saas-cert-gateway/internal/gateway"
 )
 
 // devCA reports a devca build; this one is not.
@@ -5891,9 +5891,9 @@ import (
 	"time"
 
 	certcheck "github.com/vocdoni/cert-check"
-	"github.com/vocdoni/cert-gateway/internal/certs"
-	"github.com/vocdoni/cert-gateway/internal/gateway"
-	"github.com/vocdoni/cert-gateway/internal/testpki"
+	"github.com/vocdoni/saas-cert-gateway/internal/certs"
+	"github.com/vocdoni/saas-cert-gateway/internal/gateway"
+	"github.com/vocdoni/saas-cert-gateway/internal/testpki"
 )
 
 // TestDevCAFlow (AC12): with -tags devca and DEVCA_CERT_FILE, a certificate issued by
@@ -6045,7 +6045,7 @@ func TestDevCABuildConfig(t *testing.T) {
 }
 ```
 Run: `cd /home/lucasmenendez/cert-gateway && export GOPRIVATE=github.com/vocdoni/cert-check && go test -tags devca ./cmd/...`
-Expected: `FAIL	github.com/vocdoni/cert-gateway/cmd/cert-gateway [build failed]` (`undefined: devCA`: with the tag, `providers_prod.go` is excluded and nothing defines it yet)
+Expected: `FAIL	github.com/vocdoni/saas-cert-gateway/cmd/cert-gateway [build failed]` (`undefined: devCA`: with the tag, `providers_prod.go` is excluded and nothing defines it yet)
 
 Step 2: implement
 Create `internal/devca/devca.go`:
@@ -6192,8 +6192,8 @@ import (
 	"log/slog"
 
 	certcheck "github.com/vocdoni/cert-check"
-	"github.com/vocdoni/cert-gateway/internal/devca"
-	"github.com/vocdoni/cert-gateway/internal/gateway"
+	"github.com/vocdoni/saas-cert-gateway/internal/devca"
+	"github.com/vocdoni/saas-cert-gateway/internal/gateway"
 )
 
 // devCA reports a devca build: http://localhost origins and backend urls are accepted and every
@@ -8352,7 +8352,7 @@ Interfaces this task provides to later tasks: none (last task).
    deploys from `main`, prod from the `release` branch (fast-forward to a `main` commit dev has run). No tags are part of
    this plan.
 4. **Owner OK required before**, each one separately:
-   1. Creating the GitHub repository `vocdoni/cert-gateway` (visibility, branch protection on `main` requiring `ci`), and
+   1. Creating the GitHub repository `vocdoni/saas-cert-gateway` (visibility, branch protection on `main` requiring `ci`), and
       adding its Actions secret `CERT_CHECK_READ_TOKEN`.
    2. Creating the read-only token for `github.com/vocdoni/cert-check` used by CI and Railway builds.
    3. Pushing saas-backend `feat/cert-auth`.

@@ -5,7 +5,7 @@ Owner decisions so far (2026-11-11):
 - D1 Architecture: a separate, stateless **certificate gateway** service terminates TLS and checks
   the client certificate with `github.com/vocdoni/cert-check`. It hands the proven identity to
   saas-backend server to server. saas-backend keeps its App Platform hosting.
-- D2 The gateway lives in a **new dedicated repo** (`vocdoni/cert-gateway`).
+- D2 The gateway lives in a **new dedicated repo** (`vocdoni/saas-cert-gateway`).
 - D3 Census model: **certificate plus optional 2FA**. The certificate proves the DNI/NIE. The
   census may still require an email or SMS OTP afterwards, through the existing challenge flow.
 - D4 Accepted certificates at launch: **stable natural-person providers only**. These are FNMT,
@@ -136,7 +136,7 @@ voter browser                     cert-gateway (Railway)            saas-backend
  │ 7 existing sign / blind-sign
 ```
 
-### C1. cert-gateway (new repo `vocdoni/cert-gateway`)
+### C1. cert-gateway (new repo `vocdoni/saas-cert-gateway`)
 
 A single Go 1.27 binary, `cmd/cert-gateway`, with no database and no disk state apart from the
 ACME cache.
