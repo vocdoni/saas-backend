@@ -14,6 +14,9 @@ Owner decisions so far (2026-11-11):
 - D5 TLS: the gateway offers **TLS 1.3 and 1.2** (`certcheck.WithTLS13()`). Amended after the
   spec audit: there is no fallback between the two, so the gateway gets a `TLS13` switch and the
   dev test covers Windows key stores (see "Passive observers" and AC9).
+- D8 (2026-11-16) Local development: the gateway gets a static-certificate mode and a test CA that
+  is compiled only with the build tag `devca`, so the whole flow runs locally without an official
+  certificate (C1 "Local development").
 - D7 Hosting: **Railway in every environment**, through Railway's TCP proxy, which passes TLS
   untouched to the Go process. This is the setup cert-check's test UI already runs on
   (`testui/README.md` §4). Accepted trade-offs: a Railway-assigned port other than 443 in the URL,
@@ -302,6 +305,36 @@ ACME cache.
 - **CI.** Run `go test -race ./...`, golangci-lint and a Docker build, with
   `GOPRIVATE=github.com/vocdoni/cert-check` and a read token for the private cert-check module.
   CI publishes no image: Railway builds the Dockerfile.
+- **Local development (D8).** Everything runs on one machine, with no cloud service.
+  - **Static server certificate.** `TLS_CERT_FILE` and `TLS_KEY_FILE` replace ACME, for example
+    with a mkcert certificate for `cert.localtest.me`. They are mutually exclusive with
+    `CLOUDFLARE_API_TOKEN` and `ACME_DNS_OVERRIDE_DOMAIN`, and startup fails if both sets are
+    given. This mode is in every build, so the production image can also run without ACME.
+  - **Test CA, build tag `devca` only.** `internal/devca` implements a `certcheck.Provider`
+    (id `devca`) that accepts client certificates issued by a local CA whose certificate is in
+    `DEVCA_CERT_FILE`.
+    - The provider skips revocation and reads the DNI/NIE from the subject `serialNumber`
+      (`IDCES-<number>`), applying the same canonical form as cert-check.
+    - It is added to the handler only when the binary is built with `-tags devca` **and**
+      `DEVCA_CERT_FILE` is set.
+    - The Dockerfile and CI never pass the tag. A test builds the binary without the tag and checks
+      that a `devca` client certificate gets `untrusted_issuer` and that `devca` is not among the
+      provider ids.
+    - A `devca` binary logs a warning at startup and answers `X-Cert-Gateway-Dev: devca` on every
+      response.
+  - **Scripts.** `scripts/devca` creates the local CA (once, under `~/.cache/cert-gateway/devca`,
+    never in the repo). Given a DNI or NIE and a name, it issues a client certificate as a
+    PKCS#12 file with a printed password, ready to import into a browser.
+  - **Stack.** `make dev` or a `docker-compose.dev.yml` in the cert-gateway repo starts Mongo, a
+    local saas-backend with test gateway keys, the gateway (`devca`, static certificate, `BACKENDS`
+    pointing at the local backend with origin `http://localhost:3000`) and documents running
+    vocdoni-app with `CERT_GATEWAY_URL=https://cert.localtest.me:8443`.
+    - The `https`-only origin rule gets one exception: `http://localhost:<port>` is accepted only in
+      a `devca` binary.
+    - The README walks through: create the CA, issue a certificate, import it, create a member with
+      that DNI and a cert census, then vote.
+  - A real certificate (FNMT, idCAT…) also works locally against a binary without `devca`. It
+    needs internet for OCSP/CRL and the DNI in the local memberbase.
 
 ### C2. saas-backend
 
@@ -699,6 +732,14 @@ ACME cache.
   document number, name, email or phone; a vocdoni-app test asserts `sessionStorage` holds only
   `state` and `codeVerifier` during the flow and that the cert path never calls
   `pushCrispUserFields`.
+- [ ] AC12 Local development:
+  - A binary built without `-tags devca` rejects a `devca` client certificate with
+    `untrusted_issuer`, lists no `devca` provider, and refuses an `http://localhost` origin in
+    `BACKENDS`.
+  - With `-tags devca` and `DEVCA_CERT_FILE`, a certificate from `scripts/devca` for a member's DNI
+    completes the flow against a local backend in a test.
+  - `make dev` (or the compose file) starts the stack, and the README walkthrough ends with a cast
+    vote. The owner checks this manually once.
 
 ## Constraints
 
