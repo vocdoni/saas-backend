@@ -16,7 +16,10 @@ Owner decisions so far (2026-11-11):
   dev test covers Windows key stores (see "Passive observers" and AC9).
 - D9 (2026-11-17) Folded in from a review of ferranrego's parallel work (vocdoni/saas-backend#850,
   #851, vocdoni/vocdoni-app#1975–#1980). See "Amendments D9" at the end of this document.
-  The per-attempt random subdomain (#851) is still under discussion and not part of this.
+  The per-attempt random subdomain is decided separately as D10.
+- D10 (2026-11-17) Per-attempt random subdomain: every certificate attempt goes to a fresh
+  `<label>.<DOMAIN>` host, so the browser shows the certificate picker again instead of reusing a
+  remembered choice. See "Amendments D10" at the end of this document.
 - D8 (2026-11-16) Local development: the gateway gets a static-certificate mode and a test CA that
   is compiled only with the build tag `devca`, so the whole flow runs locally without an official
   certificate (C1 "Local development").
@@ -816,6 +819,60 @@ ACME cache.
   - a background request to the gateway before navigating;
   - localStorage for the verifier;
   - auto-starting the flow without the consent checkbox.
+
+## Amendments D10 (2026-11-17): per-attempt random subdomain
+
+**Why.** Browsers remember the client certificate chosen for a host and port, or the choice of
+none, until they restart. On phones a restart is barely possible. A fresh host on every attempt
+makes the browser show the picker again.
+
+**Hosts.**
+- `DOMAIN` stays the base name: `cert-dev.vocdoni.net` (dev) and `cert.vocdoni.io` (prod).
+- The gateway serves `<label>.<DOMAIN>`, where `<label>` is 26 lowercase base32 characters
+  (`[a-z2-7]{26}`, 130 random bits).
+- The bare `DOMAIN` is still served, as a fallback.
+- Any other host is refused at the TLS layer, because no certificate matches it.
+- `certcheck.CheckHost`, which requires `Host` to equal the SNI name, still applies.
+- The label is not a secret and carries no state. The gateway stays stateless, and everything in
+  C1 (parameters, `returnUrl` rule, PKCE, signing) is unchanged.
+
+**Certificate.**
+- ACME (certmagic, DNS-01 as today) manages `DOMAIN` and `*.DOMAIN`. A wildcard needs DNS-01,
+  which the delegated ACME zone already provides: `_acme-challenge.<DOMAIN>` serves both names.
+- In static mode, `TLS_CERT_FILE` must cover both names. Locally that is `cert.localtest.me` and
+  `*.cert.localtest.me`, both of which resolve to 127.0.0.1.
+- The SNI guard accepts `DOMAIN` and exactly one label under it.
+
+**DNS (owner OK, per environment).** A DNS-only CNAME `*.<DOMAIN>` to the same Railway TCP proxy
+host as `<DOMAIN>`. Railway forwards TCP and ignores the name. The port is the same.
+
+**App.**
+- Each click on "sign in with certificate" builds `https://<label>.<host of CERT_GATEWAY_URL>:<port>/v1/auth?…`
+  with a fresh label from `crypto.getRandomValues`.
+- `CERT_GATEWAY_URL` keeps naming the base origin.
+- The sticky codes (see "Sticky certificate choice") now show a "Try again" button. Retrying
+  reaches a new host, so the picker appears again. "Close the browser" advice remains only as a
+  secondary hint, and in-app browsers keep their D9 advice.
+
+**Docs.**
+- The gateway README covers the wildcard certificate, the wildcard DNS record, local static
+  certificates for both names, and a troubleshooting note.
+- This spec updates D7, C1 and the rollout steps.
+- vocdoni-app documents that `CERT_GATEWAY_URL` is the base origin and that attempts use random
+  subdomains of it.
+
+**Acceptance.**
+- **AC7:**
+  - a request to `<label>.<DOMAIN>` is served;
+  - a two-label subdomain, or an unrelated name, gets no certificate;
+  - the ACME manager manages exactly `DOMAIN` and `*.DOMAIN`.
+- **AC8:**
+  - two attempts use two different hosts, both under the base host and with the same port;
+  - sticky codes show "Try again".
+- **AC9:** on Android, on iOS and on desktop, cancel the picker once, then press "Try again". The
+  picker must appear again.
+
+**Cost.** Nothing beyond one wildcard DNS record and one wildcard certificate per environment.
 
 ## Constraints
 
