@@ -174,6 +174,18 @@ func TestCertAssertions(t *testing.T) {
 		expect(t, status, body, http.StatusNotFound, "process_not_open")
 	})
 
+	t.Run("process ended", func(t *testing.T) {
+		c := qt.New(t)
+		endedPID, _ := publishCensusProcess(t, token, orgAddress, certCensus(nil, ids...), 1)
+		vp, err := testDB.VotingProcess(objectID(c, endedPID))
+		c.Assert(err, qt.IsNil)
+		vp.EndDate = time.Now().Add(-2 * time.Minute) // past the CSP's end grace; publish refuses a past one
+		_, err = testDB.SetVotingProcess(vp)
+		c.Assert(err, qt.IsNil)
+		status, body := postCertAssertion(t, newCertAssertionRequest(endedPID, testDNI(3), challenge))
+		expect(t, status, body, http.StatusNotFound, "process_not_open")
+	})
+
 	t.Run("census without certAuth", func(t *testing.T) {
 		typed, _ := publishCensusProcess(t, token, orgAddress, apicommon.CensusSpec{
 			AuthFields: db.OrgMemberAuthFields{db.OrgMemberAuthFieldsNationalID}, MemberIDs: ids,

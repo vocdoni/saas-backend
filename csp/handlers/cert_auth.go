@@ -155,7 +155,7 @@ func (c *CSPHandlers) CertAssertionHandler(w http.ResponseWriter, r *http.Reques
 	logFields := []any{"provider", req.Provider, "processId", req.ProcessID}
 
 	vp, err := c.mainDB.VotingProcess(processID)
-	if errors.Is(err, db.ErrNotFound) || (err == nil && !vp.Published) {
+	if errors.Is(err, db.ErrNotFound) || (err == nil && (!vp.Published || processEnded(vp))) {
 		writeCertAssertionError(w, http.StatusNotFound, certErrProcessClosed, logFields...)
 		return
 	}
