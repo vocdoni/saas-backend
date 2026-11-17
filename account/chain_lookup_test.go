@@ -20,7 +20,7 @@ func newLookupNode(c *qt.C, handler http.HandlerFunc) *Account {
 	c.Cleanup(srv.Close)
 	client, err := apiclient.New(srv.URL + "/")
 	c.Assert(err, qt.IsNil)
-	return &Account{client: client}
+	return &Account{client: client, apiEndpoint: srv.URL + "/"}
 }
 
 // TestTxMined pins the only answers that may feed the dead rule: 200 is mined, 204 is not found,
@@ -80,26 +80,31 @@ func TestTxMined(t *testing.T) {
 	c.Assert(mined, qt.IsFalse)
 }
 
-// TestOrgElectionIDs pins the organization listing: ids newest first as the node pages them, an
-// empty page past the end (the node answers {}), and an error on a non-200.
+// TestOrgElectionIDs pins the organization listing on GET /elections?organizationId=&page=: ids
+// newest first as the node pages them, an empty page past the end (404 code 4057), and an error
+// on any other non-200, an unknown organization (404 code 4006) included.
 func TestOrgElectionIDs(t *testing.T) {
 	c := qt.New(t)
 	org := common.HexToAddress("0x00000000000000000000000000000000000000aa")
 	fail := false
 	a := newLookupNode(c, func(w http.ResponseWriter, r *http.Request) {
-		base := "/accounts/00000000000000000000000000000000000000aa/elections/page/"
+		q := r.URL.Query()
 		switch {
 		case fail:
 			http.Error(w, "boom", http.StatusInternalServerError)
-		case r.URL.Path == base+"0":
+		case r.URL.Path != "/elections":
+			http.Error(w, "not found", http.StatusNotFound)
+		case q.Get("organizationId") != "00000000000000000000000000000000000000aa":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"organization not found","code":4006}`))
+		case q.Get("page") == "0":
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(&api.ElectionsList{Elections: []*api.ElectionSummary{
 				{ElectionID: dvotetypes.HexBytes{0x02}}, {ElectionID: dvotetypes.HexBytes{0x01}},
 			}})
-		case r.URL.Path == base+"1":
-			_, _ = w.Write([]byte("{}"))
 		default:
-			http.Error(w, "not found", http.StatusNotFound)
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"page not found","code":4057}`))
 		}
 	})
 
@@ -110,6 +115,9 @@ func TestOrgElectionIDs(t *testing.T) {
 	ids, err = a.OrgElectionIDs(org, 1)
 	c.Assert(err, qt.IsNil)
 	c.Assert(ids, qt.HasLen, 0)
+
+	_, err = a.OrgElectionIDs(common.HexToAddress("0xbb"), 0)
+	c.Assert(err, qt.Not(qt.IsNil))
 
 	fail = true
 	_, err = a.OrgElectionIDs(org, 0)
