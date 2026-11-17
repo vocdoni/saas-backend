@@ -14,6 +14,9 @@ Owner decisions so far (2026-11-11):
 - D5 TLS: the gateway offers **TLS 1.3 and 1.2** (`certcheck.WithTLS13()`). Amended after the
   spec audit: there is no fallback between the two, so the gateway gets a `TLS13` switch and the
   dev test covers Windows key stores (see "Passive observers" and AC9).
+- D9 (2026-11-17) Folded in from a review of ferranrego's parallel work (vocdoni/saas-backend#850,
+  #851, vocdoni/vocdoni-app#1975–#1980). See "Amendments D9" at the end of this document.
+  The per-attempt random subdomain (#851) is still under discussion and not part of this.
 - D8 (2026-11-16) Local development: the gateway gets a static-certificate mode and a test CA that
   is compiled only with the build tag `devca`, so the whole flow runs locally without an official
   certificate (C1 "Local development").
@@ -757,6 +760,62 @@ ACME cache.
     completes the flow against a local backend in a test.
   - `make dev` (or the compose file) starts the stack, and the README walkthrough ends with a cast
     vote. The owner checks this manually once.
+
+## Amendments D9 (2026-11-17)
+
+**A. Letterless DNI/NIE (backend, C2.2).**
+- `CanonicalNationalID` also accepts a DNI of 7–8 digits, or an NIE of a prefix plus 7 digits, with
+  no letter. It computes the check letter and returns the canonical form with `ok=true`. Examples:
+  `55555555` gives `55555555K`, `55.555.555` gives `55555555K`, `Y1234567` gives `Y1234567X`.
+- Shorter numbers stay unchanged with `ok=false`, for example `123`, so a member number typed into
+  the field never becomes a DNI.
+- Migration 0037 and the repair tooling pick this up through `hashMemberFields`.
+- AC1 gains these vectors.
+
+**C. Gateway (C1).**
+- The 303 redirect sends `Connection: close`, so a retry opens a new TLS connection and the
+  certificate is chosen again.
+- After `Auth`, a certificate whose profile role is not natural person is refused with
+  `unsupported_profile`. This is defensive: D4 already excludes those providers.
+- Every `#certError` redirect carries `&ref=<DiagnosticID>`, which the voter UI shows as a support
+  reference. The gateway already logs the same ID.
+
+**D. Backend (C2).**
+- The assertion endpoint answers `process_not_open` for a process that has ended as well as for
+  an unpublished one, using the same "ended" test the voting routes use.
+- Publishing a process whose census has `certAuth` is refused (40025) while no gateway key is
+  configured. Create and update already refuse it.
+- A test covers an anonymous (blind CSP) cert census: certificate login, then blind-sign.
+
+**E. vocdoni-app (C3).**
+- **Code rejected at step 0:** a step 0 that fails with 40802 on the certificate path (code
+  expired, reused, or wrong verifier) shows "Your certificate sign-in expired. Sign in again" with
+  the start button, never the not-in-census message.
+- **Lost or mismatched `state`:** the voter sees the start button again, not a dead end.
+- **In-app browsers** (WhatsApp, Instagram, Facebook, Gmail, Telegram, LinkedIn… detected from the
+  user agent, with tests):
+  - The certificate step explains that the browser cannot use certificates.
+  - It offers "Copy link" and "open this link in your browser", plus an Android intent link where
+    one applies.
+  - `no_certificate` in such a browser gets that advice instead of "close the browser".
+- **Gateway unreachable:** if the voter is back on the page with a stored flow but no fragment, the
+  page shows the "the certificate page didn't load? try another network, e.g. mobile data" hint.
+- **Copy and guidance:**
+  - Clearer messages for the error codes that today fall into the generic message; expired and
+    not-yet-valid are told apart.
+  - Picker guidance: "choose the certificate with your name", naming the accepted issuers.
+  - "idCAT Mòbil and Cl@ve are not certificates", for organisers and for voters.
+  - An "if you keep having problems, contact {organisation}" footer, followed by the `ref`.
+  - `role="status"` on the signing-in indicator.
+  - The organiser's duplicated "(missing or invalid)" copy is fixed.
+- **Organiser, invalid DNIs:** for a certificate census, members with a missing or invalid DNI/NIE
+  no longer block saving. The organiser sees "N members can't sign in" and a "Save anyway" action.
+  Duplicates still block. The backend leaves those members out, as C2.3 says.
+- **Not adopted:**
+  - showing the holder's name or DNI;
+  - a background request to the gateway before navigating;
+  - localStorage for the verifier;
+  - auto-starting the flow without the consent checkbox.
 
 ## Constraints
 
