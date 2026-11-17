@@ -101,6 +101,18 @@ func TestCertAuthStep0(t *testing.T) {
 		c.Assert(login(t, authOnly, bob, nil).VoterRef, qt.Not(qt.Equals), first.VoterRef)
 	})
 
+	t.Run("anonymous census: the token blind-signs", func(t *testing.T) {
+		c := qt.New(t)
+		spec := certCensus(nil, ids...)
+		spec.Anonymous = true
+		anonymous, elections := publishCensusProcess(t, token, orgAddress, spec, 1)
+		voter := ethereum.SignKeys{}
+		c.Assert(voter.Generate(), qt.IsNil)
+		proof := testBlindSignBallot(t, anonymous, login(t, anonymous, alice, nil).AuthToken,
+			elections[0], voter.Address().Bytes())
+		c.Assert(proof.GetCa().GetSignature(), qt.Not(qt.HasLen), 0)
+	})
+
 	t.Run("email 2FA: an OTP, then step 1", func(t *testing.T) {
 		resp := login(t, withEmail, bob, &handlers.AuthRequest{Email: members[1].Email})
 		verifyProcessCSP(t, withEmail, members[1].Email, resp.AuthToken)
