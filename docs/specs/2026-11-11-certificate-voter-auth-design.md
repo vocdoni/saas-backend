@@ -19,7 +19,8 @@ Owner decisions so far (2026-11-11):
   The per-attempt random subdomain is decided separately as D10.
 - D10 (2026-11-17) Per-attempt random subdomain: every certificate attempt goes to a fresh
   `<label>.<DOMAIN>` host, so the browser shows the certificate picker again instead of reusing a
-  remembered choice. See "Amendments D10" at the end of this document.
+  remembered choice. It amends D7 (wildcard CNAME and certificate), C1, the rollout steps and the
+  "Sticky certificate choice" section. See "Amendments D10" at the end of this document.
 - D8 (2026-11-16) Local development: the gateway gets a static-certificate mode and a test CA that
   is compiled only with the build tag `devca`, so the whole flow runs locally without an official
   certificate (C1 "Local development").
@@ -149,7 +150,8 @@ ACME cache.
 
 - **Listeners.**
   - **Auth listener** `AUTH_LISTEN` (default `:8443`), reached through the Railway TCP proxy at
-    `https://<DOMAIN>:<port assigned to the TCP proxy>`. It serves TLS with
+    `https://<label>.<DOMAIN>:<port assigned to the TCP proxy>` (one random label per attempt, D10;
+    the bare `DOMAIN` also works). It serves TLS with
     `handler.TLSConfig(getCert)`, adding `certcheck.WithTLS13()` when `TLS13` is true. The
     `http.Server` has `Protocols` set to HTTP/1 only. It serves `/v1/auth` and nothing else.
   - **Main listener** `PORT` (`8080`, set as a service variable), plain HTTP with no public
@@ -162,7 +164,7 @@ ACME cache.
     UI does. HTTP-01 and TLS-ALPN-01 cannot reach a Railway-assigned port. The certificate and ACME
     account live in `DATA_DIR/certmagic` on a Railway volume, so redeploys reuse them. The auth
     listener starts once the certificate is ready, and a failed issuance is retried in the
-    background with backoff. certmagic manages `DOMAIN` only, with no on-demand issuance.
+    background with backoff. certmagic manages `DOMAIN` and `*.DOMAIN` (D10), with no on-demand issuance.
   - The Cloudflare token is never zone-wide on `vocdoni.io` or `vocdoni.net`: both zones hold
     production records. `_acme-challenge.<DOMAIN>` is a CNAME to a TXT name in a dedicated
     Cloudflare zone that holds nothing else, `ACME_DNS_OVERRIDE_DOMAIN` is that full TXT record
@@ -308,7 +310,8 @@ ACME cache.
   - Expected cost: about 50–100 MB of RAM and almost no CPU, so roughly $1–2 a month of Railway
     usage per environment, usually inside the plan's included usage.
   - Hostnames are DNS-only (grey-cloud) CNAME records on Cloudflare pointing at the Railway TCP
-    proxy hostname: `cert-dev.vocdoni.net` (dev) and `cert.vocdoni.io` (prod). The public URL
+    proxy hostname: `cert-dev.vocdoni.net` (dev) and `cert.vocdoni.io` (prod), plus a wildcard
+    `*.<DOMAIN>` CNAME to the same proxy host (D10). The public URL
     carries the Railway-assigned port, for example `https://cert.vocdoni.io:15140`.
     `CERT_GATEWAY_URL` in vocdoni-app includes that port. If the TCP proxy is ever recreated, the
     port and possibly the proxy hostname change: `CERT_GATEWAY_URL` and the CNAME are updated in
@@ -576,7 +579,11 @@ ACME cache.
 - **Rollout order:**
   1. saas-backend with the feature off (no keys), migration run on dev.
   2. cert-gateway on Railway dev. Before the first issuance:
-     - Check that no CAA record on the hostname's zone excludes `letsencrypt.org`.
+     - Create the DNS-only `*.<DOMAIN>` CNAME to the same TCP proxy host as `<DOMAIN>` (D10).
+     - Check that no CAA record on the hostname or its zone excludes `letsencrypt.org`, and that
+       any `issuewild` record also allows it: the wildcard certificate is checked against
+       `issuewild` when one exists.
+     - After issuance, `/readyz` answers 200 only once both `DOMAIN` and `*.DOMAIN` are valid.
      - Check that the assigned port is not on Chromium's restricted-port list or Firefox's banned
        list. If it is, recreate the proxy.
 
@@ -643,8 +650,9 @@ ACME cache.
   voter's language, that to use a different certificate they must close every window of the
   browser and open the voting link again (owner, 2026-11-16). The retry button stays, for the retryable codes
   (`revocation_unavailable`, `internal`, `backend_unavailable`, `rate_limited`).
-  Not done for now: a fresh hostname per attempt would avoid the restart. DNS-01 makes a wildcard
-  certificate possible, so this is a later option if support load shows it is needed.
+  Since D10 every attempt goes to a fresh host, so a "Try again" button restarts the flow and the
+  picker appears again; the restart advice stays as a secondary hint. Codes that depend on the
+  process or census (`process_not_open`, `not_cert_census`, `anonymous_unavailable`) offer no retry.
 - **Replay to the backend.** The signed request carries a timestamp valid for 60 s and travels
   over TLS. A replay can only create a new code, which goes back to the replayer and is useless
   without the verifier.
@@ -717,8 +725,9 @@ ACME cache.
   - Each `certcheck` error code leads to `#certError`.
   - A disallowed `returnUrl` or a bad parameter gets a 400 with no redirect. So does a `returnUrl`
     on an allowed origin with any other path, a query, or another process id.
-  - An SNI name other than `DOMAIN` gets no certificate and triggers no ACME order (certmagic
-    is configured for `DOMAIN` only, with no on-demand issuance).
+  - An SNI name other than `DOMAIN` or one valid label under it gets no certificate and triggers
+    no ACME order (certmagic manages exactly `DOMAIN` and `*.DOMAIN`, with no on-demand
+    issuance; see D10 acceptance).
   - `/readyz` answers 503 until the auth certificate is present and valid, then 200.
   - A `Host` that differs from the SNI name gets a 421.
   - The signature verifies against the backend's verifier, using shared test vectors.
