@@ -139,3 +139,27 @@ func TestCertCensusValidation(t *testing.T) {
 		c.Assert(got.Census.Size, qt.Equals, int64(len(valid)))
 	})
 }
+
+// TestCertCensusPublishNeedsFeature: a draft with a certificate census created while the feature was
+// on cannot be published once the gateway keys are gone, and publishes again when they are back.
+func TestCertCensusPublishNeedsFeature(t *testing.T) {
+	c := qt.New(t)
+	enableCertAuth(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	ids := memberIDs(postOrgMembers(t, token, orgAddress, apicommon.OrgMember{MemberNumber: "P-1", NationalID: testDNI(1)}))
+	req := minimalVotingProcessRequest(orgAddress)
+	req.StartDate = ""
+	req.Census = certCensus(nil, ids...)
+	pid := requestAndParse[apicommon.CreateVotingProcessResponse](t, http.MethodPost, token, req,
+		processesCreateEndpoint).ProcessID
+	payIfPriced(t, token, pid)
+
+	t.Run("feature off", func(t *testing.T) {
+		setCertGatewayKeys(t, nil)
+		requestAndAssertError(errors.ErrNotSupported, t, http.MethodPost, token, nil, "processes", pid, "publish")
+	})
+
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
+}

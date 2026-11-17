@@ -41,6 +41,12 @@ func (a *API) anonymousCensusRefused(anonymous bool) bool {
 	return anonymous && a.csp.BlindCSPDisabled()
 }
 
+// errCertAuthDisabled is the refusal of a certificate census while no certificate gateway key is
+// configured, at create, update, validation and publish.
+func errCertAuthDisabled() error {
+	return errors.ErrNotSupported.Withf("certificate voter authentication is not enabled")
+}
+
 // certAuthSpecError returns the error for a census spec whose certAuth cannot be used, or nil:
 // certificate censuses are refused while no certificate gateway key is configured, and they need
 // authFields to be exactly ["nationalId"], the field a certificate proves. Any 2FA subset is fine.
@@ -49,7 +55,7 @@ func (a *API) certAuthSpecError(spec apicommon.CensusSpec) error {
 		return nil
 	}
 	if !a.csp.CertAuthEnabled() {
-		return errors.ErrNotSupported.Withf("certificate voter authentication is not enabled")
+		return errCertAuthDisabled()
 	}
 	if !slices.Equal(spec.AuthFields, db.OrgMemberAuthFields{db.OrgMemberAuthFieldsNationalID}) {
 		return errors.ErrInvalidData.Withf(`certAuth requires authFields to be exactly ["nationalId"]`)

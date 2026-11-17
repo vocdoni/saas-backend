@@ -6477,6 +6477,8 @@ paths:
         include that the organization has not paid for either: deselect it, or publish once
         another process pays for it.
         422 (40176) means the census is above 50 000 voters: quote-only, no self-service price.
+        400 (40025) means the census uses certificate authentication (certAuth) while the service
+        has it disabled.
       parameters:
       - description: Process ID
         in: path
