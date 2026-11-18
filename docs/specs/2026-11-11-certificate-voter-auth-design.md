@@ -303,10 +303,9 @@ ACME cache.
     to a region outside the EU.
   - Deploy trigger: the dev service tracks `main`. The prod service tracks the branch `release`,
     which only the owner advances, by fast-forward to a commit of `main` that dev has run.
-  - Private module: the Dockerfile's build stage declares `ARG CERT_CHECK_READ_TOKEN` and uses it
-    to fetch `github.com/vocdoni/cert-check` (`GOPRIVATE`, a git `insteadOf` URL). The value is a
-    sealed service variable holding a read-only token for that one repository. The final stage
-    does not contain it.
+  - Dependency: `github.com/vocdoni/cert-check` is public (since 2026-11-18), so the build fetches it
+    like any module, with no token, `GOPRIVATE` or git rewrite. The build image is `golang:1.27`
+    pinned by digest to a go1.27.4 image (GO-2026-6859 is fixed in go1.27.4).
   - Expected cost: about 50–100 MB of RAM and almost no CPU, so roughly $1–2 a month of Railway
     usage per environment, usually inside the plan's included usage.
   - Hostnames are DNS-only (grey-cloud) CNAME records on Cloudflare pointing at the Railway TCP
@@ -318,9 +317,9 @@ ACME cache.
     the same change.
   - Staging has no gateway of its own: app-stg's `CERT_GATEWAY_URL` points at `cert-dev.vocdoni.net`,
     whose `BACKENDS` has a `stg` entry, and the stg backend holds the stg public key.
-- **CI.** Run `go test -race ./...`, golangci-lint and a Docker build, with
-  `GOPRIVATE=github.com/vocdoni/cert-check` and a read token for the private cert-check module.
-  CI publishes no image: Railway builds the Dockerfile.
+- **CI.** Run `go test -race ./...`, golangci-lint and a Docker build. The Go version comes from
+  `go.mod` (`go-version-file`, newest patch with `check-latest`). CI publishes no image: Railway
+  builds the Dockerfile.
 - **Local development (D8).** Everything runs on one machine, with no cloud service.
   - **Static server certificate.** `TLS_CERT_FILE` and `TLS_KEY_FILE` replace ACME, for example
     with a mkcert certificate for `cert.localtest.me`. They are mutually exclusive with

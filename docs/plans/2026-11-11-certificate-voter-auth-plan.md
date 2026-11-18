@@ -8,6 +8,11 @@ Repos and branches:
 - vocdoni-integrator-sdk: /home/lucasmenendez/vocdoni-integrator-sdk → feat/cert-auth (base origin/main 2be5f7e; Task 15 creates the branch)
 - vocdoni-app: /home/lucasmenendez/vocdoni-app → feat/cert-auth (base origin/develop 6daf44fb; Task 16 creates the branch; the local `develop` is behind, never build on it)
 
+> **Note (2026-11-18):** `github.com/vocdoni/cert-check` is now public. Every step below that sets
+> `GOPRIVATE`, passes `CERT_CHECK_READ_TOKEN` or rewrites git URLs for it no longer applies; the
+> gateway fetches cert-check like any module (spec C1, "Deployment" and "CI"). This plan is kept as
+> the record of how the work was executed.
+
 ## Spec issues found
 
 1. **AC2 and "Compatibility" use an invalid DNI.** The examples `1234567-z` ↔ `01234567Z` and `1234567z` ↔ `01234567-Z`
