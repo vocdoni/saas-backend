@@ -43,6 +43,14 @@ func (c *CSPHandlers) attestedFirstStep(
 	if err != nil {
 		return nil, err
 	}
+	// refused before an OTP is spent on a voter who could not be signed for anyway
+	full, err := c.mainDB.AttestedCensusFull(processID, uid, census.Size)
+	if err != nil {
+		return nil, errors.ErrGenericInternalServerError.WithErr(err)
+	}
+	if full {
+		return nil, errors.ErrAttestedCensusFull
+	}
 	org, err := c.mainDB.Organization(census.OrgAddress)
 	if err != nil {
 		if err == db.ErrNotFound {
@@ -200,7 +208,22 @@ func attestedSignContext(
 		weight:      weightBytes(1),
 		attestation: auth.Attestation,
 		userID:      auth.UserID,
+		censusSize:  census.Size,
 	}, true
+}
+
+// attestedCensusFull writes 40810 and reports true when the attested voter of sc has no record yet
+// and the census already holds as many as its size, so a new voter is refused before any ballot.
+func (c *CSPHandlers) attestedCensusFull(w http.ResponseWriter, sc *signContext) bool {
+	full, err := c.mainDB.AttestedCensusFull(sc.process.ID, sc.userID, sc.censusSize)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return true
+	}
+	if full {
+		errors.ErrAttestedCensusFull.Write(w)
+	}
+	return full
 }
 
 // attestedBySigner reports whether the token was issued against an attestation of the census's
@@ -212,11 +235,12 @@ func attestedBySigner(auth *db.CSPAuth, census *db.Census) bool {
 
 // recordAttested stores, before the CSP signs question upstreamID for an attested voter, the
 // attestation and the question in the voter's attestation record, so no signature exists without
-// one. A record may list a question whose signature then failed; it never misses a signed one. It
-// does nothing for a memberbase census.
+// one. A record may list a question whose signature then failed; it never misses a signed one. A
+// new voter past the census size gets db.ErrAttestedCensusFull. It does nothing for a memberbase
+// census.
 func (c *CSPHandlers) recordAttested(sc *signContext, upstreamID internal.HexBytes) error {
 	if sc.attestation == nil {
 		return nil
 	}
-	return c.mainDB.RecordAttestedSignature(sc.process.ID, sc.userID, sc.attestation, upstreamID)
+	return c.mainDB.RecordAttestedSignature(sc.process.ID, sc.userID, sc.attestation, upstreamID, sc.censusSize)
 }

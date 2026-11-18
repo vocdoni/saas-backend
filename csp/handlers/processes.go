@@ -122,6 +122,8 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 //	@Description	40017 with data.retryAfter.
 //	@Description	Step 0 for an anonymous census is refused (400, 40037, "anonymous voting is temporarily
 //	@Description	unavailable") while the service has anonymous voting off.
+//	@Description	Step 0 on an attested census refuses a voter not signed for yet once as many voters as
+//	@Description	the census size were (409, 40810).
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -132,6 +134,7 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 //	@Failure		400			{object}	errors.Error	"Invalid input data, attempt or send limit (40017), or anonymous voting unavailable"
 //	@Failure		401			{object}	errors.Error	"Invalid authentication data, cooldown not reached, or invalid challenge"
 //	@Failure		404			{object}	errors.Error	"Process, census, or organization not found"
+//	@Failure		409			{object}	errors.Error	"Attested census full (40810)"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Failure		503			{object}	errors.Error	"Password- or phone-hashing capacity exhausted, retry later (50302)"
 //	@Router			/processes/{processId}/auth/{step} [post]
@@ -269,7 +272,8 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 //	@Description	bound to the process; authorizes the member against the question's eligibility subset
 //	@Description	and consumes the per-election signing slot (a question cannot be signed twice).
 //	@Description	Body: authToken, electionId (the question's on-chain election id) and payload (the voter
-//	@Description	address). tokenR is unused.
+//	@Description	address). tokenR is unused. On an attested census, a voter not signed for yet is refused
+//	@Description	once as many voters as the census size were (409, 40810).
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -279,6 +283,7 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 //	@Failure		400			{object}	errors.Error	"Invalid input data"
 //	@Failure		401			{object}	errors.Error	"Unauthorized, unverified token, election not in process, or member not eligible"
 //	@Failure		404			{object}	errors.Error	"Process, census, or user not found"
+//	@Failure		409			{object}	errors.Error	"Attested census full (40810)"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/sign [post]
 func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request) {
@@ -308,6 +313,10 @@ func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := c.recordAttested(sc, upstreamID); err != nil {
+		if errors.Is(err, db.ErrAttestedCensusFull) {
+			errors.ErrAttestedCensusFull.Write(w)
+			return
+		}
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
@@ -326,6 +335,8 @@ type signContext struct {
 	// member of a memberbase census; every signature for it is recorded first (recordAttested).
 	attestation *db.CSPAuthAttestation
 	userID      internal.HexBytes
+	// censusSize caps the attested voters signed for (Census.Size); unused for a memberbase census.
+	censusSize int64
 	// anonymous is the census mode: true for a blind (OFF_CHAIN_CA_V2) census, which is served by
 	// the two-round blind-point/blind-sign endpoints instead of the plain ECDSA sign endpoints.
 	anonymous bool
@@ -359,7 +370,11 @@ func (c *CSPHandlers) resolveSignContext(
 		return nil, false
 	}
 	if census.Attested != nil {
-		return attestedSignContext(w, vp, census, auth)
+		sc, ok := attestedSignContext(w, vp, census, auth)
+		if !ok || c.attestedCensusFull(w, sc) {
+			return nil, false
+		}
+		return sc, true
 	}
 	// Re-check census participation. The token was minted when the voter was in the census, and it
 	// never expires, so without this a member removed from the census (or from the group that
@@ -472,7 +487,10 @@ type authorizedBallot struct {
 //	@Description	it; retry), auth_invalid (the token was invalidated mid-batch and every remaining
 //	@Description	entry is stamped with it; authenticate again), address_mismatch (that election was
 //	@Description	already signed for a different address; re-send with the address sign-info
-//	@Description	reports) or sign_failed (internal failure; retry). Retry ONLY the entries that
+//	@Description	reports), census_full (an attested census filled up with other voters first; every
+//	@Description	remaining entry is stamped with it) or sign_failed (internal failure; retry). A voter
+//	@Description	of an attested census not signed for yet is refused upfront once as many voters as the
+//	@Description	census size were (409, 40810). Retry ONLY the entries that
 //	@Description	carry a retryable code: re-sending the whole batch re-signs the ballots that
 //	@Description	already succeeded, and every signature, re-signs included, counts toward the election's
 //	@Description	limit (MaxCSPSignaturesPerElection, 10 in total) — past it the election is permanently
@@ -486,6 +504,7 @@ type authorizedBallot struct {
 //	@Failure		400			{object}	errors.Error	"Invalid input data"
 //	@Failure		401			{object}	errors.Error	"Unauthorized, unverified token, election not in process, or member not eligible"
 //	@Failure		404			{object}	errors.Error	"Census or user not found"
+//	@Failure		409			{object}	errors.Error	"Attested census full (40810)"
 //	@Failure		413			{object}	errors.Error	"Request body too large"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/sign-batch [post]
@@ -576,6 +595,14 @@ func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Req
 		if err := c.recordAttested(sc, b.upstreamID); err != nil {
 			res.Code, res.Error = signOutcome(err)
 			logSignFailure(oid, sc.memberID, b.upstreamID, err)
+			// the census filled up since the check above: no other ballot can be recorded either
+			if res.Code == signCodeCensusFull {
+				for j := i + 1; j < len(ballots); j++ {
+					resp.Signatures[j].UpstreamID = ballots[j].upstreamID
+					resp.Signatures[j].Code, resp.Signatures[j].Error = res.Code, res.Error
+				}
+				break
+			}
 			continue
 		}
 		signature, err := c.csp.Sign(req.AuthToken, b.address, b.upstreamID, sc.weight,
@@ -883,6 +910,9 @@ const (
 	// (~1/256 leading-zero case). The nonce is NOT consumed, so the client re-blinds against the
 	// same R (from blind-point, which is idempotent) and retries.
 	signCodeInvalidBlindedMessage = "invalid_blinded_message"
+	// signCodeCensusFull: the attested census filled up with other voters before this one was
+	// signed for; retrying cannot succeed unless the census grows.
+	signCodeCensusFull = "census_full"
 )
 
 // signOutcome maps a signing error to a stable, machine-readable code and a message safe for
@@ -903,6 +933,8 @@ func signOutcome(err error) (code, message string) {
 		return signCodeBlindRequestMissing, "no blind point issued for this election; request one via blind-point first"
 	case errors.Is(err, csp.ErrInvalidBlindedMessage):
 		return signCodeInvalidBlindedMessage, "the blinded message is invalid; re-blind against the same blind point and retry"
+	case errors.Is(err, db.ErrAttestedCensusFull):
+		return signCodeCensusFull, "the attested census is full"
 	default:
 		return signCodeFailed, "could not sign the ballot"
 	}
@@ -915,7 +947,7 @@ func signOutcome(err error) (code, message string) {
 // member and process ids make a warn attributable during an incident.
 func logSignFailure(oid bson.ObjectID, memberID string, upstreamID internal.HexBytes, err error) {
 	if errors.Is(err, csp.ErrProcessAlreadyConsumed) || errors.Is(err, csp.ErrUserAlreadySigning) ||
-		errors.Is(err, csp.ErrAddressMismatch) {
+		errors.Is(err, csp.ErrAddressMismatch) || errors.Is(err, db.ErrAttestedCensusFull) {
 		log.Debugw("skipped a batch ballot", "procId", oid.Hex(), "member", memberID,
 			"electionId", upstreamID, "reason", err)
 		return

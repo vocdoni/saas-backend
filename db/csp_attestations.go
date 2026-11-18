@@ -29,39 +29,142 @@ type AttestationRecord struct {
 	CreatedAt   time.Time           `json:"createdAt" bson:"createdAt"`
 }
 
+// attestedVotersCounterID is the counters document holding how many attested voters of processID
+// have a record, the count RecordAttestedSignature caps at the census size.
+func attestedVotersCounterID(processID bson.ObjectID) string {
+	return "attestedVoters:" + processID.Hex()
+}
+
 // RecordAttestedSignature records that the CSP is about to sign question upstreamID for the attested
 // voter userID of processID. The first call for a voter stores the attestation; later calls only add
-// the question. It runs before the signature, so no signature exists without its record.
+// the question. It runs before the signature, so no signature exists without its record. A voter
+// without a record yet is refused with ErrAttestedCensusFull once maxVoters voters have one.
 func (ms *MongoStorage) RecordAttestedSignature(processID bson.ObjectID, userID internal.HexBytes,
-	attestation *CSPAuthAttestation, upstreamID internal.HexBytes,
+	attestation *CSPAuthAttestation, upstreamID internal.HexBytes, maxVoters int64,
 ) error {
-	if processID.IsZero() || len(userID) == 0 || attestation == nil || len(upstreamID) == 0 {
+	if processID.IsZero() || len(userID) == 0 || attestation == nil || len(upstreamID) == 0 || maxVoters <= 0 {
 		return ErrBadInputs
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	filter := bson.M{"_id": userID, "processId": processID}
-	update := bson.M{
-		"$setOnInsert": bson.M{
-			"voterId":     attestation.VoterID,
-			"contactHash": attestation.ContactHash,
-			"expiresAt":   attestation.ExpiresAt,
-			"signature":   attestation.Signature,
-			"signer":      attestation.Signer,
-			"createdAt":   time.Now(),
-		},
-		"$addToSet": bson.M{"questions": upstreamID},
+	addQuestion := bson.M{"$addToSet": bson.M{"questions": upstreamID}}
+	res, err := ms.cspAttestations.UpdateOne(ctx, filter, addQuestion)
+	if err != nil {
+		return fmt.Errorf("failed to record attested signature: %w", err)
 	}
-	opts := options.UpdateOne().SetUpsert(true)
-	_, err := ms.cspAttestations.UpdateOne(ctx, filter, update, opts)
+	if res.MatchedCount == 1 {
+		return nil
+	}
+	granted, err := ms.claimAttestedVoter(ctx, processID, maxVoters)
+	if err != nil {
+		return err
+	}
+	if !granted {
+		return ms.addQuestionOrRefuse(ctx, filter, addQuestion)
+	}
+	_, err = ms.cspAttestations.InsertOne(ctx, &AttestationRecord{
+		UserID:      userID,
+		ProcessID:   processID,
+		VoterID:     attestation.VoterID,
+		ContactHash: attestation.ContactHash,
+		ExpiresAt:   attestation.ExpiresAt,
+		Signature:   attestation.Signature,
+		Signer:      attestation.Signer,
+		Questions:   []internal.HexBytes{upstreamID},
+		CreatedAt:   time.Now(),
+	})
+	if err == nil {
+		return nil
+	}
+	// the slot goes back whatever failed: on a duplicate key a concurrent first sign of the same
+	// voter holds its own slot and wrote the record, which only needs the question added
+	if rErr := ms.releaseAttestedVoter(ctx, processID); rErr != nil {
+		return errors.Join(fmt.Errorf("failed to record attested signature: %w", err), rErr)
+	}
 	if mongo.IsDuplicateKeyError(err) {
-		// a concurrent first sign inserted the record between our match and insert: add the question
-		_, err = ms.cspAttestations.UpdateOne(ctx, filter, update)
+		_, err = ms.cspAttestations.UpdateOne(ctx, filter, addQuestion)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to record attested signature: %w", err)
 	}
 	return nil
+}
+
+// attestedRecordRechecks and attestedRecordRecheckDelay bound how long a voter refused a slot waits
+// for a concurrent first sign of the same voter, which may hold the last slot, to write its record.
+const (
+	attestedRecordRechecks     = 5
+	attestedRecordRecheckDelay = 20 * time.Millisecond
+)
+
+// addQuestionOrRefuse adds the question to the voter's record once a concurrent first sign of the
+// same voter wrote it, and returns ErrAttestedCensusFull when no record shows up in time.
+func (ms *MongoStorage) addQuestionOrRefuse(ctx context.Context, filter, addQuestion bson.M) error {
+	for i := range attestedRecordRechecks {
+		if i > 0 {
+			time.Sleep(attestedRecordRecheckDelay)
+		}
+		res, err := ms.cspAttestations.UpdateOne(ctx, filter, addQuestion)
+		if err != nil {
+			return fmt.Errorf("failed to record attested signature: %w", err)
+		}
+		if res.MatchedCount == 1 {
+			return nil
+		}
+	}
+	return ErrAttestedCensusFull
+}
+
+// claimAttestedVoter atomically takes one of the maxVoters attested voter slots of processID,
+// reporting false when all are taken. Like ClaimCSPCounter, the conditional upsert collides on _id
+// once the count reaches the cap, and one retry tells that apart from losing a concurrent first claim.
+func (ms *MongoStorage) claimAttestedVoter(ctx context.Context, processID bson.ObjectID, maxVoters int64) (bool, error) {
+	filter := bson.M{"_id": attestedVotersCounterID(processID), "count": bson.M{"$lt": maxVoters}}
+	update := bson.M{"$inc": bson.M{"count": int64(1)}}
+	opts := options.UpdateOne().SetUpsert(true)
+	for attempt := 0; ; attempt++ {
+		_, err := ms.counters.UpdateOne(ctx, filter, update, opts)
+		if err == nil {
+			return true, nil
+		}
+		if !mongo.IsDuplicateKeyError(err) {
+			return false, fmt.Errorf("failed to claim an attested voter slot: %w", err)
+		}
+		if attempt > 0 {
+			return false, nil
+		}
+	}
+}
+
+// releaseAttestedVoter gives back a slot claimAttestedVoter took, never below zero.
+func (ms *MongoStorage) releaseAttestedVoter(ctx context.Context, processID bson.ObjectID) error {
+	filter := bson.M{"_id": attestedVotersCounterID(processID), "count": bson.M{"$gt": 0}}
+	if _, err := ms.counters.UpdateOne(ctx, filter, bson.M{"$inc": bson.M{"count": int64(-1)}}); err != nil {
+		return fmt.Errorf("failed to release an attested voter slot: %w", err)
+	}
+	return nil
+}
+
+// AttestedCensusFull reports whether the attested voter userID of processID would be refused a
+// record: it has none yet and maxVoters voters already have one. It lets auth/0 refuse before an OTP
+// is spent; RecordAttestedSignature is the authoritative check.
+func (ms *MongoStorage) AttestedCensusFull(processID bson.ObjectID, userID internal.HexBytes, maxVoters int64) (bool, error) {
+	if _, err := ms.AttestationRecord(processID, userID); err == nil {
+		return false, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return false, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	var counter struct {
+		Count int64 `bson:"count"`
+	}
+	err := ms.counters.FindOne(ctx, bson.M{"_id": attestedVotersCounterID(processID)}).Decode(&counter)
+	if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
+		return false, fmt.Errorf("failed to read attested voter count: %w", err)
+	}
+	return counter.Count >= maxVoters, nil
 }
 
 // AttestationRecord returns the attestation record of the attested voter userID of processID, or

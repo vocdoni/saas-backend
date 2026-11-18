@@ -133,7 +133,14 @@ The handlers branch on `census.Attested`, not on the body shape.
   `:461-463`).
 - **`check`** answers `belongsToProcess = true` for a verified attested token and ignores
   eligibility; **`weight`** returns 1.
-- Optionally, refuse new pins past `Census.Size`, since the chain would reject those votes anyway.
+- **Census size cap:** the CSP signs for at most `Census.Size` distinct attested voters per process,
+  since the chain would reject the extra votes anyway. A voter with an attestation record keeps
+  signing and checking; a new one is refused with 409 40810. `auth/0`, `sign` and `sign-batch`
+  refuse a new voter upfront once the cap is reached, so no OTP is spent on them. The authoritative
+  check is where the record is first written: a per-process counter takes a slot with a conditional
+  increment under `Census.Size` before the record is inserted, and gives it back if the insert fails,
+  so concurrent new voters at `Size - 1` admit exactly one. In a batch, a voter who loses that race
+  gets `census_full` on every remaining ballot. Growing the census (§4.2) admits new voters again.
 
 ### 4.4 Errors
 
@@ -146,6 +153,7 @@ CSP block (40801 and 40802 are taken):
 | 40806 | `ErrContactHashMismatch` (auth/0 and resend) | 401 |
 | 40808 | `ErrAttestationSignerRevoked`: token minted under a rotated signer (sign, resend) | 401 |
 | 40809 | `ErrProcessNotEnded`: attestations requested while a question is still open (§7) | 409 |
+| 40810 | `ErrAttestedCensusFull`: a new voter past `Census.Size` (auth/0, sign, sign-batch, §4.3) | 409 |
 
 Invalid combinations of census fields use 400 40037.
 
@@ -194,7 +202,8 @@ history, and per signed `voterId` the attestation record and the questions it wa
 
 Checks:
 - every record carries a valid signature by the signer active at its time;
-- for each question, `votes on chain ≤ voterIds signed for it ≤ maxCensusSize`;
+- for each question, `votes on chain ≤ voterIds signed for it ≤ maxCensusSize`; the SaaS enforces
+  the second bound when it signs (§4.3), so the whole list holds at most `maxCensusSize` records;
 - the integrator confirms every `voterId` is one it issued, and that the totals agree with its own
   count;
 - each voter checks their own entry through the integrator: someone listed as signed who never voted

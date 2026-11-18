@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -68,16 +69,16 @@ func TestAttestationRecords(t *testing.T) {
 	userB := internal.HexBytes{0x0b}
 	q1, q2 := internal.HexBytes{0x01}, internal.HexBytes{0x02}
 
-	c.Assert(testDB.RecordAttestedSignature(processID, userA, nil, q1), qt.ErrorIs, ErrBadInputs)
+	c.Assert(testDB.RecordAttestedSignature(processID, userA, nil, q1, 10), qt.ErrorIs, ErrBadInputs)
 
 	first := testAttestation(1)
-	c.Assert(testDB.RecordAttestedSignature(processID, userA, first, q1), qt.IsNil)
+	c.Assert(testDB.RecordAttestedSignature(processID, userA, first, q1, 10), qt.IsNil)
 	// a later attestation for the same voter keeps the first one and only adds the question
-	c.Assert(testDB.RecordAttestedSignature(processID, userA, testAttestation(9), q2), qt.IsNil)
-	c.Assert(testDB.RecordAttestedSignature(processID, userA, testAttestation(9), q2), qt.IsNil)
-	c.Assert(testDB.RecordAttestedSignature(processID, userB, testAttestation(2), q1), qt.IsNil)
+	c.Assert(testDB.RecordAttestedSignature(processID, userA, testAttestation(9), q2, 10), qt.IsNil)
+	c.Assert(testDB.RecordAttestedSignature(processID, userA, testAttestation(9), q2, 10), qt.IsNil)
+	c.Assert(testDB.RecordAttestedSignature(processID, userB, testAttestation(2), q1, 10), qt.IsNil)
 	// another process does not leak into this one
-	c.Assert(testDB.RecordAttestedSignature(bson.NewObjectID(), internal.HexBytes{0x0c}, testAttestation(3), q1), qt.IsNil)
+	c.Assert(testDB.RecordAttestedSignature(bson.NewObjectID(), internal.HexBytes{0x0c}, testAttestation(3), q1, 10), qt.IsNil)
 
 	record, err := testDB.AttestationRecord(processID, userA)
 	c.Assert(err, qt.IsNil)
@@ -156,4 +157,88 @@ func TestMigrationCSPAttestations(t *testing.T) {
 		keys = append(keys, spec.KeysDocument.String())
 	}
 	c.Assert(keys, qt.Contains, `{"processId": {"$numberInt":"1"},"_id": {"$numberInt":"1"}}`)
+}
+
+// TestAttestationRecordsCensusSize: once as many voters as the census size have a record, a new
+// voter is refused while a voter with a record keeps adding questions.
+func TestAttestationRecordsCensusSize(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	processID := bson.NewObjectID()
+	userA, userB, userC := internal.HexBytes{0x0a}, internal.HexBytes{0x0b}, internal.HexBytes{0x0c}
+	q1, q2 := internal.HexBytes{0x01}, internal.HexBytes{0x02}
+
+	c.Assert(testDB.RecordAttestedSignature(processID, userA, testAttestation(1), q1, 0), qt.ErrorIs, ErrBadInputs)
+	c.Assert(testDB.RecordAttestedSignature(processID, userA, testAttestation(1), q1, 2), qt.IsNil)
+	c.Assert(testDB.RecordAttestedSignature(processID, userB, testAttestation(2), q1, 2), qt.IsNil)
+	full, err := testDB.AttestedCensusFull(processID, userC, 2)
+	c.Assert(err, qt.IsNil)
+	c.Assert(full, qt.IsTrue)
+	c.Assert(testDB.RecordAttestedSignature(processID, userC, testAttestation(3), q1, 2), qt.ErrorIs, ErrAttestedCensusFull)
+
+	full, err = testDB.AttestedCensusFull(processID, userA, 2)
+	c.Assert(err, qt.IsNil)
+	c.Assert(full, qt.IsFalse)
+	c.Assert(testDB.RecordAttestedSignature(processID, userA, testAttestation(1), q2, 2), qt.IsNil)
+	record, err := testDB.AttestationRecord(processID, userA)
+	c.Assert(err, qt.IsNil)
+	c.Assert(record.Questions, qt.DeepEquals, []internal.HexBytes{q1, q2})
+
+	// a grown census admits the refused voter
+	c.Assert(testDB.RecordAttestedSignature(processID, userC, testAttestation(3), q1, 3), qt.IsNil)
+	n, err := testDB.CountAttestationRecords(processID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(n, qt.Equals, int64(3))
+}
+
+// TestAttestationRecordsCensusSizeRace: concurrent first signs of distinct voters with one slot left
+// admit exactly one, and concurrent first signs of one voter take a single slot.
+func TestAttestationRecordsCensusSizeRace(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	const racers = 8
+
+	processID := bson.NewObjectID()
+	c.Assert(testDB.RecordAttestedSignature(processID, internal.HexBytes{0xff}, testAttestation(0xff),
+		internal.HexBytes{0x01}, 2), qt.IsNil)
+	errs := make([]error, racers)
+	var wg sync.WaitGroup
+	for i := range racers {
+		wg.Go(func() {
+			errs[i] = testDB.RecordAttestedSignature(processID, internal.HexBytes{byte(i)}, testAttestation(byte(i)),
+				internal.HexBytes{0x01}, 2)
+		})
+	}
+	wg.Wait()
+	admitted := 0
+	for _, err := range errs {
+		if err == nil {
+			admitted++
+			continue
+		}
+		c.Assert(err, qt.ErrorIs, ErrAttestedCensusFull)
+	}
+	c.Assert(admitted, qt.Equals, 1)
+	n, err := testDB.CountAttestationRecords(processID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(n, qt.Equals, int64(2))
+
+	single := bson.NewObjectID()
+	voter := internal.HexBytes{0x0a}
+	for i := range racers {
+		wg.Go(func() {
+			errs[i] = testDB.RecordAttestedSignature(single, voter, testAttestation(0x0a), internal.HexBytes{byte(i + 1)}, 1)
+		})
+	}
+	wg.Wait()
+	for _, err := range errs {
+		c.Assert(err, qt.IsNil)
+	}
+	record, err := testDB.AttestationRecord(single, voter)
+	c.Assert(err, qt.IsNil)
+	c.Assert(record.Questions, qt.HasLen, racers)
+	full, err := testDB.AttestedCensusFull(single, internal.HexBytes{0x0b}, 2)
+	c.Assert(err, qt.IsNil)
+	c.Assert(full, qt.IsFalse, qt.Commentf("one voter must take one slot"))
 }

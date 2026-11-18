@@ -598,7 +598,7 @@ func (ms *MongoStorage) DeleteCSPProcessByProcess(processID internal.HexBytes) (
 
 // DeleteVotingProcessCSPByOrg removes the CSP auth tokens anchored to any voting process of the
 // organization (the anchor is the process ObjectID bytes, see csp/handlers parseProcessID), their
-// attestation records and the
+// attestation records with their voter counts and the
 // CSP status rows of their questions' elections (keyed by the question UpstreamID). It is a step
 // of an organization teardown and must run before DeleteVotingProcessesByOrg, which drops the ids
 // it reads.
@@ -624,6 +624,13 @@ func (ms *MongoStorage) DeleteVotingProcessCSPByOrg(orgAddress common.Address) e
 		}
 		if _, err := ms.cspAttestations.DeleteMany(ctx, bson.M{"processId": bson.M{"$in": processIDs}}); err != nil {
 			return fmt.Errorf("failed to delete attestation records of voting processes: %w", err)
+		}
+		counterIDs := make([]string, 0, len(processIDs))
+		for _, id := range processIDs {
+			counterIDs = append(counterIDs, attestedVotersCounterID(id))
+		}
+		if _, err := ms.counters.DeleteMany(ctx, bson.M{"_id": bson.M{"$in": counterIDs}}); err != nil {
+			return fmt.Errorf("failed to delete attested voter counts of voting processes: %w", err)
 		}
 	}
 	var upstreamIDs []internal.HexBytes

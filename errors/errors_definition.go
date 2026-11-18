@@ -160,6 +160,12 @@ var (
 	}
 	// ErrProcessNotEnded refuses the attestation audit while any question of the process is open.
 	ErrProcessNotEnded = Error{Code: 40809, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("process has not ended")}
+	// ErrAttestedCensusFull refuses a new attested voter once as many voters as the census size were
+	// signed for; voters already signed for keep working.
+	ErrAttestedCensusFull = Error{
+		Code: 40810, HTTPstatus: http.StatusConflict, LogLevel: "info",
+		Err: fmt.Errorf("attested census is full"),
+	}
 
 	// Server errors (500) - These should be used sparingly and only for true internal errors
 	ErrMarshalingServerJSONFailed  = Error{Code: 50001, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: failed to process response"), LogLevel: "error"}
