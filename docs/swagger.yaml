@@ -5736,8 +5736,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Invalid/expired token, token not belonging to the process,
-            or contact mismatch
+          description: Invalid, expired or foreign token, contact mismatch, or rotated
+            signer (40808)
           schema:
             $ref: '#/definitions/errors.Error'
         "404":

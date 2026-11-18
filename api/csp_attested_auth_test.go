@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"fmt"
@@ -167,4 +168,43 @@ func TestAttestedAuthOnly(t *testing.T) {
 	rotated := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "",
 		attestedAuthRequest(t, next, oid, voter, "", "", soon), "processes", pid, "auth", "0")
 	c.Assert(rotated.AuthToken, qt.Not(qt.DeepEquals), first.AuthToken)
+}
+
+// TestAttestedResendAfterRotation: a signer rotation revokes the resends of a token minted under the
+// old signer (40808), without spending a resend nor sending a challenge.
+func TestAttestedResendAfterRotation(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "attestedresend123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	key, err := ethcrypto.GenerateKey()
+	c.Assert(err, qt.IsNil)
+	req := newAttestedProcessRequest(orgAddress, ethcrypto.PubkeyToAddress(key.PublicKey), 10)
+	req.Census.TwoFaFields = db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail}
+	pid, _ := publishProcessRequest(t, token, req)
+	oid := objectID(c, pid)
+	email := fmt.Sprintf("attestedresend%d@example.org", time.Now().UnixNano())
+
+	authReq := attestedAuthRequest(t, key, oid, common.Hash{0x03}, attestation.ContactEmail, email,
+		time.Now().Add(10*time.Minute))
+	step0 := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", authReq, "processes", pid, "auth", "0")
+	_ = waitForEmail(t, email)
+
+	next, err := ethcrypto.GenerateKey()
+	c.Assert(err, qt.IsNil)
+	requestAndParse[apicommon.AttestedCensusSpec](t, http.MethodPut, token,
+		&apicommon.AttestationSignerRequest{Signer: ethcrypto.PubkeyToAddress(next.PublicKey)},
+		"processes", pid, "attestation-signer")
+	revoked := requestAndParseWithAssertCode[errors.Error](http.StatusUnauthorized, t, http.MethodPost, "",
+		&handlers.AuthResendRequest{AuthToken: step0.AuthToken, Contact: email, Salt: authReq.Salt},
+		"processes", pid, "auth", "resend")
+	c.Assert(revoked.Code, qt.Equals, errors.ErrAttestationSignerRevoked.Code)
+
+	stored, err := testDB.CSPAuth(step0.AuthToken)
+	c.Assert(err, qt.IsNil)
+	c.Assert(stored.Resends, qt.Equals, 0)
+	time.Sleep(2 * time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err = testMailService.FindEmail(ctx, email)
+	c.Assert(err, qt.Not(qt.IsNil), qt.Commentf("a revoked token must not trigger a resend"))
 }

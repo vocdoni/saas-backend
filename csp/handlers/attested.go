@@ -123,12 +123,18 @@ func (c *CSPHandlers) verifyAttestation(
 }
 
 // attestedResend is auth/resend for an attested census: the voter proves the contact with the salt
-// of their attestation, and the challenge goes to that contact again.
+// of their attestation, and the challenge goes to that contact again. A token minted under a
+// rotated-out signer is refused before any resend is claimed or sent.
 func (c *CSPHandlers) attestedResend(
-	w http.ResponseWriter, r *http.Request, req *AuthResendRequest, auth *db.CSPAuth, org *db.Organization,
+	w http.ResponseWriter, r *http.Request, req *AuthResendRequest, auth *db.CSPAuth,
+	census *db.Census, org *db.Organization,
 ) {
 	if auth.Attestation == nil || auth.Attestation.ContactKind == "" {
 		errors.ErrUnauthorized.Withf("token has no attested contact").Write(w)
+		return
+	}
+	if !attestedBySigner(auth, census) {
+		errors.ErrAttestationSignerRevoked.Write(w)
 		return
 	}
 	kind := attestation.ContactKind(auth.Attestation.ContactKind)

@@ -122,7 +122,8 @@ The handlers branch on `census.Attested`, not on the body shape.
   - Without 2FA: reuse the voter's unexpired auth-only token, or create one, capped per `uid` per
     day (today's `createAuthOnlyToken` has no cap, `csp/auth.go:37-39`).
 - **`auth/resend`** takes `{authToken, contact, salt}` and checks them against `token.ContactHash`
-  before claiming a resend.
+  before claiming a resend. A token minted under a rotated-out signer is refused with 401 40808
+  before any resend is claimed or sent.
 - **Budgets:** attested step 0 spends no failed-attempt budget (a bad signature reveals nothing).
   The cooldown and daily send cap key on `uid`; per-token OTP attempts and resends are unchanged.
 - **`sign` / `sign-batch`:** `resolveSignContext` skips the participant and member lookups for an
@@ -143,7 +144,7 @@ CSP block (40801 and 40802 are taken):
 | 40803 | `ErrAttestationInvalid`: signature, signer, domain or `processId` | 401 |
 | 40804 | `ErrAttestationExpired` | 401 |
 | 40806 | `ErrContactHashMismatch` (auth/0 and resend) | 401 |
-| 40808 | `ErrAttestationSignerRevoked`: token minted under a rotated signer | 401 |
+| 40808 | `ErrAttestationSignerRevoked`: token minted under a rotated signer (sign, resend) | 401 |
 | 40809 | `ErrProcessNotEnded`: attestations requested while a question is still open (§7) | 409 |
 
 Invalid combinations of census fields use 400 40037.

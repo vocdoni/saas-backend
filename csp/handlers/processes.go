@@ -173,7 +173,7 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 //	@Param			request		body		handlers.AuthResendRequest	true	"Resend request with auth token and contact data"
 //	@Success		200			{object}	handlers.AuthResponse
 //	@Failure		400			{object}	errors.Error	"Malformed body, missing token, invalid contact, verified token, or resend limit (40017)"
-//	@Failure		401			{object}	errors.Error	"Invalid/expired token, token not belonging to the process, or contact mismatch"
+//	@Failure		401			{object}	errors.Error	"Invalid, expired or foreign token, contact mismatch, or rotated signer (40808)"
 //	@Failure		404			{object}	errors.Error	"Census or organization not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Failure		503			{object}	errors.Error	"Phone-hashing capacity exhausted, retry later (50302)"
@@ -220,7 +220,7 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if census.Attested != nil {
-		c.attestedResend(w, r, &req, auth, org)
+		c.attestedResend(w, r, &req, auth, census, org)
 		return
 	}
 	member, ok := c.orgMemberFromAuth(w, vp.OrgAddress, auth)
