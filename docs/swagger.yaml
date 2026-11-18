@@ -6816,7 +6816,7 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.UpdateQuestionCensusResponse'
         "400":
-          description: Invalid input data, or a member is not part of the census
+          description: Invalid input data, member not in the census, or attested census
           schema:
             $ref: '#/definitions/errors.Error'
         "401":

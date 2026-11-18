@@ -89,8 +89,9 @@ The attestation mode is a census field, not a census type: `Census.Type` stays d
 - DB: `db.Census.Attested *AttestedCensus { Signer common.Address; SignerHistory []{Signer, From} }`.
   A missing field means a memberbase census, so existing data needs no migration.
 - `attested` excludes `groupId`, `memberIds`, `authFields`, `weighted`, `anonymous` and any question
-  `eligibility`; violations answer 400 40037 at create, update and publish. Allowed `twoFaFields`:
-  `[]`, `["email"]`, `["phone"]` (not `sms_or_mail`).
+  `eligibility`; violations answer 400 40037 at create, update and publish, and
+  `PUT /processes/{id}/questions/{questionId}/census` refuses any eligibility list with 400 40037.
+  Allowed `twoFaFields`: `[]`, `["email"]`, `["phone"]` (not `sms_or_mail`).
 - Signer rotation: `PUT /processes/{id}/attestation-signer {signer}` appends to `SignerHistory`;
   afterwards `auth/0` and every sign accept only the active signer (§4.3, §8).
 

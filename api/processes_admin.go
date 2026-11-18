@@ -790,7 +790,7 @@ func (a *API) addProcessCensusMembers(
 //	@Param			request		body		apicommon.UpdateQuestionCensusRequest					true	"Complete desired eligibility list"
 //	@Success		200			{object}	apicommon.UpdateQuestionCensusResponse					"Eligibility updated; no on-chain resize needed"
 //	@Success		202			{object}	apicommon.UpdateQuestionCensusResponse					"Eligibility updated; maxCensusSize update enqueued"
-//	@Failure		400			{object}	errors.Error											"Invalid input data, or a member is not part of the census"
+//	@Failure		400			{object}	errors.Error											"Invalid input data, member not in the census, or attested census"
 //	@Failure		401			{object}	errors.Error											"Unauthorized"
 //	@Failure		404			{object}	errors.Error											"Process or question not found"
 //	@Failure		409			{object}	errors.Error											"Publish in progress, member already signed for, or list changed"
@@ -866,6 +866,10 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 	census, err := a.db.Census(vp.CensusID.Hex())
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if census.Attested != nil {
+		errors.ErrInvalidData.With(errCensusAttestedNoMembers).Write(w)
 		return
 	}
 	eligible, err := a.validateCensusParticipants(census.ID.Hex(), req.MemberIDs)

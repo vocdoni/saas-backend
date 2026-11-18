@@ -89,3 +89,27 @@ func TestAttestationSignerRotation(t *testing.T) {
 		&apicommon.AttestationSignerRequest{Signer: next}, "processes", plain, "attestation-signer")
 	c.Assert(notAttested.Code, qt.Equals, errors.ErrInvalidData.Code)
 }
+
+// TestAttestedQuestionCensus: question eligibility is refused on an attested census, which has no
+// member list, both on a draft and on a published process.
+func TestAttestedQuestionCensus(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "attestedquest123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	signer := common.Address{0xaa}
+	draft := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, newAttestedProcessRequest(orgAddress, signer, 10), processesCreateEndpoint).ProcessID
+	published := publishedAttestedProcess(t, token, orgAddress, signer, 10, nil)
+
+	for _, pid := range []string{draft, published} {
+		got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+		c.Assert(got.Questions, qt.Not(qt.HasLen), 0)
+		for _, memberIDs := range [][]string{{"64b7f0e0a1b2c3d4e5f60718"}, {}} {
+			refused := requestAndParseWithAssertCode[errors.Error](http.StatusBadRequest, t, http.MethodPut, token,
+				&apicommon.UpdateQuestionCensusRequest{MemberIDs: memberIDs},
+				"processes", pid, "questions", got.Questions[0].ID.Hex(), "census")
+			c.Assert(refused.Code, qt.Equals, errors.ErrInvalidData.Code)
+			c.Assert(refused.Error(), qt.Contains, "attested census has no members")
+		}
+	}
+}

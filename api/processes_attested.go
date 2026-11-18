@@ -15,6 +15,9 @@ import (
 // errCensusNotAttested answers a request that only applies to an attested census.
 const errCensusNotAttested = "the process census is not attested"
 
+// errCensusAttestedNoMembers answers a member-list request on an attested census, which has none.
+const errCensusAttestedNoMembers = "an attested census has no members, so its questions take no eligibility list"
+
 // updateAttestedCensusSizeHandler godoc
 //
 //	@Summary		Grow the declared size of an attested census
