@@ -144,6 +144,7 @@ CSP block (40801 and 40802 are taken):
 | 40804 | `ErrAttestationExpired` | 401 |
 | 40806 | `ErrContactHashMismatch` (auth/0 and resend) | 401 |
 | 40808 | `ErrAttestationSignerRevoked`: token minted under a rotated signer | 401 |
+| 40809 | `ErrProcessNotEnded`: attestations requested while a question is still open (§7) | 409 |
 
 Invalid combinations of census fields use 400 40037.
 
@@ -185,7 +186,8 @@ format change.
 
 ## 7. Audit
 
-Once `processEnded` holds and every question is ENDED or RESULTS, the SaaS serves a public, paginated
+Once every question is ENDED or RESULTS on chain (at the scheduled end, or earlier when an admin ends
+the process), the SaaS serves a public, paginated
 `GET /processes/{id}/attestations` (no API key, immutable from then on): the domain, the signer
 history, and per signed `voterId` the attestation record and the questions it was signed for.
 

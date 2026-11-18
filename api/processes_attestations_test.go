@@ -16,8 +16,8 @@ import (
 )
 
 // TestAttestedParticipantsAndAudit: the participants of an attested census are looked up by voterId
-// from the attestation records, and the public attestations endpoint opens only once the process is
-// over, listing every signed voter with its attestation and questions.
+// from the attestation records, and the public attestations endpoint opens once every question has
+// ended, even before the scheduled end date, listing every signed voter with its attestation and questions.
 func TestAttestedParticipantsAndAudit(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "attestedaudit12")
@@ -55,16 +55,17 @@ func TestAttestedParticipantsAndAudit(t *testing.T) {
 	c.Assert(byEmail.Code, qt.Equals, errors.ErrMalformedBody.Code)
 
 	// still open: no audit yet
-	requestAndAssertCode(http.StatusConflict, t, http.MethodGet, "", nil, "processes", pid, "attestations")
+	requestAndAssertError(errors.ErrProcessNotEnded, t, http.MethodGet, "", nil, "processes", pid, "attestations")
 
 	vp, questions, err := testDB.ProcessWithQuestions(oid)
 	c.Assert(err, qt.IsNil)
-	for _, q := range questions {
+	c.Assert(vp.EndDate.After(time.Now()), qt.IsTrue)
+	// ended early, one question at a time: the audit waits for the last one, not for the end date
+	c.Assert(testDB.SetQuestionStatus(questions[0].ID, db.QuestionStatusEnded), qt.IsNil)
+	requestAndAssertError(errors.ErrProcessNotEnded, t, http.MethodGet, "", nil, "processes", pid, "attestations")
+	for _, q := range questions[1:] {
 		c.Assert(testDB.SetQuestionStatus(q.ID, db.QuestionStatusEnded), qt.IsNil)
 	}
-	// every question ended but the end date has not passed yet
-	requestAndAssertCode(http.StatusConflict, t, http.MethodGet, "", nil, "processes", pid, "attestations")
-	c.Assert(testDB.SetVotingProcessEndDate(vp.ID, time.Now().Add(-time.Minute)), qt.IsNil)
 
 	audit := requestAndParse[apicommon.ProcessAttestationsResponse](t, http.MethodGet, "", nil,
 		"processes", pid, "attestations?limit=1")
@@ -90,5 +91,35 @@ func TestAttestedParticipantsAndAudit(t *testing.T) {
 		_, err := domain.Verify(&att, rec.Signature, signer)
 		c.Assert(err, qt.IsNil)
 		c.Assert(rec.Questions[0].QuestionID, qt.Not(qt.Equals), "")
+	}
+}
+
+// TestAttestationsPublic: the audit opens on the questions' terminal status alone, so an early end
+// publishes before the scheduled end date and a single open question keeps it closed.
+func TestAttestationsPublic(t *testing.T) {
+	future := &db.VotingProcess{Published: true, EndDate: time.Now().Add(time.Hour)}
+	questions := func(statuses ...string) []db.VotingProcessQuestion {
+		qs := make([]db.VotingProcessQuestion, len(statuses))
+		for i, s := range statuses {
+			qs[i].Status = s
+		}
+		return qs
+	}
+	for _, tc := range []struct {
+		name      string
+		vp        *db.VotingProcess
+		questions []db.VotingProcessQuestion
+		want      bool
+	}{
+		{"ended early", future, questions(db.QuestionStatusEnded, db.QuestionStatusResults), true},
+		{"one question open", future, questions(db.QuestionStatusEnded, db.QuestionStatusReady), false},
+		{"paused", future, questions(db.QuestionStatusPaused), false},
+		{"no end date", &db.VotingProcess{Published: true}, questions(db.QuestionStatusResults), true},
+		{"unpublished", &db.VotingProcess{EndDate: time.Now().Add(-time.Hour)}, questions(db.QuestionStatusEnded), false},
+		{"no questions", future, nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			qt.Assert(t, attestationsPublic(tc.vp, tc.questions), qt.Equals, tc.want)
+		})
 	}
 }

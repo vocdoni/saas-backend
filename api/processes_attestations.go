@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -83,9 +82,9 @@ func (a *API) attestedParticipants(w http.ResponseWriter, r *http.Request, vp *d
 //	@Summary		Published attestation records of an attested census
 //	@Description	Public, paginated audit of an attested census once it is over: the EIP-712 domain, the
 //	@Description	signer history and, per attested voter the CSP signed for, the attestation it signed
-//	@Description	against and the questions it signed. Served once the process end date has passed (or
-//	@Description	it has none) and every question is ENDED or RESULTS; 409 before. The records carry no
-//	@Description	contact, salt or voting address.
+//	@Description	against and the questions it signed. Served once every question is ENDED or RESULTS,
+//	@Description	at the scheduled end or earlier if the process was ended early; 409 (40809) before.
+//	@Description	The records carry no contact, salt or voting address.
 //	@Tags			processes
 //	@Produce		json
 //	@Param			processId	path		string	true	"Voting process ID"
@@ -94,7 +93,7 @@ func (a *API) attestedParticipants(w http.ResponseWriter, r *http.Request, vp *d
 //	@Success		200			{object}	apicommon.ProcessAttestationsResponse
 //	@Failure		400			{object}	errors.Error	"Not an attested census"
 //	@Failure		404			{object}	errors.Error	"Process not found"
-//	@Failure		409			{object}	errors.Error	"Process not over yet"
+//	@Failure		409			{object}	errors.Error	"Process not ended yet (40809)"
 //	@Router			/processes/{processId}/attestations [get]
 func (a *API) processAttestationsHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)
@@ -124,8 +123,13 @@ func (a *API) processAttestationsHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrInvalidData.With(errCensusNotAttested).Write(w)
 		return
 	}
-	if !attestationsPublic(vp, questions, time.Now()) {
-		errors.ErrDuplicateConflict.Withf("the attestations are published once every question has ended").Write(w)
+	if !attestationsPublic(vp, questions) {
+		// the stored status trails the chain, which ends questions at the scheduled end on its own:
+		// refresh it so a retry sees the end.
+		for i := range questions {
+			a.enqueueReconcileIfStale(&questions[i])
+		}
+		errors.ErrProcessNotEnded.Withf("the attestations are published once every question has ended").Write(w)
 		return
 	}
 	domain, err := a.csp.AttestationDomain()
@@ -179,10 +183,11 @@ func (a *API) processAttestationsHandler(w http.ResponseWriter, r *http.Request)
 	apicommon.HTTPWriteJSON(w, resp)
 }
 
-// attestationsPublic reports whether the attestation records of vp are public: its end date has
-// passed, when it has one, and every question is ENDED or RESULTS, so no record can change.
-func attestationsPublic(vp *db.VotingProcess, questions []db.VotingProcessQuestion, now time.Time) bool {
-	if !vp.Published || len(questions) == 0 || (!vp.EndDate.IsZero() && now.Before(vp.EndDate)) {
+// attestationsPublic reports whether the attestation records of vp are public: every question is
+// ENDED or RESULTS, so no record can change. The chain status rules, not EndDate, so a process
+// ended early publishes at once.
+func attestationsPublic(vp *db.VotingProcess, questions []db.VotingProcessQuestion) bool {
+	if !vp.Published || len(questions) == 0 {
 		return false
 	}
 	for i := range questions {

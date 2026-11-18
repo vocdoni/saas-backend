@@ -5584,9 +5584,9 @@ paths:
       description: |-
         Public, paginated audit of an attested census once it is over: the EIP-712 domain, the
         signer history and, per attested voter the CSP signed for, the attestation it signed
-        against and the questions it signed. Served once the process end date has passed (or
-        it has none) and every question is ENDED or RESULTS; 409 before. The records carry no
-        contact, salt or voting address.
+        against and the questions it signed. Served once every question is ENDED or RESULTS,
+        at the scheduled end or earlier if the process was ended early; 409 (40809) before.
+        The records carry no contact, salt or voting address.
       parameters:
       - description: Voting process ID
         in: path
@@ -5617,7 +5617,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Process not over yet
+          description: Process not ended yet (40809)
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Published attestation records of an attested census

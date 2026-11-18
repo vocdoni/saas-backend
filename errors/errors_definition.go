@@ -158,6 +158,8 @@ var (
 		Code: 40808, HTTPstatus: http.StatusUnauthorized, LogLevel: "info",
 		Err: fmt.Errorf("attestation signer is no longer active"),
 	}
+	// ErrProcessNotEnded refuses the attestation audit while any question of the process is open.
+	ErrProcessNotEnded = Error{Code: 40809, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("process has not ended")}
 
 	// Server errors (500) - These should be used sparingly and only for true internal errors
 	ErrMarshalingServerJSONFailed  = Error{Code: 50001, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: failed to process response"), LogLevel: "error"}
