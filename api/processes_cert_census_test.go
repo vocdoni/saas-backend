@@ -1,16 +1,19 @@
 package api
 
 import (
+	"context"
 	"crypto/ed25519"
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // testCertGatewayKeyID and testCertGatewaySeed are the shared signature test vector key (seed bytes
@@ -162,4 +165,26 @@ func TestCertCensusPublishNeedsFeature(t *testing.T) {
 
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
+}
+
+// TestCertCensusPublishRefusalWins: with certificate auth off, a cert draft that the organization's
+// publish check also refuses (here, over the duration cap) answers 40025, not that later error.
+func TestCertCensusPublishRefusalWins(t *testing.T) {
+	c := qt.New(t)
+	enableCertAuth(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	ids := memberIDs(postOrgMembers(t, token, orgAddress, apicommon.OrgMember{MemberNumber: "W-1", NationalID: testDNI(51)}))
+	req := minimalVotingProcessRequest(orgAddress)
+	req.StartDate = ""
+	req.Census = certCensus(nil, ids...)
+	pid := requestAndParse[apicommon.CreateVotingProcessResponse](t, http.MethodPost, token, req,
+		processesCreateEndpoint).ProcessID
+	// over the duration cap, stored as drafts were before they were capped
+	_, err := testDB.DBClient.Database(testDBName).Collection("votingProcesses").UpdateOne(context.Background(),
+		bson.M{"_id": objectID(c, pid)}, bson.M{"$set": bson.M{"endDate": time.Now().Add(120 * 24 * time.Hour).UTC()}})
+	c.Assert(err, qt.IsNil)
+
+	setCertGatewayKeys(t, nil)
+	requestAndAssertError(errors.ErrNotSupported, t, http.MethodPost, token, nil, "processes", pid, "publish")
 }

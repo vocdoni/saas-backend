@@ -222,7 +222,9 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	}
 	if err := a.subscriptions.OrgCanPublishProcess(orgDoc, durationSeconds); err != nil {
 		problems = append(problems, err.Error())
-		denied = err
+		if denied == nil { // the certificate refusal above wins
+			denied = err
+		}
 	}
 	return problems, questionsMismatch, denied
 }
