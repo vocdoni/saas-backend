@@ -14,9 +14,11 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
@@ -226,4 +228,70 @@ func TestCertAuthStep0MemberEdited(t *testing.T) {
 		err := postProcessAuth0AndExpectError(t, pid, req)
 		qt.Assert(t, err.Code, qt.Equals, errors.ErrCSPAuthFailed.Code, qt.Commentf("nationalId %q", newID))
 	}
+}
+
+// TestCertAuthStep0RetryLaterKeepsCode: a step 0 refused for a reason the voter can only wait out
+// (the failed-attempt budget, 40017, or the 2FA cooldown) leaves the certificate code unspent, so
+// it redeems once the refusal is over.
+func TestCertAuthStep0RetryLaterKeepsCode(t *testing.T) {
+	enableCertAuth(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	members := postOrgMembers(t, token, orgAddress,
+		apicommon.OrgMember{MemberNumber: "R-1", NationalID: testDNI(41), Email: "r1-cert@example.com"})
+	ids := memberIDs(members)
+	authOnly, _ := publishCensusProcess(t, token, orgAddress, certCensus(nil, ids...), 1)
+	withEmail, _ := publishCensusProcess(t, token, orgAddress,
+		certCensus(db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail}, ids...), 1)
+	unused := func(c *qt.C, code string) {
+		c.Helper()
+		codeHash := sha256.Sum256([]byte(code))
+		var stored db.CertAuthAssertion
+		c.Assert(testDB.DBClient.Database(testDBName).Collection("certAuthAssertions").
+			FindOne(context.Background(), bson.M{"codeHash": codeHash[:]}).Decode(&stored), qt.IsNil)
+		c.Assert(stored.UsedAt, qt.IsNil)
+	}
+
+	t.Run("failed-attempt budget spent: 40017", func(t *testing.T) {
+		c := qt.New(t)
+		vp, err := testDB.VotingProcess(objectID(c, authOnly))
+		c.Assert(err, qt.IsNil)
+		participant, err := testDB.CensusParticipant(vp.CensusID.Hex(), ids[0])
+		c.Assert(err, qt.IsNil)
+		anchorID := internal.HexBytes(vp.ID[:])
+		var claims []csp.AuthAttemptClaim
+		for {
+			claim, err := testAPI.csp.ClaimAuthAttempt(anchorID, participant.LoginHash, nil)
+			if err != nil {
+				break
+			}
+			claims = append(claims, claim)
+		}
+		verifier, challenge := testCertPKCE(t)
+		req := &handlers.AuthRequest{CertCode: newCertCode(t, authOnly, testDNI(41), challenge), CodeVerifier: verifier}
+		apiErr := postProcessAuth0AndExpectError(t, authOnly, req)
+		c.Assert(apiErr.Code, qt.Equals, errors.ErrVerificationMaxAttempts.Code)
+		unused(c, req.CertCode)
+		for _, claim := range claims {
+			testAPI.csp.ReleaseAuthAttempt(claim)
+		}
+		postProcessAuth0(t, authOnly, req)
+	})
+
+	t.Run("2FA cooldown", func(t *testing.T) {
+		c := qt.New(t)
+		login := func() *handlers.AuthRequest {
+			verifier, challenge := testCertPKCE(t)
+			return &handlers.AuthRequest{
+				CertCode: newCertCode(t, withEmail, testDNI(41), challenge), CodeVerifier: verifier, Email: members[0].Email,
+			}
+		}
+		postProcessAuth0(t, withEmail, login())
+		req := login()
+		apiErr := postProcessAuth0AndExpectError(t, withEmail, req)
+		c.Assert(apiErr.Code, qt.Equals, errors.ErrAttemptCoolDownTime.Code)
+		unused(c, req.CertCode)
+		time.Sleep(cspNotificationCoolDownTime)
+		postProcessAuth0(t, withEmail, req)
+	})
 }

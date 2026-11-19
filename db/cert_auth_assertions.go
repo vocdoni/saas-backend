@@ -69,6 +69,35 @@ func (ms *MongoStorage) RecordCertGatewayRequest(digest []byte, expiresAt time.T
 	return true, nil
 }
 
+// CertAuthAssertion returns, without consuming it, the unused and unexpired assertion of the
+// process with the given code hash, or ErrNotFound.
+func (ms *MongoStorage) CertAuthAssertion(codeHash []byte, processID bson.ObjectID, now time.Time) (
+	*CertAuthAssertion, error,
+) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	a := &CertAuthAssertion{}
+	err := ms.certAuthAssertions.FindOne(ctx, redeemableCertAuthAssertion(codeHash, processID, now)).Decode(a)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get cert auth assertion: %w", err)
+	}
+	return a, nil
+}
+
+// redeemableCertAuthAssertion matches the unused and unexpired assertion of the process with the
+// given code hash.
+func redeemableCertAuthAssertion(codeHash []byte, processID bson.ObjectID, now time.Time) bson.M {
+	return bson.M{
+		"codeHash":  codeHash,
+		"processId": processID,
+		"usedAt":    nil,
+		"expiresAt": bson.M{"$gt": now},
+	}
+}
+
 // ConsumeCertAuthAssertion atomically marks as used, and returns, the unused and unexpired
 // assertion of the process with the given code hash. Two concurrent calls never both get it. It
 // returns ErrNotFound for a code that is unknown, used, expired or of another process.
@@ -77,15 +106,9 @@ func (ms *MongoStorage) ConsumeCertAuthAssertion(codeHash []byte, processID bson
 ) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	filter := bson.M{
-		"codeHash":  codeHash,
-		"processId": processID,
-		"usedAt":    nil,
-		"expiresAt": bson.M{"$gt": now},
-	}
 	update := bson.M{"$set": bson.M{"usedAt": now}}
 	a := &CertAuthAssertion{}
-	err := ms.certAuthAssertions.FindOneAndUpdate(ctx, filter, update,
+	err := ms.certAuthAssertions.FindOneAndUpdate(ctx, redeemableCertAuthAssertion(codeHash, processID, now), update,
 		options.FindOneAndUpdate().SetReturnDocument(options.After)).Decode(a)
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return nil, ErrNotFound

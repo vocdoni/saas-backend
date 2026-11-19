@@ -287,12 +287,21 @@ func voterRef(processID, memberID string) string {
 // the gateway returned to the voting page and the PKCE verifier of its code challenge, plus the
 // email or phone when the census has 2FA, and no typed login field.
 //
-// The request is checked in full before the code is consumed, so a malformed one spends nothing.
-// The code is then consumed atomically, and is spent from then on whatever the outcome: a
-// verifier, contact or weight that fails sends the voter through the certificate again. An unknown,
-// expired, used or foreign code and a wrong verifier all answer the bare ErrCSPAuthFailed. The
-// failed-attempt budget is the participant's (its login hash), claimed before the contact check as
-// in the typed flow. The rest is the typed flow's: contact check, weight, then csp.AuthToken.
+// The request is checked in full before the code is looked at, so a malformed one spends nothing.
+// The code is then looked up without being consumed, and every check that can refuse runs before
+// it is consumed atomically, right before the token is minted:
+//   - a failure on the voter's data (an unknown, expired, used or foreign code, a wrong verifier, a
+//     participant that no longer holds the proved national ID, a wrong contact, a zero weight)
+//     spends the code, and sends the voter through the certificate again. The code and verifier
+//     failures answer the bare ErrCSPAuthFailed.
+//   - a refusal the voter can only wait out (the failed-attempt budget, 40017, and for a census
+//     with 2FA the cooldown and the daily send cap AuthToken applies) leaves the code redeemable.
+//     The 2FA checks are a peek (csp.ChallengeSendRefusal): AuthToken enforces them again after
+//     the code is consumed, so a send racing in between can still refuse with the code spent.
+//
+// The failed-attempt budget is the participant's (its login hash), claimed before the contact
+// check as in the typed flow. The rest is the typed flow's: contact check, weight, then
+// csp.AuthToken.
 func (c *CSPHandlers) certAuthFirstStep(
 	r *http.Request,
 	req *AuthRequest,
@@ -319,13 +328,19 @@ func (c *CSPHandlers) certAuthFirstStep(
 	var processID bson.ObjectID
 	copy(processID[:], anchorID)
 	codeHash := sha256.Sum256([]byte(req.CertCode))
-	assertion, err := c.mainDB.ConsumeCertAuthAssertion(codeHash[:], processID, time.Now())
+	assertion, err := c.mainDB.CertAuthAssertion(codeHash[:], processID, time.Now())
 	if errors.Is(err, db.ErrNotFound) {
 		return nil, "", errors.ErrCSPAuthFailed
 	}
 	if err != nil {
 		return nil, "", errors.ErrGenericInternalServerError.WithErr(err)
 	}
+	consumed := false
+	defer func() {
+		if !consumed && (errors.Is(err, errors.ErrCSPAuthFailed) || errors.Is(err, errors.ErrZeroWeightVoter)) {
+			c.spendCertCode(codeHash[:], processID)
+		}
+	}()
 	verifierHash := sha256.Sum256([]byte(req.CodeVerifier))
 	challenge := base64.RawURLEncoding.EncodeToString(verifierHash[:])
 	if subtle.ConstantTimeCompare([]byte(challenge), []byte(assertion.CodeChallenge)) != 1 ||
@@ -371,11 +386,34 @@ func (c *CSPHandlers) certAuthFirstStep(
 	if census.Weighted && member.Weight == 0 {
 		return nil, "", errors.ErrZeroWeightVoter
 	}
+	uID := internal.HexBytesFromString(member.ID.Hex())
+	if challengeType != "" {
+		if err := c.csp.ChallengeSendRefusal(uID, anchorID); err != nil {
+			return nil, "", err
+		}
+	}
+
+	// exactly once: of two concurrent redemptions that got this far, one consumes the code
+	if _, err := c.mainDB.ConsumeCertAuthAssertion(codeHash[:], processID, time.Now()); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, "", errors.ErrCSPAuthFailed
+		}
+		return nil, "", errors.ErrGenericInternalServerError.WithErr(err)
+	}
+	consumed = true
 	name, logo := orgNameAndLogo(org)
-	token, err = c.csp.AuthToken(anchorID, internal.HexBytesFromString(member.ID.Hex()), toDestinations,
-		challengeType, lang, name, logo, org.Address)
+	token, err = c.csp.AuthToken(anchorID, uID, toDestinations, challengeType, lang, name, logo, org.Address)
 	if err != nil {
 		return nil, "", err
 	}
 	return token, voterRef(processID.Hex(), member.ID.Hex()), nil
+}
+
+// spendCertCode consumes a certificate code whose step 0 failed on the voter's data, so the voter
+// goes through the certificate again. A code already spent is fine; other failures are logged.
+func (c *CSPHandlers) spendCertCode(codeHash []byte, processID bson.ObjectID) {
+	_, err := c.mainDB.ConsumeCertAuthAssertion(codeHash, processID, time.Now())
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		log.Warnw("failed to spend cert code", "processId", processID.Hex(), "error", err)
+	}
 }
