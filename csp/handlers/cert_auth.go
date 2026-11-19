@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -53,7 +54,7 @@ type CertAssertionRequest struct {
 	ProcessID string `json:"processId"`
 	// NationalID is the certificate's DNI or NIE, 9 characters as cert-check reports it.
 	NationalID string `json:"nationalId"`
-	// DocumentType is DNI or NIE.
+	// DocumentType is DNI or NIE, the type of NationalID (an NIE starts with X, Y or Z), else bad_request.
 	DocumentType string `json:"documentType"`
 	// Provider and Profile are the cert-check provider and profile that accepted the certificate.
 	Provider string `json:"provider"`
@@ -82,6 +83,15 @@ func (req *CertAssertionRequest) valid() bool {
 	return (req.DocumentType == "DNI" || req.DocumentType == "NIE") &&
 		req.Provider != "" && len(req.Provider) <= 64 && len(req.Profile) <= 64 &&
 		hex64.MatchString(req.CertSHA256) && base64URL43.MatchString(req.CodeChallenge)
+}
+
+// nationalIDDocumentType is the document type of a canonical national ID: NIE for one with an X, Y
+// or Z prefix, else DNI.
+func nationalIDDocumentType(canonical string) string {
+	if strings.ContainsAny(canonical[:1], "XYZ") {
+		return "NIE"
+	}
+	return "DNI"
 }
 
 // writeCertAssertionJSON writes an answer of POST /cert-auth/assertions.
@@ -190,7 +200,7 @@ func (c *CSPHandlers) CertAssertionHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	nationalID, ok := internal.CanonicalNationalID(req.NationalID)
-	if !ok {
+	if !ok || req.DocumentType != nationalIDDocumentType(nationalID) {
 		writeCertAssertionError(w, http.StatusBadRequest, certErrBadRequest, logFields...)
 		return
 	}

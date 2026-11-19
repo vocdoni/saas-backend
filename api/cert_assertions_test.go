@@ -164,7 +164,12 @@ func TestCertAssertions(t *testing.T) {
 	})
 
 	t.Run("malformed requests", func(t *testing.T) {
+		dniAsNIE := newCertAssertionRequest(pid, testDNI(3), challenge)
+		dniAsNIE.DocumentType = "NIE"
+		nieAsDNI := newCertAssertionRequest(pid, "X1234567L", challenge)
 		for _, req := range []*handlers.CertAssertionRequest{
+			dniAsNIE,
+			nieAsDNI,
 			newCertAssertionRequest("not-an-id", testDNI(3), challenge),
 			newCertAssertionRequest(bson.NewObjectID().Hex()[:23]+"G", testDNI(3), challenge),
 			newCertAssertionRequest(pid, "12345678A", challenge), // invalid DNI

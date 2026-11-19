@@ -2491,7 +2491,8 @@ definitions:
           characters (PKCE S256).
         type: string
       documentType:
-        description: DocumentType is DNI or NIE.
+        description: DocumentType is DNI or NIE, the type of NationalID (an NIE starts
+          with X, Y or Z), else bad_request.
         type: string
       nationalId:
         description: NationalID is the certificate's DNI or NIE, 9 characters as cert-check
