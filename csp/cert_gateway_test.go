@@ -99,7 +99,7 @@ func TestVoterRef(t *testing.T) {
 	keyHash := sha256.Sum256([]byte("vocdoni-voter-ref-key:secret"))
 	c.Assert(key, qt.DeepEquals, keyHash[:])
 	mac := hmac.New(sha256.New, keyHash[:])
-	mac.Write([]byte("vocdoni-voter-ref:process:member-1"))
+	_, _ = mac.Write([]byte("vocdoni-voter-ref:process:member-1"))
 	ref := voterRef(key, "process", "member-1")
 	c.Assert(ref, qt.Equals, hex.EncodeToString(mac.Sum(nil)))
 	c.Assert(ref, qt.Matches, `[0-9a-f]{64}`)

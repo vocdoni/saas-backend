@@ -138,7 +138,7 @@ func voterRefKey(secret string) []byte {
 // voterRef is CSP.VoterRef with an explicit key.
 func voterRef(key []byte, processID, memberID string) string {
 	mac := hmac.New(sha256.New, key)
-	mac.Write([]byte("vocdoni-voter-ref:" + processID + ":" + memberID))
+	_, _ = mac.Write([]byte("vocdoni-voter-ref:" + processID + ":" + memberID))
 	return hex.EncodeToString(mac.Sum(nil))
 }
 

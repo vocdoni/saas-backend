@@ -100,7 +100,7 @@ func TestCertAuthStep0(t *testing.T) {
 		c.Assert(first.VoterRef, qt.Matches, `[0-9a-f]{64}`)
 		key := sha256.Sum256([]byte("vocdoni-voter-ref-key:" + testSecret))
 		mac := hmac.New(sha256.New, key[:])
-		mac.Write([]byte("vocdoni-voter-ref:" + authOnly + ":" + ids[0]))
+		_, _ = mac.Write([]byte("vocdoni-voter-ref:" + authOnly + ":" + ids[0]))
 		c.Assert(first.VoterRef, qt.Equals, hex.EncodeToString(mac.Sum(nil)))
 		c.Assert(login(t, authOnly, alice, nil).VoterRef, qt.Equals, first.VoterRef)
 		c.Assert(login(t, authOnly, bob, nil).VoterRef, qt.Not(qt.Equals), first.VoterRef)
