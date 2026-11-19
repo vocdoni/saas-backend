@@ -74,6 +74,7 @@ func TestAttestedProcessRefusesMemberOptions(t *testing.T) {
 		"auth fields": func(r *apicommon.CreateVotingProcessRequest) { r.Census.AuthFields = db.OrgMemberAuthFields{"name"} },
 		"weighted":    func(r *apicommon.CreateVotingProcessRequest) { r.Census.Weighted = true },
 		"anonymous":   func(r *apicommon.CreateVotingProcessRequest) { r.Census.Anonymous = true },
+		"cert auth":   func(r *apicommon.CreateVotingProcessRequest) { r.Census.CertAuth = true },
 		"two channels": func(r *apicommon.CreateVotingProcessRequest) {
 			r.Census.TwoFaFields = db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail, db.OrgMemberTwoFaFieldPhone}
 		},

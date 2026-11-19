@@ -159,6 +159,11 @@ func TestAttestedAuthOnly(t *testing.T) {
 	withNonZeroHash.Contact, withNonZeroHash.Salt = "", nil
 	assertAuthError(t, pid, withNonZeroHash, errors.ErrAttestationInvalid)
 
+	// a certificate code belongs to a certificate census only
+	withCertCode := attestedAuthRequest(t, key, oid, voter, "", "", soon)
+	withCertCode.CertCode = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	assertAuthError(t, pid, withCertCode, errors.ErrInvalidUserData)
+
 	next, err := ethcrypto.GenerateKey()
 	c.Assert(err, qt.IsNil)
 	requestAndParse[apicommon.AttestedCensusSpec](t, http.MethodPut, token,
