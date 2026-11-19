@@ -20,11 +20,10 @@ func TestNationalIDLoginHashIsCanonical(t *testing.T) {
 	c.Assert(hash("1234567-l"), qt.DeepEquals, hash("01234567L"))
 	c.Assert(hash(" x-01234567 l"), qt.DeepEquals, hash("X1234567L"))
 	c.Assert(hash("12.345.678-z"), qt.DeepEquals, hash("12345678Z"))
-	// a member stored without the letter matches the typed or certificate DNI/NIE with it
-	c.Assert(hash("12345678"), qt.DeepEquals, hash("12345678Z"))
-	c.Assert(hash("1234567"), qt.DeepEquals, hash("01234567L"))
-	c.Assert(hash("Y1234567"), qt.DeepEquals, hash("Y1234567X"))
-	// a short number is never taken for a DNI
+	// the check letter is required: a member stored without it never matches a DNI/NIE with it
+	c.Assert(hash("12345678"), qt.Not(qt.DeepEquals), hash("12345678Z"))
+	c.Assert(hash("1234567"), qt.Not(qt.DeepEquals), hash("01234567L"))
+	c.Assert(hash("Y1234567"), qt.Not(qt.DeepEquals), hash("Y1234567X"))
 	c.Assert(hash("123"), qt.Not(qt.DeepEquals), hash("00000123L"))
 	// not a valid DNI/NIE: compared as before, case-insensitively only
 	c.Assert(hash("DNI002"), qt.DeepEquals, hash("dni002"))

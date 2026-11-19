@@ -13,9 +13,9 @@ import (
 )
 
 // TestMigrationCanonicalNationalIDHashes: migration 37 rehashes participants stored under a
-// non-canonical national ID, including one stored without its check letter, leaves (and counts)
-// the members stored twice under two spellings of one DNI with their old hashes, and a second run
-// changes nothing.
+// non-canonical national ID, leaves one stored without its check letter (not a DNI) as it was,
+// leaves (and counts) the members stored twice under two spellings of one DNI with their old
+// hashes, and a second run changes nothing.
 func TestMigrationCanonicalNationalIDHashes(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
@@ -41,14 +41,14 @@ func TestMigrationCanonicalNationalIDHashes(t *testing.T) {
 		return m, h
 	}
 	rehashed, _ := seed("1234567-l")
-	letterless, _ := seed("55.555.555")
+	letterless, letterlessHash := seed("55.555.555")
 	canonical, canonicalHash := seed("12345678Z")
 	foreign, foreignHash := seed("P1234567")
 	twinA, twinAHash := seed("X1234567L")
 	twinB, twinBHash := seed("x-01234567-l")
 
 	dry := runRepair(t, migrations.RepairOptions{})
-	c.Assert(dry.ParticipantsRehashed, qt.Equals, 2)
+	c.Assert(dry.ParticipantsRehashed, qt.Equals, 1)
 	c.Assert(dry.ParticipantsSkipped, qt.Equals, 2)
 	c.Assert(dry.SkippedMembers, qt.ContentEquals, []migrations.SkippedMember{
 		{MemberID: twinA.ID.Hex(), CensusID: censusID}, {MemberID: twinB.ID.Hex(), CensusID: censusID},
@@ -63,7 +63,7 @@ func TestMigrationCanonicalNationalIDHashes(t *testing.T) {
 	for range 2 { // the second run must change nothing
 		c.Assert(mig.Up(ctx, database), qt.IsNil)
 		c.Assert(stored(rehashed), qt.DeepEquals, HashAuthTwoFaFields(OrgMember{NationalID: "01234567L"}, auth, nil))
-		c.Assert(stored(letterless), qt.DeepEquals, HashAuthTwoFaFields(OrgMember{NationalID: "55555555K"}, auth, nil))
+		c.Assert(stored(letterless), qt.DeepEquals, letterlessHash)
 		c.Assert(stored(canonical), qt.DeepEquals, canonicalHash)
 		c.Assert(stored(foreign), qt.DeepEquals, foreignHash)
 		c.Assert(stored(twinA), qt.DeepEquals, twinAHash)
