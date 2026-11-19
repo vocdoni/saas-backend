@@ -866,71 +866,18 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 	template := mailtemplates.PasswordResetNotification
 	// a code delivered too recently means we silently skip sending another, preventing email flooding
 	// without leaking whether the account exists
-	var code, link string
-	expiration := time.Now().Add(a.otpExpiry)
-	existing, err := a.db.UserVerificationCode(user, codeType)
-	switch {
-	case err == nil:
-		// atomically claim one delivery: the previous one must be older than the cooldown and, for a
-		// reusable code, the send budget must not be spent. A single conditional update, so
-		// concurrent recovery requests cannot both pass it; when blocked (or raced), silently skip.
-		reusable := codeReusable(existing)
-		maxSends := apicommon.VerificationCodeMaxSends
-		if !reusable {
-			// an expired or exhausted code is replaced by a fresh one below, which resets the send
-			// and guess budgets
-			maxSends = math.MaxInt32
-		}
-		sent, err := a.db.VerificationCodeTrySend(user, codeType, a.otpCooldown, maxSends)
-		if err != nil || !sent {
-			if err != nil && !errors.Is(err, db.ErrNotFound) {
-				log.Warnw("could not record recovery code send", "error", err)
-			}
-			apicommon.HTTPWriteOK(w)
-			return
-		}
-		if reusable {
-			// resend the still-usable code rather than replace it, so repeated recovery requests
-			// cannot invalidate the code the user is about to type
-			if code, err = internal.OpenToken(existing.SealedCode, user.Email, a.secret); err != nil {
-				errors.ErrGenericInternalServerError.Write(w)
-				return
-			}
-			if link, err = a.generateVerificationLink(user, codeType, code); err != nil {
-				errors.ErrGenericInternalServerError.Write(w)
-				return
-			}
-			expiration = existing.Expiration
-		} else if code, link, err = a.generateVerificationCodeAndLink(user, codeType); err != nil {
-			log.Warnw("could not generate verification code", "error", err)
+	// a blocked or unrecorded send is skipped silently, so the answer never reveals whether the account
+	// exists; failing to check the cooldown counts as blocked, so a storage error cannot bypass it
+	if err := a.mailUserCode(r.Context(), user, codeType, template); err != nil {
+		switch {
+		case errors.Is(err, errCodeSendBlocked):
+		case errors.Is(err, errCodeSendUnchecked):
+			log.Warnw("could not check password recovery cooldown", "error", err)
+		default:
+			log.Warnw("could not send recovery code", "error", err)
 			errors.ErrGenericInternalServerError.Write(w)
 			return
 		}
-	case errors.Is(err, db.ErrNotFound):
-		// no pending code: generate and store a fresh one
-		if code, link, err = a.generateVerificationCodeAndLink(user, codeType); err != nil {
-			log.Warnw("could not generate verification code", "error", err)
-			errors.ErrGenericInternalServerError.Write(w)
-			return
-		}
-	default:
-		// unexpected DB error: treat conservatively as cooldown-active so a transient storage
-		// failure cannot be exploited to bypass rate limiting
-		log.Warnw("could not check password recovery cooldown", "error", err)
-		apicommon.HTTPWriteOK(w)
-		return
-	}
-	// send the code and the verification link to the user email
-	if err := a.sendMail(r.Context(), nil, user.Email, template,
-		struct {
-			Code string
-			Link string
-		}{code, link},
-		expiration,
-	); err != nil {
-		log.Warnw("could not send recovery code", "error", err)
-		errors.ErrGenericInternalServerError.Write(w)
-		return
 	}
 	apicommon.HTTPWriteOK(w)
 }
@@ -1063,4 +1010,64 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 // not expired and its guess budget is not spent. Any other code is replaced by a fresh one.
 func codeReusable(v *db.UserVerification) bool {
 	return v.Expiration.After(time.Now()) && v.Attempts < apicommon.VerificationCodeMaxAttempts
+}
+
+var (
+	// errCodeSendBlocked means the OTP cooldown or the code's send budget blocks this delivery
+	errCodeSendBlocked = fmt.Errorf("a code was sent recently")
+	// errCodeSendUnchecked means the cooldown could not be checked or claimed, so nothing was sent
+	errCodeSendUnchecked = fmt.Errorf("could not check the code cooldown")
+)
+
+// mailUserCode mails the user a code of the given type under the shared resend rules: a delivery is
+// claimed atomically once per OTP cooldown, a still-usable code is resent rather than replaced (so a
+// repeated request cannot invalidate the code the user is about to type) within its send budget, and
+// an expired or exhausted code is replaced by a fresh one, which resets both budgets.
+func (a *API) mailUserCode(ctx context.Context, user *db.User, codeType db.CodeType,
+	template mailtemplates.MailTemplate,
+) error {
+	var code, link string
+	expiration := time.Now().Add(a.otpExpiry)
+	existing, err := a.db.UserVerificationCode(user, codeType)
+	switch {
+	case err == nil:
+		reusable := codeReusable(existing)
+		maxSends := apicommon.VerificationCodeMaxSends
+		if !reusable {
+			maxSends = math.MaxInt32
+		}
+		// a single conditional update, so concurrent requests cannot both pass it
+		sent, err := a.db.VerificationCodeTrySend(user, codeType, a.otpCooldown, maxSends)
+		switch {
+		case err != nil && !errors.Is(err, db.ErrNotFound):
+			return fmt.Errorf("%w: %w", errCodeSendUnchecked, err)
+		case err != nil || !sent:
+			// blocked, or the code was replaced or consumed between the read and the claim
+			return errCodeSendBlocked
+		}
+		if reusable {
+			if code, err = internal.OpenToken(existing.SealedCode, user.Email, a.secret); err != nil {
+				return fmt.Errorf("could not open the stored code: %w", err)
+			}
+			if link, err = a.generateVerificationLink(user, codeType, code); err != nil {
+				return fmt.Errorf("could not build the code link: %w", err)
+			}
+			expiration = existing.Expiration
+		} else if code, link, err = a.generateVerificationCodeAndLink(user, codeType); err != nil {
+			return fmt.Errorf("could not generate the code: %w", err)
+		}
+	case errors.Is(err, db.ErrNotFound):
+		if code, link, err = a.generateVerificationCodeAndLink(user, codeType); err != nil {
+			return fmt.Errorf("could not generate the code: %w", err)
+		}
+	default:
+		return fmt.Errorf("%w: %w", errCodeSendUnchecked, err)
+	}
+	return a.sendMail(ctx, nil, user.Email, template,
+		struct {
+			Code string
+			Link string
+		}{code, link},
+		expiration,
+	)
 }

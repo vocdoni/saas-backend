@@ -41,6 +41,7 @@ var (
 	ErrProviderAlreadyLinkedToThisAccount    = Error{Code: 40042, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("OAuth provider already linked to this account"), LogLevel: "info"}
 	ErrProviderNotLinked                     = Error{Code: 40043, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("OAuth provider not linked to this account"), LogLevel: "info"}
 	ErrProviderAlreadyLinkedToAnotherAccount = Error{Code: 40044, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("OAuth provider already linked to another account"), LogLevel: "info"}
+	ErrUserAlreadyHasPassword                = Error{Code: 40045, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("user already has a password"), LogLevel: "info"}
 
 	// Validation errors (400)
 	ErrEmailMalformed          = Error{Code: 40002, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid email format")}
