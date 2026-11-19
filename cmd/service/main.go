@@ -33,6 +33,10 @@ import (
 // AutomaticEnv read it as VOCDONI_DISABLE_BLINDCSP (viper upper-cases keys, with no replacer).
 const disableBlindCSPKey = "disable_blindcsp"
 
+// certGatewayPublicKeysKey is the flag of the certificate gateway public keys, read from
+// VOCDONI_CERT_GATEWAY_PUBLIC_KEYS like disableBlindCSPKey.
+const certGatewayPublicKeysKey = "cert_gateway_public_keys"
+
 // initViper binds the flags and the VOCDONI_<FLAG> environment variables to v.
 func initViper(v *viper.Viper, flags *flag.FlagSet) error {
 	v.SetEnvPrefix("VOCDONI")
@@ -93,6 +97,8 @@ func main() {
 	flag.Duration("statusSyncInterval", 60*time.Second, "poll cadence for confirm retries + read freshness window (0=60s)")
 	flag.Duration("statusSyncConfirmTimeout", 5*time.Minute, "max wait for on-chain confirmation before reconciling (0=5m)")
 	flag.Bool(disableBlindCSPKey, false, "temporarily stop offering anonymous voting (no new anonymous processes, no blind signing)")
+	flag.String(certGatewayPublicKeysKey, "",
+		"certificate gateway public keys, keyId:base64(ed25519 public key) comma-separated; empty turns certificate voter auth off")
 	// parse flags
 	flag.Parse()
 	// initialize Viper
@@ -191,6 +197,10 @@ func main() {
 		OTPCooldown:         viper.GetDuration("otpCooldown"),
 	}
 
+	certGatewayKeys, err := csp.ParseCertGatewayKeys(viper.GetString(certGatewayPublicKeysKey))
+	if err != nil {
+		log.Fatalf("invalid %s: %v", certGatewayPublicKeysKey, err)
+	}
 	cspConf := &csp.Config{
 		RootKey:                        bPrivKey,
 		DB:                             database,
@@ -203,6 +213,8 @@ func main() {
 		NotificationBreakerMaxFailures: viper.GetInt("notificationBreakerMaxFailures"),
 		NotificationBreakerCooldown:    viper.GetDuration("notificationBreakerCooldown"),
 		DisableBlindCSP:                viper.GetBool(disableBlindCSPKey),
+		CertGatewayKeys:                certGatewayKeys,
+		VoterRefSecret:                 secret,
 	}
 
 	// overwrite the email notifications service with the SMTP service if the

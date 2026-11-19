@@ -413,16 +413,21 @@ type participantHashSet struct {
 
 // computeParticipantHashes mirrors db.calculateParticipantHashesBson: it produces
 // exactly the hash fields that were originally stored for a participant, so the
-// repair never adds or removes keys.
+// repair never adds or removes keys. Like db.Census.LoginHashFields, a certificate
+// census hashes the national ID alone and stores no email or phone variant.
 func computeParticipantHashes(m memberHashDoc, c censusHashDoc) participantHashSet {
+	authFields, twoFaFields := c.AuthFields, c.TwoFaFields
+	if c.CertAuth {
+		authFields, twoFaFields = []string{"nationalId"}, nil
+	}
 	set := participantHashSet{
-		LoginHash: hashMemberFields(m, c.AuthFields, c.TwoFaFields),
+		LoginHash: hashMemberFields(m, authFields, twoFaFields),
 	}
-	if len(c.TwoFaFields) == 2 && strings.TrimSpace(m.Email) != "" {
-		set.LoginHashEmail = hashMemberFields(m, c.AuthFields, []string{"email"}) //nolint:goconst
+	if len(twoFaFields) == 2 && strings.TrimSpace(m.Email) != "" {
+		set.LoginHashEmail = hashMemberFields(m, authFields, []string{"email"}) //nolint:goconst
 	}
-	if len(c.TwoFaFields) == 2 && len(m.Phone) > 0 {
-		set.LoginHashPhone = hashMemberFields(m, c.AuthFields, []string{"phone"})
+	if len(twoFaFields) == 2 && len(m.Phone) > 0 {
+		set.LoginHashPhone = hashMemberFields(m, authFields, []string{"phone"})
 	}
 	return set
 }

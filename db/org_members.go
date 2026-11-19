@@ -610,7 +610,7 @@ func (ms *MongoStorage) updateCensusParticipantsForMember(ctx context.Context, m
 		}
 		// the edit left the member without the data to log in: drop its login hashes rather than
 		// re-hash it, so it can neither log in nor clash with another participant
-		if member.MissingLoginData(census.AuthFields, census.TwoFaFields) {
+		if census.MemberMissingLoginData(member) {
 			writes = append(writes, plannedWrite{
 				filter: participantFilter,
 				update: bson.M{

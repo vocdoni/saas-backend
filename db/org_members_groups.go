@@ -373,13 +373,15 @@ func (ms *MongoStorage) ListOrganizationMemberGroup(
 // Checks the entire member base of an organization creating a projection that contains only
 // the provided auth fields and verifies that the resulting data do not have duplicates or
 // missing fields. Returns the corresponding informative errors concerning duplicates or columns with empty values.
-// Both authFields and twoFaFields are checked for missing data.
+// Both auth and 2FA fields are checked for missing data. CertAuth checks them for a
+// certificate census, where a national ID that is not a valid DNI or NIE also counts as missing data
+// and only the national ID is hashed (Census.LoginHashFields).
 func (ms *MongoStorage) CheckGroupMembersFields(
 	orgAddress common.Address,
 	groupID string,
-	authFields OrgMemberAuthFields,
-	twoFaFields OrgMemberTwoFaFields,
+	fields CensusLoginFields,
 ) (*OrgMemberAggregationResults, error) {
+	authFields, twoFaFields := fields.AuthFields, fields.TwoFaFields
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return nil, ErrInvalidData
 	}
@@ -401,7 +403,7 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 		}
 	}()
 
-	return aggregateMemberFields(ctx, cur, authFields, twoFaFields)
+	return aggregateMemberFields(ctx, cur, fields)
 }
 
 // CheckMembersFields checks that the provided auth/2FA fields are usable for authentication over an
@@ -411,9 +413,9 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 func (ms *MongoStorage) CheckMembersFields(
 	orgAddress common.Address,
 	memberIDs []string,
-	authFields OrgMemberAuthFields,
-	twoFaFields OrgMemberTwoFaFields,
+	fields CensusLoginFields,
 ) (*OrgMemberAggregationResults, error) {
+	authFields, twoFaFields := fields.AuthFields, fields.TwoFaFields
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return nil, ErrInvalidData
 	}
@@ -437,7 +439,7 @@ func (ms *MongoStorage) CheckMembersFields(
 		}
 	}()
 
-	results, err := aggregateMemberFields(ctx, cur, authFields, twoFaFields)
+	results, err := aggregateMemberFields(ctx, cur, fields)
 	if err != nil {
 		return nil, err
 	}
@@ -467,10 +469,10 @@ func (ms *MongoStorage) CheckMembersFields(
 func aggregateMemberFields(
 	ctx context.Context,
 	cur *mongo.Cursor,
-	authFields OrgMemberAuthFields,
-	twoFaFields OrgMemberTwoFaFields,
+	fields CensusLoginFields,
 ) (*OrgMemberAggregationResults, error) {
-	cm, err := classifyCensusMembers(ctx, cur, Census{AuthFields: authFields, TwoFaFields: twoFaFields}, nil)
+	census := Census{AuthFields: fields.AuthFields, TwoFaFields: fields.TwoFaFields, CertAuth: fields.CertAuth}
+	cm, err := classifyCensusMembers(ctx, cur, census, nil)
 	if err != nil {
 		return nil, err
 	}

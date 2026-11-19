@@ -36,3 +36,12 @@ func TestDisableBlindCSPEnvName(t *testing.T) {
 		qt.Assert(t, read(t, env), qt.IsTrue)
 	})
 }
+
+func TestCertGatewayPublicKeysEnvName(t *testing.T) {
+	t.Setenv("VOCDONI_CERT_GATEWAY_PUBLIC_KEYS", "dev-1:A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=")
+	flags := flag.NewFlagSet("test", flag.ContinueOnError)
+	flags.String(certGatewayPublicKeysKey, "", "")
+	v := viper.New()
+	qt.Assert(t, initViper(v, flags), qt.IsNil)
+	qt.Assert(t, v.GetString(certGatewayPublicKeysKey), qt.Equals, "dev-1:A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=")
+}

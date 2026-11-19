@@ -38,25 +38,8 @@ func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 		return c.createAuthOnlyToken(anchorID, uID)
 	}
 
-	// get last token for the user and anchor
-	lastToken, err := c.Storage.LastCSPAuth(uID, anchorID)
-	if err != nil && err != db.ErrTokenNotFound {
-		log.Warnw("error getting last token",
-			"userID", uID,
-			"anchorID", anchorID,
-			"error", err)
-		return nil, ErrStorageFailure
-	}
-	// check if the last token was created less than the cooldown time
-	if lastToken != nil {
-		remainingTime := c.notificationCoolDownTime - time.Since(lastToken.CreatedAt)
-		if remainingTime > 0 {
-			log.Warnw("cooldown time not reached",
-				"userID", uID,
-				"anchorID", anchorID,
-				"lastToken", lastToken.Token)
-			return nil, errors.ErrAttemptCoolDownTime.WithData(map[string]any{"coolDownTime": remainingTime.Milliseconds()})
-		}
+	if err := c.challengeCooldown(uID, anchorID); err != nil {
+		return nil, err
 	}
 	// cap the challenges (new tokens + resends) this member can be sent for this process today:
 	// the cooldown only spaces sends, so without a cap a member's contact could be flooded with
@@ -116,6 +99,53 @@ func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 		return nil, ErrNotificationFailure
 	}
 	return token, nil
+}
+
+// challengeCooldown refuses a new token for the member on the anchor process while the cooldown
+// since their last one runs.
+func (c *CSP) challengeCooldown(uID, anchorID internal.HexBytes) error {
+	lastToken, err := c.Storage.LastCSPAuth(uID, anchorID)
+	if err != nil && err != db.ErrTokenNotFound {
+		log.Warnw("error getting last token",
+			"userID", uID,
+			"anchorID", anchorID,
+			"error", err)
+		return ErrStorageFailure
+	}
+	// check if the last token was created less than the cooldown time
+	if lastToken != nil {
+		remainingTime := c.notificationCoolDownTime - time.Since(lastToken.CreatedAt)
+		if remainingTime > 0 {
+			log.Warnw("cooldown time not reached",
+				"userID", uID,
+				"anchorID", anchorID,
+				"lastToken", lastToken.Token)
+			return errors.ErrAttemptCoolDownTime.WithData(map[string]any{"coolDownTime": remainingTime.Milliseconds()})
+		}
+	}
+	return nil
+}
+
+// ChallengeSendRefusal returns, without spending anything, the refusal AuthToken would answer
+// right now to a new challenge for the member on the anchor process: the cooldown since their last
+// token, or the daily send cap. It is a peek, for a caller that must not spend something else
+// (a certificate code) on a request AuthToken would refuse; AuthToken still enforces both.
+func (c *CSP) ChallengeSendRefusal(uID, anchorID internal.HexBytes) error {
+	if err := c.challengeCooldown(uID, anchorID); err != nil {
+		return err
+	}
+	reached, err := c.Storage.CSPCounterReached(db.CSPCounterChallengeSends, counterKey(uID, anchorID),
+		c.maxDailyChallengeSends)
+	if err != nil {
+		log.Warnw("error reading daily challenge sends", "userID", uID, "anchorID", anchorID, "error", err)
+		return ErrStorageFailure
+	}
+	if reached {
+		window := db.CSPCounterWindow(db.CSPCounterChallengeSends)
+		resetAt := time.Now().UTC().Truncate(window).Add(window)
+		return counterLimitError(db.CSPCounterResult{ResetAt: resetAt}, "daily challenge limit reached, try again tomorrow")
+	}
+	return nil
 }
 
 // ClaimChallengeResend atomically spends one of the at most MaxChallengeResends resends of an
@@ -318,6 +348,10 @@ type AuthAttemptClaim []db.CSPCounterClaim
 // It returns an ErrVerificationMaxAttempts carrying retryAfter (seconds until the hour resets)
 // once either budget is spent, and an ErrInternalStorageError if a counter cannot be claimed.
 func (c *CSP) ClaimAuthAttempt(anchorID internal.HexBytes, submission, voter []byte) (AuthAttemptClaim, error) {
+	// an empty key would make the process's own budget, shared by every caller
+	if len(submission) == 0 {
+		return nil, errors.ErrGenericInternalServerError.Withf("empty auth attempt key")
+	}
 	res, err := c.Storage.ClaimCSPCounter(db.CSPCounterAuthFailures,
 		counterKey(submission, anchorID), c.maxHourlyAuthFailures)
 	if err != nil {

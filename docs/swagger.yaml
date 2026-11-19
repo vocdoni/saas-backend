@@ -101,6 +101,14 @@ definitions:
         items:
           $ref: '#/definitions/db.OrgMemberAuthField'
         type: array
+      certAuth:
+        description: |-
+          CertAuth makes voters prove their national ID with a Spanish personal certificate, through the
+          certificate gateway, instead of typing it. It requires authFields to be exactly ["nationalId"];
+          twoFaFields may add an email or SMS code. Refused (40025) while the service has no certificate
+          gateway keys configured. Members whose nationalId is not a valid DNI or NIE are reported as
+          missing data and left out of the census. Echoed on process reads.
+        type: boolean
       groupId:
         description: |-
           GroupID is the org member group the census was built from. Round-trips: it is echoed back on
@@ -837,6 +845,10 @@ definitions:
       censusId:
         description: Unique identifier for the census
         type: string
+      certAuth:
+        description: CertAuth reports a census whose voters prove their national ID
+          with a personal certificate
+        type: boolean
       groupID:
         description: Optional for creating a census based on an organization member
           group
@@ -2333,6 +2345,16 @@ definitions:
     properties:
       birthDate:
         type: string
+      certCode:
+        description: |-
+          CertCode is the single-use code the certificate gateway returned to the voting page, for a
+          census with certAuth (43 base64url characters). It replaces every typed login field.
+        type: string
+      codeVerifier:
+        description: |-
+          CodeVerifier is the PKCE verifier (43 to 128 base64url characters) whose
+          base64url(sha256(...)) the voting page sent to the certificate gateway as codeChallenge.
+        type: string
       email:
         type: string
       memberNumber:
@@ -2373,6 +2395,12 @@ definitions:
       signature:
         example: deadbeef
         format: hex
+        type: string
+      voterRef:
+        description: |-
+          VoterRef identifies the voter of a certificate census on the process, the same on every login:
+          lowercase hex of an HMAC-SHA256, keyed from the service secret, of
+          "vocdoni-voter-ref:" + process id + ":" + member id. Step 0 only.
         type: string
       weight:
         example: 2a
@@ -2447,6 +2475,48 @@ definitions:
         items:
           $ref: '#/definitions/handlers.SignBatchResult'
         type: array
+    type: object
+  handlers.CertAssertionError:
+    properties:
+      error:
+        type: string
+    type: object
+  handlers.CertAssertionRequest:
+    properties:
+      certSha256:
+        description: CertSHA256 is the lowercase hex SHA-256 of the certificate.
+        type: string
+      codeChallenge:
+        description: CodeChallenge is base64url(sha256(codeVerifier)), unpadded, 43
+          characters (PKCE S256).
+        type: string
+      documentType:
+        description: DocumentType is DNI or NIE, the type of NationalID (an NIE starts
+          with X, Y or Z), else bad_request.
+        type: string
+      nationalId:
+        description: NationalID is the certificate's DNI or NIE, 9 characters as cert-check
+          reports it.
+        type: string
+      processId:
+        description: ProcessID is the voting process id, 24 lowercase hex characters.
+        type: string
+      profile:
+        type: string
+      provider:
+        description: Provider and Profile are the cert-check provider and profile
+          that accepted the certificate.
+        type: string
+    type: object
+  handlers.CertAssertionResponse:
+    properties:
+      certCode:
+        description: CertCode is the single-use code the voter redeems at step 0 with
+          the PKCE verifier.
+        type: string
+      expiresAt:
+        description: ExpiresAt is when the code expires, RFC 3339 UTC.
+        type: string
     type: object
   handlers.CheckMembershipRequest:
     properties:
@@ -2824,6 +2894,69 @@ paths:
       summary: Refresh JWT token
       tags:
       - auth
+  /cert-auth/assertions:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Called by the certificate gateway, server to server, once it has verified a voter's
+        certificate. The body is signed with the gateway's Ed25519 key in the X-Cert-Gateway-Signature
+        header: t=<unix seconds>,k=<keyId>,v1=<base64url signature> over
+        "cert-gateway-v1\n" + t + "\nPOST\n/cert-auth/assertions\n" + hex(sha256(body)), within 60 s of
+        the server clock. Each signed request is accepted once: a replay answers 401 bad_signature.
+        On success it stores a single-use code, valid for 5 minutes, that the voter redeems at
+        POST /processes/{processId}/auth/0 with the PKCE verifier of codeChallenge. At most 10
+        assertions per census participant per process per hour.
+        Without certificate gateway keys configured the route answers a plain 404.
+      parameters:
+      - description: Gateway signature
+        in: header
+        name: X-Cert-Gateway-Signature
+        required: true
+        type: string
+      - description: Verified certificate identity
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.CertAssertionRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handlers.CertAssertionResponse'
+        "400":
+          description: bad_request
+          schema:
+            $ref: '#/definitions/handlers.CertAssertionError'
+        "401":
+          description: bad_signature (also a replay)
+          schema:
+            $ref: '#/definitions/handlers.CertAssertionError'
+        "403":
+          description: zero_weight
+          schema:
+            $ref: '#/definitions/handlers.CertAssertionError'
+        "404":
+          description: process_not_open, not_in_census; or no body when the feature
+            is off
+          schema:
+            $ref: '#/definitions/handlers.CertAssertionError'
+        "409":
+          description: not_cert_census, anonymous_unavailable
+          schema:
+            $ref: '#/definitions/handlers.CertAssertionError'
+        "429":
+          description: rate_limited
+          schema:
+            $ref: '#/definitions/handlers.CertAssertionError'
+        "500":
+          description: internal failure, no body (the gateway reports backend_unavailable)
+      summary: Create a certificate auth assertion (certificate gateway only)
+      tags:
+      - processes
   /info:
     get:
       description: Returns the service version, build information and the Vocdoni
@@ -5405,6 +5538,11 @@ paths:
         40017 with data.retryAfter.
         Step 0 for an anonymous census is refused (400, 40037, "anonymous voting is temporarily
         unavailable") while the service has anonymous voting off.
+        For a census with certAuth, step 0 takes certCode and codeVerifier (plus the email or phone when
+        the census has 2FA) and no typed login field, else 40005; an unknown, expired, used or foreign
+        code, or a wrong verifier, answers 40802 and the code is spent, as it is by a wrong contact or a
+        zero weight; a 40017 or a 2FA cooldown (40103) refusal leaves it redeemable. The answer carries
+        voterRef. A certCode sent to any other census answers 40005.
       parameters:
       - description: Process ID
         in: path
@@ -6343,6 +6481,8 @@ paths:
         include that the organization has not paid for either: deselect it, or publish once
         another process pays for it.
         422 (40176) means the census is above 50 000 voters: quote-only, no self-service price.
+        400 (40025) means the census uses certificate authentication (certAuth) while the service
+        has it disabled.
       parameters:
       - description: Process ID
         in: path
@@ -6915,6 +7055,9 @@ paths:
         is a 400. Requires Manager/Admin role of the organization. While the service has anonymous
         voting temporarily off, an `anonymous: true` spec is a 400 (40037) "anonymous voting is
         temporarily unavailable".
+        A `certAuth: true` spec needs authFields exactly ["nationalId"] (else 400, 40037) and a service with
+        certificate gateway keys (else 400, 40025); members whose nationalId is not a valid DNI or NIE are
+        reported in missingData.
 
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
