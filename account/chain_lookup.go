@@ -19,6 +19,8 @@ import (
 const (
 	// orgElectionsPageTimeout bounds one GET of an organization's elections page.
 	orgElectionsPageTimeout = 10 * time.Second
+	// orgElectionsPageLimit is the elections page size requested from the node (its MaxItemsPerPage).
+	orgElectionsPageLimit = 100
 	// nodeErrPageNotFound is the node's API code for a page past the last one (ErrPageNotFound).
 	nodeErrPageNotFound = 4057
 )
@@ -58,8 +60,8 @@ func (a *Account) ChainHeight() (uint32, error) {
 }
 
 // OrgElectionIDs returns one page (from 0) of the ids of the elections an organization created,
-// newest first, via GET /elections?organizationId={org}&page={page}. A page past the last one is
-// empty: the node answers it with 404 and code 4057 (page not found).
+// newest first, via GET /elections?organizationId={org}&page={page}&limit={orgElectionsPageLimit}.
+// A page past the last one is empty: the node answers it with 404 and code 4057 (page not found).
 func (a *Account) OrgElectionIDs(org common.Address, page int) ([]internal.HexBytes, error) {
 	u, err := url.Parse(a.apiEndpoint)
 	if err != nil {
@@ -69,6 +71,7 @@ func (a *Account) OrgElectionIDs(org common.Address, page int) ([]internal.HexBy
 	u.RawQuery = url.Values{
 		"organizationId": {hex.EncodeToString(org.Bytes())},
 		"page":           {strconv.Itoa(page)},
+		"limit":          {strconv.Itoa(orgElectionsPageLimit)},
 	}.Encode()
 	ctx, cancel := context.WithTimeout(context.Background(), orgElectionsPageTimeout)
 	defer cancel()

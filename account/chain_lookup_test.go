@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -80,7 +81,7 @@ func TestTxMined(t *testing.T) {
 	c.Assert(mined, qt.IsFalse)
 }
 
-// TestOrgElectionIDs pins the organization listing on GET /elections?organizationId=&page=: ids
+// TestOrgElectionIDs pins the organization listing on GET /elections?organizationId=&page=&limit=: ids
 // newest first as the node pages them, an empty page past the end (404 code 4057), and an error
 // on any other non-200, an unknown organization (404 code 4006) included.
 func TestOrgElectionIDs(t *testing.T) {
@@ -94,6 +95,8 @@ func TestOrgElectionIDs(t *testing.T) {
 			http.Error(w, "boom", http.StatusInternalServerError)
 		case r.URL.Path != "/elections":
 			http.Error(w, "not found", http.StatusNotFound)
+		case q.Get("limit") != strconv.Itoa(orgElectionsPageLimit):
+			http.Error(w, "unexpected limit", http.StatusBadRequest)
 		case q.Get("organizationId") != "00000000000000000000000000000000000000aa":
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"error":"organization not found","code":4006}`))
