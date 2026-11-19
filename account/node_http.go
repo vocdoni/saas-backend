@@ -35,10 +35,29 @@ func getJSON(ctx context.Context, rawURL string, out any) error {
 	}()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxNodeErrorBodyBytes))
-		return fmt.Errorf("unexpected status %d (%s)", resp.StatusCode, body)
+		return &nodeStatusError{Status: resp.StatusCode, Body: body}
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxNodeResponseBytes)).Decode(out); err != nil {
 		return fmt.Errorf("could not decode response: %w", err)
 	}
 	return nil
+}
+
+// nodeStatusError is a non-200 answer of the node, so callers can act on its API error code.
+type nodeStatusError struct {
+	Status int
+	Body   []byte
+}
+
+func (e *nodeStatusError) Error() string {
+	return fmt.Sprintf("unexpected status %d (%s)", e.Status, e.Body)
+}
+
+// apiCode returns the node's API error code from a {"error":...,"code":N} body, or 0.
+func (e *nodeStatusError) apiCode() int {
+	var body struct {
+		Code int `json:"code"`
+	}
+	_ = json.Unmarshal(e.Body, &body)
+	return body.Code
 }
