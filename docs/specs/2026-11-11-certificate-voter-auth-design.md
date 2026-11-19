@@ -17,6 +17,12 @@ Owner decisions so far (2026-11-11):
 - D9 (2026-11-17) Folded in from a review of ferranrego's parallel work (vocdoni/saas-backend#850,
   #851, vocdoni/vocdoni-app#1975–#1980). See "Amendments D9" at the end of this document.
   The per-attempt random subdomain is decided separately as D10.
+- D11 (2026-11-19) Dev deployment: the dev gateway's `DOMAIN` is `cert.vocdoni.net` (owner's DNS
+  choice; prod stays `cert.vocdoni.io`). Its Cloudflare token is scoped to the `vocdoni.net` zone
+  (Zone:Read, DNS:Edit) instead of a dedicated ACME zone, an accepted risk for now;
+  `ACME_DNS_OVERRIDE_DOMAIN=_acme-challenge.cert.vocdoni.net`. The gateway manages only the
+  wildcard certificate `*.DOMAIN`: issuing `DOMAIN` and `*.DOMAIN` separately raced on the shared
+  `_acme-challenge` TXT name (Let's Encrypt's secondary validators saw the first value cached).
 - D10 (2026-11-17) Per-attempt random subdomain: every certificate attempt goes to a fresh
   `<label>.<DOMAIN>` host, so the browser shows the certificate picker again instead of reusing a
   remembered choice. It amends D7 (wildcard CNAME and certificate), C1, the rollout steps and the
@@ -27,7 +33,7 @@ Owner decisions so far (2026-11-11):
 - D7 Hosting: **Railway in every environment**, through Railway's TCP proxy, which passes TLS
   untouched to the Go process. This is the setup cert-check's test UI already runs on
   (`testui/README.md` §4). Accepted trade-offs: a Railway-assigned port other than 443 in the URL,
-  and ACME by DNS-01 with a Cloudflare token limited to a dedicated ACME zone. Hostnames: `cert-dev.vocdoni.net` (dev) and
+  and ACME by DNS-01 with a Cloudflare token limited to a dedicated ACME zone. Hostnames: `cert.vocdoni.net` (dev) and
   `cert.vocdoni.io` (prod). Staging uses the dev gateway, which routes each request to the dev or
   the stg backend by the `returnUrl` origin (C1 "Backends").
 - D6 Pending-vote recovery: the backend returns a stable `voterRef`, and `@vocdoni/react-providers`
@@ -151,7 +157,7 @@ ACME cache.
 - **Listeners.**
   - **Auth listener** `AUTH_LISTEN` (default `:8443`), reached through the Railway TCP proxy at
     `https://<label>.<DOMAIN>:<port assigned to the TCP proxy>` (one random label per attempt, D10;
-    the bare `DOMAIN` also works). It serves TLS with
+    the bare `DOMAIN` is not served, D11). It serves TLS with
     `handler.TLSConfig(getCert)`, adding `certcheck.WithTLS13()` when `TLS13` is true. The
     `http.Server` has `Protocols` set to HTTP/1 only. It serves `/v1/auth` and nothing else.
   - **Main listener** `PORT` (`8080`, set as a service variable), plain HTTP with no public
@@ -164,7 +170,7 @@ ACME cache.
     UI does. HTTP-01 and TLS-ALPN-01 cannot reach a Railway-assigned port. The certificate and ACME
     account live in `DATA_DIR/certmagic` on a Railway volume, so redeploys reuse them. The auth
     listener starts once the certificate is ready, and a failed issuance is retried in the
-    background with backoff. certmagic manages `DOMAIN` and `*.DOMAIN` (D10), with no on-demand issuance.
+    background with backoff. certmagic manages only `*.DOMAIN` (D10, D11), with no on-demand issuance.
   - The Cloudflare token is never zone-wide on `vocdoni.io` or `vocdoni.net`: both zones hold
     production records. `_acme-challenge.<DOMAIN>` is a CNAME to a TXT name in a dedicated
     Cloudflare zone that holds nothing else, `ACME_DNS_OVERRIDE_DOMAIN` is that full TXT record
@@ -309,13 +315,13 @@ ACME cache.
   - Expected cost: about 50–100 MB of RAM and almost no CPU, so roughly $1–2 a month of Railway
     usage per environment, usually inside the plan's included usage.
   - Hostnames are DNS-only (grey-cloud) CNAME records on Cloudflare pointing at the Railway TCP
-    proxy hostname: `cert-dev.vocdoni.net` (dev) and `cert.vocdoni.io` (prod), plus a wildcard
+    proxy hostname: `cert.vocdoni.net` (dev) and `cert.vocdoni.io` (prod), plus a wildcard
     `*.<DOMAIN>` CNAME to the same proxy host (D10). The public URL
     carries the Railway-assigned port, for example `https://cert.vocdoni.io:15140`.
     `CERT_GATEWAY_URL` in vocdoni-app includes that port. If the TCP proxy is ever recreated, the
     port and possibly the proxy hostname change: `CERT_GATEWAY_URL` and the CNAME are updated in
     the same change.
-  - Staging has no gateway of its own: app-stg's `CERT_GATEWAY_URL` points at `cert-dev.vocdoni.net`,
+  - Staging has no gateway of its own: app-stg's `CERT_GATEWAY_URL` points at `cert.vocdoni.net`,
     whose `BACKENDS` has a `stg` entry, and the stg backend holds the stg public key.
 - **CI.** Run `go test -race ./...`, golangci-lint and a Docker build. The Go version comes from
   `go.mod` (`go-version-file`, newest patch with `check-latest`). CI publishes no image: Railway
@@ -607,7 +613,7 @@ ACME cache.
   8. End-to-end test with real certificates, run manually by the owner (AC9).
   9. Staging: migration, stg keys on the stg backend, the `stg` entry in the dev gateway's
      `BACKENDS`, the `backend check` line for `stg` showing 401, then app-stg with
-     `CERT_GATEWAY_URL=https://cert-dev.vocdoni.net:<port>`.
+     `CERT_GATEWAY_URL=https://cert.vocdoni.net:<port>`.
   10. Production: the same steps on its own gateway (`cert.vocdoni.io`), deployed by the owner
       advancing the `release` branch.
   11. Every deploy and DNS change waits for the owner's OK.
@@ -751,7 +757,7 @@ ACME cache.
   - A `state` mismatch strips the fragment and calls nothing.
   - After a reload and a second certificate login in the same tab, a pending vote saved before the
     reload is re-sent (react-providers test with `voterRef`).
-- [ ] AC9 Manual end-to-end on dev (`cert-dev.vocdoni.net`), run by the owner, with `TLS13=true`: an FNMT and an idCAT
+- [ ] AC9 Manual end-to-end on dev (`cert.vocdoni.net`), run by the owner, with `TLS13=true`: an FNMT and an idCAT
   software certificate, each on Windows (Chrome or Edge, certificate in the Windows store), on
   Firefox (its own store) and on macOS or Android. Auth-only and email-2FA censuses, plus a
   certificate whose DNI is outside the census. Cancel the picker once and confirm the message
@@ -835,21 +841,21 @@ none, until they restart. On phones a restart is barely possible. A fresh host o
 makes the browser show the picker again.
 
 **Hosts.**
-- `DOMAIN` stays the base name: `cert-dev.vocdoni.net` (dev) and `cert.vocdoni.io` (prod).
+- `DOMAIN` stays the base name: `cert.vocdoni.net` (dev) and `cert.vocdoni.io` (prod).
 - The gateway serves `<label>.<DOMAIN>`, where `<label>` is 26 lowercase base32 characters
   (`[a-z2-7]{26}`, 130 random bits).
-- The bare `DOMAIN` is still served, as a fallback.
+- The bare `DOMAIN` is not served (D11): only label hosts get a certificate.
 - Any other host is refused at the TLS layer, because no certificate matches it.
 - `certcheck.CheckHost`, which requires `Host` to equal the SNI name, still applies.
 - The label is not a secret and carries no state. The gateway stays stateless, and everything in
   C1 (parameters, `returnUrl` rule, PKCE, signing) is unchanged.
 
 **Certificate.**
-- ACME (certmagic, DNS-01 as today) manages `DOMAIN` and `*.DOMAIN`. A wildcard needs DNS-01,
-  which the delegated ACME zone already provides: `_acme-challenge.<DOMAIN>` serves both names.
-- In static mode, `TLS_CERT_FILE` must cover both names. Locally that is `cert.localtest.me` and
-  `*.cert.localtest.me`, both of which resolve to 127.0.0.1.
-- The SNI guard accepts `DOMAIN` and exactly one label under it.
+- ACME (certmagic, DNS-01 as today) manages only `*.DOMAIN` (D11), validated at
+  `_acme-challenge.<DOMAIN>`.
+- In static mode, `TLS_CERT_FILE` must cover `*.DOMAIN`. Locally that is `*.cert.localtest.me`,
+  which resolves to 127.0.0.1.
+- The SNI guard accepts exactly one label under `DOMAIN`.
 
 **DNS (owner OK, per environment).** A DNS-only CNAME `*.<DOMAIN>` to the same Railway TCP proxy
 host as `<DOMAIN>`. Railway forwards TCP and ignores the name. The port is the same.
