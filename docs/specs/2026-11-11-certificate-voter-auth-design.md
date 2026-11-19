@@ -588,7 +588,7 @@ ACME cache.
      - Check that no CAA record on the hostname or its zone excludes `letsencrypt.org`, and that
        any `issuewild` record also allows it: the wildcard certificate is checked against
        `issuewild` when one exists.
-     - After issuance, `/readyz` answers 200 only once both `DOMAIN` and `*.DOMAIN` are valid.
+     - After issuance, `/readyz` answers 200 once the `*.DOMAIN` certificate is valid.
      - Check that the assigned port is not on Chromium's restricted-port list or Firefox's banned
        list. If it is, recreate the proxy.
 
@@ -730,8 +730,8 @@ ACME cache.
   - Each `certcheck` error code leads to `#certError`.
   - A disallowed `returnUrl` or a bad parameter gets a 400 with no redirect. So does a `returnUrl`
     on an allowed origin with any other path, a query, or another process id.
-  - An SNI name other than `DOMAIN` or one valid label under it gets no certificate and triggers
-    no ACME order (certmagic manages exactly `DOMAIN` and `*.DOMAIN`, with no on-demand
+  - An SNI name other than one valid label under `DOMAIN` gets no certificate and triggers
+    no ACME order (certmagic manages exactly `*.DOMAIN`, with no on-demand
     issuance; see D10 acceptance).
   - `/readyz` answers 503 until the auth certificate is present and valid, then 200.
   - A `Host` that differs from the SNI name gets a 421.
@@ -879,7 +879,7 @@ host as `<DOMAIN>`. Railway forwards TCP and ignores the name. The port is the s
 - **AC7:**
   - a request to `<label>.<DOMAIN>` is served;
   - a two-label subdomain, or an unrelated name, gets no certificate;
-  - the ACME manager manages exactly `DOMAIN` and `*.DOMAIN`.
+  - the ACME manager manages exactly `*.DOMAIN`.
 - **AC8:**
   - two attempts use two different hosts, both under the base host and with the same port;
   - sticky codes show "Try again".
