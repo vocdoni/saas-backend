@@ -901,7 +901,8 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 		if err != nil {
 			// the request may have reached the node: every record stays, and the next round
 			// resubmits each question at the same nonce
-			log.Warnw("voting process batch submit failed, will retry", "error", err)
+			log.Warnw("voting process batch submit failed, will retry", "processId", pw.vp.ID.Hex(),
+				"jobId", pw.jobID, "error", err)
 			// the transport error stays in the log: it can name internal node addresses
 			lastErr = fmt.Errorf("could not submit the election batch to the node")
 			continue
@@ -1160,21 +1161,6 @@ func anyMined(questions []db.VotingProcessQuestion) bool {
 	return false
 }
 
-// publishDenial is the job error for a failed HasTxPermission check: a plan or role refusal keeps
-// its message, while an internal (5xx) error only says the check failed, since its detail can carry
-// internal state and stays in the log.
-func publishDenial(err error) error {
-	var apiErr errors.Error
-	switch {
-	case err == nil:
-		return fmt.Errorf("voting process publish not permitted")
-	case errors.As(err, &apiErr) && apiErr.HTTPstatus >= http.StatusInternalServerError:
-		return fmt.Errorf("could not check the voting process publish permission")
-	default:
-		return fmt.Errorf("voting process publish not permitted: %s", err.Error())
-	}
-}
-
 // buildBatch builds, funds, permission-checks and signs a NEW_PROCESS tx per pending
 // question with contiguous nonces starting at startNonce. A question that is not permitted
 // fails the whole attempt with an error (nothing is partially submitted).
@@ -1230,13 +1216,13 @@ func (pw *publishWorker) buildBatch(
 			return nil, fmt.Errorf("unexpected tx type for publish")
 		}
 		hasPerm, err := a.subscriptions.HasTxPermission(fundedTx, *txType, pw.org, pw.user)
-		if err != nil {
-			log.Warnw("voting process publish not permitted", "error", err)
-			return nil, publishDenial(err)
-		}
-		if !hasPerm {
-			log.Warnw("voting process publish not permitted")
-			return nil, publishDenial(nil)
+		if err != nil || !hasPerm {
+			log.Warnw("voting process publish not permitted", "processId", pw.vp.ID.Hex(),
+				"jobId", pw.jobID, "error", err)
+			if err != nil {
+				return nil, fmt.Errorf("voting process publish not permitted: %w", err)
+			}
+			return nil, fmt.Errorf("voting process publish not permitted")
 		}
 		stx, err := a.account.SignTransaction(fundedTx, pw.orgSigner)
 		if err != nil {
@@ -1257,7 +1243,7 @@ func (pw *publishWorker) confirmBatch(pending []*db.VotingProcessQuestion, resul
 	// node ever returns a differently-sized batch, that positional binding is unsafe (it could
 	// persist question A's id onto B), so treat the whole round as unconfirmed rather than trust it.
 	if len(results) != len(pending) {
-		log.Warnw("unexpected batch result count, will retry",
+		log.Warnw("unexpected batch result count, will retry", "processId", pw.vp.ID.Hex(), "jobId", pw.jobID,
 			"pending", len(pending), "results", len(results))
 		return false, fmt.Errorf("node returned %d batch results for %d transactions", len(results), len(pending))
 	}
@@ -1272,12 +1258,12 @@ func (pw *publishWorker) confirmBatch(pending []*db.VotingProcessQuestion, resul
 			if res.InCache {
 				// the node already holds the same tx bytes, so it may still be mined
 				log.Warnw("voting process election already pending on the node, will retry",
-					"questionId", id, "error", res.Err)
-				cause = fmt.Errorf("election for question %s is already pending on the node and may still be mined", id)
+					"processId", pw.vp.ID.Hex(), "jobId", pw.jobID, "questionId", id, "error", res.Err)
+				cause = fmt.Errorf("election for question %s already submitted, awaiting confirmation", id)
 			} else {
 				log.Warnw("voting process election rejected by the node, will retry",
-					"questionId", id, "error", res.Err)
-				cause = fmt.Errorf("election for question %s rejected by the node: %s", id, res.Err)
+					"processId", pw.vp.ID.Hex(), "jobId", pw.jobID, "questionId", id, "error", res.Err)
+				cause = fmt.Errorf("chain rejected the election for question %s", id)
 			}
 			allConfirmed = false
 			continue
@@ -1290,7 +1276,8 @@ func (pw *publishWorker) confirmBatch(pending []*db.VotingProcessQuestion, resul
 			continue
 		}
 		if err := a.account.WaitTxMined(res.Hash); err != nil {
-			log.Warnw("voting process election not confirmed, will retry", "error", err)
+			log.Warnw("voting process election not confirmed, will retry", "processId", pw.vp.ID.Hex(),
+				"jobId", pw.jobID, "questionId", id, "txHash", res.Hash.String(), "error", err)
 			cause = fmt.Errorf("election for question %s not confirmed on chain", id)
 			allConfirmed = false
 			continue

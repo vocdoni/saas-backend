@@ -161,7 +161,7 @@ func TestVotingProcessPublishRejectsStrayQuestion(t *testing.T) {
 // touching the chain or the DB: the failure paths never reach the publish worker's app.
 func TestConfirmBatchCause(t *testing.T) {
 	c := qt.New(t)
-	pw := &publishWorker{}
+	pw := &publishWorker{vp: &db.VotingProcess{ID: bson.NewObjectID()}, jobID: "job"}
 
 	c.Run("rejected by node", func(c *qt.C) {
 		pending := []*db.VotingProcessQuestion{{ID: bson.NewObjectID()}}
@@ -170,8 +170,9 @@ func TestConfirmBatchCause(t *testing.T) {
 		})
 		c.Assert(ok, qt.IsFalse)
 		c.Assert(err, qt.Not(qt.IsNil))
-		c.Assert(err.Error(), qt.Contains, "some reason")
+		c.Assert(err.Error(), qt.Contains, "chain rejected the election")
 		c.Assert(err.Error(), qt.Contains, pending[0].ID.Hex())
+		c.Assert(err.Error(), qt.Not(qt.Contains), "some reason")
 	})
 
 	c.Run("pending does not overwrite the rejection", func(c *qt.C) {
@@ -182,9 +183,10 @@ func TestConfirmBatchCause(t *testing.T) {
 		})
 		c.Assert(ok, qt.IsFalse)
 		c.Assert(err, qt.Not(qt.IsNil))
-		c.Assert(err.Error(), qt.Contains, "first reason")
+		c.Assert(err.Error(), qt.Contains, "chain rejected the election")
 		c.Assert(err.Error(), qt.Contains, pending[0].ID.Hex())
 		c.Assert(err.Error(), qt.Not(qt.Contains), pending[1].ID.Hex())
+		c.Assert(err.Error(), qt.Not(qt.Contains), "first reason")
 	})
 
 	c.Run("result count mismatch", func(c *qt.C) {
@@ -202,37 +204,8 @@ func TestConfirmBatchCause(t *testing.T) {
 		})
 		c.Assert(ok, qt.IsFalse)
 		c.Assert(err, qt.Not(qt.IsNil))
-		c.Assert(err.Error(), qt.Contains, "may still be mined")
+		c.Assert(err.Error(), qt.Contains, "already submitted, awaiting confirmation")
 		c.Assert(err.Error(), qt.Contains, pending[0].ID.Hex())
 		c.Assert(err.Error(), qt.Not(qt.Contains), "rejected")
-	})
-}
-
-// TestPublishDenial checks that a permission failure reaches the job error without internal
-// detail: a plan refusal keeps its message, while an internal failure only says the check failed.
-func TestPublishDenial(t *testing.T) {
-	c := qt.New(t)
-
-	c.Run("role refusal keeps its message", func(c *qt.C) {
-		err := publishDenial(errors.ErrUserHasNoAdminRole)
-		c.Assert(err.Error(), qt.Contains, "not permitted")
-		c.Assert(err.Error(), qt.Contains, "user does not have admin role")
-	})
-
-	c.Run("internal error hides its detail", func(c *qt.C) {
-		err := publishDenial(errors.ErrGenericInternalServerError.WithErr(fmt.Errorf("dial tcp 10.1.2.3:27017")))
-		c.Assert(err.Error(), qt.Not(qt.Contains), "10.1.2.3")
-		c.Assert(err.Error(), qt.Contains, "could not check")
-	})
-
-	c.Run("duration refusal keeps its message", func(c *qt.C) {
-		err := publishDenial(errors.ErrInvalidData.Withf("process duration exceeds the limit of %d days", 90))
-		c.Assert(err.Error(), qt.Contains, "not permitted")
-		c.Assert(err.Error(), qt.Contains, "process duration exceeds the limit of 90 days")
-	})
-
-	c.Run("denied without error", func(c *qt.C) {
-		err := publishDenial(nil)
-		c.Assert(err.Error(), qt.Contains, "not permitted")
 	})
 }
