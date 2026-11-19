@@ -293,6 +293,13 @@ func (c *CSPHandlers) authFirstStep(
 	if c.anonymousCensusRefused(census) {
 		return firstStepResult{}, errors.ErrInvalidData.With(csp.AnonymousVotingUnavailable)
 	}
+	if census.Attested != nil {
+		if req.CertCode != "" {
+			return firstStepResult{}, errors.ErrInvalidUserData.Withf("this census does not use certificate authentication")
+		}
+		token, err := c.attestedFirstStep(r, &req, anchorID, census)
+		return firstStepResult{token: token}, err
+	}
 
 	org, err := c.mainDB.Organization(census.OrgAddress)
 	if err != nil {

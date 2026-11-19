@@ -146,6 +146,10 @@ const (
 	// PUT /processes/{processId}/census adds members to a published process's census (+ maxCensusSize bump);
 	// DELETE removes them from it and from every question eligibility list built on it
 	processesCensusEndpoint = "/processes/{processId}/census"
+	// PUT /processes/{processId}/census/size grows the declared size of a published attested census
+	processesCensusSizeEndpoint = "/processes/{processId}/census/size"
+	// PUT /processes/{processId}/attestation-signer rotates the attestation signer of an attested census
+	processesAttestationSignerEndpoint = "/processes/{processId}/attestation-signer"
 	// GET /processes/{processId}/validation publish-readiness dry-run (protected)
 	processesValidateEndpoint = "/processes/{processId}/validation"
 
@@ -192,6 +196,9 @@ const (
 	// GET /processes/{processId}/participants?field=&value= — Manager/Admin lookup of org members by
 	// field intersected with the census, with per-question voted status (protected)
 	processesParticipantsEndpoint = "/processes/{processId}/participants"
+	// GET /processes/{processId}/attestations publishes the attestation records of an ended attested
+	// census (public)
+	processesAttestationsEndpoint = "/processes/{processId}/attestations"
 	// POST /processes/{processId}/sign-info — voter's per-question consumed address/nullifier (public)
 	processesSignInfoEndpoint = "/processes/{processId}/sign-info"
 	// CSP voter routes for a voting process (public)

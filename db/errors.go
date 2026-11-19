@@ -21,6 +21,8 @@ var (
 	ErrStoreToken = fmt.Errorf("cannot set token")
 	// ErrBadInputs is returned if the inputs provided to the function are invalid
 	ErrBadInputs = fmt.Errorf("bad inputs")
+	// ErrAttestedCensusFull is returned when a new attested voter would exceed the census size
+	ErrAttestedCensusFull = fmt.Errorf("attested census is full")
 	// ErrProcessAlreadyConsumed is returned if the process has already been consumed by the user
 	ErrProcessAlreadyConsumed = fmt.Errorf("token already consumed")
 	// ErrBlindNonceNotFound is returned when a round-2 blind claim finds no armed nonce for the
