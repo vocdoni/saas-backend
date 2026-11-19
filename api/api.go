@@ -590,6 +590,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, processesBlindSignEndpoint, cspHandlers.ProcessBlindSignHandler)
 		handle(r, http.MethodPost, processesWeightEndpoint, cspHandlers.ProcessWeightHandler)
 		handle(r, http.MethodPost, processesSignInfoEndpoint, cspHandlers.ProcessSignInfoHandler)
+		handle(r, http.MethodPost, certAuthAssertionsEndpoint, cspHandlers.CertAssertionHandler)
 	})
 	a.router = r
 	return r

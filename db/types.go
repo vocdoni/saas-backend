@@ -266,6 +266,10 @@ type Census struct {
 	// Attested marks a census whose voters an integrator vouches for with signed attestations
 	// instead of a member list; nil is a memberbase census. Size holds its declared maximum.
 	Attested *AttestedCensus `json:"attested,omitempty" bson:"attested,omitempty"`
+	// CertAuth makes voters prove their nationalId (the only auth field such a census has) with a
+	// Spanish personal certificate, through the certificate gateway, instead of typing it. The
+	// census may still require an email or SMS code afterwards (TwoFaFields).
+	CertAuth bool `json:"certAuth,omitempty" bson:"certAuth,omitempty"`
 
 	CreatedAt time.Time `json:"createdAt" bson:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt" bson:"updatedAt"`
@@ -476,6 +480,26 @@ func (f OrgMemberTwoFaFields) GetCensusType() CensusType {
 	return CensusTypeAuthOnly
 }
 
+// CensusLoginFields are the login fields of a census: its auth and 2FA fields, and whether its
+// voters prove the national ID with a certificate (Census.CertAuth).
+type CensusLoginFields struct {
+	AuthFields  OrgMemberAuthFields
+	TwoFaFields OrgMemberTwoFaFields
+	CertAuth    bool
+}
+
+// LoginHashFields returns the fields a participant's login hashes are computed from. A certificate
+// census hashes the national ID alone: the certificate proves it, any 2FA contact is checked
+// against the member afterwards, and one canonical DNI is therefore one participant. Every other
+// census hashes its auth and 2FA fields. calculateParticipantHashes is its only caller, and
+// migrations.computeParticipantHashes mirrors it.
+func (c Census) LoginHashFields() (OrgMemberAuthFields, OrgMemberTwoFaFields) {
+	if c.CertAuth {
+		return OrgMemberAuthFields{OrgMemberAuthFieldsNationalID}, nil
+	}
+	return c.AuthFields, c.TwoFaFields
+}
+
 // HashAuthTwoFaFields helper function receives as input the data of a member and
 // the auth and twoFa field and produces the sha256 login hash of the values of
 // those fields, keyed by field name (see internal.HashLoginFields).
@@ -492,6 +516,9 @@ func (f OrgMemberTwoFaFields) GetCensusType() CensusType {
 // emails. A full Unicode case-fold would be marginally more correct for a few
 // scripts, but diverging from the existing convention would be worse: the two
 // sides of the comparison only agree because they fold identically.
+//
+// The national ID is hashed in its canonical DNI/NIE form when it is a valid one (see
+// memberAuthFieldValue and internal.CanonicalNationalID), so its formatting does not matter.
 //
 // The password auth field is not part of the hash (memberAuthFieldValue reports it unknown): it is
 // checked after the participant lookup instead, so passwords never affect loginHash, uniqueness or

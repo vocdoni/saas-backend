@@ -33,6 +33,12 @@ type AuthRequest struct {
 	Signature   internal.HexBytes   `json:"signature,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	Contact     string              `json:"contact,omitempty"`
 	Salt        internal.HexBytes   `json:"salt,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	// CertCode is the single-use code the certificate gateway returned to the voting page, for a
+	// census with certAuth (43 base64url characters). It replaces every typed login field.
+	CertCode string `json:"certCode,omitempty"`
+	// CodeVerifier is the PKCE verifier (43 to 128 base64url characters) whose
+	// base64url(sha256(...)) the voting page sent to the certificate gateway as codeChallenge.
+	CodeVerifier string `json:"codeVerifier,omitempty"`
 }
 
 // AttestationPayload is the EIP-712 Attestation message an integrator signed for one voter.
@@ -60,6 +66,10 @@ type AuthResponse struct {
 	AuthToken internal.HexBytes `json:"authToken,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	Signature internal.HexBytes `json:"signature,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	Weight    internal.HexBytes `json:"weight,omitempty" swaggertype:"string" format:"hex" example:"2a"`
+	// VoterRef identifies the voter of a certificate census on the process, the same on every login:
+	// lowercase hex of an HMAC-SHA256, keyed from the service secret, of
+	// "vocdoni-voter-ref:" + process id + ":" + member id. Step 0 only.
+	VoterRef string `json:"voterRef,omitempty"`
 }
 
 // AuthRequest defines the payload for finishing the authentication process.

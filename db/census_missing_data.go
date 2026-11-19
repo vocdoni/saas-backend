@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
@@ -59,6 +60,21 @@ func (m *OrgMember) MissingLoginData(authFields OrgMemberAuthFields, twoFaFields
 	return true
 }
 
+// MemberMissingLoginData reports whether the member lacks the data to log in to the census: what
+// MissingLoginData reports for its auth and 2FA fields, and, for a certificate census, a national ID
+// that is not a valid DNI or NIE, which no certificate could ever match. Such members are left out of
+// the census and reported as missing data.
+func (c *Census) MemberMissingLoginData(m *OrgMember) bool {
+	if m.MissingLoginData(c.AuthFields, c.TwoFaFields) {
+		return true
+	}
+	if c.CertAuth {
+		_, ok := internal.CanonicalNationalID(m.NationalID)
+		return !ok
+	}
+	return false
+}
+
 // memberAuthFieldValue returns the value of an auth field of the member, and false for a field it
 // does not know, which HashAuthTwoFaFields ignores too.
 func memberAuthFieldValue(m *OrgMember, field OrgMemberAuthField) (value string, known bool) {
@@ -70,7 +86,9 @@ func memberAuthFieldValue(m *OrgMember, field OrgMemberAuthField) (value string,
 	case OrgMemberAuthFieldsMemberNumber:
 		return m.MemberNumber, true
 	case OrgMemberAuthFieldsNationalID:
-		return m.NationalID, true
+		// a valid DNI/NIE is compared in its canonical form, so its formatting does not matter
+		nationalID, _ := internal.CanonicalNationalID(m.NationalID)
+		return nationalID, true
 	case OrgMemberAuthFieldsBirthDate:
 		return m.BirthDate, true
 	default:
@@ -132,7 +150,7 @@ func classifyCensusMembers(
 		if err := cur.Decode(m); err != nil {
 			return nil, fmt.Errorf("decoding member: %w", err)
 		}
-		if m.MissingLoginData(census.AuthFields, census.TwoFaFields) {
+		if census.MemberMissingLoginData(m) {
 			cm.missing = append(cm.missing, m.ID)
 			continue
 		}

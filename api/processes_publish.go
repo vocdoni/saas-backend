@@ -170,7 +170,8 @@ type publishTarget struct {
 // a 409 rather than a 400; the dry-run ignores the flag and just reports the problem.
 //
 // denied is the organization's typed refusal (OrgCanPublishProcess: the integrator's own org,
-// 40174, or the 90-day duration cap), also listed in problems. Publish answers it as that error,
+// 40174, or the 90-day duration cap), or 40025 for a certificate census while certificate auth is
+// off, also listed in problems. Publish answers it as that error,
 // as draft creation does, rather than folding it into a 400.
 func (a *API) publishPreflightProblems(t publishTarget) (problems []string, questionsMismatch bool, denied error) {
 	vp, questions, census, user := t.vp, t.questions, t.census, t.user
@@ -186,9 +187,14 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	if a.anonymousCensusRefused(census.Anonymous) && !anyMined(questions) {
 		problems = append(problems, anonymousVotingUnavailable)
 	}
+	// a draft created while the feature was on cannot publish once the gateway keys are gone
+	if census.CertAuth && !a.csp.CertAuthEnabled() && !anyMined(questions) {
+		denied = errCertAuthDisabled()
+		problems = append(problems, denied.Error())
+	}
 	orgDoc, err := a.db.Organization(vp.OrgAddress)
 	if err != nil {
-		return append(problems, "organization not found"), questionsMismatch, nil
+		return append(problems, "organization not found"), questionsMismatch, denied
 	}
 	if !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
 		problems = append(problems, "publishing requires the admin role")
@@ -204,7 +210,7 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	// the checks below but fail in the worker (electionParamsForQuestion). Reject it here.
 	if maxSize == 0 {
 		problems = append(problems, "census has no members")
-		return problems, questionsMismatch, nil
+		return problems, questionsMismatch, denied
 	}
 	start := vp.StartDate
 	if start.IsZero() || start.Before(time.Now()) {
@@ -216,7 +222,9 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 	}
 	if err := a.subscriptions.OrgCanPublishProcess(orgDoc, durationSeconds); err != nil {
 		problems = append(problems, err.Error())
-		denied = err
+		if denied == nil { // the certificate refusal above wins
+			denied = err
+		}
 	}
 	return problems, questionsMismatch, denied
 }
@@ -278,6 +286,8 @@ func preflightError(problems []string, questionsMismatch bool, denied error) err
 //	@Description	include that the organization has not paid for either: deselect it, or publish once
 //	@Description	another process pays for it.
 //	@Description	422 (40176) means the census is above 50 000 voters: quote-only, no self-service price.
+//	@Description	400 (40025) means the census uses certificate authentication (certAuth) while the service
+//	@Description	has it disabled.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json

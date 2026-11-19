@@ -124,6 +124,11 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 //	@Description	unavailable") while the service has anonymous voting off.
 //	@Description	Step 0 on an attested census refuses a voter not signed for yet once as many voters as
 //	@Description	the census size were (409, 40810).
+//	@Description	For a census with certAuth, step 0 takes certCode and codeVerifier (plus the email or phone when
+//	@Description	the census has 2FA) and no typed login field, else 40005; an unknown, expired, used or foreign
+//	@Description	code, or a wrong verifier, answers 40802 and the code is spent, as it is by a wrong contact or a
+//	@Description	zero weight; a 40017 or a 2FA cooldown (40103) refusal leaves it redeemable. The answer carries
+//	@Description	voterRef. A certCode sent to any other census answers 40005.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json

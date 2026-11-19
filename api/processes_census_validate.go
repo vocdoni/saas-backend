@@ -23,6 +23,9 @@ import (
 //	@Description	is a 400. Requires Manager/Admin role of the organization. While the service has anonymous
 //	@Description	voting temporarily off, an `anonymous: true` spec is a 400 (40037) "anonymous voting is
 //	@Description	temporarily unavailable".
+//	@Description	A `certAuth: true` spec needs authFields exactly ["nationalId"] (else 400, 40037) and a service with
+//	@Description	certificate gateway keys (else 400, 40025); members whose nationalId is not a valid DNI or NIE are
+//	@Description	reported in missingData.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
@@ -70,17 +73,22 @@ func (a *API) validateProcessCensusHandler(w http.ResponseWriter, r *http.Reques
 		errors.ErrInvalidData.With(db.PasswordNeedsLookupFieldMessage).Write(w)
 		return
 	}
+	if err := a.certAuthSpecError(census); err != nil {
+		writeAPIError(w, err)
+		return
+	}
 
 	// select the member set to validate: a group, an explicit subset, or (default) the whole org.
 	var results *db.OrgMemberAggregationResults
 	var err error
+	fields := db.CensusLoginFields{AuthFields: census.AuthFields, TwoFaFields: census.TwoFaFields, CertAuth: census.CertAuth}
 	switch {
 	case census.GroupID != "":
-		results, err = a.db.CheckGroupMembersFields(orgAddr, census.GroupID, census.AuthFields, census.TwoFaFields)
+		results, err = a.db.CheckGroupMembersFields(orgAddr, census.GroupID, fields)
 	case len(census.MemberIDs) > 0:
-		results, err = a.db.CheckMembersFields(orgAddr, census.MemberIDs, census.AuthFields, census.TwoFaFields)
+		results, err = a.db.CheckMembersFields(orgAddr, census.MemberIDs, fields)
 	default:
-		results, err = a.db.CheckGroupMembersFields(orgAddr, "", census.AuthFields, census.TwoFaFields)
+		results, err = a.db.CheckGroupMembersFields(orgAddr, "", fields)
 	}
 	if err != nil {
 		// bad input (malformed member id, unknown group) is a client error, not a 500.

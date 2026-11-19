@@ -765,6 +765,9 @@ type OrganizationCensus struct {
 
 	// Optional for defining which member data should be used for two-factor authentication
 	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
+
+	// CertAuth reports a census whose voters prove their national ID with a personal certificate
+	CertAuth bool `json:"certAuth,omitempty"`
 }
 
 // OrganizationCensusFromDB converts a db.Census to an OrganizationCensus.
@@ -780,6 +783,7 @@ func OrganizationCensusFromDB(census *db.Census) OrganizationCensus {
 		Weighted:    census.Weighted,
 		AuthFields:  census.AuthFields,
 		TwoFaFields: census.TwoFaFields,
+		CertAuth:    census.CertAuth,
 	}
 	// guard the zero id so an organization-wide census reports no group at all: omitempty keys off the
 	// empty string, but a zero ObjectID hexes to 24 zeros and would serialize as a real group.

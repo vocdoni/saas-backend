@@ -146,7 +146,7 @@ func TestMigrationCSPAttestations(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	mig := migrationByVersion(c, 37)
+	mig := migrationByVersion(c, 40)
 	database := testDB.DBClient.Database(testDB.database)
 	c.Assert(mig.Up(ctx, database), qt.IsNil)
 

@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -58,6 +59,8 @@ func attestedCensusProblem(spec apicommon.CensusSpec, questions []apicommon.Voti
 		return "attested census cannot have groupId or memberIds"
 	case len(spec.AuthFields) > 0:
 		return "attested census cannot have authFields"
+	case spec.CertAuth:
+		return "attested census cannot use certAuth"
 	case spec.Weighted:
 		return "attested census cannot be weighted"
 	case spec.Anonymous:
@@ -83,8 +86,8 @@ func attestedCensusPublishProblems(census *db.Census, questions []db.VotingProce
 	if census.Size <= 0 {
 		problems = append(problems, "attested census has no maxCensusSize")
 	}
-	if census.Weighted || census.Anonymous || len(census.AuthFields) > 0 || !census.GroupID.IsZero() ||
-		!attestedTwoFaFields(census.TwoFaFields) {
+	if census.Weighted || census.Anonymous || census.CertAuth || len(census.AuthFields) > 0 ||
+		!census.GroupID.IsZero() || !attestedTwoFaFields(census.TwoFaFields) {
 		problems = append(problems, "attested census combines member-based options")
 	}
 	for i := range questions {
@@ -115,6 +118,28 @@ func (a *API) echoAttestationDomain(spec *apicommon.CensusSpec) {
 	spec.Attested.VerifyingContract = &domain.VerifyingContract
 }
 
+// errCertAuthDisabled is the refusal of a certificate census while no certificate gateway key is
+// configured, at create, update, validation and publish.
+func errCertAuthDisabled() error {
+	return errors.ErrNotSupported.Withf("certificate voter authentication is not enabled")
+}
+
+// certAuthSpecError returns the error for a census spec whose certAuth cannot be used, or nil:
+// certificate censuses are refused while no certificate gateway key is configured, and they need
+// authFields to be exactly ["nationalId"], the field a certificate proves. Any 2FA subset is fine.
+func (a *API) certAuthSpecError(spec apicommon.CensusSpec) error {
+	if !spec.CertAuth {
+		return nil
+	}
+	if !a.csp.CertAuthEnabled() {
+		return errCertAuthDisabled()
+	}
+	if !slices.Equal(spec.AuthFields, db.OrgMemberAuthFields{db.OrgMemberAuthFieldsNationalID}) {
+		return errors.ErrInvalidData.Withf(`certAuth requires authFields to be exactly ["nationalId"]`)
+	}
+	return nil
+}
+
 // resolveOrCreateDefaultCensus materializes the inline census spec of a voting process into
 // a db.Census (auth/2FA policy + participants) and returns it. The census type is inferred
 // from the 2FA fields (SetCensus does this). The census is created unpublished; publishing happens at
@@ -126,12 +151,16 @@ func (a *API) resolveOrCreateDefaultCensus(
 	if a.anonymousCensusRefused(spec.Anonymous) {
 		return nil, nil, errors.ErrInvalidData.With(anonymousVotingUnavailable)
 	}
+	if err := a.certAuthSpecError(spec); err != nil {
+		return nil, nil, err
+	}
 	census := &db.Census{
 		OrgAddress:  orgAddress,
 		Weighted:    spec.Weighted,
 		Anonymous:   spec.Anonymous,
 		AuthFields:  spec.AuthFields,
 		TwoFaFields: spec.TwoFaFields,
+		CertAuth:    spec.CertAuth,
 		CreatedAt:   time.Now(),
 	}
 	if spec.Attested != nil {

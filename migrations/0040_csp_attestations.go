@@ -10,7 +10,7 @@ import (
 )
 
 func init() {
-	AddMigration(37, "csp_attestations", upCSPAttestations, downCSPAttestations)
+	AddMigration(40, "csp_attestations", upCSPAttestations, downCSPAttestations)
 }
 
 // upCSPAttestations creates cspAttestations, the attestation records of attested censuses keyed by

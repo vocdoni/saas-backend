@@ -215,4 +215,8 @@ const (
 	processesBlindPointEndpoint = "/processes/{processId}/blind-point"
 	processesBlindSignEndpoint  = "/processes/{processId}/blind-sign"
 	processesWeightEndpoint     = "/processes/{processId}/weight"
+	// POST /cert-auth/assertions — the certificate gateway, server to server and signed, hands over
+	// a voter's verified national ID and gets a single-use code for step 0 (404 while no gateway key
+	// is configured)
+	certAuthAssertionsEndpoint = "/cert-auth/assertions"
 )
