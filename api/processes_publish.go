@@ -1248,9 +1248,9 @@ func (pw *publishWorker) buildBatch(
 }
 
 // confirmBatch waits for each submitted item to mine and persists the question's on-chain
-// id. It returns true only when every pending question is confirmed. Otherwise the error is
-// the cause of the round's last failure; items left unsent keep the cause of the failure before
-// them (nil when all were confirmed).
+// id. It returns (true, nil) only when every pending question is confirmed. Otherwise the error
+// is the cause of the round's last failure, and an item left unsent keeps the cause of the
+// failure before it.
 func (pw *publishWorker) confirmBatch(pending []*db.VotingProcessQuestion, results []account.BatchItemResult) (bool, error) {
 	a := pw.a
 	// results are aligned to pending by position (SubmitSignedTxBatch's fail-fast ordering). If the
@@ -1269,9 +1269,16 @@ func (pw *publishWorker) confirmBatch(pending []*db.VotingProcessQuestion, resul
 		switch res.Status {
 		case account.BatchSubmitted:
 		case account.BatchFailed:
-			log.Warnw("voting process election rejected by the node, will retry",
-				"questionId", id, "error", res.Err)
-			cause = fmt.Errorf("election for question %s rejected by the node: %s", id, res.Err)
+			if res.InCache {
+				// the node already holds the same tx bytes, so it may still be mined
+				log.Warnw("voting process election already pending on the node, will retry",
+					"questionId", id, "error", res.Err)
+				cause = fmt.Errorf("election for question %s is already pending on the node and may still be mined", id)
+			} else {
+				log.Warnw("voting process election rejected by the node, will retry",
+					"questionId", id, "error", res.Err)
+				cause = fmt.Errorf("election for question %s rejected by the node: %s", id, res.Err)
+			}
 			allConfirmed = false
 			continue
 		default:

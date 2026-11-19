@@ -194,6 +194,18 @@ func TestConfirmBatchCause(t *testing.T) {
 		c.Assert(err, qt.Not(qt.IsNil))
 		c.Assert(err.Error(), qt.Contains, "0 batch results for 1 transactions")
 	})
+
+	c.Run("in cache is not reported as rejected", func(c *qt.C) {
+		pending := []*db.VotingProcessQuestion{{ID: bson.NewObjectID()}}
+		ok, err := pw.confirmBatch(pending, []account.BatchItemResult{
+			{Status: account.BatchFailed, Err: "tx already exists in cache", InCache: true},
+		})
+		c.Assert(ok, qt.IsFalse)
+		c.Assert(err, qt.Not(qt.IsNil))
+		c.Assert(err.Error(), qt.Contains, "may still be mined")
+		c.Assert(err.Error(), qt.Contains, pending[0].ID.Hex())
+		c.Assert(err.Error(), qt.Not(qt.Contains), "rejected")
+	})
 }
 
 // TestPublishDenial checks that a permission failure reaches the job error without internal
@@ -213,10 +225,10 @@ func TestPublishDenial(t *testing.T) {
 		c.Assert(err.Error(), qt.Contains, "could not check")
 	})
 
-	c.Run("plain plan refusal keeps its message", func(c *qt.C) {
-		err := publishDenial(fmt.Errorf("vote overwrites are not allowed"))
+	c.Run("duration refusal keeps its message", func(c *qt.C) {
+		err := publishDenial(errors.ErrInvalidData.Withf("process duration exceeds the limit of %d days", 90))
 		c.Assert(err.Error(), qt.Contains, "not permitted")
-		c.Assert(err.Error(), qt.Contains, "vote overwrites are not allowed")
+		c.Assert(err.Error(), qt.Contains, "process duration exceeds the limit of 90 days")
 	})
 
 	c.Run("denied without error", func(c *qt.C) {
