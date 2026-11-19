@@ -1714,6 +1714,15 @@ definitions:
         description: New password
         type: string
     type: object
+  apicommon.UserPasswordSetup:
+    properties:
+      code:
+        description: Password setup code
+        type: string
+      newPassword:
+        description: New password
+        type: string
+    type: object
   apicommon.UserPasswordUpdate:
     properties:
       newPassword:
@@ -7182,6 +7191,88 @@ paths:
       summary: Confirm a pending email change
       tags:
       - users
+  /users/me/password/setup:
+    post:
+      description: |-
+        Mail a code that lets the authenticated account, which has no password (it signs in with
+        an OAuth provider), set its first password via POST /users/me/password/setup/verify. A
+        still-valid code is resent rather than replaced; a new send is accepted once per OTP
+        cooldown. The email links to the web app page /account/password/setup?code=<code>.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Code sent recently, or no mail service
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: User already has a password
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Request a password setup code
+      tags:
+      - users
+  /users/me/password/setup/verify:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Set the first password of the authenticated account, which has no password, with the code
+        mailed by POST /users/me/password/setup. On success every existing session is revoked and
+        a fresh token is returned.
+      parameters:
+      - description: Setup code and new password
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.UserPasswordSetup'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.LoginResponse'
+        "400":
+          description: Invalid input data or max attempts reached
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized, code mismatch or code expired
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: User already has a password
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Server busy, retry after the Retry-After delay
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Set the first password with a setup code
+      tags:
+      - users
   /users/password:
     put:
       consumes:
@@ -7228,7 +7319,11 @@ paths:
     post:
       consumes:
       - application/json
-      description: Request a password recovery code for a user
+      description: |-
+        Mail a password reset code to the account with the given email, verified or not. Unknown
+        emails and accounts without a password (OAuth-only) get the same 200 and no email, so the
+        endpoint reveals neither which accounts exist nor their type; those accounts add a password
+        via POST /users/me/password/setup. A new code is sent at most once per OTP cooldown.
       parameters:
       - description: User email information
         in: body
@@ -7258,7 +7353,10 @@ paths:
     post:
       consumes:
       - application/json
-      description: Reset a user's password using a verification code
+      description: |-
+        Reset a user's password with the code mailed by POST /users/password/recovery. The code proves
+        mailbox ownership, so the reset also verifies the account; every existing session is revoked.
+        Accounts without a password (OAuth-only) are refused; they use POST /users/me/password/setup.
       parameters:
       - description: Password reset information
         in: body
