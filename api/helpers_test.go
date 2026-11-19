@@ -31,3 +31,11 @@ func TestBuildLoginResponseExpiry(t *testing.T) {
 	// the response-level expiry mirrors the token claim
 	c.Assert(res.Expirity.Before(now.Add(jwtExpiration+time.Hour)), qt.IsTrue)
 }
+
+// TestUserCodeWebAppURI checks each user-targeted code type links to the web app page that redeems it.
+func TestUserCodeWebAppURI(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(userCodeWebAppURI(db.CodeTypeVerifyAccount), qt.Equals, "/account/verify")
+	c.Assert(userCodeWebAppURI(db.CodeTypePasswordReset), qt.Equals, "/account/password/reset")
+	c.Assert(userCodeWebAppURI(db.CodeTypePasswordSetup), qt.Equals, "/account/password/setup")
+}
