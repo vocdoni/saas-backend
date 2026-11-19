@@ -17,6 +17,8 @@ Owner decisions so far (2026-11-11):
 - D9 (2026-11-17) Folded in from a review of ferranrego's parallel work (vocdoni/saas-backend#850,
   #851, vocdoni/vocdoni-app#1975–#1980). See "Amendments D9" at the end of this document.
   The per-attempt random subdomain is decided separately as D10.
+- D12 (2026-11-19) PR review of vocdoni/saas-backend#862 (see "Amendments D12" at the end). It
+  reverses D9.A: a DNI/NIE without its check letter is invalid again.
 - D11 (2026-11-19) Dev deployment: the dev gateway's `DOMAIN` is `cert.vocdoni.net` (owner's DNS
   choice; prod stays `cert.vocdoni.io`). Its Cloudflare token is scoped to the `vocdoni.net` zone
   (Zone:Read, DNS:Edit) instead of a dedicated ACME zone, an accepted risk for now;
@@ -783,7 +785,7 @@ ACME cache.
 
 ## Amendments D9 (2026-11-17)
 
-**A. Letterless DNI/NIE (backend, C2.2).**
+**A. Letterless DNI/NIE (backend, C2.2).** *Reversed by D12: the check letter is required.*
 - `CanonicalNationalID` also accepts a DNI of 7–8 digits, or an NIE of a prefix plus 7 digits, with
   no letter. It computes the check letter and returns the canonical form with `ok=true`. Examples:
   `55555555` gives `55555555K`, `55.555.555` gives `55555555K`, `Y1234567` gives `Y1234567X`.
@@ -890,6 +892,43 @@ host as `<DOMAIN>`. Railway forwards TCP and ignores the name. The port is the s
   picker must appear again.
 
 **Cost.** Nothing beyond one wildcard DNS record and one wildcard certificate per environment.
+
+## Amendments D12 (2026-11-19): PR review
+
+- **The code is bound to the proved national ID.** The assertion stores the login hash its
+  participant matched. Step 0 refuses (40802) when the participant's current login hash is empty
+  or differs, for example when the organiser edited or cleared the member's national ID after the
+  code was issued. `ClaimAuthAttempt` refuses an empty key.
+- **One use per gateway request.**
+  - Each accepted signature is recorded once, keyed by the hash of the signed message (in
+    collection `certGatewayRequests`, with a 2-minute TTL, migration 0039).
+  - A replay answers 401 `bad_signature` before any other work, so it cannot spend the voter's
+    assertion budget.
+- **Budgets.**
+  - The assertion budget unit is released when the assertion cannot be stored.
+  - At step 0 the code is looked up first. It is consumed only after the attempt budget, and for
+    2FA the resend cooldown and daily cap, have passed. A refusal for those reasons keeps the code
+    usable.
+  - A wrong verifier, census, contact or login hash, or a zero weight, spends it (C2.5 item 7).
+  - Residual: `AuthToken` re-checks the cooldown and daily cap after consumption, so a send that
+    lands between the two checks still burns the code.
+- **`voterRef`** is HMAC-SHA256 over `"vocdoni-voter-ref:" + processId + ":" + memberId`.
+  - The key is `sha256("vocdoni-voter-ref-key:" + <service secret>)`, so it cannot be computed
+    from member ids alone.
+  - It changes if the service secret changes. Pending votes saved under the old value are then
+    not recognised.
+- **`documentType` must match the national ID.** `DNI` means 8 digits and a letter; `NIE` means
+  X/Y/Z, 7 digits and a letter. A mismatch answers 400 `bad_request`.
+- **The check letter is required** (owner). Letterless values such as `12345678` are not a
+  valid DNI. This keeps a numeric foreign or member number from matching a Spanish DNI.
+- **Migration 0037 logs each skipped row** by `censusId` and `participantId` (never the national
+  ID), so organisers can remove the duplicate and `scripts/repairlogins -apply` can rehash it.
+- **Rollout without overlap.**
+  - Old replicas hash the raw national ID. Deploy 0037 with no old/new overlap (App Platform
+    replaces the single instance).
+  - If replicas did overlap, run `scripts/repairlogins -apply` once the rollout is complete.
+- **Publish refusal order.** The 40025 refusal (cert auth not configured) wins over a later
+  publish denial.
 
 ## Constraints
 
