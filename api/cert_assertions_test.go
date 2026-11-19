@@ -7,8 +7,8 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -34,11 +34,14 @@ func testCertPKCE(t *testing.T) (verifier, challenge string) {
 	return verifier, base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-// newCertAssertionRequest is the assertion the gateway posts for a certificate of nationalID.
+// newCertAssertionRequest is the assertion the gateway posts for a certificate of nationalID. The
+// certificate hash is random, so two requests never share a body (a replayed signature is refused).
 func newCertAssertionRequest(pid, nationalID, challenge string) *handlers.CertAssertionRequest {
+	certSHA256 := make([]byte, sha256.Size)
+	_, _ = rand.Read(certSHA256)
 	return &handlers.CertAssertionRequest{
 		ProcessID: pid, NationalID: nationalID, DocumentType: "DNI", Provider: "fnmt",
-		Profile: "fnmt-citizen-g2", CertSHA256: fmt.Sprintf("%064x", 0xab), CodeChallenge: challenge,
+		Profile: "fnmt-citizen-g2", CertSHA256: hex.EncodeToString(certSHA256), CodeChallenge: challenge,
 	}
 }
 
@@ -146,6 +149,18 @@ func TestCertAssertions(t *testing.T) {
 				expect(t, status, resp, http.StatusUnauthorized, "bad_signature")
 			})
 		}
+	})
+
+	t.Run("a replayed request is refused, a different one accepted", func(t *testing.T) {
+		body, err := json.Marshal(newCertAssertionRequest(pid, "01234567L", challenge))
+		qt.Assert(t, err, qt.IsNil)
+		header := signCertAssertion(testCertGatewayKey, testCertGatewayKeyID, body, time.Now())
+		status, resp := postCertAssertionRaw(t, body, header)
+		qt.Assert(t, status, qt.Equals, http.StatusCreated, qt.Commentf("response: %s", resp))
+		status, resp = postCertAssertionRaw(t, body, header)
+		expect(t, status, resp, http.StatusUnauthorized, "bad_signature")
+		status, resp = postCertAssertion(t, newCertAssertionRequest(pid, "01234567L", challenge))
+		qt.Assert(t, status, qt.Equals, http.StatusCreated, qt.Commentf("response: %s", resp))
 	})
 
 	t.Run("malformed requests", func(t *testing.T) {

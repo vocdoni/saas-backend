@@ -1,7 +1,9 @@
 package csp
 
 import (
+	"crypto/sha256"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,9 +36,20 @@ func TestCertGatewaySignatureVectors(t *testing.T) {
 	at := time.Unix(vectorTime, 0)
 
 	c.Assert(string(CertGatewaySignedMessage(vectorTime, []byte(vectorBody))), qt.Equals, vectorMessage)
-	c.Assert(VerifyCertGatewaySignature(keys, vectorHeader, []byte(vectorBody), at), qt.IsNil)
-	c.Assert(VerifyCertGatewaySignature(keys, vectorHeader, []byte(vectorBody), at.Add(60*time.Second)), qt.IsNil)
-	c.Assert(VerifyCertGatewaySignature(keys, vectorHeader, []byte(vectorBody), at.Add(-60*time.Second)), qt.IsNil)
+	digest, err := VerifyCertGatewaySignature(keys, vectorHeader, []byte(vectorBody), at)
+	c.Assert(err, qt.IsNil)
+	wantDigest := sha256.Sum256([]byte(vectorMessage))
+	c.Assert(digest, qt.DeepEquals, wantDigest[:])
+	_, err = VerifyCertGatewaySignature(keys, vectorHeader, []byte(vectorBody), at.Add(60*time.Second))
+	c.Assert(err, qt.IsNil)
+	_, err = VerifyCertGatewaySignature(keys, vectorHeader, []byte(vectorBody), at.Add(-60*time.Second))
+	c.Assert(err, qt.IsNil)
+	// the digest names the signed request, not how its header is written
+	parts := strings.Split(vectorHeader, ",")
+	reordered := strings.Join([]string{parts[2], parts[0], parts[1]}, ",")
+	digest2, err := VerifyCertGatewaySignature(keys, reordered, []byte(vectorBody), at)
+	c.Assert(err, qt.IsNil)
+	c.Assert(digest2, qt.DeepEquals, digest)
 
 	for name, tc := range map[string]struct {
 		header, body string
@@ -52,7 +65,7 @@ func TestCertGatewaySignatureVectors(t *testing.T) {
 		"other body":      {vectorHeader, vectorBody + " ", at},
 		"other time":      {"t=1767225601" + vectorHeader[len("t=1767225600"):], vectorBody, at},
 	} {
-		err := VerifyCertGatewaySignature(keys, tc.header, []byte(tc.body), tc.at)
+		_, err := VerifyCertGatewaySignature(keys, tc.header, []byte(tc.body), tc.at)
 		c.Assert(errors.Is(err, ErrCertGatewaySignature), qt.IsTrue, qt.Commentf("%s: %v", name, err))
 	}
 }

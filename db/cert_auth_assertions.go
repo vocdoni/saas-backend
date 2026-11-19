@@ -49,6 +49,26 @@ func (ms *MongoStorage) CreateCertAuthAssertion(a *CertAuthAssertion) error {
 	return nil
 }
 
+// RecordCertGatewayRequest records digest, the hash of a certificate gateway request whose
+// signature was just verified, so that signed request is accepted once. It reports false when the
+// digest is already recorded: the request is a replay. A TTL index on expiresAt removes the record
+// once the signature would be stale anyway.
+func (ms *MongoStorage) RecordCertGatewayRequest(digest []byte, expiresAt time.Time) (bool, error) {
+	if len(digest) == 0 {
+		return false, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	_, err := ms.certGatewayRequests.InsertOne(ctx, bson.M{"_id": digest, "expiresAt": expiresAt})
+	if mongo.IsDuplicateKeyError(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to record cert gateway request: %w", err)
+	}
+	return true, nil
+}
+
 // ConsumeCertAuthAssertion atomically marks as used, and returns, the unused and unexpired
 // assertion of the process with the given code hash. Two concurrent calls never both get it. It
 // returns ErrNotFound for a code that is unknown, used, expired or of another process.

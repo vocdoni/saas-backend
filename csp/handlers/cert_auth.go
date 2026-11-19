@@ -108,9 +108,10 @@ func writeCertAssertionError(w http.ResponseWriter, status int, code string, log
 //	@Description	certificate. The body is signed with the gateway's Ed25519 key in the X-Cert-Gateway-Signature
 //	@Description	header: t=<unix seconds>,k=<keyId>,v1=<base64url signature> over
 //	@Description	"cert-gateway-v1\n" + t + "\nPOST\n/cert-auth/assertions\n" + hex(sha256(body)), within 60 s of
-//	@Description	the server clock. On success it stores a single-use code, valid for 5 minutes, that the voter
-//	@Description	redeems at POST /processes/{processId}/auth/0 with the PKCE verifier of codeChallenge. At most
-//	@Description	10 assertions per census participant per process per hour.
+//	@Description	the server clock. Each signed request is accepted once: a replay answers 401 bad_signature.
+//	@Description	On success it stores a single-use code, valid for 5 minutes, that the voter redeems at
+//	@Description	POST /processes/{processId}/auth/0 with the PKCE verifier of codeChallenge. At most 10
+//	@Description	assertions per census participant per process per hour.
 //	@Description	Without certificate gateway keys configured the route answers a plain 404.
 //	@Tags			processes
 //	@Accept			json
@@ -119,7 +120,7 @@ func writeCertAssertionError(w http.ResponseWriter, status int, code string, log
 //	@Param			request						body		handlers.CertAssertionRequest	true	"Verified certificate identity"
 //	@Success		201							{object}	handlers.CertAssertionResponse
 //	@Failure		400							{object}	handlers.CertAssertionError	"bad_request"
-//	@Failure		401							{object}	handlers.CertAssertionError	"bad_signature"
+//	@Failure		401							{object}	handlers.CertAssertionError	"bad_signature (also a replay)"
 //	@Failure		403							{object}	handlers.CertAssertionError	"zero_weight"
 //	@Failure		404							{object}	handlers.CertAssertionError	"process_not_open, not_in_census; or no body when the feature is off"
 //	@Failure		409							{object}	handlers.CertAssertionError	"not_cert_census, anonymous_unavailable"
@@ -138,8 +139,21 @@ func (c *CSPHandlers) CertAssertionHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	header := r.Header.Get(csp.CertGatewaySignatureHeader)
-	if err := csp.VerifyCertGatewaySignature(keys, header, body, time.Now()); err != nil {
+	now := time.Now()
+	digest, err := csp.VerifyCertGatewaySignature(keys, header, body, now)
+	if err != nil {
 		writeCertAssertionError(w, http.StatusUnauthorized, certErrBadSignature, "reason", err.Error())
+		return
+	}
+	// a signed request is accepted once: a captured one replayed within its freshness window would
+	// otherwise spend the voter's assertion budget
+	fresh, err := c.mainDB.RecordCertGatewayRequest(digest, now.Add(csp.CertGatewayReplayWindow))
+	if err != nil {
+		c.certAssertionFailed(w, err, nil)
+		return
+	}
+	if !fresh {
+		writeCertAssertionError(w, http.StatusUnauthorized, certErrBadSignature, "reason", "replayed request")
 		return
 	}
 	var req CertAssertionRequest
@@ -221,7 +235,7 @@ func (c *CSPHandlers) CertAssertionHandler(w http.ResponseWriter, r *http.Reques
 	}
 	certCode := base64.RawURLEncoding.EncodeToString(code)
 	codeHash := sha256.Sum256([]byte(certCode))
-	now := time.Now().UTC()
+	now = now.UTC()
 	assertion := &db.CertAuthAssertion{
 		CodeHash:      codeHash[:],
 		ProcessID:     processID,

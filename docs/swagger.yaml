@@ -2901,9 +2901,10 @@ paths:
         certificate. The body is signed with the gateway's Ed25519 key in the X-Cert-Gateway-Signature
         header: t=<unix seconds>,k=<keyId>,v1=<base64url signature> over
         "cert-gateway-v1\n" + t + "\nPOST\n/cert-auth/assertions\n" + hex(sha256(body)), within 60 s of
-        the server clock. On success it stores a single-use code, valid for 5 minutes, that the voter
-        redeems at POST /processes/{processId}/auth/0 with the PKCE verifier of codeChallenge. At most
-        10 assertions per census participant per process per hour.
+        the server clock. Each signed request is accepted once: a replay answers 401 bad_signature.
+        On success it stores a single-use code, valid for 5 minutes, that the voter redeems at
+        POST /processes/{processId}/auth/0 with the PKCE verifier of codeChallenge. At most 10
+        assertions per census participant per process per hour.
         Without certificate gateway keys configured the route answers a plain 404.
       parameters:
       - description: Gateway signature
@@ -2929,7 +2930,7 @@ paths:
           schema:
             $ref: '#/definitions/handlers.CertAssertionError'
         "401":
-          description: bad_signature
+          description: bad_signature (also a replay)
           schema:
             $ref: '#/definitions/handlers.CertAssertionError'
         "403":

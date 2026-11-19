@@ -67,39 +67,47 @@ func CertGatewaySignedMessage(t int64, body []byte) []byte {
 // VerifyCertGatewaySignature verifies header, the X-Cert-Gateway-Signature value
 // "t=<unix seconds>,k=<keyId>,v1=<base64url(signature), no padding>", over body, the raw request
 // body, with the key named by k. The timestamp must be within CertGatewaySignatureMaxSkew of now.
-// Every failure wraps ErrCertGatewaySignature.
-func VerifyCertGatewaySignature(keys CertGatewayKeys, header string, body []byte, now time.Time) error {
+// Every failure wraps ErrCertGatewaySignature. On success it returns the request's digest, the
+// sha256 of the signed message: the same for every copy of one signed request, however its header
+// is written, so the caller can accept it once (CertGatewayReplayWindow).
+func VerifyCertGatewaySignature(keys CertGatewayKeys, header string, body []byte, now time.Time) ([]byte, error) {
 	fields := map[string]string{}
 	for part := range strings.SplitSeq(header, ",") {
 		name, value, found := strings.Cut(part, "=")
 		if _, dup := fields[name]; !found || dup {
-			return fmt.Errorf("%w: malformed header", ErrCertGatewaySignature)
+			return nil, fmt.Errorf("%w: malformed header", ErrCertGatewaySignature)
 		}
 		fields[name] = value
 	}
 	if len(fields) != 3 {
-		return fmt.Errorf("%w: malformed header", ErrCertGatewaySignature)
+		return nil, fmt.Errorf("%w: malformed header", ErrCertGatewaySignature)
 	}
 	t, err := strconv.ParseInt(fields["t"], 10, 64)
 	if err != nil {
-		return fmt.Errorf("%w: malformed timestamp", ErrCertGatewaySignature)
+		return nil, fmt.Errorf("%w: malformed timestamp", ErrCertGatewaySignature)
 	}
 	if skew := now.Sub(time.Unix(t, 0)); skew > CertGatewaySignatureMaxSkew || skew < -CertGatewaySignatureMaxSkew {
-		return fmt.Errorf("%w: stale timestamp", ErrCertGatewaySignature)
+		return nil, fmt.Errorf("%w: stale timestamp", ErrCertGatewaySignature)
 	}
 	key, ok := keys[fields["k"]]
 	if !ok {
-		return fmt.Errorf("%w: unknown key", ErrCertGatewaySignature)
+		return nil, fmt.Errorf("%w: unknown key", ErrCertGatewaySignature)
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(fields["v1"])
 	if err != nil || len(sig) != ed25519.SignatureSize {
-		return fmt.Errorf("%w: malformed signature", ErrCertGatewaySignature)
+		return nil, fmt.Errorf("%w: malformed signature", ErrCertGatewaySignature)
 	}
-	if !ed25519.Verify(key, CertGatewaySignedMessage(t, body), sig) {
-		return fmt.Errorf("%w: signature mismatch", ErrCertGatewaySignature)
+	message := CertGatewaySignedMessage(t, body)
+	if !ed25519.Verify(key, message, sig) {
+		return nil, fmt.Errorf("%w: signature mismatch", ErrCertGatewaySignature)
 	}
-	return nil
+	digest := sha256.Sum256(message)
+	return digest[:], nil
 }
+
+// CertGatewayReplayWindow is how long an accepted request's digest is remembered: a signature is
+// fresh for CertGatewaySignatureMaxSkew either side of its timestamp, so it is stale by then.
+const CertGatewayReplayWindow = 2 * CertGatewaySignatureMaxSkew
 
 // MaxHourlyCertAssertions caps the certificate assertions created for one census participant on
 // one voting process per UTC hour.
