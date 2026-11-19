@@ -218,7 +218,7 @@ func (c *CSPHandlers) CertAssertionHandler(w http.ResponseWriter, r *http.Reques
 		writeCertAssertionError(w, http.StatusForbidden, certErrZeroWeight, logFields...)
 		return
 	}
-	granted, err := c.csp.ClaimCertAssertion(internal.HexBytes(processID[:]), internal.HexBytes(member.ID[:]))
+	claim, granted, err := c.csp.ClaimCertAssertion(internal.HexBytes(processID[:]), internal.HexBytes(member.ID[:]))
 	if err != nil {
 		c.certAssertionFailed(w, err, logFields)
 		return
@@ -227,6 +227,13 @@ func (c *CSPHandlers) CertAssertionHandler(w http.ResponseWriter, r *http.Reques
 		writeCertAssertionError(w, http.StatusTooManyRequests, certErrRateLimited, logFields...)
 		return
 	}
+	// an internal failure from here on gives the unit back: only created assertions spend the budget
+	created := false
+	defer func() {
+		if !created {
+			c.csp.ReleaseCertAssertion(claim)
+		}
+	}()
 
 	code := make([]byte, 32)
 	if _, err := rand.Read(code); err != nil {
@@ -252,6 +259,7 @@ func (c *CSPHandlers) CertAssertionHandler(w http.ResponseWriter, r *http.Reques
 		c.certAssertionFailed(w, err, logFields)
 		return
 	}
+	created = true
 	log.Infow("cert assertion created", append([]any{"outcome", "created"}, logFields...)...)
 	writeCertAssertionJSON(w, http.StatusCreated, &CertAssertionResponse{
 		CertCode:  certCode,

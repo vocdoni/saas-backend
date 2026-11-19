@@ -244,3 +244,36 @@ func TestCertAssertions(t *testing.T) {
 	})
 	c.Assert(testAPI.csp.CertAuthEnabled(), qt.IsTrue)
 }
+
+// TestCertAssertionBudgetReturnedOnFailure: an assertion that fails to be stored gives its unit of
+// the participant's hourly budget back, so internal failures never rate-limit a voter.
+func TestCertAssertionBudgetReturnedOnFailure(t *testing.T) {
+	c := qt.New(t)
+	enableCertAuth(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	ids := memberIDs(postOrgMembers(t, token, orgAddress, apicommon.OrgMember{MemberNumber: "F-1", NationalID: testDNI(31)}))
+	pid, _ := publishCensusProcess(t, token, orgAddress, certCensus(nil, ids...), 1)
+	_, challenge := testCertPKCE(t)
+
+	// every insert into certAuthAssertions fails while this validator is on
+	database := testDB.DBClient.Database(testDBName)
+	setValidator := func(validator bson.M) {
+		c.Assert(database.RunCommand(context.Background(), bson.D{
+			{Key: "collMod", Value: "certAuthAssertions"}, {Key: "validator", Value: validator},
+		}).Err(), qt.IsNil)
+	}
+	setValidator(bson.M{"neverPresent": bson.M{"$exists": true}})
+	c.Cleanup(func() { setValidator(bson.M{}) })
+	for range 3 {
+		status, body := postCertAssertion(t, newCertAssertionRequest(pid, testDNI(31), challenge))
+		c.Assert(status, qt.Equals, http.StatusInternalServerError, qt.Commentf("response: %s", body))
+	}
+	setValidator(bson.M{})
+
+	for range csp.MaxHourlyCertAssertions {
+		newCertCode(t, pid, testDNI(31), challenge)
+	}
+	status, body := postCertAssertion(t, newCertAssertionRequest(pid, testDNI(31), challenge))
+	c.Assert(status, qt.Equals, http.StatusTooManyRequests, qt.Commentf("response: %s", body))
+}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.vocdoni.io/dvote/log"
 )
 
 // CertGatewaySignatureHeader carries the certificate gateway's signature of an assertion request.
@@ -114,12 +115,21 @@ const CertGatewayReplayWindow = 2 * CertGatewaySignatureMaxSkew
 const MaxHourlyCertAssertions = 10
 
 // ClaimCertAssertion spends one unit of the participant's hourly certificate assertion budget on
-// the process, and reports false once it is spent.
-func (c *CSP) ClaimCertAssertion(processID, participantID internal.HexBytes) (bool, error) {
+// the process, and reports false once it is spent. The caller hands a granted claim to
+// ReleaseCertAssertion when the assertion then fails to be created.
+func (c *CSP) ClaimCertAssertion(processID, participantID internal.HexBytes) (db.CSPCounterClaim, bool, error) {
 	res, err := c.Storage.ClaimCSPCounter(db.CSPCounterCertAssertions,
 		counterKey(participantID, processID), MaxHourlyCertAssertions)
 	if err != nil {
-		return false, fmt.Errorf("claiming cert assertion: %w", err)
+		return nil, false, fmt.Errorf("claiming cert assertion: %w", err)
 	}
-	return res.Granted, nil
+	return res.Claim, res.Granted, nil
+}
+
+// ReleaseCertAssertion gives back a ClaimCertAssertion unit whose assertion was not created.
+// Storage errors are logged: at worst the participant loses one unit of the current hour.
+func (c *CSP) ReleaseCertAssertion(claim db.CSPCounterClaim) {
+	if err := c.Storage.ReleaseCSPCounter(claim); err != nil {
+		log.Warnw("error releasing cert assertion", "error", err)
+	}
 }
