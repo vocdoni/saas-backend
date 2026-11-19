@@ -5538,8 +5538,9 @@ paths:
         unavailable") while the service has anonymous voting off.
         For a census with certAuth, step 0 takes certCode and codeVerifier (plus the email or phone when
         the census has 2FA) and no typed login field, else 40005; an unknown, expired, used or foreign
-        code, or a wrong verifier, answers 40802 and the code is spent. The answer carries voterRef. A
-        certCode sent to any other census answers 40005.
+        code, or a wrong verifier, answers 40802 and the code is spent, as it is by a wrong contact or a
+        zero weight; a 40017 or a 2FA cooldown (40103) refusal leaves it redeemable. The answer carries
+        voterRef. A certCode sent to any other census answers 40005.
       parameters:
       - description: Process ID
         in: path
