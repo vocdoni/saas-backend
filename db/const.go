@@ -23,6 +23,7 @@ const (
 	CodeTypeOrgInvite       CodeType = "organization_invite"
 	CodeTypeOrgInviteUpdate CodeType = "organization_invite_update"
 	CodeTypeUpdateEmail     CodeType = "update_email"
+	CodeTypePasswordSetup   CodeType = "password_setup"
 
 	// max census size allowed for user test purposes; the same size prices to a free base,
 	// so it is defined once, by pricing

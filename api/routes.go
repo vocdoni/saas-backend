@@ -42,6 +42,10 @@ const (
 	usersRecoveryPasswordEndpoint = "/users/password/recovery"
 	// POST /users/password/reset to reset the user password
 	usersResetPasswordEndpoint = "/users/password/reset"
+	// POST /users/me/password/setup to mail a code that lets a password-less (OAuth-only) account set a password
+	usersMePasswordSetupEndpoint = "/users/me/password/setup"
+	// POST /users/me/password/setup/verify to set the first password with that code
+	usersMePasswordSetupVerifyEndpoint = "/users/me/password/setup/verify"
 
 	// async job routes
 	// GET /jobs/{jobId} to poll the status/result of an async transaction job (public; the

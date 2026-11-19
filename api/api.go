@@ -473,6 +473,8 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPut, usersMeEndpoint, a.updateUserInfoHandler)
 		handle(r, http.MethodPost, usersMeEmailVerifyEndpoint, a.updateUserEmailVerifyHandler)
 		handle(r, http.MethodPut, usersPasswordEndpoint, a.updateUserPasswordHandler)
+		handle(r, http.MethodPost, usersMePasswordSetupEndpoint, a.requestPasswordSetupHandler)
+		handle(r, http.MethodPost, usersMePasswordSetupVerifyEndpoint, a.verifyPasswordSetupHandler)
 		handle(r, http.MethodPost, organizationsEndpoint, a.createOrganizationHandler)
 		handle(r, http.MethodPut, organizationEndpoint, a.updateOrganizationHandler)
 		handle(r, http.MethodGet, organizationUsersEndpoint, a.organizationUsersHandler)

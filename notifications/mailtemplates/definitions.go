@@ -23,6 +23,13 @@ var PasswordResetNotification = MailTemplate{
 	WebAppURI: "/account/password/reset",
 }
 
+// PasswordSetupNotification is the notification sent when a signed-in account without a password
+// (OAuth-only) asks to add one, with the code that proves it owns the mailbox.
+var PasswordSetupNotification = MailTemplate{
+	File:      "password_setup",
+	WebAppURI: "/account/password/setup",
+}
+
 // VerifyEmailChangeNotification is the notification sent to the new address
 // when a user asks to change their account email, with the code that confirms it.
 var VerifyEmailChangeNotification = MailTemplate{

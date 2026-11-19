@@ -288,3 +288,60 @@ func TestUsers(t *testing.T) {
 		c.Assert(user.Verified, qt.IsTrue)
 	})
 }
+
+// TestUserPasswordWrites covers the password writes of the setup and reset flows: each touches only
+// its own fields and bumps the session version in the same atomic update.
+func TestUserPasswordWrites(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	t.Run("SetUserInitialPassword", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+
+		// a password-less (OAuth-only) account gets its first password and a new session version
+		userID, err := testDB.SetUser(&User{
+			Email:     testUserEmail,
+			FirstName: testUserFirstName,
+			LastName:  testUserLastName,
+			Verified:  true,
+		})
+		c.Assert(err, qt.IsNil)
+		c.Assert(testDB.SetUserInitialPassword(userID, "firstHash"), qt.IsNil)
+		user, err := testDB.User(userID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(user.Password, qt.Equals, "firstHash")
+		c.Assert(user.SessionVersion, qt.Equals, uint64(1))
+
+		// a second setup finds a password already stored and writes nothing
+		c.Assert(testDB.SetUserInitialPassword(userID, "secondHash"), qt.Equals, ErrConflict)
+		user, err = testDB.User(userID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(user.Password, qt.Equals, "firstHash")
+		c.Assert(user.SessionVersion, qt.Equals, uint64(1))
+
+		// an unknown user matches nothing either
+		c.Assert(testDB.SetUserInitialPassword(99999, "x"), qt.Equals, ErrConflict)
+	})
+
+	t.Run("ResetUserPassword", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+
+		// an unverified account with a password: the reset replaces it and verifies the account
+		userID, err := testDB.SetUser(&User{
+			Email:     testUserEmail,
+			Password:  testUserPass,
+			FirstName: testUserFirstName,
+			LastName:  testUserLastName,
+		})
+		c.Assert(err, qt.IsNil)
+		c.Assert(testDB.ResetUserPassword(userID, "resetHash"), qt.IsNil)
+		user, err := testDB.User(userID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(user.Password, qt.Equals, "resetHash")
+		c.Assert(user.Verified, qt.IsTrue)
+		c.Assert(user.SessionVersion, qt.Equals, uint64(1))
+		c.Assert(user.FirstName, qt.Equals, testUserFirstName)
+
+		c.Assert(testDB.ResetUserPassword(99999, "x"), qt.Equals, ErrNotFound)
+	})
+}
