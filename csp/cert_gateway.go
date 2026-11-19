@@ -66,13 +66,24 @@ func CertGatewaySignedMessage(t int64, body []byte) []byte {
 		hex.EncodeToString(sum[:]))
 }
 
-// VerifyCertGatewaySignature verifies header, the X-Cert-Gateway-Signature value
-// "t=<unix seconds>,k=<keyId>,v1=<base64url(signature), no padding>", over body, the raw request
-// body, with the key named by k. The timestamp must be within CertGatewaySignatureMaxSkew of now.
-// Every failure wraps ErrCertGatewaySignature. On success it returns the request's digest, the
-// sha256 of the signed message: the same for every copy of one signed request, however its header
-// is written, so the caller can accept it once (CertGatewayReplayWindow).
-func VerifyCertGatewaySignature(keys CertGatewayKeys, header string, body []byte, now time.Time) ([]byte, error) {
+// CertGatewaySignedRequest is a certificate gateway request to verify.
+type CertGatewaySignedRequest struct {
+	// Header is the X-Cert-Gateway-Signature value.
+	Header string
+	// Body is the raw request body.
+	Body []byte
+	// ReceivedAt is when the request arrived, which the signature timestamp is checked against.
+	ReceivedAt time.Time
+}
+
+// VerifyCertGatewaySignature verifies req.Header, the X-Cert-Gateway-Signature value
+// "t=<unix seconds>,k=<keyId>,v1=<base64url(signature), no padding>", over req.Body with the key
+// named by k. The timestamp must be within CertGatewaySignatureMaxSkew of req.ReceivedAt. Every
+// failure wraps ErrCertGatewaySignature. On success it returns the request's digest, the sha256 of
+// the signed message: the same for every copy of one signed request, however its header is
+// written, so the caller can accept it once (CertGatewayReplayWindow).
+func VerifyCertGatewaySignature(keys CertGatewayKeys, req CertGatewaySignedRequest) ([]byte, error) {
+	header, body, now := req.Header, req.Body, req.ReceivedAt
 	fields := map[string]string{}
 	for part := range strings.SplitSeq(header, ",") {
 		name, value, found := strings.Cut(part, "=")

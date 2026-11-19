@@ -149,7 +149,9 @@ func (c *CSPHandlers) CertAssertionHandler(w http.ResponseWriter, r *http.Reques
 	}
 	header := r.Header.Get(csp.CertGatewaySignatureHeader)
 	now := time.Now()
-	digest, err := csp.VerifyCertGatewaySignature(keys, header, body, now)
+	digest, err := csp.VerifyCertGatewaySignature(keys, csp.CertGatewaySignedRequest{
+		Header: header, Body: body, ReceivedAt: now,
+	})
 	if err != nil {
 		writeCertAssertionError(w, http.StatusUnauthorized, certErrBadSignature, "reason", err.Error())
 		return
@@ -305,25 +307,20 @@ var base64URLVerifier = regexp.MustCompile(`^[A-Za-z0-9_-]{43,128}$`)
 // The failed-attempt budget is the participant's (its login hash), claimed before the contact
 // check as in the typed flow. The rest is the typed flow's: contact check, weight, then
 // csp.AuthToken.
-func (c *CSPHandlers) certAuthFirstStep(
-	r *http.Request,
-	req *AuthRequest,
-	census *db.Census,
-	org *db.Organization,
-	anchorID internal.HexBytes,
-) (token internal.HexBytes, ref string, err error) {
+func (c *CSPHandlers) certAuthFirstStep(in firstStepRequest) (res firstStepResult, err error) {
+	r, req, census, org, anchorID := in.r, in.req, in.census, in.org, in.anchorID
 	if !base64URL43.MatchString(req.CertCode) || !base64URLVerifier.MatchString(req.CodeVerifier) ||
 		req.Name != "" || req.Surname != "" || req.MemberNumber != "" || req.NationalID != "" ||
 		req.BirthDate != "" || req.Password != "" {
-		return nil, "", errors.ErrInvalidUserData.Withf("a certificate login takes certCode and codeVerifier only")
+		return firstStepResult{}, errors.ErrInvalidUserData.Withf("a certificate login takes certCode and codeVerifier only")
 	}
 	if err := validateAuthRequest(req, census); err != nil {
-		return nil, "", err
+		return firstStepResult{}, err
 	}
 	var phone *voterPhone
 	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone) {
 		if phone, err = parseVoterPhone(r.Context(), req.Phone, org); err != nil {
-			return nil, "", phoneParseFailed(err)
+			return firstStepResult{}, phoneParseFailed(err)
 		}
 	}
 	lang := apicommon.NotificationLang(r.Context(), org)
@@ -333,10 +330,10 @@ func (c *CSPHandlers) certAuthFirstStep(
 	codeHash := sha256.Sum256([]byte(req.CertCode))
 	assertion, err := c.mainDB.CertAuthAssertion(codeHash[:], processID, time.Now())
 	if errors.Is(err, db.ErrNotFound) {
-		return nil, "", errors.ErrCSPAuthFailed
+		return firstStepResult{}, errors.ErrCSPAuthFailed
 	}
 	if err != nil {
-		return nil, "", errors.ErrGenericInternalServerError.WithErr(err)
+		return firstStepResult{}, errors.ErrGenericInternalServerError.WithErr(err)
 	}
 	consumed := false
 	defer func() {
@@ -348,25 +345,25 @@ func (c *CSPHandlers) certAuthFirstStep(
 	challenge := base64.RawURLEncoding.EncodeToString(verifierHash[:])
 	if subtle.ConstantTimeCompare([]byte(challenge), []byte(assertion.CodeChallenge)) != 1 ||
 		assertion.CensusID != census.ID.Hex() {
-		return nil, "", errors.ErrCSPAuthFailed
+		return firstStepResult{}, errors.ErrCSPAuthFailed
 	}
 
 	participant, err := c.mainDB.CensusParticipant(census.ID.Hex(), assertion.ParticipantID)
 	if errors.Is(err, db.ErrNotFound) {
-		return nil, "", errors.ErrCSPAuthFailed
+		return firstStepResult{}, errors.ErrCSPAuthFailed
 	}
 	if err != nil {
-		return nil, "", errors.ErrGenericInternalServerError.WithErr(err)
+		return firstStepResult{}, errors.ErrGenericInternalServerError.WithErr(err)
 	}
 	// the participant must still hold the national ID the certificate proved: an edited or cleared
 	// one changes or unsets its login hash
 	if len(participant.LoginHash) == 0 ||
 		subtle.ConstantTimeCompare(participant.LoginHash, assertion.LoginHash) != 1 {
-		return nil, "", errors.ErrCSPAuthFailed
+		return firstStepResult{}, errors.ErrCSPAuthFailed
 	}
 	claim, err := c.csp.ClaimAuthAttempt(anchorID, participant.LoginHash, nil)
 	if err != nil {
-		return nil, "", err
+		return firstStepResult{}, err
 	}
 	defer func() {
 		if !errors.Is(err, errors.ErrCSPAuthFailed) {
@@ -377,39 +374,39 @@ func (c *CSPHandlers) certAuthFirstStep(
 	member, err := c.mainDB.OrgMember(census.OrgAddress, participant.ParticipantID)
 	if errors.Is(err, db.ErrNotFound) {
 		log.Warnw("census participant without org member", "participantID", participant.ParticipantID)
-		return nil, "", errors.ErrCSPAuthFailed
+		return firstStepResult{}, errors.ErrCSPAuthFailed
 	}
 	if err != nil {
-		return nil, "", errors.ErrGenericInternalServerError.WithErr(err)
+		return firstStepResult{}, errors.ErrGenericInternalServerError.WithErr(err)
 	}
 	toDestinations, challengeType, err := determineContactMethod(census, req, phone, member)
 	if err != nil {
-		return nil, "", err
+		return firstStepResult{}, err
 	}
 	if census.Weighted && member.Weight == 0 {
-		return nil, "", errors.ErrZeroWeightVoter
+		return firstStepResult{}, errors.ErrZeroWeightVoter
 	}
 	uID := internal.HexBytesFromString(member.ID.Hex())
 	if challengeType != "" {
 		if err := c.csp.ChallengeSendRefusal(uID, anchorID); err != nil {
-			return nil, "", err
+			return firstStepResult{}, err
 		}
 	}
 
 	// exactly once: of two concurrent redemptions that got this far, one consumes the code
 	if _, err := c.mainDB.ConsumeCertAuthAssertion(codeHash[:], processID, time.Now()); err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			return nil, "", errors.ErrCSPAuthFailed
+			return firstStepResult{}, errors.ErrCSPAuthFailed
 		}
-		return nil, "", errors.ErrGenericInternalServerError.WithErr(err)
+		return firstStepResult{}, errors.ErrGenericInternalServerError.WithErr(err)
 	}
 	consumed = true
 	name, logo := orgNameAndLogo(org)
-	token, err = c.csp.AuthToken(anchorID, uID, toDestinations, challengeType, lang, name, logo, org.Address)
+	token, err := c.csp.AuthToken(anchorID, uID, toDestinations, challengeType, lang, name, logo, org.Address)
 	if err != nil {
-		return nil, "", err
+		return firstStepResult{}, err
 	}
-	return token, c.csp.VoterRef(processID.Hex(), member.ID.Hex()), nil
+	return firstStepResult{token: token, voterRef: c.csp.VoterRef(processID.Hex(), member.ID.Hex())}, nil
 }
 
 // spendCertCode consumes a certificate code whose step 0 failed on the voter's data, so the voter

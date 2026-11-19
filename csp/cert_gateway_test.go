@@ -36,20 +36,23 @@ func TestCertGatewaySignatureVectors(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(keys, qt.HasLen, 2)
 	at := time.Unix(vectorTime, 0)
+	verify := func(header, body string, receivedAt time.Time) ([]byte, error) {
+		return VerifyCertGatewaySignature(keys, CertGatewaySignedRequest{Header: header, Body: []byte(body), ReceivedAt: receivedAt})
+	}
 
 	c.Assert(string(CertGatewaySignedMessage(vectorTime, []byte(vectorBody))), qt.Equals, vectorMessage)
-	digest, err := VerifyCertGatewaySignature(keys, vectorHeader, []byte(vectorBody), at)
+	digest, err := verify(vectorHeader, vectorBody, at)
 	c.Assert(err, qt.IsNil)
 	wantDigest := sha256.Sum256([]byte(vectorMessage))
 	c.Assert(digest, qt.DeepEquals, wantDigest[:])
-	_, err = VerifyCertGatewaySignature(keys, vectorHeader, []byte(vectorBody), at.Add(60*time.Second))
+	_, err = verify(vectorHeader, vectorBody, at.Add(60*time.Second))
 	c.Assert(err, qt.IsNil)
-	_, err = VerifyCertGatewaySignature(keys, vectorHeader, []byte(vectorBody), at.Add(-60*time.Second))
+	_, err = verify(vectorHeader, vectorBody, at.Add(-60*time.Second))
 	c.Assert(err, qt.IsNil)
 	// the digest names the signed request, not how its header is written
 	parts := strings.Split(vectorHeader, ",")
 	reordered := strings.Join([]string{parts[2], parts[0], parts[1]}, ",")
-	digest2, err := VerifyCertGatewaySignature(keys, reordered, []byte(vectorBody), at)
+	digest2, err := verify(reordered, vectorBody, at)
 	c.Assert(err, qt.IsNil)
 	c.Assert(digest2, qt.DeepEquals, digest)
 
@@ -67,7 +70,7 @@ func TestCertGatewaySignatureVectors(t *testing.T) {
 		"other body":      {vectorHeader, vectorBody + " ", at},
 		"other time":      {"t=1767225601" + vectorHeader[len("t=1767225600"):], vectorBody, at},
 	} {
-		_, err := VerifyCertGatewaySignature(keys, tc.header, []byte(tc.body), tc.at)
+		_, err := verify(tc.header, tc.body, tc.at)
 		c.Assert(errors.Is(err, ErrCertGatewaySignature), qt.IsTrue, qt.Commentf("%s: %v", name, err))
 	}
 }

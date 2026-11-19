@@ -34,14 +34,13 @@ func parseAuthStep(w http.ResponseWriter, r *http.Request) (int, bool) {
 func (c *CSPHandlers) handleAuthStep(w http.ResponseWriter, r *http.Request,
 	step int, anchorID internal.HexBytes, censusID string,
 ) {
-	var authToken internal.HexBytes
-	var voterRef string
+	var res firstStepResult
 	var err error
 
 	if step == 0 {
-		authToken, voterRef, err = c.authFirstStep(r, anchorID, censusID)
+		res, err = c.authFirstStep(r, anchorID, censusID)
 	} else {
-		authToken, err = c.authSecondStep(r)
+		res.token, err = c.authSecondStep(r)
 	}
 
 	if err != nil {
@@ -54,7 +53,7 @@ func (c *CSPHandlers) handleAuthStep(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	apicommon.HTTPWriteJSON(w, &AuthResponse{AuthToken: authToken, VoterRef: voterRef})
+	apicommon.HTTPWriteJSON(w, &AuthResponse{AuthToken: res.token, VoterRef: res.voterRef})
 }
 
 // validateContactInfo checks if at least one contact method is provided
@@ -275,53 +274,65 @@ func (c *CSPHandlers) authFirstStep(
 	r *http.Request,
 	anchorID internal.HexBytes,
 	censusID string,
-) (token internal.HexBytes, voterRef string, err error) {
+) (firstStepResult, error) {
 	// Parse request
 	var req AuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		return nil, "", errors.ErrMalformedBody.Withf("invalid JSON request")
+		return firstStepResult{}, errors.ErrMalformedBody.Withf("invalid JSON request")
 	}
 
 	// Get census and org information first (needed for validation)
 	census, err := c.mainDB.Census(censusID)
 	if err != nil {
 		if err == db.ErrNotFound {
-			return nil, "", errors.ErrCensusNotFound
+			return firstStepResult{}, errors.ErrCensusNotFound
 		}
-		return nil, "", errors.ErrGenericInternalServerError.WithErr(err)
+		return firstStepResult{}, errors.ErrGenericInternalServerError.WithErr(err)
 	}
 	// before any budget is claimed or challenge sent: the token could not be blind-signed anyway
 	if c.anonymousCensusRefused(census) {
-		return nil, "", errors.ErrInvalidData.With(csp.AnonymousVotingUnavailable)
+		return firstStepResult{}, errors.ErrInvalidData.With(csp.AnonymousVotingUnavailable)
 	}
 
 	org, err := c.mainDB.Organization(census.OrgAddress)
 	if err != nil {
 		if err == db.ErrNotFound {
-			return nil, "", errors.ErrOrganizationNotFound
+			return firstStepResult{}, errors.ErrOrganizationNotFound
 		}
-		return nil, "", errors.ErrGenericInternalServerError.WithErr(err)
+		return firstStepResult{}, errors.ErrGenericInternalServerError.WithErr(err)
 	}
 
+	in := firstStepRequest{r: r, req: &req, census: census, org: org, anchorID: anchorID}
 	if census.CertAuth {
-		return c.certAuthFirstStep(r, &req, census, org, anchorID)
+		return c.certAuthFirstStep(in)
 	}
 	if req.CertCode != "" {
-		return nil, "", errors.ErrInvalidUserData.Withf("this census does not use certificate authentication")
+		return firstStepResult{}, errors.ErrInvalidUserData.Withf("this census does not use certificate authentication")
 	}
-	token, err = c.typedAuthFirstStep(r, &req, census, org, anchorID)
-	return token, "", err
+	token, err := c.typedAuthFirstStep(in)
+	return firstStepResult{token: token}, err
+}
+
+// firstStepRequest is a step-0 request with the census, organization and anchor (process) it
+// authenticates against.
+type firstStepRequest struct {
+	r        *http.Request
+	req      *AuthRequest
+	census   *db.Census
+	org      *db.Organization
+	anchorID internal.HexBytes
+}
+
+// firstStepResult is what step 0 answers: the token, and the voterRef of a certificate census.
+type firstStepResult struct {
+	token    internal.HexBytes
+	voterRef string
 }
 
 // typedAuthFirstStep is step 0 of a census whose voters type their login fields (see authFirstStep).
-func (c *CSPHandlers) typedAuthFirstStep(
-	r *http.Request,
-	in *AuthRequest,
-	census *db.Census,
-	org *db.Organization,
-	anchorID internal.HexBytes,
-) (token internal.HexBytes, err error) {
-	req := *in
+func (c *CSPHandlers) typedAuthFirstStep(in firstStepRequest) (token internal.HexBytes, err error) {
+	r, census, org, anchorID := in.r, in.census, in.org, in.anchorID
+	req := *in.req
 
 	lang := apicommon.NotificationLang(r.Context(), org)
 
