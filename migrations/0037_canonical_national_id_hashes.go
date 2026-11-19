@@ -24,6 +24,12 @@ func upCanonicalNationalIDHashes(ctx context.Context, database *mongo.Database) 
 	if err != nil {
 		return fmt.Errorf("rehashing canonical national id login hashes: %w", err)
 	}
+	// ids only, never the national ID: the organiser removes the duplicate member, then
+	// scripts/repairlogins -apply rehashes the row that is left
+	for _, skipped := range report.SkippedMembers {
+		log.Warnw("census participant kept its old login hash: its national id is duplicated in the census",
+			"censusId", skipped.CensusID, "participantId", skipped.MemberID)
+	}
 	log.Infow("rehashed census participant login hashes with canonical national ids",
 		"scanned", report.ParticipantsScanned, "rehashed", report.ParticipantsRehashed,
 		"skipped", report.ParticipantsSkipped, "orphans", report.OrphanParticipants)

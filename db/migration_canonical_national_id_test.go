@@ -2,6 +2,8 @@ package db
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +12,7 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/migrations"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.vocdoni.io/dvote/log"
 )
 
 // TestMigrationCanonicalNationalIDHashes: migration 37 rehashes participants stored under a
@@ -60,7 +63,17 @@ func TestMigrationCanonicalNationalIDHashes(t *testing.T) {
 			bson.M{"participantID": m.ID.Hex(), "censusId": censusID}).Decode(&p), qt.IsNil)
 		return p.LoginHash
 	}
-	for range 2 { // the second run must change nothing
+	// each skipped row is logged with its census and participant ids, so the organiser can act,
+	// and never with the national ID
+	out := captureLogs(t, func() { c.Assert(mig.Up(ctx, database), qt.IsNil) })
+	for _, twin := range []*OrgMember{twinA, twinB} {
+		c.Assert(out, qt.Matches, `(?s).*participantId=\S*`+twin.ID.Hex()+`.*`)
+	}
+	c.Assert(out, qt.Matches, `(?s).*censusId=\S*`+censusID+`.*`)
+	for _, nationalID := range []string{"1234567", "X1234567L"} {
+		c.Assert(out, qt.Not(qt.Contains), nationalID)
+	}
+	for range 2 { // a second run must change nothing
 		c.Assert(mig.Up(ctx, database), qt.IsNil)
 		c.Assert(stored(rehashed), qt.DeepEquals, HashAuthTwoFaFields(OrgMember{NationalID: "01234567L"}, auth, nil))
 		c.Assert(stored(letterless), qt.DeepEquals, letterlessHash)
@@ -72,4 +85,23 @@ func TestMigrationCanonicalNationalIDHashes(t *testing.T) {
 	again := runRepair(t, migrations.RepairOptions{})
 	c.Assert(again.ParticipantsRehashed, qt.Equals, 0)
 	c.Assert(again.ParticipantsSkipped, qt.Equals, 2)
+}
+
+// captureLogs runs fn with the global logger writing to a file, and returns what it logged.
+func captureLogs(t *testing.T, fn func()) string {
+	t.Helper()
+	prev := *log.Logger()
+	t.Cleanup(func() { *log.Logger() = prev })
+	logFile := filepath.Join(t.TempDir(), "db.log")
+	f, err := os.Create(logFile)
+	qt.Assert(t, err, qt.IsNil)
+	t.Cleanup(func() { _ = f.Close() })
+	stdout := os.Stdout
+	os.Stdout = f
+	log.Init("debug", "stdout", nil)
+	os.Stdout = stdout
+	fn()
+	out, err := os.ReadFile(logFile)
+	qt.Assert(t, err, qt.IsNil)
+	return string(out)
 }
