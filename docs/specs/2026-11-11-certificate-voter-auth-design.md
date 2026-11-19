@@ -23,6 +23,9 @@ Owner decisions so far (2026-11-11):
   `ACME_DNS_OVERRIDE_DOMAIN=_acme-challenge.cert.vocdoni.net`. The gateway manages only the
   wildcard certificate `*.DOMAIN`: issuing `DOMAIN` and `*.DOMAIN` separately raced on the shared
   `_acme-challenge` TXT name (Let's Encrypt's secondary validators saw the first value cached).
+  The `_acme-challenge.<DOMAIN>` name needs its own record (a fixed TXT, or the CNAME to a
+  dedicated ACME zone): otherwise the `*.<DOMAIN>` CNAME captures it and the challenge TXT is never
+  seen. Dev has `_acme-challenge.cert.vocdoni.net TXT "keeps the wildcard CNAME off this name"`.
 - D10 (2026-11-17) Per-attempt random subdomain: every certificate attempt goes to a fresh
   `<label>.<DOMAIN>` host, so the browser shows the certificate picker again instead of reusing a
   remembered choice. It amends D7 (wildcard CNAME and certificate), C1, the rollout steps and the
