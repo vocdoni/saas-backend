@@ -318,6 +318,10 @@ type AuthAttemptClaim []db.CSPCounterClaim
 // It returns an ErrVerificationMaxAttempts carrying retryAfter (seconds until the hour resets)
 // once either budget is spent, and an ErrInternalStorageError if a counter cannot be claimed.
 func (c *CSP) ClaimAuthAttempt(anchorID internal.HexBytes, submission, voter []byte) (AuthAttemptClaim, error) {
+	// an empty key would make the process's own budget, shared by every caller
+	if len(submission) == 0 {
+		return nil, errors.ErrGenericInternalServerError.Withf("empty auth attempt key")
+	}
 	res, err := c.Storage.ClaimCSPCounter(db.CSPCounterAuthFailures,
 		counterKey(submission, anchorID), c.maxHourlyAuthFailures)
 	if err != nil {

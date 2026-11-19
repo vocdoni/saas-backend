@@ -21,12 +21,16 @@ type CertAuthAssertion struct {
 	ProcessID     bson.ObjectID `bson:"processId"`
 	CensusID      string        `bson:"censusId"`
 	ParticipantID string        `bson:"participantId"`
-	CodeChallenge string        `bson:"codeChallenge"` // base64url(sha256(codeVerifier))
-	Provider      string        `bson:"provider"`
-	CertSHA256    string        `bson:"certSha256"`
-	CreatedAt     time.Time     `bson:"createdAt"`
-	ExpiresAt     time.Time     `bson:"expiresAt"`
-	UsedAt        *time.Time    `bson:"usedAt,omitempty"`
+	// LoginHash is the participant's login hash the certificate's national ID matched. Step 0
+	// redeems the code only while the participant still holds it, so a member whose national ID
+	// was edited or cleared since cannot log in with a certificate for the old one.
+	LoginHash     []byte     `bson:"loginHash"`
+	CodeChallenge string     `bson:"codeChallenge"` // base64url(sha256(codeVerifier))
+	Provider      string     `bson:"provider"`
+	CertSHA256    string     `bson:"certSha256"`
+	CreatedAt     time.Time  `bson:"createdAt"`
+	ExpiresAt     time.Time  `bson:"expiresAt"`
+	UsedAt        *time.Time `bson:"usedAt,omitempty"`
 }
 
 // CreateCertAuthAssertion stores a new assertion.

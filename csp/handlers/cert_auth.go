@@ -227,6 +227,7 @@ func (c *CSPHandlers) CertAssertionHandler(w http.ResponseWriter, r *http.Reques
 		ProcessID:     processID,
 		CensusID:      census.ID.Hex(),
 		ParticipantID: participant.ParticipantID,
+		LoginHash:     participant.LoginHash,
 		CodeChallenge: req.CodeChallenge,
 		Provider:      req.Provider,
 		CertSHA256:    req.CertSHA256,
@@ -316,6 +317,12 @@ func (c *CSPHandlers) certAuthFirstStep(
 	}
 	if err != nil {
 		return nil, "", errors.ErrGenericInternalServerError.WithErr(err)
+	}
+	// the participant must still hold the national ID the certificate proved: an edited or cleared
+	// one changes or unsets its login hash
+	if len(participant.LoginHash) == 0 ||
+		subtle.ConstantTimeCompare(participant.LoginHash, assertion.LoginHash) != 1 {
+		return nil, "", errors.ErrCSPAuthFailed
 	}
 	claim, err := c.csp.ClaimAuthAttempt(anchorID, participant.LoginHash, nil)
 	if err != nil {

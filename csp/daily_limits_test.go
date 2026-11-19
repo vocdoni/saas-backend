@@ -157,6 +157,10 @@ func TestAuthAttemptBudget(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	_, err = csp.ClaimAuthAttempt(testAnchorID, []byte("fresh-submission"), nil)
 	c.Assert(err, qt.ErrorIs, errors.ErrVerificationMaxAttempts)
+
+	// an empty submission key would be one budget shared by every caller on the process: refused
+	_, err = csp.ClaimAuthAttempt(testAnchorID, nil, nil)
+	c.Assert(err, qt.ErrorIs, errors.ErrGenericInternalServerError)
 }
 
 // assertRetryAfter checks that err is an API error carrying retryAfter, a whole number of

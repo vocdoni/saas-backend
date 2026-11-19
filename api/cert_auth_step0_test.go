@@ -196,3 +196,34 @@ func TestCertAuthStep0(t *testing.T) {
 	})
 	c.Assert(testAPI.csp.CertAuthEnabled(), qt.IsTrue)
 }
+
+// TestCertAuthStep0MemberEdited: a code only redeems while the member still holds the national ID
+// the certificate proved. Editing it to another DNI, or clearing it (which unsets the participant's
+// login hashes), between the assertion and step 0 makes the code answer 40802.
+func TestCertAuthStep0MemberEdited(t *testing.T) {
+	enableCertAuth(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	members := postOrgMembers(t, token, orgAddress,
+		apicommon.OrgMember{MemberNumber: "E-1", NationalID: testDNI(11)},
+		apicommon.OrgMember{MemberNumber: "E-2", NationalID: testDNI(12)},
+		apicommon.OrgMember{MemberNumber: "E-3", NationalID: testDNI(13)},
+	)
+	pid, _ := publishCensusProcess(t, token, orgAddress, certCensus(nil, memberIDs(members)...), 1)
+
+	for _, member := range members {
+		newID := map[string]string{"E-1": testDNI(21), "E-2": "", "E-3": member.NationalID}[member.MemberNumber]
+		verifier, challenge := testCertPKCE(t)
+		code := newCertCode(t, pid, member.NationalID, challenge)
+		req := &handlers.AuthRequest{CertCode: code, CodeVerifier: verifier}
+		if newID == member.NationalID {
+			postProcessAuth0(t, pid, req)
+			continue
+		}
+		requestAndParse[apicommon.OrgMember](t, http.MethodPut, token,
+			apicommon.UpsertOrgMemberRequest{ID: member.ID, NationalID: &newID},
+			organizationMembersURL(orgAddress.String()))
+		err := postProcessAuth0AndExpectError(t, pid, req)
+		qt.Assert(t, err.Code, qt.Equals, errors.ErrCSPAuthFailed.Code, qt.Commentf("nationalId %q", newID))
+	}
+}
