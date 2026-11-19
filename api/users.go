@@ -823,7 +823,10 @@ func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) 
 // recoverUserPasswordHandler godoc
 //
 //	@Summary		Recover user password
-//	@Description	Request a password recovery code for a user
+//	@Description	Mail a password reset code to the account with the given email, verified or not. Unknown
+//	@Description	emails and accounts without a password (OAuth-only) get the same 200 and no email, so the
+//	@Description	endpoint reveals neither which accounts exist nor their type; those accounts add a password
+//	@Description	via POST /users/me/password/setup. A new code is sent at most once per OTP cooldown.
 //	@Tags			users
 //	@Accept			json
 //	@Produce		json
@@ -851,22 +854,18 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
-	// OAuth-only accounts have no password to recover (PUT /users/password refuses them too).
-	// Answer like for an unknown email so the endpoint does not reveal the account type.
-	if user.Verified && user.Password == "" {
+	// accounts without a password (OAuth-only) have nothing to recover; they add one through
+	// POST /users/me/password/setup. Answer like for an unknown email so the account type stays hidden.
+	if user.Password == "" {
 		apicommon.HTTPWriteOK(w)
 		return
 	}
-	// pick the challenge the account actually needs: an unverified account gets the account
-	// verification code instead, so it can complete registration and then log in
+	// every account with a password gets the reset code, verified or not: redeeming it proves mailbox
+	// ownership, so the reset also verifies the account and replaces a password set by whoever registered it
 	codeType := db.CodeTypePasswordReset
 	template := mailtemplates.PasswordResetNotification
-	if !user.Verified {
-		codeType = db.CodeTypeVerifyAccount
-		template = mailtemplates.VerifyAccountNotification
-	}
-	// a single cooldown guards both branches: a code delivered too recently means we silently
-	// skip sending another, preventing email flooding without leaking whether the account exists
+	// a code delivered too recently means we silently skip sending another, preventing email flooding
+	// without leaking whether the account exists
 	var code, link string
 	expiration := time.Now().Add(a.otpExpiry)
 	existing, err := a.db.UserVerificationCode(user, codeType)
@@ -939,7 +938,9 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 // resetUserPasswordHandler godoc
 //
 //	@Summary		Reset user password
-//	@Description	Reset a user's password using a verification code
+//	@Description	Reset a user's password with the code mailed by POST /users/password/recovery. The code proves
+//	@Description	mailbox ownership, so the reset also verifies the account; every existing session is revoked.
+//	@Description	Accounts without a password (OAuth-only) are refused; they use POST /users/me/password/setup.
 //	@Tags			users
 //	@Accept			json
 //	@Produce		json
@@ -974,9 +975,9 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
-	// OAuth-only accounts have no password to reset, consistently with PUT /users/password:
-	// setting one here would add a credential to an account that never had one
-	if user.Verified && user.Password == "" {
+	// accounts without a password (OAuth-only) have none to reset, consistently with PUT /users/password;
+	// they add one through the authenticated POST /users/me/password/setup
+	if user.Password == "" {
 		errors.ErrOAuthUserCannotUsePasswordRecovery.Write(w)
 		return
 	}
@@ -1043,12 +1044,17 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// field-specific password write; the same atomic update bumps the session version, revoking
-	// every session minted with the old credentials
-	if err := a.db.UpdateUserPassword(user.ID, newPassword); err != nil {
-		log.Warnw("could not update user password", "error", err)
+	// field-specific write: the redeemed code proved mailbox ownership, so the same atomic update sets the
+	// password, verifies the account and bumps the session version (revoking every older session)
+	if err := a.db.ResetUserPassword(user.ID, newPassword); err != nil {
+		log.Warnw("could not reset user password", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)
 		return
+	}
+	// the account is verified, so a pending verification code is useless; failing to drop it is
+	// harmless (verifying an already verified account is refused)
+	if err := a.db.DeleteUserVerificationCode(user, db.CodeTypeVerifyAccount); err != nil {
+		log.Warnw("could not delete the verification code after a password reset", "userId", user.ID, "error", err)
 	}
 	apicommon.HTTPWriteOK(w)
 }

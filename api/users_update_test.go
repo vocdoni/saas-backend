@@ -180,6 +180,8 @@ func TestOAuthOnlyAccountCredentialChanges(t *testing.T) {
 		&apicommon.UserInfo{Email: email}, usersRecoveryPasswordEndpoint)
 	_, err = testDB.UserVerificationCode(user, db.CodeTypePasswordReset)
 	c.Assert(err, qt.Equals, db.ErrNotFound)
+	_, err = testDB.UserVerificationCode(user, db.CodeTypeVerifyAccount)
+	c.Assert(err, qt.Equals, db.ErrNotFound)
 
 	// reset refuses the account outright
 	requestAndAssertError(errors.ErrOAuthUserCannotUsePasswordRecovery, t, http.MethodPost, "",
