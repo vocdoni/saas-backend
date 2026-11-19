@@ -463,6 +463,14 @@ func (f OrgMemberTwoFaFields) GetCensusType() CensusType {
 	return CensusTypeAuthOnly
 }
 
+// CensusLoginFields are the login fields of a census: its auth and 2FA fields, and whether its
+// voters prove the national ID with a certificate (Census.CertAuth).
+type CensusLoginFields struct {
+	AuthFields  OrgMemberAuthFields
+	TwoFaFields OrgMemberTwoFaFields
+	CertAuth    bool
+}
+
 // LoginHashFields returns the fields a participant's login hashes are computed from. A certificate
 // census hashes the national ID alone: the certificate proves it, any 2FA contact is checked
 // against the member afterwards, and one canonical DNI is therefore one participant. Every other

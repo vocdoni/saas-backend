@@ -148,7 +148,8 @@ func TestCertCensusMissingData(t *testing.T) {
 		return out
 	}
 
-	res, err := testDB.CheckMembersFields(testOrgAddress, ids, certAuthFields, emailOnly, true)
+	res, err := testDB.CheckMembersFields(testOrgAddress, ids,
+		CensusLoginFields{AuthFields: certAuthFields, TwoFaFields: emailOnly, CertAuth: true})
 	c.Assert(err, qt.IsNil)
 	c.Assert(hexes(res.MissingData), qt.ContentEquals, []string{invalid, foreign, noEmail})
 	c.Assert(hexes(res.Duplicates), qt.ContentEquals, []string{twinA, twinB})
@@ -156,7 +157,8 @@ func TestCertCensusMissingData(t *testing.T) {
 
 	// the same members in a census without CertAuth: any national ID counts, and the formatting
 	// twins are duplicates there too now that the hash is canonical
-	res, err = testDB.CheckMembersFields(testOrgAddress, ids, certAuthFields, emailOnly, false)
+	res, err = testDB.CheckMembersFields(testOrgAddress, ids,
+		CensusLoginFields{AuthFields: certAuthFields, TwoFaFields: emailOnly})
 	c.Assert(err, qt.IsNil)
 	c.Assert(hexes(res.MissingData), qt.DeepEquals, []string{noEmail})
 

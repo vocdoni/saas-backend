@@ -200,12 +200,13 @@ func TestCensusMembersEmptyValues(t *testing.T) {
 
 	t.Run("pre-flight: empty email is missing data, not a duplicate", func(t *testing.T) {
 		c := qt.New(t)
-		res, err := testDB.CheckGroupMembersFields(testOrgAddress, noEmailGroup, nil, emailOnly, false)
+		res, err := testDB.CheckGroupMembersFields(testOrgAddress, noEmailGroup,
+			CensusLoginFields{AuthFields: nil, TwoFaFields: emailOnly})
 		c.Assert(err, qt.IsNil)
 		c.Assert(res.Duplicates, qt.HasLen, 0)
 		c.Assert(hexes(res.MissingData), qt.ContentEquals, noEmail)
 
-		res, err = testDB.CheckMembersFields(testOrgAddress, noEmail, nil, emailOnly, false)
+		res, err = testDB.CheckMembersFields(testOrgAddress, noEmail, CensusLoginFields{AuthFields: nil, TwoFaFields: emailOnly})
 		c.Assert(err, qt.IsNil)
 		c.Assert(res.Duplicates, qt.HasLen, 0)
 		c.Assert(hexes(res.MissingData), qt.ContentEquals, noEmail)
@@ -214,8 +215,10 @@ func TestCensusMembersEmptyValues(t *testing.T) {
 	t.Run("pre-flight: whitespace-only auth field is missing data", func(t *testing.T) {
 		c := qt.New(t)
 		id := insertRaw(bson.M{"name": " ", "surname": "Smith", "email": "ws@example.com"})
-		res, err := testDB.CheckMembersFields(testOrgAddress, []string{id},
-			OrgMemberAuthFields{OrgMemberAuthFieldsName, OrgMemberAuthFieldsSurname}, emailOnly, false)
+		res, err := testDB.CheckMembersFields(testOrgAddress, []string{id}, CensusLoginFields{
+			AuthFields:  OrgMemberAuthFields{OrgMemberAuthFieldsName, OrgMemberAuthFieldsSurname},
+			TwoFaFields: emailOnly,
+		})
 		c.Assert(err, qt.IsNil)
 		c.Assert(hexes(res.MissingData), qt.DeepEquals, []string{id})
 	})
@@ -279,7 +282,8 @@ func TestCensusMembersEmptyValues(t *testing.T) {
 		auth := OrgMemberAuthFields{OrgMemberAuthFieldsName}
 		groupID := group(ids...)
 
-		res, err := testDB.CheckGroupMembersFields(testOrgAddress, groupID, auth, emailOrPhone, false)
+		res, err := testDB.CheckGroupMembersFields(testOrgAddress, groupID,
+			CensusLoginFields{AuthFields: auth, TwoFaFields: emailOrPhone})
 		c.Assert(err, qt.IsNil)
 		c.Assert(res.Duplicates, qt.HasLen, 0)
 		c.Assert(res.MissingData, qt.HasLen, 0)
@@ -307,7 +311,7 @@ func TestCensusMembersEmptyValues(t *testing.T) {
 		auth := OrgMemberAuthFields{OrgMemberAuthFieldsName}
 		groupID := group(ids...)
 
-		res, err := testDB.CheckMembersFields(testOrgAddress, ids, auth, emailOnly, false)
+		res, err := testDB.CheckMembersFields(testOrgAddress, ids, CensusLoginFields{AuthFields: auth, TwoFaFields: emailOnly})
 		c.Assert(err, qt.IsNil)
 		c.Assert(hexes(res.Duplicates), qt.ContentEquals, ids)
 		c.Assert(res.Members, qt.HasLen, 0)
@@ -326,12 +330,13 @@ func TestCensusMembersEmptyValues(t *testing.T) {
 		ids := []string{withPass, withoutPass}
 		auth := OrgMemberAuthFields{OrgMemberAuthFieldsMemberNumber, OrgMemberAuthFieldsPassword}
 
-		res, err := testDB.CheckMembersFields(testOrgAddress, ids, auth, nil, false)
+		res, err := testDB.CheckMembersFields(testOrgAddress, ids, CensusLoginFields{AuthFields: auth, TwoFaFields: nil})
 		c.Assert(err, qt.IsNil)
 		c.Assert(hexes(res.MissingData), qt.DeepEquals, []string{withoutPass})
 		c.Assert(hexes(res.Members), qt.DeepEquals, []string{withPass})
 
-		res, err = testDB.CheckGroupMembersFields(testOrgAddress, group(ids...), auth, nil, false)
+		res, err = testDB.CheckGroupMembersFields(testOrgAddress, group(ids...),
+			CensusLoginFields{AuthFields: auth, TwoFaFields: nil})
 		c.Assert(err, qt.IsNil)
 		c.Assert(hexes(res.MissingData), qt.DeepEquals, []string{withoutPass})
 		c.Assert(hexes(res.Members), qt.DeepEquals, []string{withPass})

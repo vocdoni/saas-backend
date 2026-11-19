@@ -81,14 +81,14 @@ func (a *API) validateProcessCensusHandler(w http.ResponseWriter, r *http.Reques
 	// select the member set to validate: a group, an explicit subset, or (default) the whole org.
 	var results *db.OrgMemberAggregationResults
 	var err error
-	auth, twoFa, certAuth := census.AuthFields, census.TwoFaFields, census.CertAuth
+	fields := db.CensusLoginFields{AuthFields: census.AuthFields, TwoFaFields: census.TwoFaFields, CertAuth: census.CertAuth}
 	switch {
 	case census.GroupID != "":
-		results, err = a.db.CheckGroupMembersFields(orgAddr, census.GroupID, auth, twoFa, certAuth)
+		results, err = a.db.CheckGroupMembersFields(orgAddr, census.GroupID, fields)
 	case len(census.MemberIDs) > 0:
-		results, err = a.db.CheckMembersFields(orgAddr, census.MemberIDs, auth, twoFa, certAuth)
+		results, err = a.db.CheckMembersFields(orgAddr, census.MemberIDs, fields)
 	default:
-		results, err = a.db.CheckGroupMembersFields(orgAddr, "", auth, twoFa, certAuth)
+		results, err = a.db.CheckGroupMembersFields(orgAddr, "", fields)
 	}
 	if err != nil {
 		// bad input (malformed member id, unknown group) is a client error, not a 500.
