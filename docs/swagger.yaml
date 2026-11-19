@@ -2399,7 +2399,8 @@ definitions:
       voterRef:
         description: |-
           VoterRef identifies the voter of a certificate census on the process, the same on every login:
-          lowercase hex of sha256("vocdoni-voter-ref:" + process id + ":" + member id). Step 0 only.
+          lowercase hex of an HMAC-SHA256, keyed from the service secret, of
+          "vocdoni-voter-ref:" + process id + ":" + member id. Step 0 only.
         type: string
       weight:
         example: 2a

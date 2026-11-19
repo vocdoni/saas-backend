@@ -103,6 +103,9 @@ type Config struct {
 	// certificate voter authentication off: the assertion route answers 404 and certificate
 	// censuses are refused (see CertAuthEnabled).
 	CertGatewayKeys CertGatewayKeys
+	// VoterRefSecret is the service secret (the API secret) the key of every voterRef is derived
+	// from (see CSP.VoterRef). Never logged.
+	VoterRefSecret string
 }
 
 // CSP struct contains the CSP service. It includes the storage, the
@@ -122,6 +125,7 @@ type CSP struct {
 	notifySync               bool
 	blindCSPDisabled         atomic.Bool
 	certGatewayKeys          atomic.Pointer[CertGatewayKeys]
+	voterRefKey              []byte
 }
 
 // CertGatewayKeys returns the configured certificate gateway public keys; empty when certificate
@@ -237,6 +241,7 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 		maxDailyChallengeSends:   maxDailyChallengeSends,
 		maxHourlyAuthFailures:    maxHourlyAuthFailures,
 		notifySync:               config.SyncDelivery,
+		voterRefKey:              voterRefKey(config.VoterRefSecret),
 	}
 	c.blindCSPDisabled.Store(config.DisableBlindCSP)
 	c.SetCertGatewayKeys(config.CertGatewayKeys)

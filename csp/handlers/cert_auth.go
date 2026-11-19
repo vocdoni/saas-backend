@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -277,12 +276,6 @@ func (*CSPHandlers) certAssertionFailed(w http.ResponseWriter, err error, logFie
 // base64URLVerifier is a PKCE code verifier: 43 to 128 base64url characters.
 var base64URLVerifier = regexp.MustCompile(`^[A-Za-z0-9_-]{43,128}$`)
 
-// voterRef is the stable reference of a voter of a certificate census on a process (AuthResponse).
-func voterRef(processID, memberID string) string {
-	sum := sha256.Sum256([]byte("vocdoni-voter-ref:" + processID + ":" + memberID))
-	return hex.EncodeToString(sum[:])
-}
-
 // certAuthFirstStep is step 0 of a census with CertAuth. The request carries the certificate code
 // the gateway returned to the voting page and the PKCE verifier of its code challenge, plus the
 // email or phone when the census has 2FA, and no typed login field.
@@ -406,7 +399,7 @@ func (c *CSPHandlers) certAuthFirstStep(
 	if err != nil {
 		return nil, "", err
 	}
-	return token, voterRef(processID.Hex(), member.ID.Hex()), nil
+	return token, c.csp.VoterRef(processID.Hex(), member.ID.Hex()), nil
 }
 
 // spendCertCode consumes a certificate code whose step 0 failed on the voter's data, so the voter

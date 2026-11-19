@@ -2,6 +2,7 @@ package csp
 
 import (
 	"crypto/ed25519"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -109,6 +110,26 @@ func VerifyCertGatewaySignature(keys CertGatewayKeys, header string, body []byte
 // CertGatewayReplayWindow is how long an accepted request's digest is remembered: a signature is
 // fresh for CertGatewaySignatureMaxSkew either side of its timestamp, so it is stale by then.
 const CertGatewayReplayWindow = 2 * CertGatewaySignatureMaxSkew
+
+// VoterRef is the stable reference of a voter of a certificate census on a process, returned at
+// step 0: lowercase hex of HMAC-SHA256 over "vocdoni-voter-ref:" + processID + ":" + memberID,
+// keyed with a key derived from the service secret, so it cannot be computed from the public ids.
+func (c *CSP) VoterRef(processID, memberID string) string {
+	return voterRef(c.voterRefKey, processID, memberID)
+}
+
+// voterRefKey derives the voterRef key from the service secret.
+func voterRefKey(secret string) []byte {
+	key := sha256.Sum256([]byte("vocdoni-voter-ref-key:" + secret))
+	return key[:]
+}
+
+// voterRef is CSP.VoterRef with an explicit key.
+func voterRef(key []byte, processID, memberID string) string {
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte("vocdoni-voter-ref:" + processID + ":" + memberID))
+	return hex.EncodeToString(mac.Sum(nil))
+}
 
 // MaxHourlyCertAssertions caps the certificate assertions created for one census participant on
 // one voting process per UTC hour.

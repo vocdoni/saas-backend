@@ -1,7 +1,9 @@
 package csp
 
 import (
+	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -86,4 +88,19 @@ func TestParseCertGatewayKeys(t *testing.T) {
 		_, err := ParseCertGatewayKeys(bad)
 		c.Assert(err, qt.Not(qt.IsNil), qt.Commentf("%q", bad))
 	}
+}
+
+func TestVoterRef(t *testing.T) {
+	c := qt.New(t)
+	key := voterRefKey("secret")
+	keyHash := sha256.Sum256([]byte("vocdoni-voter-ref-key:secret"))
+	c.Assert(key, qt.DeepEquals, keyHash[:])
+	mac := hmac.New(sha256.New, keyHash[:])
+	mac.Write([]byte("vocdoni-voter-ref:process:member-1"))
+	ref := voterRef(key, "process", "member-1")
+	c.Assert(ref, qt.Equals, hex.EncodeToString(mac.Sum(nil)))
+	c.Assert(ref, qt.Matches, `[0-9a-f]{64}`)
+	c.Assert(voterRef(key, "process", "member-1"), qt.Equals, ref) // stable across logins
+	c.Assert(voterRef(key, "process", "member-2"), qt.Not(qt.Equals), ref)
+	c.Assert(voterRef(voterRefKey("other secret"), "process", "member-1"), qt.Not(qt.Equals), ref)
 }

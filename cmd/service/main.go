@@ -214,6 +214,7 @@ func main() {
 		NotificationBreakerCooldown:    viper.GetDuration("notificationBreakerCooldown"),
 		DisableBlindCSP:                viper.GetBool(disableBlindCSPKey),
 		CertGatewayKeys:                certGatewayKeys,
+		VoterRefSecret:                 secret,
 	}
 
 	// overwrite the email notifications service with the SMTP service if the

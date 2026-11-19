@@ -49,7 +49,8 @@ type AuthResponse struct {
 	Signature internal.HexBytes `json:"signature,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	Weight    internal.HexBytes `json:"weight,omitempty" swaggertype:"string" format:"hex" example:"2a"`
 	// VoterRef identifies the voter of a certificate census on the process, the same on every login:
-	// lowercase hex of sha256("vocdoni-voter-ref:" + process id + ":" + member id). Step 0 only.
+	// lowercase hex of an HMAC-SHA256, keyed from the service secret, of
+	// "vocdoni-voter-ref:" + process id + ":" + member id. Step 0 only.
 	VoterRef string `json:"voterRef,omitempty"`
 }
 

@@ -246,6 +246,7 @@ func TestMain(m *testing.M) {
 		SMSService:               testSMSService,
 		NotificationCoolDownTime: cspNotificationCoolDownTime,
 		RootKey:                  *rootKey,
+		VoterRefSecret:           testSecret,
 		// deliver challenge notifications synchronously so the OTP email is in
 		// the fake inbox before the auth response returns (deterministic tests)
 		SyncDelivery: true,
