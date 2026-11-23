@@ -62,6 +62,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -133,6 +135,11 @@ type Config struct {
 	// ask the chain whether a vote is on chain. Nil (production) uses Account, bounded by the
 	// lookup slots shared with POST /votes/verify. Tests set it to inject lookup failures.
 	VoteOnChainLookup handlers.VoteOnChainLookup
+	// SMSStatusHandler receives Twilio's delivery status callbacks. Nil leaves the route unregistered.
+	SMSStatusHandler http.HandlerFunc
+	// MetricsToken, when set, serves Prometheus metrics on /metrics to requests bearing it.
+	// Empty leaves the route unregistered.
+	MetricsToken string
 }
 
 // StatusEnqueuer hands question status reconciliations to the background syncer. It is satisfied by
@@ -168,6 +175,8 @@ type API struct {
 	csp             *csp.CSP
 	oauthServiceURL string
 	originSecret    string
+	smsStatus       http.HandlerFunc
+	metricsToken    string
 	stripeHandlers  *StripeHandlers
 	// paymentGW is the seam to Stripe's one-time checkout used by pay-per-process
 	// billing; nil when the Stripe service is unavailable. Tests install a fake.
@@ -322,6 +331,8 @@ func New(ctx context.Context, conf *Config) *API {
 		csp:                   conf.CSP,
 		oauthServiceURL:       conf.OAuthServiceURL,
 		originSecret:          conf.OriginSecret,
+		smsStatus:             conf.SMSStatusHandler,
+		metricsToken:          conf.MetricsToken,
 		orgTxLocks:            newOrgTxMutex(),
 		walletLocks:           newOrgTxMutex(),
 		censusGrowthLocks:     newOrgTxMutex(),
@@ -545,6 +556,12 @@ func (a *API) initRouter() http.Handler {
 			}
 		})
 		handle(r, http.MethodGet, infoEndpoint, a.InfoHandler)
+		if a.smsStatus != nil {
+			handle(r, http.MethodPost, smsStatusCallback, a.smsStatus)
+		}
+		if a.metricsToken != "" {
+			handle(r, http.MethodGet, metricsEndpoint, requireBearer(a.metricsToken, promhttp.Handler()).ServeHTTP)
+		}
 
 		handle(r, http.MethodPost, authLoginEndpoint, a.authLoginHandler)
 		handle(r, http.MethodPost, oauthLoginEndpoint, a.oauthLoginHandler)

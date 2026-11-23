@@ -304,3 +304,16 @@ func requireOriginSecret(secret string) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// requireBearer serves next only to requests whose Authorization header is
+// "Bearer <token>"; any other request gets a bare 401.
+func requireBearer(token string, next http.Handler) http.Handler {
+	want := []byte("Bearer " + token)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), want) != 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}

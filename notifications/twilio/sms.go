@@ -28,6 +28,10 @@ type Config struct {
 	AccountSid string
 	AuthToken  string
 	FromNumber string
+	// StatusCallbackURL, when set, is where Twilio posts each message's delivery
+	// status (see SMS.HandleStatusCallback). It must be the public URL as Twilio
+	// reaches it: the callback signature is checked against it.
+	StatusCallbackURL string
 }
 
 // SMS is the implementation of the NotificationService interface for the
@@ -74,6 +78,9 @@ func (tsms *SMS) SendNotification(ctx context.Context, notification *notificatio
 	params.SetTo(notification.ToNumber)
 	params.SetFrom(tsms.config.FromNumber)
 	params.SetBody(notification.PlainBody)
+	if tsms.config.StatusCallbackURL != "" {
+		params.SetStatusCallback(tsms.config.StatusCallbackURL)
+	}
 	// create a channel to handle errors
 	errCh := make(chan error, 1)
 	go func() {
@@ -87,6 +94,7 @@ func (tsms *SMS) SendNotification(ctx context.Context, notification *notificatio
 	case <-ctx.Done():
 		return ctx.Err()
 	case err := <-errCh:
+		recordSend(err)
 		return classifySendError(err)
 	}
 }

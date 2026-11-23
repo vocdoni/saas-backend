@@ -112,6 +112,10 @@ const (
 	// DELETE /integrator/organizations/{orgAddress}/apikeys/{keyId} to revoke an API key
 	integratorOrgAPIKeyEndpoint = "/integrator/organizations/{orgAddress}/apikeys/{keyId}"
 
+	// POST /notifications/sms/status to receive Twilio's SMS delivery status callbacks
+	smsStatusCallback = "/notifications/sms/status"
+	// GET /metrics to scrape Prometheus metrics, with the metrics bearer token
+	metricsEndpoint = "/metrics"
 	// POST /payments/webhook to receive the Stripe webhook
 	paymentsWebhook = "/payments/webhook"
 	// GET /wallet/checkout/{sessionId} to read a wallet top-up checkout session

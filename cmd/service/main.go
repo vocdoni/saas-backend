@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -75,6 +76,9 @@ func main() {
 	flag.String("twilioAccountSid", "", "Twilio account SID")
 	flag.String("twilioAuthToken", "", "Twilio auth token")
 	flag.String("twilioFromNumber", "", "Twilio from number")
+	flag.String("smsCanaryNumber", "", "if set, send a delivery-check SMS to this number every smsCanaryInterval")
+	flag.Duration("smsCanaryInterval", 24*time.Hour, "how often the SMS canary is sent")
+	flag.String("metricsToken", "", "if set, serve Prometheus metrics on /metrics to requests bearing this token")
 	flag.String("stripeApiSecret", "", "Stripe API secret")
 	flag.String("stripeWebhookSecret", "", "Stripe Webhook secret")
 	flag.String("oauthServiceURL", "https://oauth.vocdoni.net", "OAuth service URL")
@@ -134,6 +138,8 @@ func main() {
 	twilioAccountSid := viper.GetString("twilioAccountSid")
 	twilioAuthToken := viper.GetString("twilioAuthToken")
 	twilioFromNumber := viper.GetString("twilioFromNumber")
+	smsCanaryNumber := viper.GetString("smsCanaryNumber")
+	smsCanaryInterval := viper.GetDuration("smsCanaryInterval")
 	// stripe vars
 	stripeAPISecret := viper.GetString("stripeApiSecret")
 	stripeWebhookSecret := viper.GetString("stripeWebhookSecret")
@@ -195,6 +201,7 @@ func main() {
 		OriginSecret:        viper.GetString("originSecret"),
 		OTPExpiry:           viper.GetDuration("otpExpiry"),
 		OTPCooldown:         viper.GetDuration("otpCooldown"),
+		MetricsToken:        viper.GetString("metricsToken"),
 	}
 
 	certGatewayKeys, err := csp.ParseCertGatewayKeys(viper.GetString(certGatewayPublicKeysKey))
@@ -267,19 +274,31 @@ func main() {
 		// without a primary, and the primary block above was skipped.
 		log.Warnw("backup SMTP relay configured but primary SMTP relay is not; backup will be ignored")
 	}
+	// smsCanary, when set, runs the SMS canary once the server is up
+	var smsCanary func(context.Context)
 	// create SMS notifications service if the required parameters are set and
 	// include it in the API configuration
 	if twilioAccountSid != "" && twilioAuthToken != "" && twilioFromNumber != "" {
-		apiConf.SMSService = new(twilio.SMS)
-		if err := apiConf.SMSService.New(&twilio.Config{
+		sms := new(twilio.SMS)
+		smsConf := &twilio.Config{
 			AccountSid: twilioAccountSid,
 			AuthToken:  twilioAuthToken,
 			FromNumber: twilioFromNumber,
-		}); err != nil {
+		}
+		// delivery status callbacks need a public URL for Twilio to post to
+		if server != "" {
+			smsConf.StatusCallbackURL = strings.TrimSuffix(server, "/") + "/notifications/sms/status"
+			apiConf.SMSStatusHandler = sms.HandleStatusCallback
+		}
+		if err := sms.New(smsConf); err != nil {
 			log.Fatalf("could not create the SMS service: %v", err)
 		}
-		cspConf.SMSService = apiConf.SMSService
-		log.Infow("SMS service created", "from", twilioFromNumber)
+		apiConf.SMSService = sms
+		cspConf.SMSService = sms
+		log.Infow("SMS service created", "from", twilioFromNumber, "statusCallback", smsConf.StatusCallbackURL)
+		if smsCanaryNumber != "" {
+			smsCanary = func(ctx context.Context) { sms.RunCanary(ctx, smsCanaryNumber, smsCanaryInterval) }
+		}
 	}
 
 	// create the CSP service and include it in the API configuration
@@ -312,6 +331,9 @@ func main() {
 	}
 	// create the local API server
 	api.New(ctx, apiConf).Start()
+	if smsCanary != nil {
+		go smsCanary(ctx)
+	}
 	log.Infow("server started", "host", host, "port", port)
 	// wait forever, as the server is running in a goroutine
 	c := make(chan os.Signal, 1)
