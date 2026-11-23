@@ -535,3 +535,33 @@ func TestWalletTopUpStoresPricing(t *testing.T) {
 	c.Assert(entry.Pricing, qt.DeepEquals, breakdown)
 	assertWalletConsistent(c, testOrgAddress)
 }
+
+// TestStoredWalletBalance: the stored balance is the one Wallet reports, unposted movements
+// included, and reading it writes nothing: a movement a crash left unposted stays unposted, with
+// no ledger row, until something drains the wallet. A wallet never credited reads 0.
+func TestStoredWalletBalance(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() {
+		walletStepHook = nil
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+	})
+	balance, err := testDB.StoredWalletBalance(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(balance, qt.Equals, pricing.Cents(0))
+
+	c.Assert(topUpTestWallet(10_000, "cs_stored"), qt.IsNil)
+	walletStepHook = func(walletStep, string) error { return errSimulatedCrash }
+	c.Assert(topUpTestWallet(2_500, "cs_stored_unposted"), qt.ErrorIs, errSimulatedCrash)
+	walletStepHook = nil
+
+	balance, err = testDB.StoredWalletBalance(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(balance, qt.Equals, pricing.Cents(12_500))
+	c.Assert(rawWallet(c, testOrgAddress).Unposted, qt.HasLen, 1)
+	c.Assert(ledgerRows(c, testOrgAddress), qt.HasLen, 1)
+
+	wallet, err := testDB.Wallet(testOrgAddress) // drains
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.BalanceCents, qt.Equals, balance)
+	assertWalletConsistent(c, testOrgAddress)
+}

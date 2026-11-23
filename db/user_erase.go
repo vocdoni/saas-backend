@@ -8,6 +8,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/pricing"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -181,9 +182,11 @@ func (ms *MongoStorage) countOrgContents(planOrg *ErasurePlanOrg) error {
 		return fmt.Errorf("could not count API keys of org %s: %w", address, err)
 	}
 	if planOrg.ManagedBy == (common.Address{}) {
-		if planOrg.WalletBalanceCents, err = ms.storedWalletBalance(address); err != nil {
+		balance, err := ms.StoredWalletBalance(address)
+		if err != nil {
 			return err
 		}
+		planOrg.WalletBalanceCents = int64(balance)
 	}
 	return nil
 }
@@ -195,15 +198,15 @@ func countDocuments(coll *mongo.Collection, filter bson.M) (int64, error) {
 	return coll.CountDocuments(ctx, filter)
 }
 
-// storedWalletBalance reads the balance stored on the organization's wallet without draining it
-// (Wallet would post the unposted movements, a write), so building a plan never writes. It is the
-// balance before any drain or draft credit-back; unposted movements are already part of it, since
+// StoredWalletBalance reads the balance stored on the organization's wallet without draining it
+// (Wallet would post the unposted movements, a write), so building a plan or a read-only view
+// never writes. It equals Wallet's BalanceCents: unposted movements are already part of it, since
 // each one moves the balance in the same write that queues it. A missing wallet reads 0.
-func (ms *MongoStorage) storedWalletBalance(address common.Address) (int64, error) {
+func (ms *MongoStorage) StoredWalletBalance(address common.Address) (pricing.Cents, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	var wallet struct {
-		BalanceCents int64 `bson:"balanceCents"`
+		BalanceCents pricing.Cents `bson:"balanceCents"`
 	}
 	err := ms.wallets.FindOne(ctx, bson.M{"_id": address},
 		options.FindOne().SetProjection(bson.M{"balanceCents": 1})).Decode(&wallet)

@@ -383,3 +383,25 @@ func TestTopUpInvoicePDF(t *testing.T) {
 type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// TestIsStripeHost: only an https URL on stripe.com or one of its subdomains passes.
+func TestIsStripeHost(t *testing.T) {
+	c := qt.New(t)
+	for raw, want := range map[string]bool{
+		"https://stripe.com/x":                              true,
+		"https://pay.stripe.com/invoice/acct_1/x/pdf":       true,
+		"https://PAY.STRIPE.COM/x":                          true,
+		"https://pay.stripe.com:443/x":                      true,
+		"http://pay.stripe.com/x":                           false,
+		"//pay.stripe.com/x":                                false,
+		"https://evilstripe.com/x":                          false,
+		"https://stripe.com.evil.example/x":                 false,
+		"https://pay.stripe.com@evil.example/x":             false,
+		"https://evil.example/?next=https://pay.stripe.com": false,
+		"": false,
+	} {
+		u, err := url.Parse(raw)
+		c.Assert(err, qt.IsNil, qt.Commentf("%q", raw))
+		c.Assert(IsStripeHost(u), qt.Equals, want, qt.Commentf("%q", raw))
+	}
+}

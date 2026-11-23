@@ -58,25 +58,25 @@ var invoicePDFClient = &http.Client{
 		if len(via) >= 10 {
 			return fmt.Errorf("too many redirects")
 		}
-		if !isStripeHost(req.URL) {
+		if !IsStripeHost(req.URL) {
 			return fmt.Errorf("redirected off stripe.com to %q", req.URL.Host)
 		}
 		return nil
 	},
 }
 
-// isStripeHost reports whether u is an https URL on stripe.com or one of its subdomains.
-func isStripeHost(u *url.URL) bool {
+// IsStripeHost reports whether u is an https URL on stripe.com or one of its subdomains.
+func IsStripeHost(u *url.URL) bool {
 	host := strings.ToLower(u.Hostname())
 	return u.Scheme == "https" && (host == "stripe.com" || strings.HasSuffix(host, ".stripe.com"))
 }
 
-// TopUpInvoicePDF serves the invoice of the top-up ledger row keyed idempotencyKey: a manual
+// InvoiceOfLedgerKey returns the invoice of the top-up ledger row keyed idempotencyKey: a manual
 // invoice's key (InvoiceTopUpKey) names it, any other key is the checkout session whose invoice
-// it is. ErrNoInvoice when there is none yet, or no PDF yet, and for a key that names no
-// checkout session (resource_missing: a ledger row keyed by anything else has no invoice); any
-// other Stripe failure is errors.ErrStripeError.
-func (s *Service) TopUpInvoicePDF(idempotencyKey string) (*InvoicePDF, error) {
+// it is. ErrNoInvoice when the session has none yet, and for a key that names no checkout session
+// (resource_missing: a ledger row keyed by anything else has no invoice); any other Stripe
+// failure is errors.ErrStripeError.
+func (c *Client) InvoiceOfLedgerKey(idempotencyKey string) (*stripeapi.Invoice, error) {
 	invoiceID, ok := strings.CutPrefix(idempotencyKey, invoiceTopUpKeyPrefix)
 	if !ok {
 		session, err := stripecheckoutsession.Get(idempotencyKey, &stripeapi.CheckoutSessionParams{})
@@ -92,7 +92,14 @@ func (s *Service) TopUpInvoicePDF(idempotencyKey string) (*InvoicePDF, error) {
 		}
 		invoiceID = session.Invoice.ID
 	}
-	invoice, err := s.client.GetInvoice(invoiceID)
+	return c.GetInvoice(invoiceID)
+}
+
+// TopUpInvoicePDF serves the invoice of the top-up ledger row keyed idempotencyKey
+// (InvoiceOfLedgerKey). ErrNoInvoice when there is none yet, or no PDF yet; a PDF URL off
+// stripe.com is refused.
+func (s *Service) TopUpInvoicePDF(idempotencyKey string) (*InvoicePDF, error) {
+	invoice, err := s.client.InvoiceOfLedgerKey(idempotencyKey)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +121,7 @@ func (s *Service) TopUpInvoicePDF(idempotencyKey string) (*InvoicePDF, error) {
 // redirect to the file; the body is capped at maxInvoicePDFBytes.
 func fetchInvoicePDF(rawURL string) (io.ReadCloser, error) {
 	u, err := url.Parse(rawURL)
-	if err != nil || !isStripeHost(u) {
+	if err != nil || !IsStripeHost(u) {
 		return nil, errors.ErrStripeError.Withf("refusing to fetch an invoice pdf from %q", rawURL)
 	}
 	resp, err := invoicePDFClient.Get(u.String())
