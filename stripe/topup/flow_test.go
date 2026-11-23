@@ -228,6 +228,12 @@ func TestExecute(t *testing.T) {
 	c.Assert(f.writes()[0], qt.Equals, "POST /v1/customers/cus_new")
 	c.Assert(f.stamped, qt.DeepEquals, map[string]string{"cus_new": flowOrg.String()})
 
+	// a plan with no mode is refused before the first Stripe call
+	f.calls = nil
+	_, err = Execute(ctx, client, plan)
+	c.Assert(err, qt.ErrorIs, ErrInvalid)
+	c.Assert(f.calls, qt.HasLen, 0)
+
 	for _, tc := range []struct {
 		fail, stage, invoiceID string
 		mode                   Mode

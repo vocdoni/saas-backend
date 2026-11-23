@@ -81,12 +81,12 @@ const (
 
 // Typed refusals; every error Validate and Prepare return for them satisfies errors.Is.
 var (
-	ErrInvalid           = errors.New("invalid top-up")
-	ErrManagedOrg        = errors.New("managed organization has no wallet")
-	ErrNoCustomer        = errors.New("no stripe customer")
-	ErrCustomerOtherOrg  = errors.New("stripe customer not tied to the organization")
-	ErrCustomerNoAddress = errors.New("stripe customer has no address")
-	ErrDuplicate         = errors.New("duplicate top-up")
+	ErrInvalid           = fmt.Errorf("invalid top-up")
+	ErrManagedOrg        = fmt.Errorf("managed organization has no wallet")
+	ErrNoCustomer        = fmt.Errorf("no stripe customer")
+	ErrCustomerOtherOrg  = fmt.Errorf("stripe customer not tied to the organization")
+	ErrCustomerNoAddress = fmt.Errorf("stripe customer has no address")
+	ErrDuplicate         = fmt.Errorf("duplicate top-up")
 )
 
 // Store is the database reads Prepare needs.
@@ -215,7 +215,11 @@ func Prepare(ctx context.Context, ms Store, c *stripe.Client, r Request) (*Plan,
 // Execute issues the invoice of a Plan Prepare returned: it stamps the customer when p.Stamp,
 // then New → AddLines → Finalize (auto_advance off) → Pay (paid out of band) or Send. A failure is
 // an *ExecuteError naming the stage, and, from AddLines onwards, the invoice left behind.
+// A plan with no valid Mode is refused (ErrInvalid) before any write.
 func Execute(ctx context.Context, c *stripe.Client, p *Plan) (*Result, error) {
+	if p.Mode != PaidOutOfBand && p.Mode != Send {
+		return nil, fmt.Errorf("%w: the mode must be %q or %q", ErrInvalid, PaidOutOfBand, Send)
+	}
 	if p.Stamp {
 		if err := c.UpdateCustomerMetadata(p.Customer.ID, map[string]string{"address": p.Org.String()}); err != nil {
 			return nil, &ExecuteError{Stage: StageStamp, Err: fmt.Errorf(

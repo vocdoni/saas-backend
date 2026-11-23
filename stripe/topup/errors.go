@@ -14,6 +14,7 @@ type DuplicateError struct {
 	raw  []*stripeapi.Invoice
 }
 
+// Error names the refused top-up and, for each duplicate found, what to do with it.
 func (e *DuplicateError) Error() string {
 	lines := make([]string, 0, len(e.raw))
 	for _, invoice := range e.raw {
@@ -23,6 +24,7 @@ func (e *DuplicateError) Error() string {
 		"7 days: %s", e.Plan.Org, e.Plan.AmountCents, e.Plan.Description, strings.Join(lines, "; "))
 }
 
+// Unwrap makes a DuplicateError satisfy errors.Is(err, ErrDuplicate).
 func (*DuplicateError) Unwrap() error { return ErrDuplicate }
 
 // describeDuplicate is one line of the refusal for an invoice duplicateInvoices picked: the
@@ -64,6 +66,8 @@ type ExecuteError struct {
 	Err       error
 }
 
+// Error is the message of the error the failed stage returned.
 func (e *ExecuteError) Error() string { return e.Err.Error() }
 
+// Unwrap returns the error the failed stage returned.
 func (e *ExecuteError) Unwrap() error { return e.Err }
