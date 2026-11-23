@@ -12,6 +12,7 @@ import (
 	"github.com/twilio/twilio-go/client"
 	api "github.com/twilio/twilio-go/rest/api/v2010"
 	"github.com/vocdoni/saas-backend/notifications"
+	"go.vocdoni.io/dvote/log"
 )
 
 const (
@@ -28,13 +29,22 @@ type Config struct {
 	AccountSid string
 	AuthToken  string
 	FromNumber string
+	// FallbackFromNumber, when set, is a numeric sender used to resend a message
+	// Twilio refused with 21612 for FromNumber: an alphanumeric sender ID is not
+	// accepted in every country (some require it to be registered first).
+	FallbackFromNumber string
+}
+
+// messageCreator is the part of the Twilio REST API the service uses.
+type messageCreator interface {
+	CreateMessage(params *api.CreateMessageParams) (*api.ApiV2010Message, error)
 }
 
 // SMS is the implementation of the NotificationService interface for the
 // Twilio SMS service. It contains the configuration and the Twilio REST client.
 type SMS struct {
-	config *Config
-	client *t.RestClient
+	config   *Config
+	messages messageCreator
 }
 
 var _ notifications.NotificationService = &SMS{}
@@ -60,7 +70,7 @@ func (tsms *SMS) New(rawConfig any) error {
 		return err
 	}
 	// init Twilio REST client
-	tsms.client = t.NewRestClient()
+	tsms.messages = t.NewRestClient().Api
 	return nil
 }
 
@@ -69,26 +79,50 @@ func (tsms *SMS) New(rawConfig any) error {
 // returns an error if the notification could not be sent or if the context is
 // done.
 func (tsms *SMS) SendNotification(ctx context.Context, notification *notifications.Notification) error {
-	// create message with configured sender number and notification data
+	err := tsms.send(ctx, tsms.config.FromNumber, notification)
+	if fallback := tsms.config.FallbackFromNumber; fallback != "" && fallback != tsms.config.FromNumber &&
+		twilioErrorCode(err) == codeSenderRecipientMismatch {
+		log.Infow("sms sender refused for recipient, resending from fallback number",
+			"from", tsms.config.FromNumber, "fallback", fallback)
+		err = tsms.send(ctx, fallback, notification)
+	}
+	return classifySendError(err)
+}
+
+// send creates one message from the given sender and waits for Twilio's answer
+// or for ctx to be done.
+func (tsms *SMS) send(ctx context.Context, from string, notification *notifications.Notification) error {
 	params := &api.CreateMessageParams{}
 	params.SetTo(notification.ToNumber)
-	params.SetFrom(tsms.config.FromNumber)
+	params.SetFrom(from)
 	params.SetBody(notification.PlainBody)
-	// create a channel to handle errors
 	errCh := make(chan error, 1)
 	go func() {
-		// send the message
-		_, err := tsms.client.Api.CreateMessage(params)
+		_, err := tsms.messages.CreateMessage(params)
 		errCh <- err
 		close(errCh)
 	}()
-	// wait for the message to be sent or the context to be done
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case err := <-errCh:
-		return classifySendError(err)
+		return err
 	}
+}
+
+// codeSenderRecipientMismatch is Twilio's 21612: the message cannot be sent with
+// this combination of 'To' and 'From', e.g. an alphanumeric sender ID the
+// recipient's country does not accept.
+const codeSenderRecipientMismatch = 21612
+
+// twilioErrorCode returns the Twilio error code in err, or 0 when err is not a
+// Twilio REST error.
+func twilioErrorCode(err error) int {
+	var restErr *client.TwilioRestError
+	if errors.As(err, &restErr) {
+		return restErr.Code
+	}
+	return 0
 }
 
 // permanentTwilioCodes are the Twilio error codes that name a recipient which can
