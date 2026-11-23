@@ -37,6 +37,10 @@ const disableBlindCSPKey = "disable_blindcsp"
 // VOCDONI_CERT_GATEWAY_PUBLIC_KEYS like disableBlindCSPKey.
 const certGatewayPublicKeysKey = "cert_gateway_public_keys"
 
+// maintenanceWindowKey is the flag of the scheduled maintenance window, read from
+// VOCDONI_MAINTENANCE_WINDOW like disableBlindCSPKey.
+const maintenanceWindowKey = "maintenance_window"
+
 // initViper binds the flags and the VOCDONI_<FLAG> environment variables to v.
 func initViper(v *viper.Viper, flags *flag.FlagSet) error {
 	v.SetEnvPrefix("VOCDONI")
@@ -99,6 +103,8 @@ func main() {
 	flag.Bool(disableBlindCSPKey, false, "temporarily stop offering anonymous voting (no new anonymous processes, no blind signing)")
 	flag.String(certGatewayPublicKeysKey, "",
 		"certificate gateway public keys, keyId:base64(ed25519 public key) comma-separated; empty turns certificate voter auth off")
+	flag.String(maintenanceWindowKey, "",
+		"scheduled maintenance window <from>/<until> in RFC 3339: announced on every response, writes refused with 503 inside it")
 	// parse flags
 	flag.Parse()
 	// initialize Viper
@@ -195,6 +201,13 @@ func main() {
 		OriginSecret:        viper.GetString("originSecret"),
 		OTPExpiry:           viper.GetDuration("otpExpiry"),
 		OTPCooldown:         viper.GetDuration("otpCooldown"),
+	}
+
+	if apiConf.Maintenance, err = api.ParseMaintenanceWindow(viper.GetString(maintenanceWindowKey)); err != nil {
+		log.Fatalf("invalid %s: %v", maintenanceWindowKey, err)
+	}
+	if apiConf.Maintenance != nil {
+		log.Infow("maintenance window scheduled", "window", apiConf.Maintenance.String())
 	}
 
 	certGatewayKeys, err := csp.ParseCertGatewayKeys(viper.GetString(certGatewayPublicKeysKey))

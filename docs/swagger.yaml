@@ -6,7 +6,18 @@ definitions:
         type: string
       goVersion:
         type: string
+      maintenance:
+        allOf:
+        - $ref: '#/definitions/api.MaintenanceWindow'
+        description: Maintenance is the scheduled downtime, present until it ends.
       version:
+        type: string
+    type: object
+  api.MaintenanceWindow:
+    properties:
+      from:
+        type: string
+      until:
         type: string
     type: object
   apicommon.APIKeyInfo:
@@ -2959,8 +2970,8 @@ paths:
       - processes
   /info:
     get:
-      description: Returns the service version, build information and the Vocdoni
-        chain ID.
+      description: Returns the service version, build information, the Vocdoni chain
+        ID and any scheduled maintenance window.
       produces:
       - application/json
       responses:

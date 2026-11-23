@@ -113,6 +113,9 @@ type Config struct {
 	// Requests without it are refused, so the origin can't be reached around the proxy and its
 	// rate limits (e.g. through the hosting provider's default domain).
 	OriginSecret string
+	// Maintenance, when set, is the scheduled downtime announced on every response and enforced
+	// on writes, see maintenance.
+	Maintenance *MaintenanceWindow
 	// OTPExpiry overrides the validity window for all one-time codes (account
 	// verification, password reset). Zero uses notifications.DefaultOTPExpiry.
 	OTPExpiry time.Duration
@@ -168,6 +171,7 @@ type API struct {
 	csp             *csp.CSP
 	oauthServiceURL string
 	originSecret    string
+	maintenance     *MaintenanceWindow
 	stripeHandlers  *StripeHandlers
 	// paymentGW is the seam to Stripe's one-time checkout used by pay-per-process
 	// billing; nil when the Stripe service is unavailable. Tests install a fake.
@@ -322,6 +326,7 @@ func New(ctx context.Context, conf *Config) *API {
 		csp:                   conf.CSP,
 		oauthServiceURL:       conf.OAuthServiceURL,
 		originSecret:          conf.OriginSecret,
+		maintenance:           conf.Maintenance,
 		orgTxLocks:            newOrgTxMutex(),
 		walletLocks:           newOrgTxMutex(),
 		censusGrowthLocks:     newOrgTxMutex(),
@@ -418,6 +423,7 @@ func (a *API) initRouter() http.Handler {
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		ExposedHeaders:   []string{maintenanceHeader, "Retry-After"}, // readable by browser clients
 		AllowCredentials: true,
 		MaxAge:           300, // Maximum value not ignored by any of major browsers
 	}).Handler)
@@ -431,6 +437,7 @@ func (a *API) initRouter() http.Handler {
 	r.Use(middleware.Timeout(45 * time.Second))
 	// set lang param in context
 	r.Use(a.setLang)
+	r.Use(maintenance(a.maintenance, time.Now))
 
 	a.csp.PasswordSalt = passwordSalt
 	cspHandlers := handlers.New(a.csp, a.db, a.voteOnChain)
