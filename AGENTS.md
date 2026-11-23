@@ -142,6 +142,8 @@ Component packages (each is a focused service composed in `main.go`):
   There is no command to switch it later.
 - **`stripe/`** — Stripe client, one-time wallet top-up checkouts, and the webhooks that credit,
   refund or dispute them (subscription, invoice and product events are acknowledged and ignored).
+  `stripe/topup/` issues a manual top-up as a Stripe invoice (validation, customer resolution and
+  evidence, the 7-day duplicate guard, the invoice); `cmd/topup` and the staff dashboard both run it.
 - **`objectstorage/`** — S3-like object storage (images) backed by Mongo, with upload/download handlers.
 - **`errors/`** — typed API `Error` (code + HTTP status + optional data), JSON-serializable; handlers
   return these. Predefined errors in `errors_definition.go`.

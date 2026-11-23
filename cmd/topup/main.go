@@ -1,5 +1,6 @@
 // Command topup issues a manual wallet top-up for an organization as a Stripe invoice: credit
-// sold outside the embedded checkout (a bank transfer, a negotiated amount). The invoice is
+// sold outside the embedded checkout (a bank transfer, a negotiated amount). The checks and the
+// invoice are the topup package's, which the staff dashboard runs too. The invoice is
 // billed to the organization's Stripe customer with VAT by Stripe Tax, and the organization's
 // wallet is credited once Stripe reports it paid: the invoice.paid webhook credits it exactly
 // once, keyed by the invoice. The command itself never writes the wallet.
@@ -15,7 +16,8 @@
 // or, for a customer with no checkout session at all, an email that is an Admin of this
 // organization and belongs to no other one. A customer whose checkouts were another
 // organization's, or whose email could vouch for several, is refused and the operator verifies
-// the customer and stamps metadata.address in the Dashboard by hand. A customer is never
+// the customer and stamps metadata.address in the Dashboard by hand. The stamp is written only
+// when the invoice is issued: a refused or dry run writes nothing in Stripe. A customer is never
 // created here: one without an address has no tax location, and automatic tax would fail at
 // finalization, so such a customer is refused until the operator completes it in the
 // Dashboard. -customer may also name one of several customers stamped with the organization,
@@ -53,41 +55,18 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"strconv"
-	"strings"
-	"time"
-	"unicode/utf8"
 
 	"github.com/ethereum/go-ethereum/common"
-	stripeapi "github.com/stripe/stripe-go/v87"
-	stripeinvoice "github.com/stripe/stripe-go/v87/invoice"
 	"github.com/vocdoni/saas-backend/db"
-	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/pricing"
 	"github.com/vocdoni/saas-backend/stripe"
-)
-
-// maxAmountCents is the largest top-up, the bound of POST /organizations/{orgAddress}/wallet/topup
-// (api.walletTopUpMaxCents); the minimum is pricing.MinimumChargeCents, like every charge.
-const maxAmountCents = 100_000_00 // €100 000
-
-// daysUntilDue is how long a sent invoice stays payable.
-const daysUntilDue = 30
-
-// duplicateWindow is how far back an invoice for the same top-up refuses a run: long enough to
-// catch a retry, short enough that a recurring top-up with the same flags is issued.
-const duplicateWindow = 7 * 24 * time.Hour
-
-// Invoice metadata keys that name the top-up a run issued, so a second run recognizes it
-// (duplicateInvoices) whatever lines the invoice has.
-const (
-	metadataKeyAmountCents = "topup_amount_cents"
-	metadataKeyDescription = "topup_description"
+	"github.com/vocdoni/saas-backend/stripe/topup"
 )
 
 // options holds the parsed CLI flags.
@@ -124,231 +103,33 @@ func main() {
 	}
 }
 
-// maxDescriptionChars is the longest description: it names the line's product and is kept in the
-// invoice metadata, and 250 characters stays within Stripe's limits for both.
-const maxDescriptionChars = 250
-
-// validate checks the flags alone: everything that needs no database or Stripe. It trims the
-// description in place, so the invoice line and the duplicate check use the same text.
-func validate(opts *options) error {
+// validate checks the flags alone and turns them into a top-up request: the CLI's own checks
+// (the database, the organization address, exactly one mode), then topup.Validate, which trims
+// the description.
+func validate(opts *options) (topup.Request, error) {
 	if opts.mongoURL == "" {
-		return fmt.Errorf("-mongoURL is required")
+		return topup.Request{}, fmt.Errorf("-mongoURL is required")
 	}
 	if !common.IsHexAddress(opts.org) {
-		return fmt.Errorf("-org must be an organization address")
-	}
-	if cents := pricing.Cents(opts.amountCents); cents < pricing.MinimumChargeCents || cents > maxAmountCents {
-		return fmt.Errorf("-amount-cents must be between %d and %d eur cents", pricing.MinimumChargeCents, maxAmountCents)
-	}
-	opts.description = strings.TrimSpace(opts.description)
-	if opts.description == "" {
-		return fmt.Errorf("-description is required")
-	}
-	if n := utf8.RuneCountInString(opts.description); n > maxDescriptionChars {
-		return fmt.Errorf("-description is %d characters long, at most %d fit (stripe limits)", n, maxDescriptionChars)
+		return topup.Request{}, fmt.Errorf("-org must be an organization address")
 	}
 	if opts.paidOutOfBand == opts.send {
-		return fmt.Errorf("exactly one of -paid-out-of-band or -send is required")
+		return topup.Request{}, fmt.Errorf("exactly one of -paid-out-of-band or -send is required")
 	}
-	return nil
-}
-
-// checkOrganization refuses an organization that has no wallet of its own.
-func checkOrganization(org *db.Organization) error {
-	if org.ManagedBy != (common.Address{}) {
-		return fmt.Errorf("organization %s is managed by %s and has no wallet; top up the integrator instead",
-			org.Address, org.ManagedBy)
+	mode := topup.Send
+	if opts.paidOutOfBand {
+		mode = topup.PaidOutOfBand
 	}
-	return nil
-}
-
-// userStore is the one database read resolveCustomer needs: the user behind a customer's email.
-type userStore interface {
-	UserByEmail(email string) (*db.User, error)
-}
-
-// checkCustomerOrg refuses an unstamped customer the command cannot tie to the organization.
-// The evidence is the customer's checkout sessions: one carrying wallet_topup_org of this
-// organization accepts it (its checkouts created the customer); sessions of other
-// organizations alone refuse it (another tenant's customer). A customer with no checkout
-// session at all (one created in the Dashboard) is accepted when its email is an Admin of this
-// organization and belongs to no other organization, so the email vouches for one tenant only.
-func checkCustomerOrg(q customerQuery, customer *stripeapi.Customer) error {
-	sessions, err := q.client.CheckoutSessionsOfCustomer(customer.ID)
-	if err != nil {
-		return fmt.Errorf("could not list the checkout sessions of customer %s: %w", customer.ID, err)
-	}
-	if len(sessions) > 0 {
-		var orgs []string
-		for _, session := range sessions {
-			raw := session.Metadata[stripe.MetadataKeyWalletTopUpOrg]
-			if common.IsHexAddress(raw) && common.HexToAddress(raw) == q.org {
-				return nil
-			}
-			if raw != "" {
-				orgs = append(orgs, raw)
-			}
-		}
-		if len(orgs) == 0 {
-			return fmt.Errorf("customer %s has checkout sessions but none a wallet top-up of organization %s, so it is "+
-				"not stamped; verify the customer and stamp metadata.address with the organization address in the "+
-				"stripe dashboard by hand", customer.ID, q.org)
-		}
-		return fmt.Errorf("customer %s was created by checkouts of %s, not of organization %s, so it is not stamped",
-			customer.ID, strings.Join(orgs, ", "), q.org)
-	}
-	user, err := q.users.UserByEmail(internal.NormalizeEmail(customer.Email))
-	if err != nil && !errors.Is(err, db.ErrNotFound) {
-		return fmt.Errorf("could not look up the user of customer %s <%s>: %w", customer.ID, customer.Email, err)
-	}
-	if err != nil || !user.HasRoleFor(q.org, db.AdminRole) {
-		return fmt.Errorf("customer %s <%s> is not an admin of organization %s, so it is not stamped; verify the "+
-			"customer and stamp metadata.address with the organization address in the stripe dashboard by hand",
-			customer.ID, customer.Email, q.org)
-	}
-	for _, membership := range user.Organizations {
-		if membership.Address != q.org {
-			return fmt.Errorf("customer %s <%s> is an admin of organization %s but also a member of %s, so its email "+
-				"cannot vouch for it and it is not stamped; verify the customer and stamp metadata.address with the "+
-				"organization address in the stripe dashboard by hand", customer.ID, customer.Email, q.org, membership.Address)
-		}
-	}
-	return nil
-}
-
-// formatAddress is a customer's billing address on one line, for the operator to check.
-func formatAddress(a *stripeapi.Address) string {
-	if a == nil {
-		return "no address"
-	}
-	var parts []string
-	for _, p := range []string{a.Line1, a.Line2, a.PostalCode, a.City, a.State, a.Country} {
-		if p != "" {
-			parts = append(parts, p)
-		}
-	}
-	return strings.Join(parts, ", ")
-}
-
-// checkCustomer refuses a customer automatic tax cannot locate: one with no address.
-func checkCustomer(customer *stripeapi.Customer) error {
-	if customer.Address == nil || customer.Address.Country == "" {
-		return fmt.Errorf("customer %s has no address, so its tax cannot be computed; complete it in the Stripe dashboard first",
-			customer.ID)
-	}
-	return nil
-}
-
-// buildInvoiceParams is the invoice of a manual top-up of org billed to customer: sent, not
-// charged (send_invoice, auto_advance off), due in daysUntilDue, EUR with automatic tax, and
-// marked manual so the invoice.paid webhook credits it, with the top-up's net amount and
-// description in its metadata from creation, so even a draft left with no line is recognized.
-func buildInvoiceParams(org common.Address, customerID string, opts *options) *stripeapi.InvoiceParams {
-	return &stripeapi.InvoiceParams{
-		Customer:         new(customerID),
-		Currency:         new(string(stripeapi.CurrencyEUR)),
-		CollectionMethod: new(string(stripeapi.InvoiceCollectionMethodSendInvoice)),
-		DaysUntilDue:     new(int64(daysUntilDue)),
-		AutoAdvance:      new(false),
-		AutomaticTax:     &stripeapi.InvoiceAutomaticTaxParams{Enabled: new(true)},
-		Metadata: map[string]string{
-			stripe.MetadataKeyWalletTopUpOrg:    org.String(),
-			stripe.MetadataKeyWalletTopUpSource: stripe.TopUpSourceManual,
-			metadataKeyAmountCents:              strconv.FormatInt(opts.amountCents, 10),
-			metadataKeyDescription:              opts.description,
-		},
-	}
-}
-
-// buildLineParams is the invoice's one line: amountCents net of VAT (tax exclusive) for description.
-func buildLineParams(amountCents int64, description string) *stripeapi.InvoiceAddLinesParams {
-	return &stripeapi.InvoiceAddLinesParams{
-		Lines: []*stripeapi.InvoiceAddLinesLineParams{{
-			Description: new(description),
-			Quantity:    new(int64(1)),
-			PriceData: &stripeapi.InvoiceAddLinesLinePriceDataParams{
-				Currency:    new(string(stripeapi.CurrencyEUR)),
-				UnitAmount:  new(amountCents),
-				TaxBehavior: new("exclusive"),
-				ProductData: &stripeapi.InvoiceAddLinesLinePriceDataProductDataParams{Name: new(description)},
-			},
-		}},
-	}
-}
-
-// duplicateInvoices picks, among invoices of any customer, the manual top-ups of org that are not
-// void and whose metadata names the same -amount-cents and -description: what running the
-// command again with the same flags would issue a second time.
-func duplicateInvoices(invoices []*stripeapi.Invoice, org common.Address, opts *options) []*stripeapi.Invoice {
-	var duplicates []*stripeapi.Invoice
-	for _, invoice := range invoices {
-		rawOrg := invoice.Metadata[stripe.MetadataKeyWalletTopUpOrg]
-		if invoice.Metadata[stripe.MetadataKeyWalletTopUpSource] != stripe.TopUpSourceManual ||
-			!common.IsHexAddress(rawOrg) || common.HexToAddress(rawOrg) != org ||
-			invoice.Status == stripeapi.InvoiceStatusVoid {
-			continue
-		}
-		if invoice.Metadata[metadataKeyAmountCents] == strconv.FormatInt(opts.amountCents, 10) &&
-			invoice.Metadata[metadataKeyDescription] == opts.description {
-			duplicates = append(duplicates, invoice)
-		}
-	}
-	return duplicates
-}
-
-// describeDuplicate is one line of the refusal for an invoice duplicateInvoices picked: the
-// invoice, its status and customer, and what the operator does about it, which depends on how far
-// the run that issued it got.
-func describeDuplicate(invoice *stripeapi.Invoice) string {
-	customerID := "unknown"
-	if invoice.Customer != nil {
-		customerID = invoice.Customer.ID
-	}
-	var advice string
-	switch invoice.Status {
-	case stripeapi.InvoiceStatusDraft:
-		advice = "delete it in the dashboard and re-run"
-	case stripeapi.InvoiceStatusOpen:
-		advice = "if that run finished, nothing to do; otherwise mark it paid out of band or send it from the " +
-			"dashboard (or void it and re-run)"
-	default: // paid or uncollectible
-		advice = "already issued, nothing to do"
-	}
-	return fmt.Sprintf("%s (%s, customer %s): %s", invoice.ID, invoice.Status, customerID, advice)
-}
-
-// checkDuplicate refuses the run when the organization already has an invoice for this very
-// top-up (duplicateInvoices) created within duplicateWindow, billed to any customer: a retry
-// naming another -customer of the organization is a duplicate too. The invoices are listed, not
-// searched: search lags behind a fresh invoice.
-func checkDuplicate(org common.Address, opts *options) error {
-	var invoices []*stripeapi.Invoice
-	iter := stripeinvoice.List(&stripeapi.InvoiceListParams{
-		ListParams:   stripeapi.ListParams{Limit: new(int64(100))},
-		CreatedRange: &stripeapi.RangeQueryParams{GreaterThanOrEqual: time.Now().Add(-duplicateWindow).Unix()},
+	return topup.Validate(topup.Request{
+		Org: common.HexToAddress(opts.org), AmountCents: pricing.Cents(opts.amountCents), Description: opts.description,
+		CustomerID: opts.customer, Mode: mode, AllowDuplicate: opts.allowDup,
 	})
-	for iter.Next() {
-		invoices = append(invoices, iter.Invoice())
-	}
-	if err := iter.Err(); err != nil {
-		return fmt.Errorf("could not list the invoices of the last 7 days, retry later: %w", err)
-	}
-	duplicates := duplicateInvoices(invoices, org, opts)
-	if len(duplicates) == 0 {
-		return nil
-	}
-	lines := make([]string, 0, len(duplicates))
-	for _, invoice := range duplicates {
-		lines = append(lines, describeDuplicate(invoice))
-	}
-	return fmt.Errorf("an invoice for the same top-up (organization %s, %d eur cents net, %q) was issued in the last "+
-		"7 days: %s; pass -allow-duplicate to issue another on purpose",
-		org, opts.amountCents, opts.description, strings.Join(lines, "; "))
 }
 
 // run holds the whole CLI flow so os.Exit and flag.Parse stay in main.
 func run(opts *options, out io.Writer) error {
-	if err := validate(opts); err != nil {
+	req, err := validate(opts)
+	if err != nil {
 		flag.Usage()
 		return err
 	}
@@ -356,7 +137,6 @@ func run(opts *options, out io.Writer) error {
 	if apiKey == "" {
 		return fmt.Errorf("VOCDONI_STRIPEAPISECRET environment variable is required")
 	}
-	orgAddress := common.HexToAddress(opts.org)
 
 	// read only: no reset, no migrations
 	ms, err := db.NewWithOptions(opts.mongoURL, opts.database, db.ConnectOptions{SkipMigrations: true})
@@ -364,33 +144,23 @@ func run(opts *options, out io.Writer) error {
 		return fmt.Errorf("could not connect to mongodb: %w", err)
 	}
 	defer ms.Close()
-	org, err := ms.Organization(orgAddress)
-	if err != nil {
-		return fmt.Errorf("could not find organization %s: %w", orgAddress, err)
-	}
-	if err := checkOrganization(org); err != nil {
-		return err
-	}
-
+	ctx := context.Background()
 	client := stripe.NewClient(&stripe.Config{APIKey: apiKey})
-	customer, err := resolveCustomer(customerQuery{
-		client: client, users: ms, org: orgAddress, customerID: opts.customer, write: !opts.dryRun,
-	})
-	if err != nil {
+	plan, err := topup.Prepare(ctx, ms, client, req)
+	switch {
+	case errors.Is(err, topup.ErrDuplicate):
+		return fmt.Errorf("%w; pass -allow-duplicate to issue another on purpose", err)
+	case errors.Is(err, topup.ErrNoCustomer):
+		return fmt.Errorf("%w (pass it with -customer)", err)
+	case err != nil:
 		return err
 	}
-	// a read, so a dry run is refused like the real one would be
-	if !opts.allowDup {
-		if err := checkDuplicate(orgAddress, opts); err != nil {
-			return err
-		}
-	}
-	if _, err := fmt.Fprintf(out, "organization %s, customer %s <%s>\n  %s\n", orgAddress, customer.ID, customer.Email,
-		formatAddress(customer.Address)); err != nil {
+	if _, err := fmt.Fprintf(out, "organization %s, customer %s <%s>\n  %s\n", plan.Org, plan.Customer.ID,
+		plan.Customer.Email, plan.Customer.Address); err != nil {
 		return fmt.Errorf("could not print the customer: %w", err)
 	}
 	if _, err := fmt.Fprintf(out, "invoice: %d eur cents net, %q, send_invoice due in %d days, automatic tax\n",
-		opts.amountCents, opts.description, daysUntilDue); err != nil {
+		plan.AmountCents, plan.Description, topup.DaysUntilDue); err != nil {
 		return fmt.Errorf("could not print the invoice: %w", err)
 	}
 	if opts.dryRun {
@@ -400,113 +170,18 @@ func run(opts *options, out io.Writer) error {
 		return nil
 	}
 
-	invoice, err := stripeinvoice.New(buildInvoiceParams(orgAddress, customer.ID, opts))
+	result, err := topup.Execute(ctx, client, plan)
 	if err != nil {
-		return fmt.Errorf("could not create the invoice: %w", err)
+		return err
 	}
-	invoiceID := invoice.ID
-	if _, err := stripeinvoice.AddLines(invoiceID, buildLineParams(opts.amountCents, opts.description)); err != nil {
-		return fmt.Errorf("could not add the line to invoice %s (delete the draft in the dashboard): %w", invoiceID, err)
-	}
-	_, err = stripeinvoice.FinalizeInvoice(invoiceID, &stripeapi.InvoiceFinalizeInvoiceParams{AutoAdvance: new(false)})
-	if err != nil {
-		return fmt.Errorf("could not finalize invoice %s (delete the draft, or void it if it was finalized, "+
-			"in the dashboard): %w", invoiceID, err)
-	}
-	switch {
-	case opts.paidOutOfBand:
-		invoice, err = stripeinvoice.Pay(invoiceID, &stripeapi.InvoicePayParams{PaidOutOfBand: new(true)})
-		if err != nil {
-			return fmt.Errorf("could not mark invoice %s paid out of band (do it in the dashboard): %w", invoiceID, err)
-		}
-	case opts.send:
-		invoice, err = stripeinvoice.SendInvoice(invoiceID, &stripeapi.InvoiceSendInvoiceParams{})
-		if err != nil {
-			return fmt.Errorf("could not send invoice %s (send it from the dashboard): %w", invoiceID, err)
-		}
-	default:
-		// validate requires exactly one mode
-		return fmt.Errorf("invoice %s is finalized but no payment mode was given (void it in the dashboard)", invoiceID)
-	}
+	invoice := result.Invoice
 	// the invoice exists and is paid or sent: a failed print must not hide that
 	if _, err := fmt.Fprintf(out, "invoice %s (%s) %s: %d eur cents net, %d with tax\n  %s\n",
-		invoice.ID, invoice.Number, invoice.Status, invoice.TotalExcludingTax, invoice.Total,
-		invoice.HostedInvoiceURL); err != nil {
-		return fmt.Errorf("invoice %s was issued, but could not print it: %w", invoiceID, err)
+		invoice.ID, invoice.Number, invoice.Status, invoice.AmountCents, invoice.TotalCents, invoice.HostedURL); err != nil {
+		return fmt.Errorf("invoice %s was issued, but could not print it: %w", invoice.ID, err)
 	}
 	if _, err := fmt.Fprintln(out, "the wallet is credited by the invoice.paid webhook once the invoice is paid"); err != nil {
-		return fmt.Errorf("invoice %s was issued, but could not print the next step: %w", invoiceID, err)
+		return fmt.Errorf("invoice %s was issued, but could not print the next step: %w", invoice.ID, err)
 	}
 	return nil
-}
-
-// customerQuery is what resolveCustomer needs: the Stripe client, the users to vouch for an
-// unstamped customer, the organization, the -customer flag (may be empty) and whether to stamp.
-type customerQuery struct {
-	client     *stripe.Client
-	users      userStore
-	org        common.Address
-	customerID string
-	write      bool
-}
-
-// resolveCustomer finds the organization's Stripe customer by its address, or takes customerID
-// when none is found and, when write is set, stamps the organization address on it so later
-// lookups find it. An unstamped customer is taken only if a checkout of the organization used
-// it or, with no checkout at all, its email is an Admin of this organization and of no other
-// (checkCustomerOrg). When the search found one and customerID names
-// another, that one is used only if it is stamped with the same organization (a duplicate
-// stamp), never one stamped with another organization nor an unstamped one. A failed search
-// refuses the run: it cannot tell whether a customer is stamped. It never creates a customer,
-// refuses one with no address (checkCustomer), and a refused run writes nothing.
-func resolveCustomer(q customerQuery) (*stripeapi.Customer, error) {
-	client, org, customerID, write := q.client, q.org, q.customerID, q.write
-	found, err := client.GetCustomerByAddress(org.String())
-	if err != nil && !errors.Is(err, stripe.ErrCustomerNotFound) {
-		return nil, fmt.Errorf("could not search the customer of organization %s, retry later: %w", org, err)
-	}
-	if customerID == "" {
-		if found == nil {
-			return nil, fmt.Errorf("no stripe customer is stamped with organization %s; pass the one its checkouts "+
-				"created with -customer, or create one in the stripe dashboard with the organization's billing "+
-				"address (and tax id) first and pass that", org)
-		}
-		if err := checkCustomer(found); err != nil {
-			return nil, err
-		}
-		return found, nil
-	}
-	if found != nil && found.ID == customerID {
-		if err := checkCustomer(found); err != nil {
-			return nil, err
-		}
-		return found, nil
-	}
-	customer, err := client.GetCustomer(customerID)
-	if err != nil {
-		return nil, fmt.Errorf("could not read customer %s: %w", customerID, err)
-	}
-	stamped := customer.Metadata["address"]
-	switch {
-	case stamped != "" && common.HexToAddress(stamped) != org:
-		return nil, fmt.Errorf("customer %s belongs to organization %s, not %s", customer.ID, stamped, org)
-	case stamped == "" && found != nil:
-		return nil, fmt.Errorf("organization %s is stamped on customer %s, not %s; drop -customer or fix the stamp "+
-			"in the dashboard", org, found.ID, customerID)
-	}
-	// checked before the stamp: a customer refused here is left as it was
-	if err := checkCustomer(customer); err != nil {
-		return nil, err
-	}
-	if stamped == "" {
-		if err := checkCustomerOrg(q, customer); err != nil {
-			return nil, err
-		}
-	}
-	if write && stamped == "" {
-		if err := client.UpdateCustomerMetadata(customer.ID, map[string]string{"address": org.String()}); err != nil {
-			return nil, fmt.Errorf("could not stamp customer %s with the organization address: %w", customer.ID, err)
-		}
-	}
-	return customer, nil
 }
