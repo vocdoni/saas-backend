@@ -71,6 +71,8 @@ func main() {
 	flag.String("twilioAccountSid", "", "Twilio account SID")
 	flag.String("twilioAuthToken", "", "Twilio auth token")
 	flag.String("twilioFromNumber", "", "Twilio from number")
+	flag.String("twilioFallbackFromNumber", "",
+		"numeric Twilio sender used when twilioFromNumber is refused for a recipient (Twilio error 21612)")
 	flag.String("stripeApiSecret", "", "Stripe API secret")
 	flag.String("stripeWebhookSecret", "", "Stripe Webhook secret")
 	flag.String("oauthServiceURL", "https://oauth.vocdoni.net", "OAuth service URL")
@@ -128,6 +130,7 @@ func main() {
 	twilioAccountSid := viper.GetString("twilioAccountSid")
 	twilioAuthToken := viper.GetString("twilioAuthToken")
 	twilioFromNumber := viper.GetString("twilioFromNumber")
+	twilioFallbackFromNumber := viper.GetString("twilioFallbackFromNumber")
 	// stripe vars
 	stripeAPISecret := viper.GetString("stripeApiSecret")
 	stripeWebhookSecret := viper.GetString("stripeWebhookSecret")
@@ -260,14 +263,15 @@ func main() {
 	if twilioAccountSid != "" && twilioAuthToken != "" && twilioFromNumber != "" {
 		apiConf.SMSService = new(twilio.SMS)
 		if err := apiConf.SMSService.New(&twilio.Config{
-			AccountSid: twilioAccountSid,
-			AuthToken:  twilioAuthToken,
-			FromNumber: twilioFromNumber,
+			AccountSid:         twilioAccountSid,
+			AuthToken:          twilioAuthToken,
+			FromNumber:         twilioFromNumber,
+			FallbackFromNumber: twilioFallbackFromNumber,
 		}); err != nil {
 			log.Fatalf("could not create the SMS service: %v", err)
 		}
 		cspConf.SMSService = apiConf.SMSService
-		log.Infow("SMS service created", "from", twilioFromNumber)
+		log.Infow("SMS service created", "from", twilioFromNumber, "fallbackFrom", twilioFallbackFromNumber)
 	}
 
 	// create the CSP service and include it in the API configuration
