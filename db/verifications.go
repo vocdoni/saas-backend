@@ -185,7 +185,7 @@ func (ms *MongoStorage) InsertVerificationCode(verification *UserVerification) e
 	result, err := ms.verifications.UpdateOne(ctx,
 		bson.M{"userId": verification.UserID, "type": verification.Type},
 		bson.M{"$setOnInsert": verification},
-		options.Update().SetUpsert(true))
+		options.UpdateOne().SetUpsert(true))
 	if err != nil {
 		return err
 	}
