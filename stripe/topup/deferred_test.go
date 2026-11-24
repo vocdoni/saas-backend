@@ -31,8 +31,10 @@ type fakeInvoice struct {
 // flowOrg and has an address (search finds it unless unsearchable), cus_other is stamped with
 // flowOther. Invoices live in invoices; a create or an add_lines with a known Idempotency-Key
 // replays its first response, even for a deleted invoice, as Stripe does for 24 h. A finalized
-// invoice totals its net plus taxPercent. fail (a path suffix) answers 500; every call is recorded
-// as "METHOD path" and every Idempotency-Key in keys.
+// invoice totals its net plus taxPercent; finalizing one that is not a draft, or paying one that
+// is paid, is refused as Stripe does, and pays counts the invoices marked paid. fail (a path
+// suffix) answers 500; beforeList, when set, runs before a list is served (outside the lock);
+// every call is recorded as "METHOD path" and every Idempotency-Key in keys.
 type deferredFake struct {
 	mu           sync.Mutex
 	invoices     map[string]*fakeInvoice
@@ -44,6 +46,8 @@ type deferredFake struct {
 	fail         string
 	unsearchable bool
 	taxPercent   int64
+	pays         int
+	beforeList   func()
 }
 
 func newDeferredFake(t *testing.T) (*deferredFake, *stripe.Client) {
@@ -91,6 +95,9 @@ func (f *deferredFake) json(inv *fakeInvoice) string {
 }
 
 func (f *deferredFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if f.beforeList != nil && r.Method == http.MethodGet && r.URL.Path == "/v1/invoices" {
+		f.beforeList()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	call := r.Method + " " + r.URL.Path
@@ -174,11 +181,18 @@ func (f *deferredFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		inv.Lines = append(inv.Lines, form["lines[0][description]"])
 		inv.Products = append(inv.Products, form["lines[0][price_data][product_data][name]"])
 		respond(f.json(inv))
+	case len(parts) > 1 && parts[1] == "finalize" && inv.Status != "draft":
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","message":"This invoice is already finalized"}}`))
 	case len(parts) > 1 && parts[1] == "finalize":
 		inv.Status = "open"
 		respond(f.json(inv))
+	case len(parts) > 1 && parts[1] == "pay" && inv.Status == "paid":
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","message":"Invoice is already paid"}}`))
 	case len(parts) > 1 && parts[1] == "pay" && form["paid_out_of_band"] == "true":
 		inv.Status = "paid"
+		f.pays++
 		respond(f.json(inv))
 	default:
 		missing()
@@ -187,7 +201,8 @@ func (f *deferredFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // TestIssueDeferredInvoice (AC4): a deferred invoice is issued New → AddLines → Finalize → Pay
 // (out of band) to the org's stamped customer, source deferred with the ledger key, its id stored
-// right after New, one line dated by the day the money arrived, under per-attempt Idempotency-Keys.
+// right after New, one line dated by the day the money arrived, under an Idempotency-Key of the
+// ledger key, the invoice it replaces ("first": none) and the customer.
 func TestIssueDeferredInvoice(t *testing.T) {
 	c := qt.New(t)
 	f, client := newDeferredFake(t)
@@ -195,8 +210,8 @@ func TestIssueDeferredInvoice(t *testing.T) {
 	var recorded []string
 	in := DeferredInvoice{
 		Org: flowOrg, LedgerKey: key, AmountCents: 50_000, ReceivedCents: 60_500, Description: "transfer",
-		ReceivedAt: time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC), Attempt: 1,
-		OnCreated: func(id string) error { recorded = append(recorded, id); return nil },
+		ReceivedAt: time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC),
+		OnCreated:  func(id string) error { recorded = append(recorded, id); return nil },
 	}
 
 	result, err := IssueDeferredInvoice(context.Background(), client, in)
@@ -208,7 +223,7 @@ func TestIssueDeferredInvoice(t *testing.T) {
 	c.Assert(f.writes(), qt.DeepEquals, []string{
 		"POST /v1/invoices", "POST /v1/invoices/in_1/add_lines", "POST /v1/invoices/in_1/finalize", "POST /v1/invoices/in_1/pay",
 	})
-	c.Assert(f.keys, qt.DeepEquals, []string{"topup-deferred:" + key + ":1:cus_1", "topup-deferred-lines:in_1"})
+	c.Assert(f.keys, qt.DeepEquals, []string{"topup-deferred:" + key + ":first:cus_1", "topup-deferred-lines:in_1"})
 	issued := f.invoices["in_1"]
 	c.Assert(issued.Customer, qt.Equals, "cus_1")
 	c.Assert(issued.Metadata[stripe.MetadataKeyWalletTopUpSource], qt.Equals, stripe.TopUpSourceDeferred)
@@ -224,7 +239,7 @@ func TestIssueDeferredInvoice(t *testing.T) {
 	for _, id := range []string{"in_1", ""} {
 		f.calls = nil
 		again := in
-		again.InvoiceID, again.Attempt = id, 2
+		again.InvoiceID = id
 		result, err = IssueDeferredInvoice(context.Background(), client, again)
 		c.Assert(err, qt.IsNil)
 		c.Assert(result.Invoice.ID, qt.Equals, "in_1")
@@ -233,10 +248,10 @@ func TestIssueDeferredInvoice(t *testing.T) {
 }
 
 // TestIssueDeferredInvoiceResume (AC4): a retry resumes the invoice the failed attempt left and
-// never issues a second invoice nor a second line: after a failed Finalize the draft is deleted
-// and created again (a retry under the same attempt replays the deleted draft and fails, which is
-// why every attempt has its own key); after a failed Pay it only pays; a draft whose id was never
-// recorded is found by listing, and a deleted or void one is created again. A finalized total
+// never issues a second invoice nor a second line: after a failed Finalize or AddLines the draft is
+// deleted and created again under a key naming the deleted draft (so Stripe never replays it);
+// after a failed Pay it only pays; a draft whose id was never recorded is found by listing, and a
+// deleted or void one is created again under a key naming it. A finalized total
 // other than the gross received is never paid, on the attempt nor on a retry.
 func TestIssueDeferredInvoiceResume(t *testing.T) {
 	c := qt.New(t)
@@ -249,7 +264,6 @@ func TestIssueDeferredInvoiceResume(t *testing.T) {
 		OnCreated:  func(id string) error { record.invoiceID = id; return nil },
 	}
 	attempt := func() (*Result, error) {
-		in.Attempt++
 		in.InvoiceID = record.invoiceID
 		f.mu.Lock()
 		f.calls = nil
@@ -279,24 +293,21 @@ func TestIssueDeferredInvoiceResume(t *testing.T) {
 	c.Assert(alive[0].ID, qt.Equals, "in_2")
 	c.Assert(alive[0].Lines, qt.HasLen, 1)
 
-	// a retry under the same attempt as a deleted draft gets that draft back from Stripe and fails at
-	// AddLines; the next attempt has its own key and issues the invoice
-	in.LedgerKey, record.invoiceID, in.Attempt = stripe.ManualCreditKeyPrefix+"aaaaaaaaaaaaaaaaaaaaaaaa", "", 0
+	// add_lines fails: the retry deletes the draft and creates the next under a key naming it
+	in.LedgerKey, record.invoiceID = stripe.ManualCreditKeyPrefix+"aaaaaaaaaaaaaaaaaaaaaaaa", ""
 	f.fail = "/add_lines"
 	_, err = attempt()
 	s, id = stage(err)
 	c.Assert([]string{s, id}, qt.DeepEquals, []string{StageAddLines, "in_3"})
 	f.fail = ""
-	in.Attempt--
-	_, err = attempt()
-	s, id = stage(err)
-	c.Assert([]string{s, id}, qt.DeepEquals, []string{StageAddLines, "in_3"})
-	c.Assert(f.writes(), qt.DeepEquals, []string{
-		"DELETE /v1/invoices/in_3", "POST /v1/invoices", "POST /v1/invoices/in_3/add_lines",
-	})
 	result, err := attempt()
 	c.Assert(err, qt.IsNil)
 	c.Assert(result.Invoice.ID, qt.Equals, "in_4")
+	c.Assert(f.writes(), qt.DeepEquals, []string{
+		"DELETE /v1/invoices/in_3", "POST /v1/invoices", "POST /v1/invoices/in_4/add_lines",
+		"POST /v1/invoices/in_4/finalize", "POST /v1/invoices/in_4/pay",
+	})
+	c.Assert(slices.Contains(f.keys, "topup-deferred:"+in.LedgerKey+":in_3:cus_1"), qt.IsTrue)
 	c.Assert(f.invoices["in_4"].Lines, qt.HasLen, 1)
 
 	// pay fails: the retry only pays the open invoice
@@ -323,12 +334,18 @@ func TestIssueDeferredInvoiceResume(t *testing.T) {
 	c.Assert(f.writes()[0], qt.Equals, "DELETE /v1/invoices/in_6")
 	c.Assert(record.invoiceID, qt.Equals, "in_7")
 
-	// the operator voided it: created again
+	// the operator voided it: created again, named by its record or found by listing
 	f.invoices["in_7"].Status = "void"
 	_, err = attempt()
 	c.Assert(err, qt.IsNil)
 	c.Assert(f.writes()[0], qt.Equals, "POST /v1/invoices")
 	c.Assert(record.invoiceID, qt.Equals, "in_8")
+	c.Assert(f.keys, qt.Contains, "topup-deferred:"+in.LedgerKey+":in_7:cus_1")
+	f.invoices["in_8"].Status, record.invoiceID = "void", ""
+	_, err = attempt()
+	c.Assert(err, qt.IsNil)
+	c.Assert(record.invoiceID, qt.Equals, "in_9")
+	c.Assert(f.keys, qt.Contains, "topup-deferred:"+in.LedgerKey+":in_8:cus_1")
 
 	// the total is not the gross received (another tax treatment): left open, never paid
 	in.LedgerKey, record.invoiceID = stripe.ManualCreditKeyPrefix+"dddddddddddddddddddddddd", ""
@@ -336,23 +353,25 @@ func TestIssueDeferredInvoiceResume(t *testing.T) {
 	for range 2 {
 		_, err = attempt()
 		s, id = stage(err)
-		c.Assert([]string{s, id}, qt.DeepEquals, []string{StageTotal, "in_9"})
-		c.Assert(err, qt.ErrorMatches, "invoice in_9 totals 50000 eur cents but 60500 were received.*")
-		c.Assert(slices.Contains(f.writes(), "POST /v1/invoices/in_9/pay"), qt.IsFalse)
+		c.Assert([]string{s, id}, qt.DeepEquals, []string{StageTotal, "in_10"})
+		c.Assert(err, qt.ErrorMatches, "invoice in_10 totals 50000 eur cents but 60500 were received.*")
+		c.Assert(slices.Contains(f.writes(), "POST /v1/invoices/in_10/pay"), qt.IsFalse)
 	}
-	c.Assert(f.invoices["in_9"].Status, qt.Equals, "open")
+	c.Assert(f.invoices["in_10"].Status, qt.Equals, "open")
 }
 
 // TestIssueDeferredInvoiceRefusals (AC4): no invoice without a stamped customer with an address,
 // for a key that is not a manual credit's, or over an uncollectible invoice or an open one for
-// another net amount; a just registered customer is found by its id while the search lags.
+// another net amount; a just registered customer is found by its id while the search lags, and an
+// id Stripe does not know is invalid. An InvoiceID that is not this credit's deferred invoice (a
+// manual top-up's, another credit's) is refused before anything is written: never paid nor deleted.
 func TestIssueDeferredInvoiceRefusals(t *testing.T) {
 	c := qt.New(t)
 	f, client := newDeferredFake(t)
 	in := DeferredInvoice{
 		Org: flowOrg, LedgerKey: stripe.ManualCreditKeyPrefix + "eeeeeeeeeeeeeeeeeeeeeeee", AmountCents: 50_000,
 		ReceivedCents: 60_500, Description: "transfer", ReceivedAt: time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC),
-		Attempt: 1, OnCreated: func(string) error { return nil },
+		OnCreated: func(string) error { return nil },
 	}
 	issue := func(mutate func(d *DeferredInvoice)) error {
 		d := in
@@ -374,14 +393,70 @@ func TestIssueDeferredInvoiceRefusals(t *testing.T) {
 	f.unsearchable = true
 	c.Assert(issue(func(*DeferredInvoice) {}), qt.ErrorIs, ErrNoCustomer)
 	c.Assert(issue(func(d *DeferredInvoice) { d.CustomerID = "cus_other" }), qt.ErrorIs, ErrCustomerOtherOrg)
+	c.Assert(issue(func(d *DeferredInvoice) { d.CustomerID = "cus_missing" }), qt.ErrorMatches,
+		".*customer cus_missing does not exist")
+	c.Assert(issue(func(d *DeferredInvoice) { d.CustomerID = "cus_missing" }), qt.ErrorIs, ErrInvalid)
 	c.Assert(issue(func(d *DeferredInvoice) { d.CustomerID = "cus_1" }), qt.IsNil)
 	f.unsearchable = false
 
 	f.invoices["in_1"].Status = "uncollectible"
-	c.Assert(issue(func(d *DeferredInvoice) { d.Attempt = 2 }), qt.ErrorIs, ErrDuplicate)
+	c.Assert(issue(func(*DeferredInvoice) {}), qt.ErrorIs, ErrDuplicate)
 	f.invoices["in_1"].Status, f.invoices["in_1"].Net = "open", 40_000
-	c.Assert(issue(func(d *DeferredInvoice) { d.Attempt = 2 }), qt.ErrorIs, ErrDuplicate)
+	c.Assert(issue(func(*DeferredInvoice) {}), qt.ErrorIs, ErrDuplicate)
 	c.Assert(f.writes(), qt.DeepEquals, []string{
 		"POST /v1/invoices", "POST /v1/invoices/in_1/add_lines", "POST /v1/invoices/in_1/finalize", "POST /v1/invoices/in_1/pay",
 	})
+
+	f.calls = nil
+	for id, inv := range map[string]*fakeInvoice{
+		"in_manual": {Status: "open", Net: 50_000, Metadata: map[string]string{
+			stripe.MetadataKeyWalletTopUpSource: stripe.TopUpSourceManual, stripe.MetadataKeyWalletLedgerKey: in.LedgerKey,
+		}},
+		"in_foreign": {Status: "draft", Net: 50_000, Metadata: map[string]string{
+			stripe.MetadataKeyWalletTopUpSource: stripe.TopUpSourceDeferred,
+			stripe.MetadataKeyWalletLedgerKey:   stripe.ManualCreditKeyPrefix + "ffffffffffffffffffffffff",
+		}},
+	} {
+		inv.ID, inv.Customer = id, "cus_1"
+		f.invoices[id] = inv
+		f.order = append(f.order, id)
+		err := issue(func(d *DeferredInvoice) { d.InvoiceID = id })
+		c.Assert(err, qt.ErrorIs, ErrInvalid)
+		c.Assert(err, qt.ErrorMatches, ".*invoice "+id+" does not belong to "+in.LedgerKey)
+	}
+	c.Assert(f.writes(), qt.HasLen, 0)
+	c.Assert(f.invoices["in_manual"].Status, qt.Equals, "open")
+	c.Assert(f.invoices["in_foreign"].Deleted, qt.IsFalse)
+}
+
+// TestIssueDeferredInvoiceConcurrent (AC4): two calls for the same credit from the same state (no
+// invoice yet), run in parallel, share one Stripe invoice through the create's Idempotency-Key:
+// one invoice is created, with one line, and paid once; the call that finds it finalized or paid
+// by the other resumes it as a retry would.
+func TestIssueDeferredInvoiceConcurrent(t *testing.T) {
+	c := qt.New(t)
+	f, client := newDeferredFake(t)
+	var listed sync.WaitGroup
+	listed.Add(2)
+	f.beforeList = func() { listed.Done(); listed.Wait() } // both list before either creates
+	in := DeferredInvoice{
+		Org: flowOrg, LedgerKey: stripe.ManualCreditKeyPrefix + "1234567890abcdef12345678", AmountCents: 50_000,
+		ReceivedCents: 60_500, Description: "transfer", ReceivedAt: time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC),
+		OnCreated: func(string) error { return nil },
+	}
+	var wg sync.WaitGroup
+	results := make([]*Result, 2)
+	errs := make([]error, 2)
+	for i := range 2 {
+		wg.Go(func() { results[i], errs[i] = IssueDeferredInvoice(context.Background(), client, in) })
+	}
+	wg.Wait()
+	for i := range 2 {
+		c.Assert(errs[i], qt.IsNil)
+		c.Assert(results[i].Invoice.ID, qt.Equals, "in_1")
+		c.Assert(results[i].Invoice.Status, qt.Equals, "paid")
+	}
+	c.Assert(f.order, qt.DeepEquals, []string{"in_1"})
+	c.Assert(f.invoices["in_1"].Lines, qt.HasLen, 1)
+	c.Assert(f.pays, qt.Equals, 1)
 }
