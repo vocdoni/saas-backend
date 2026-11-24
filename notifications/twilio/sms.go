@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	t "github.com/twilio/twilio-go"
 	"github.com/twilio/twilio-go/client"
@@ -188,6 +189,9 @@ func (tsms *SMS) verify(ctx context.Context, notification *notifications.Notific
 	if locale := verifyLocale(notification.Lang); locale != "" {
 		params.SetLocale(locale)
 	}
+	if ttl := verifyTTL(notification.OTPTTL); ttl != "" {
+		params.SetTemplateCustomSubstitutions(ttl)
+	}
 	return await(ctx, func() error {
 		_, err := tsms.verifications.CreateVerification(tsms.config.VerifyServiceSID, params)
 		// a refusal is resent as a plain message, unless the caller gave up by then
@@ -229,6 +233,17 @@ func verifyLocale(lang string) string {
 		return base
 	}
 	return ""
+}
+
+// verifyTTL is the template substitution that makes Verify's "expires in N minutes"
+// state the code's real lifetime instead of Verify's own 10 minutes, or "" when the
+// lifetime is unknown. Minutes round down, so the text never promises more time.
+func verifyTTL(ttl time.Duration) string {
+	if ttl <= 0 {
+		return ""
+	}
+	minutes := max(int(ttl/time.Minute), 1)
+	return fmt.Sprintf(`{"ttl":"%d"}`, minutes)
 }
 
 // codeSenderRecipientMismatch is Twilio's 21612: the message cannot be sent with

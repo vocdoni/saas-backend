@@ -35,7 +35,9 @@ func (f *fakeVerifications) CreateVerification(
 
 func TestSendNotificationVerify(t *testing.T) {
 	c := qt.New(t)
-	otp := &notifications.Notification{ToNumber: "+43600000000", PlainBody: "code 123456", OTPCode: "123456", Lang: "ca"}
+	otp := &notifications.Notification{
+		ToNumber: "+43600000000", PlainBody: "code 123456", OTPCode: "123456", Lang: "ca", OTPTTL: 5*time.Minute + 30*time.Second,
+	}
 	newSMS := func(verifySID string, verr error, msgErrs map[string]error) (*SMS, *fakeVerifications, *fakeMessages) {
 		v := &fakeVerifications{err: verr}
 		m := &fakeMessages{errs: msgErrs}
@@ -52,6 +54,8 @@ func TestSendNotificationVerify(t *testing.T) {
 	c.Assert(*v.calls[0].Channel, qt.Equals, "sms")
 	c.Assert(*v.calls[0].CustomCode, qt.Equals, "123456")
 	c.Assert(*v.calls[0].Locale, qt.Equals, "ca")
+	// the code's real lifetime replaces Verify's own "expires in 10 minutes"
+	c.Assert(*v.calls[0].TemplateCustomSubstitutions, qt.Equals, `{"ttl":"5"}`)
 	c.Assert(m.froms, qt.HasLen, 0)
 
 	// Verify failing falls back to the plain message path, sender fallback included
@@ -86,6 +90,15 @@ func TestVerifyLocale(t *testing.T) {
 		"es": "es", "ca": "ca", "pt-BR": "pt", "EN_us": "en", "eu": "", "gl": "", "": "",
 	} {
 		c.Assert(verifyLocale(lang), qt.Equals, want, qt.Commentf("lang %q", lang))
+	}
+}
+
+func TestVerifyTTL(t *testing.T) {
+	c := qt.New(t)
+	for ttl, want := range map[time.Duration]string{
+		0: "", 10 * time.Minute: `{"ttl":"10"}`, 4*time.Minute + 59*time.Second: `{"ttl":"4"}`, 30 * time.Second: `{"ttl":"1"}`,
+	} {
+		c.Assert(verifyTTL(ttl), qt.Equals, want, qt.Commentf("ttl %s", ttl))
 	}
 }
 
