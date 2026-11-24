@@ -42,6 +42,7 @@ const certGatewayPublicKeysKey = "cert_gateway_public_keys"
 // maintenanceWindowKey is the flag of the scheduled maintenance window, read from
 // VOCDONI_MAINTENANCE_WINDOW like disableBlindCSPKey.
 const maintenanceWindowKey = "maintenance_window"
+
 // environmentLabels are the deployment environments (VOCDONI_ENVIRONMENT, named as
 // OpenTelemetry's deployment.environment.name) and the name each one shows users;
 // production shows none. The environment only labels things: behaviour belongs to
