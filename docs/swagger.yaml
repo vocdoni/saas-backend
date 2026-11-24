@@ -7206,7 +7206,7 @@ paths:
           schema:
             type: string
         "400":
-          description: Code sent recently, or no mail service
+          description: Code sent recently, send budget exhausted, or no mail service
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -7258,6 +7258,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "409":
           description: User already has a password
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "413":
+          description: Request body too large
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
