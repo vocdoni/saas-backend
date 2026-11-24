@@ -30,6 +30,11 @@ type Notification struct {
 	PlainBody      string `json:"plainBody"`
 	EnableTracking bool   `json:"enableTracking"`
 	ReplyTo        string `json:"replyTo"`
+	// OTPCode is the bare one-time code in the message, for a service that delivers
+	// the code itself (Twilio Verify) instead of sending PlainBody. Never serialized.
+	OTPCode string `json:"-"`
+	// Lang is the recipient's language, for a service that writes the message itself.
+	Lang string `json:"-"`
 }
 
 // NotificationService is the interface that must be implemented by any

@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	t "github.com/twilio/twilio-go"
 	"github.com/twilio/twilio-go/client"
 	api "github.com/twilio/twilio-go/rest/api/v2010"
+	verify "github.com/twilio/twilio-go/rest/verify/v2"
 	"github.com/vocdoni/saas-backend/notifications"
 	"go.vocdoni.io/dvote/log"
 )
@@ -33,6 +35,10 @@ type Config struct {
 	// Twilio refused with 21612 for FromNumber: an alphanumeric sender ID is not
 	// accepted in every country (some require it to be registered first).
 	FallbackFromNumber string
+	// VerifyServiceSID, when set, names a Twilio Verify service (with custom codes
+	// enabled) that delivers one-time codes: Verify picks a sender each country
+	// accepts. A code it fails to deliver is sent as a plain message instead.
+	VerifyServiceSID string
 }
 
 // messageCreator is the part of the Twilio REST API the service uses.
@@ -40,11 +46,17 @@ type messageCreator interface {
 	CreateMessage(params *api.CreateMessageParams) (*api.ApiV2010Message, error)
 }
 
+// verificationCreator is the part of the Twilio Verify API the service uses.
+type verificationCreator interface {
+	CreateVerification(serviceSid string, params *verify.CreateVerificationParams) (*verify.VerifyV2Verification, error)
+}
+
 // SMS is the implementation of the NotificationService interface for the
 // Twilio SMS service. It contains the configuration and the Twilio REST client.
 type SMS struct {
-	config   *Config
-	messages messageCreator
+	config        *Config
+	messages      messageCreator
+	verifications verificationCreator
 }
 
 var _ notifications.NotificationService = &SMS{}
@@ -70,7 +82,9 @@ func (tsms *SMS) New(rawConfig any) error {
 		return err
 	}
 	// init Twilio REST client
-	tsms.messages = t.NewRestClient().Api
+	rest := t.NewRestClient()
+	tsms.messages = rest.Api
+	tsms.verifications = rest.VerifyV2
 	return nil
 }
 
@@ -79,6 +93,14 @@ func (tsms *SMS) New(rawConfig any) error {
 // returns an error if the notification could not be sent or if the context is
 // done.
 func (tsms *SMS) SendNotification(ctx context.Context, notification *notifications.Notification) error {
+	if tsms.config.VerifyServiceSID != "" && notification.OTPCode != "" {
+		err := tsms.verify(ctx, notification)
+		if err == nil || ctx.Err() != nil {
+			// on a timeout Verify may still deliver the code: a plain resend could duplicate it
+			return err
+		}
+		log.Warnw("twilio verify failed, sending the code as a plain message", "error", err)
+	}
 	err := tsms.send(ctx, tsms.config.FromNumber, notification)
 	if fallback := tsms.config.FallbackFromNumber; fallback != "" && fallback != tsms.config.FromNumber &&
 		twilioErrorCode(err) == codeSenderRecipientMismatch {
@@ -96,18 +118,55 @@ func (tsms *SMS) send(ctx context.Context, from string, notification *notificati
 	params.SetTo(notification.ToNumber)
 	params.SetFrom(from)
 	params.SetBody(notification.PlainBody)
-	errCh := make(chan error, 1)
-	go func() {
+	return await(ctx, func() error {
 		_, err := tsms.messages.CreateMessage(params)
-		errCh <- err
-		close(errCh)
-	}()
+		return err
+	})
+}
+
+// verify delivers the notification's one-time code through the Verify service.
+func (tsms *SMS) verify(ctx context.Context, notification *notifications.Notification) error {
+	params := &verify.CreateVerificationParams{}
+	params.SetTo(notification.ToNumber)
+	params.SetChannel("sms")
+	params.SetCustomCode(notification.OTPCode)
+	if locale := verifyLocale(notification.Lang); locale != "" {
+		params.SetLocale(locale)
+	}
+	return await(ctx, func() error {
+		_, err := tsms.verifications.CreateVerification(tsms.config.VerifyServiceSID, params)
+		return err
+	})
+}
+
+// await runs call in a goroutine and returns its error, or ctx's once ctx is done.
+func await(ctx context.Context, call func() error) error {
+	errCh := make(chan error, 1)
+	go func() { errCh <- call() }()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case err := <-errCh:
 		return err
 	}
+}
+
+// verifyLocales are the Twilio Verify message languages, by base language code.
+var verifyLocales = map[string]struct{}{
+	"ar": {}, "ca": {}, "cs": {}, "da": {}, "de": {}, "el": {}, "en": {}, "es": {}, "fi": {}, "fr": {},
+	"he": {}, "hi": {}, "hr": {}, "hu": {}, "id": {}, "it": {}, "ja": {}, "ko": {}, "ms": {}, "nb": {},
+	"nl": {}, "pl": {}, "pt": {}, "ro": {}, "ru": {}, "sv": {}, "th": {}, "tr": {}, "vi": {}, "zh": {},
+}
+
+// verifyLocale maps a language tag ("es", "pt-BR") to a Verify locale, or "" to let
+// Verify pick the language from the recipient's country.
+func verifyLocale(lang string) string {
+	base, _, _ := strings.Cut(strings.ToLower(lang), "-")
+	base, _, _ = strings.Cut(base, "_")
+	if _, ok := verifyLocales[base]; ok {
+		return base
+	}
+	return ""
 }
 
 // codeSenderRecipientMismatch is Twilio's 21612: the message cannot be sent with

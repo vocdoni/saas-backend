@@ -125,6 +125,8 @@ func NewNotificationChallenge(
 		n.ToAddress = to
 	case SMSChallenge:
 		n.ToNumber = to
+		n.OTPCode = code
+		n.Lang = lang
 	default:
 		return nil, ErrInvalidNotificationType
 	}
