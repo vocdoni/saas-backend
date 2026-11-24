@@ -37,6 +37,11 @@ func TestValidateBilling(t *testing.T) {
 	_, err = ValidateBilling(optional)
 	c.Assert(err, qt.IsNil)
 
+	multi := validBilling()
+	multi.TaxIDType = "eu_oss_vat"
+	_, err = ValidateBilling(multi)
+	c.Assert(err, qt.IsNil)
+
 	long := func(n int) string { return strings.Repeat("é", n) }
 	for name, mutate := range map[string]func(b *BillingDetails){
 		"no name":         func(b *BillingDetails) { b.Name = " " },
@@ -102,6 +107,11 @@ func (f *customerFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","code":"tax_id_invalid",` +
 				`"param":"tax_id_data[0][value]","message":"Invalid value for es_cif: bad"}}`))
+			return
+		}
+		if r.PostForm.Get("tax_id_data[0][value]") == "denied" {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","message":"permission denied"}}`))
 			return
 		}
 		id, ok := f.replays[key]
@@ -174,6 +184,13 @@ func TestCreateCustomer(t *testing.T) {
 	c.Assert(*refusal, qt.DeepEquals, StripeRefusalError{
 		Code: "tax_id_invalid", Param: "tax_id_data[0][value]", Msg: "Invalid value for es_cif: bad",
 	})
+
+	// a permission error is a Stripe failure, not the admin's bad details
+	denied := validBilling()
+	denied.TaxIDValue = "denied"
+	_, err = CreateCustomer(ctx, client, flowOrg, denied)
+	c.Assert(err, qt.ErrorMatches, "could not create the customer of organization .*")
+	c.Assert(errors.Is(err, ErrInvalid), qt.IsFalse)
 
 	requests := len(f.keys)
 	invalid := validBilling()

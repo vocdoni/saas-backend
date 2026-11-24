@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/mail"
 	"regexp"
 	"strings"
@@ -38,7 +39,7 @@ type BillingDetails struct {
 
 var (
 	countryPattern   = regexp.MustCompile(`^[A-Z]{2}$`)
-	taxIDTypePattern = regexp.MustCompile(`^[a-z]{2,3}_[a-z]{2,6}$`)
+	taxIDTypePattern = regexp.MustCompile(`^[a-z]{2,3}(_[a-z]+){1,2}$`)
 )
 
 // ValidateBilling checks the details alone and returns them trimmed. Stripe checks the rest when
@@ -140,7 +141,8 @@ func CreateCustomer(ctx context.Context, c *stripe.Client, org common.Address, b
 	customer, err := stripecustomer.New(params)
 	if err != nil {
 		var stripeErr *stripeapi.Error
-		if errors.As(err, &stripeErr) && stripeErr.Type == stripeapi.ErrorTypeInvalidRequest {
+		if errors.As(err, &stripeErr) && stripeErr.Type == stripeapi.ErrorTypeInvalidRequest &&
+			stripeErr.HTTPStatusCode == http.StatusBadRequest {
 			return Customer{}, &StripeRefusalError{Code: string(stripeErr.Code), Param: stripeErr.Param, Msg: stripeErr.Msg}
 		}
 		return Customer{}, fmt.Errorf("could not create the customer of organization %s: %w", org, err)
