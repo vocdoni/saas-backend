@@ -112,8 +112,9 @@ const (
 	// DELETE /integrator/organizations/{orgAddress}/apikeys/{keyId} to revoke an API key
 	integratorOrgAPIKeyEndpoint = "/integrator/organizations/{orgAddress}/apikeys/{keyId}"
 
-	// POST /notifications/sms/status to receive Twilio's SMS delivery status callbacks
-	smsStatusCallback = "/notifications/sms/status"
+	// SMSStatusCallbackRoute receives Twilio's SMS delivery status callbacks (POST); exported so the
+	// service can build the public callback URL it hands to Twilio
+	SMSStatusCallbackRoute = "/notifications/sms/status"
 	// GET /metrics to scrape Prometheus metrics, with the metrics bearer token
 	metricsEndpoint = "/metrics"
 	// POST /payments/webhook to receive the Stripe webhook

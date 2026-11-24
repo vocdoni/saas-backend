@@ -557,7 +557,7 @@ func (a *API) initRouter() http.Handler {
 		})
 		handle(r, http.MethodGet, infoEndpoint, a.InfoHandler)
 		if a.smsStatus != nil {
-			handle(r, http.MethodPost, smsStatusCallback, a.smsStatus)
+			handle(r, http.MethodPost, SMSStatusCallbackRoute, a.smsStatus)
 		}
 		if a.metricsToken != "" {
 			handle(r, http.MethodGet, metricsEndpoint, requireBearer(a.metricsToken, promhttp.Handler()).ServeHTTP)

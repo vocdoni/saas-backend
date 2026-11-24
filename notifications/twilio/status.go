@@ -15,8 +15,9 @@ const signatureHeader = "X-Twilio-Signature"
 // Config.StatusCallbackURL for every message sent with it. Failures
 // that happen after Twilio accepts a message (carrier filtering, unreachable
 // handset) only show up here. The request must carry a valid Twilio signature,
-// computed over the configured callback URL: behind the edge proxy the URL the
-// server sees differs from the one Twilio signed.
+// computed over the configured callback URL plus the request's query string
+// (which names the source): behind the edge proxy the scheme and host the
+// server sees differ from the ones Twilio signed.
 func (tsms *SMS) HandleStatusCallback(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
@@ -28,15 +29,20 @@ func (tsms *SMS) HandleStatusCallback(w http.ResponseWriter, r *http.Request) {
 			params[k] = v[0]
 		}
 	}
+	signedURL := tsms.config.StatusCallbackURL
+	if r.URL.RawQuery != "" {
+		signedURL += "?" + r.URL.RawQuery
+	}
 	validator := client.NewRequestValidator(tsms.config.AuthToken)
-	if !validator.Validate(tsms.config.StatusCallbackURL, params, r.Header.Get(signatureHeader)) {
+	if !validator.Validate(signedURL, params, r.Header.Get(signatureHeader)) {
 		http.Error(w, "invalid signature", http.StatusForbidden)
 		return
 	}
+	source := boundSource(r.URL.Query().Get("source"))
 	status, code := params["MessageStatus"], params["ErrorCode"]
-	recordStatus(status, code, time.Now())
+	recordStatus(source, status, code, time.Now())
 	if status == "undelivered" || status == "failed" {
-		log.Warnw("sms not delivered", "status", status, "code", code, "sid", params["MessageSid"])
+		log.Warnw("sms not delivered", "source", source, "status", status, "code", code, "sid", params["MessageSid"])
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

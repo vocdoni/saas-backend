@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -76,8 +77,11 @@ func main() {
 	flag.String("twilioAccountSid", "", "Twilio account SID")
 	flag.String("twilioAuthToken", "", "Twilio auth token")
 	flag.String("twilioFromNumber", "", "Twilio from number")
-	flag.String("smsCanaryNumber", "", "if set, send a delivery-check SMS to this number every smsCanaryInterval")
-	flag.Duration("smsCanaryInterval", 24*time.Hour, "how often the SMS canary is sent")
+	flag.String("twilioFallbackFromNumber", "",
+		"numeric Twilio sender used when twilioFromNumber is refused for a recipient (Twilio error 21612)")
+	flag.String("smsCanaryNumber", "",
+		"if set, send a delivery-check SMS to this number every smsCanaryInterval (enable on one instance only)")
+	flag.Duration("smsCanaryInterval", 24*time.Hour, "how often the SMS canary is sent (at least 1h)")
 	flag.String("metricsToken", "", "if set, serve Prometheus metrics on /metrics to requests bearing this token")
 	flag.String("stripeApiSecret", "", "Stripe API secret")
 	flag.String("stripeWebhookSecret", "", "Stripe Webhook secret")
@@ -138,6 +142,7 @@ func main() {
 	twilioAccountSid := viper.GetString("twilioAccountSid")
 	twilioAuthToken := viper.GetString("twilioAuthToken")
 	twilioFromNumber := viper.GetString("twilioFromNumber")
+	twilioFallbackFromNumber := viper.GetString("twilioFallbackFromNumber")
 	smsCanaryNumber := viper.GetString("smsCanaryNumber")
 	smsCanaryInterval := viper.GetDuration("smsCanaryInterval")
 	// stripe vars
@@ -281,13 +286,15 @@ func main() {
 	if twilioAccountSid != "" && twilioAuthToken != "" && twilioFromNumber != "" {
 		sms := new(twilio.SMS)
 		smsConf := &twilio.Config{
-			AccountSid: twilioAccountSid,
-			AuthToken:  twilioAuthToken,
-			FromNumber: twilioFromNumber,
+			AccountSid:         twilioAccountSid,
+			AuthToken:          twilioAuthToken,
+			FromNumber:         twilioFromNumber,
+			FallbackFromNumber: twilioFallbackFromNumber,
 		}
-		// delivery status callbacks need a public URL for Twilio to post to
-		if server != "" {
-			smsConf.StatusCallbackURL = strings.TrimSuffix(server, "/") + "/notifications/sms/status"
+		// delivery status callbacks need the exact public https URL Twilio posts to
+		// (and signs); the localhost default would only hand Twilio a dead link
+		if u, err := url.Parse(server); err == nil && u.Scheme == "https" && u.Host != "" {
+			smsConf.StatusCallbackURL = strings.TrimSuffix(server, "/") + api.SMSStatusCallbackRoute
 			apiConf.SMSStatusHandler = sms.HandleStatusCallback
 		}
 		if err := sms.New(smsConf); err != nil {
@@ -295,7 +302,8 @@ func main() {
 		}
 		apiConf.SMSService = sms
 		cspConf.SMSService = sms
-		log.Infow("SMS service created", "from", twilioFromNumber, "statusCallback", smsConf.StatusCallbackURL)
+		log.Infow("SMS service created", "from", twilioFromNumber, "fallbackFrom", twilioFallbackFromNumber,
+			"statusCallback", smsConf.StatusCallbackURL)
 		if smsCanaryNumber != "" {
 			smsCanary = func(ctx context.Context) { sms.RunCanary(ctx, smsCanaryNumber, smsCanaryInterval) }
 		}
