@@ -7,6 +7,7 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	verify "github.com/twilio/twilio-go/rest/verify/v2"
 	"github.com/vocdoni/saas-backend/notifications"
 )
@@ -86,4 +87,38 @@ func TestVerifyLocale(t *testing.T) {
 	} {
 		c.Assert(verifyLocale(lang), qt.Equals, want, qt.Commentf("lang %q", lang))
 	}
+}
+
+func TestVerifyCountsSends(t *testing.T) {
+	c := qt.New(t)
+	count := func(result, code string) float64 {
+		return testutil.ToFloat64(smsSends.WithLabelValues(sourceVoter, result, code))
+	}
+	otp := &notifications.Notification{ToNumber: "+43600000000", PlainBody: "code 123456", OTPCode: "123456"}
+	accepted, rerouted, rejected := count(sendAccepted, ""), count(sendRerouted, "60200"), count(sendRejected, "60200")
+	newSMS := func(v *fakeVerifications) *SMS {
+		conf := &Config{FromNumber: "VOCDONI", VerifyServiceSID: "VA1"}
+		return &SMS{config: conf, messages: &fakeMessages{}, verifications: v}
+	}
+
+	// delivered by Verify: one accepted send
+	c.Assert(newSMS(&fakeVerifications{}).SendNotification(context.Background(), otp), qt.IsNil)
+	c.Assert(count(sendAccepted, ""), qt.Equals, accepted+1)
+
+	// refused by Verify and resent as a plain message: rerouted, then accepted
+	c.Assert(newSMS(&fakeVerifications{err: twilioErr(60200)}).SendNotification(context.Background(), otp), qt.IsNil)
+	c.Assert(count(sendRerouted, "60200"), qt.Equals, rerouted+1)
+	c.Assert(count(sendAccepted, ""), qt.Equals, accepted+2)
+
+	// refused after the caller gave up: nothing resends it, so it is rejected
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+	slow := &fakeVerifications{err: twilioErr(60200), delay: 50 * time.Millisecond}
+	c.Assert(newSMS(slow).SendNotification(ctx, otp), qt.ErrorIs, context.DeadlineExceeded)
+	deadline := time.Now().Add(2 * time.Second)
+	for count(sendRejected, "60200") == rejected && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	c.Assert(count(sendRejected, "60200"), qt.Equals, rejected+1)
+	c.Assert(count(sendRerouted, "60200"), qt.Equals, rerouted+1)
 }

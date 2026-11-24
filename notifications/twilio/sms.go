@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -31,6 +32,10 @@ type Config struct {
 	AccountSid string
 	AuthToken  string
 	FromNumber string
+	// StatusCallbackURL, when set, is where Twilio posts each message's delivery
+	// status (see SMS.HandleStatusCallback). It must be the public URL as Twilio
+	// reaches it: the callback signature is checked against it.
+	StatusCallbackURL string
 	// FallbackFromNumber, when set, is a numeric sender used to resend a message
 	// Twilio refused with 21612 for FromNumber: an alphanumeric sender ID is not
 	// accepted in every country (some require it to be registered first).
@@ -85,6 +90,9 @@ func (tsms *SMS) New(rawConfig any) error {
 	rest := t.NewRestClient()
 	tsms.messages = rest.Api
 	tsms.verifications = rest.VerifyV2
+	// a fresh start counts as a delivery, or the no-delivery alert would fire on
+	// every restart until the first one
+	smsLastDelivered.SetToCurrentTime()
 	return nil
 }
 
@@ -101,30 +109,64 @@ func (tsms *SMS) SendNotification(ctx context.Context, notification *notificatio
 		}
 		log.Warnw("twilio verify failed, sending the code as a plain message", "error", err)
 	}
-	err := tsms.send(ctx, tsms.config.FromNumber, notification)
-	if fallback := tsms.config.FallbackFromNumber; fallback != "" && fallback != tsms.config.FromNumber &&
-		twilioErrorCode(err) == codeSenderRecipientMismatch {
+	return tsms.deliver(ctx, notification, sourceVoter)
+}
+
+// deliver sends the notification from FromNumber, resending it from the fallback
+// number when Twilio refuses that sender for the recipient.
+func (tsms *SMS) deliver(ctx context.Context, notification *notifications.Notification, source string) error {
+	err := tsms.send(ctx, tsms.config.FromNumber, notification, source)
+	if fallback, ok := tsms.fallbackFor(tsms.config.FromNumber, err); ok {
 		log.Infow("sms sender refused for recipient, resending from fallback number",
 			"from", tsms.config.FromNumber, "fallback", fallback)
-		err = tsms.send(ctx, fallback, notification)
+		err = tsms.send(ctx, fallback, notification, source)
 	}
 	return classifySendError(err)
 }
 
+// fallbackFor returns the sender to resend from when Twilio refused from for the
+// recipient (21612), and whether there is one.
+func (tsms *SMS) fallbackFor(from string, err error) (string, bool) {
+	fallback := tsms.config.FallbackFromNumber
+	ok := fallback != "" && from == tsms.config.FromNumber && fallback != from &&
+		twilioErrorCode(err) == codeSenderRecipientMismatch
+	return fallback, ok
+}
+
+// statusCallbackURL is the callback URL for one source's messages. The source
+// travels in the query string, which Twilio includes in the signed URL.
+func (tsms *SMS) statusCallbackURL(source string) string {
+	if tsms.config.StatusCallbackURL == "" {
+		return ""
+	}
+	return tsms.config.StatusCallbackURL + "?" + url.Values{"source": {source}}.Encode()
+}
+
 // send creates one message from the given sender and waits for Twilio's answer
-// or for ctx to be done.
-func (tsms *SMS) send(ctx context.Context, from string, notification *notifications.Notification) error {
+// or for ctx to be done. The outcome is counted when Twilio answers, even if ctx
+// is done by then.
+func (tsms *SMS) send(ctx context.Context, from string, notification *notifications.Notification, source string) error {
 	params := &api.CreateMessageParams{}
 	params.SetTo(notification.ToNumber)
 	params.SetFrom(from)
 	params.SetBody(notification.PlainBody)
+	if callback := tsms.statusCallbackURL(source); callback != "" {
+		params.SetStatusCallback(callback)
+	}
 	return await(ctx, func() error {
 		_, err := tsms.messages.CreateMessage(params)
+		refusal := sendRejected
+		if _, ok := tsms.fallbackFor(from, err); ok {
+			refusal = sendRerouted
+		}
+		recordSend(source, err, refusal)
 		return err
 	})
 }
 
 // verify delivers the notification's one-time code through the Verify service.
+// Verify sends no per-message status callback, so these codes only show up in
+// the sends counter.
 func (tsms *SMS) verify(ctx context.Context, notification *notifications.Notification) error {
 	params := &verify.CreateVerificationParams{}
 	params.SetTo(notification.ToNumber)
@@ -135,11 +177,18 @@ func (tsms *SMS) verify(ctx context.Context, notification *notifications.Notific
 	}
 	return await(ctx, func() error {
 		_, err := tsms.verifications.CreateVerification(tsms.config.VerifyServiceSID, params)
+		// a refusal is resent as a plain message, unless the caller gave up by then
+		refusal := sendRerouted
+		if ctx.Err() != nil {
+			refusal = sendRejected
+		}
+		recordSend(sourceVoter, err, refusal)
 		return err
 	})
 }
 
-// await runs call in a goroutine and returns its error, or ctx's once ctx is done.
+// await runs call in a goroutine and returns its error, or ctx's once ctx is
+// done. call runs to completion either way, so it can count its own outcome.
 func await(ctx context.Context, call func() error) error {
 	errCh := make(chan error, 1)
 	go func() { errCh <- call() }()
