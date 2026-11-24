@@ -113,15 +113,43 @@ func TestRecordSend(t *testing.T) {
 	}
 
 	accepted, rejected := count(sourceVoter, sendAccepted, ""), count(sourceVoter, sendRejected, "21612")
+	rerouted := count(sourceVoter, sendRerouted, "21612")
 	failed, canary := count(sourceVoter, sendError, ""), count(sourceCanary, sendAccepted, "")
-	recordSend(sourceVoter, nil)
-	recordSend(sourceVoter, &client.TwilioRestError{Status: http.StatusBadRequest, Code: 21612})
-	recordSend(sourceVoter, fmt.Errorf("dial tcp: connection refused"))
-	recordSend(sourceCanary, nil)
+	refused := &client.TwilioRestError{Status: http.StatusBadRequest, Code: 21612}
+	recordSend(sourceVoter, nil, sendRejected)
+	recordSend(sourceVoter, refused, sendRejected)
+	recordSend(sourceVoter, refused, sendRerouted)
+	recordSend(sourceVoter, fmt.Errorf("dial tcp: connection refused"), sendRejected)
+	recordSend(sourceCanary, nil, sendRejected)
 	c.Assert(count(sourceVoter, sendAccepted, ""), qt.Equals, accepted+1)
 	c.Assert(count(sourceVoter, sendRejected, "21612"), qt.Equals, rejected+1)
+	c.Assert(count(sourceVoter, sendRerouted, "21612"), qt.Equals, rerouted+1)
 	c.Assert(count(sourceVoter, sendError, ""), qt.Equals, failed+1)
 	c.Assert(count(sourceCanary, sendAccepted, ""), qt.Equals, canary+1)
+}
+
+func TestFallbackCountsRerouted(t *testing.T) {
+	c := qt.New(t)
+	count := func(result string) float64 {
+		return testutil.ToFloat64(smsSends.WithLabelValues(sourceVoter, result, "21612"))
+	}
+	rerouted, rejected := count(sendRerouted), count(sendRejected)
+	n := &notifications.Notification{ToNumber: "+43600000000", PlainBody: "123456"}
+
+	// refused, then rescued by the fallback: rerouted, not rejected
+	tsms := &SMS{
+		config:   &Config{FromNumber: "VOCDONI", FallbackFromNumber: "+15550001111"},
+		messages: &fakeMessages{errs: map[string]error{"VOCDONI": twilioErr(21612)}},
+	}
+	c.Assert(tsms.SendNotification(context.Background(), n), qt.IsNil)
+	c.Assert(count(sendRerouted), qt.Equals, rerouted+1)
+	c.Assert(count(sendRejected), qt.Equals, rejected)
+
+	// refused by both senders: the first attempt is rerouted, the fallback's is rejected
+	tsms.messages = &fakeMessages{errs: map[string]error{"VOCDONI": twilioErr(21612), "+15550001111": twilioErr(21612)}}
+	c.Assert(tsms.SendNotification(context.Background(), n), qt.Not(qt.IsNil))
+	c.Assert(count(sendRerouted), qt.Equals, rerouted+2)
+	c.Assert(count(sendRejected), qt.Equals, rejected+1)
 }
 
 // slowMessages answers CreateMessage after a delay.

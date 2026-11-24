@@ -94,13 +94,21 @@ func (tsms *SMS) SendNotification(ctx context.Context, notification *notificatio
 // number when Twilio refuses that sender for the recipient.
 func (tsms *SMS) deliver(ctx context.Context, notification *notifications.Notification, source string) error {
 	err := tsms.send(ctx, tsms.config.FromNumber, notification, source)
-	if fallback := tsms.config.FallbackFromNumber; fallback != "" && fallback != tsms.config.FromNumber &&
-		twilioErrorCode(err) == codeSenderRecipientMismatch {
+	if fallback, ok := tsms.fallbackFor(tsms.config.FromNumber, err); ok {
 		log.Infow("sms sender refused for recipient, resending from fallback number",
 			"from", tsms.config.FromNumber, "fallback", fallback)
 		err = tsms.send(ctx, fallback, notification, source)
 	}
 	return classifySendError(err)
+}
+
+// fallbackFor returns the sender to resend from when Twilio refused from for the
+// recipient (21612), and whether there is one.
+func (tsms *SMS) fallbackFor(from string, err error) (string, bool) {
+	fallback := tsms.config.FallbackFromNumber
+	ok := fallback != "" && from == tsms.config.FromNumber && fallback != from &&
+		twilioErrorCode(err) == codeSenderRecipientMismatch
+	return fallback, ok
 }
 
 // statusCallbackURL is the callback URL for one source's messages. The source
@@ -126,7 +134,11 @@ func (tsms *SMS) send(ctx context.Context, from string, notification *notificati
 	errCh := make(chan error, 1)
 	go func() {
 		_, err := tsms.messages.CreateMessage(params)
-		recordSend(source, err)
+		refusal := sendRejected
+		if _, ok := tsms.fallbackFor(from, err); ok {
+			refusal = sendRerouted
+		}
+		recordSend(source, err, refusal)
 		errCh <- err
 		close(errCh)
 	}()

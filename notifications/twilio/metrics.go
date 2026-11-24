@@ -14,6 +14,7 @@ import (
 const (
 	sendAccepted = "accepted" // Twilio accepted the message
 	sendRejected = "rejected" // Twilio answered with an API error (code label set)
+	sendRerouted = "rerouted" // refused for this sender (21612), resent from the fallback number
 	sendError    = "error"    // no Twilio answer: network error, HTTP client timeout
 )
 
@@ -26,7 +27,7 @@ const (
 var (
 	smsSends = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "saas_sms_sends_total",
-		Help: "SMS send attempts by source (voter, canary), result (accepted, rejected, error) and Twilio error code.",
+		Help: "SMS send attempts by source (voter, canary), result (accepted, rejected, rerouted, error) and Twilio error code.",
 	}, []string{"source", "result", "code"})
 	smsStatus = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "saas_sms_status_total",
@@ -52,8 +53,10 @@ func boundSource(source string) string {
 	return sourceVoter
 }
 
-// recordSend counts the outcome of one CreateMessage call.
-func recordSend(source string, err error) {
+// recordSend counts the outcome of one CreateMessage call. A Twilio refusal is
+// counted under refusal: sendRerouted when the fallback sender will retry it, so
+// only refusals nothing recovers count as sendRejected.
+func recordSend(source string, err error, refusal string) {
 	source = boundSource(source)
 	if err == nil {
 		smsSends.WithLabelValues(source, sendAccepted, "").Inc()
@@ -61,7 +64,10 @@ func recordSend(source string, err error) {
 	}
 	var restErr *client.TwilioRestError
 	if errors.As(err, &restErr) {
-		smsSends.WithLabelValues(source, sendRejected, strconv.Itoa(restErr.Code)).Inc()
+		if refusal != sendRerouted {
+			refusal = sendRejected
+		}
+		smsSends.WithLabelValues(source, refusal, strconv.Itoa(restErr.Code)).Inc()
 		return
 	}
 	smsSends.WithLabelValues(source, sendError, "").Inc()
