@@ -106,13 +106,19 @@ func Credit(ms CreditStore, p *CreditPlan, key string) error {
 	return nil
 }
 
+// DuplicateQuery is the top-up ListDuplicates looks for: an organization, a net amount and a
+// description.
+type DuplicateQuery struct {
+	Org         common.Address
+	AmountCents pricing.Cents
+	Description string
+}
+
 // ListDuplicates returns the organization's manual top-up invoices of the last 7 days, billed to
 // any customer and not void, for the same net amount and description: what Prepare refuses as
 // duplicates, for a caller that checks a direct credit against Stripe's top-ups. It only reads.
-func ListDuplicates(ctx context.Context, _ *stripe.Client, org common.Address, amountCents pricing.Cents,
-	description string,
-) ([]Invoice, error) {
-	raw, err := recentDuplicates(ctx, Request{Org: org, AmountCents: amountCents, Description: description})
+func ListDuplicates(ctx context.Context, q DuplicateQuery) ([]Invoice, error) {
+	raw, err := recentDuplicates(ctx, Request{Org: q.Org, AmountCents: q.AmountCents, Description: q.Description})
 	if err != nil {
 		return nil, err
 	}

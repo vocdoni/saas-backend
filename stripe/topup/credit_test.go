@@ -83,17 +83,17 @@ func TestPrepareCredit(t *testing.T) {
 // top-up invoices, not void, with the same net amount and description; read only.
 func TestListDuplicates(t *testing.T) {
 	c := qt.New(t)
-	f, client, _ := newFlow(t)
+	f, _, _ := newFlow(t)
 	f.listed = manualInvoiceJSON("in_dup", "paid", flowOrg, "50000", "transfer") + "," +
 		manualInvoiceJSON("in_void", "void", flowOrg, "50000", "transfer") + "," +
 		manualInvoiceJSON("in_other", "open", flowOther, "50000", "transfer") + "," +
 		manualInvoiceJSON("in_amount", "open", flowOrg, "40000", "transfer")
-	got, err := ListDuplicates(context.Background(), client, flowOrg, 50_000, "transfer")
+	got, err := ListDuplicates(context.Background(), DuplicateQuery{Org: flowOrg, AmountCents: 50_000, Description: "transfer"})
 	c.Assert(err, qt.IsNil)
 	c.Assert(got, qt.HasLen, 1)
 	c.Assert(got[0].ID, qt.Equals, "in_dup")
 	f.fail = "/v1/invoices"
-	_, err = ListDuplicates(context.Background(), client, flowOrg, 50_000, "transfer")
+	_, err = ListDuplicates(context.Background(), DuplicateQuery{Org: flowOrg, AmountCents: 50_000, Description: "transfer"})
 	c.Assert(err, qt.ErrorMatches, "could not list the invoices of the last 7 days.*")
 	c.Assert(f.writes(), qt.HasLen, 0)
 }
