@@ -115,11 +115,15 @@ func (f *fakePaymentGW) ExpirePaymentSession(sessionID string) error {
 	return nil
 }
 
-// TopUpInvoicePDF serves invoicePDF, numbered INV-0001, for any key; stripe.ErrNoInvoice when nil.
+// TopUpInvoicePDF serves invoicePDF, numbered INV-0001, for any key; stripe.ErrNoInvoice when nil,
+// and stripe.ErrExternalInvoice for an external credit's key, as the stripe package does.
 func (f *fakePaymentGW) TopUpInvoicePDF(idempotencyKey string) (*stripe.InvoicePDF, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.invoiceKeys = append(f.invoiceKeys, idempotencyKey)
+	if strings.HasPrefix(idempotencyKey, stripe.ExternalCreditKeyPrefix) {
+		return nil, stripe.ErrExternalInvoice
+	}
 	if f.invoicePDF == nil {
 		return nil, stripe.ErrNoInvoice
 	}
