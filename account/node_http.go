@@ -26,6 +26,7 @@ func getJSON(ctx context.Context, rawURL string, out any) error {
 	if err != nil {
 		return fmt.Errorf("could not build request: %w", err)
 	}
+	setNodeAuth(req)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("could not send request: %w", err)

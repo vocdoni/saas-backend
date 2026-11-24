@@ -36,7 +36,7 @@ type Account struct {
 // If the account doesn't exist, it creates a new one.
 func New(privateKey string, apiEndpoint string) (*Account, error) {
 	// create the remote API client and ensure account exists
-	apiClient, err := apiclient.New(apiEndpoint)
+	apiClient, err := NewAPIClient(apiEndpoint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create API client: %w", err)
 	}

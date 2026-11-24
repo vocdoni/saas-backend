@@ -27,7 +27,6 @@ import (
 	"github.com/vocdoni/saas-backend/objectstorage"
 	"github.com/vocdoni/saas-backend/statussync"
 	"github.com/vocdoni/saas-backend/subscriptions"
-	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -63,6 +62,10 @@ func main() {
 	flag.IntP("port", "p", 8080, "listen port")
 	flag.StringP("secret", "s", "", "API secret")
 	flag.StringP("vocdoniApi", "v", "https://api-dev.vocdoni.net/v2", "vocdoni node remote API URL")
+	flag.String("vocdoniApiToken", "",
+		"UUID Bearer token presented to vocdoniApi; list it in the node's trusted client tokens "+
+			"(voconed --trustedClientTokens) so the relay skips its per-client limits. It is also the owner "+
+			"token of the censuses created on the node, so keep it secret. Empty uses a random token per client")
 	flag.StringP("webURL", "w", "https://saas-dev.vocdoni.app", "The URL of the web application")
 	flag.StringP("mongoURL", "m", "", "The URL of the MongoDB server")
 	flag.StringP("mongoDB", "d", "", "The name of the MongoDB database")
@@ -188,7 +191,10 @@ func main() {
 	}
 	defer database.Close()
 	// create the remote API client
-	apiClient, err := apiclient.New(apiEndpoint)
+	if err := account.SetNodeToken(viper.GetString("vocdoniApiToken")); err != nil {
+		log.Fatal(err)
+	}
+	apiClient, err := account.NewAPIClient(apiEndpoint)
 	if err != nil {
 		log.Fatalf("could not create the remote API client: %v", err)
 	}
