@@ -6,8 +6,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -36,6 +38,12 @@ const disableBlindCSPKey = "disable_blindcsp"
 // certGatewayPublicKeysKey is the flag of the certificate gateway public keys, read from
 // VOCDONI_CERT_GATEWAY_PUBLIC_KEYS like disableBlindCSPKey.
 const certGatewayPublicKeysKey = "cert_gateway_public_keys"
+
+// environmentLabels are the deployment environments (VOCDONI_ENVIRONMENT, named as
+// OpenTelemetry's deployment.environment.name) and the name each one shows users;
+// production shows none. The environment only labels things: behaviour belongs to
+// its own settings, so staging runs what production runs.
+var environmentLabels = map[string]string{"development": "DEV", "staging": "STG", "production": ""}
 
 // initViper binds the flags and the VOCDONI_<FLAG> environment variables to v.
 func initViper(v *viper.Viper, flags *flag.FlagSet) error {
@@ -77,6 +85,12 @@ func main() {
 	flag.String("twilioFromNumber", "", "Twilio from number")
 	flag.String("twilioFallbackFromNumber", "",
 		"numeric Twilio sender used when twilioFromNumber is refused for a recipient (Twilio error 21612)")
+	flag.String("environment", "production",
+		"deployment environment: development, staging or production; the first two are named in the SMS users get")
+	flag.String("smsCanaryNumber", "",
+		"if set, send a delivery-check SMS to this number every smsCanaryInterval (enable on one instance only)")
+	flag.Duration("smsCanaryInterval", 24*time.Hour, "how often the SMS canary is sent (at least 1h)")
+	flag.String("metricsToken", "", "if set, serve Prometheus metrics on /metrics to requests bearing this token")
 	flag.String("stripeApiSecret", "", "Stripe API secret")
 	flag.String("stripeWebhookSecret", "", "Stripe Webhook secret")
 	flag.String("oauthServiceURL", "https://oauth.vocdoni.net", "OAuth service URL")
@@ -137,6 +151,9 @@ func main() {
 	twilioAuthToken := viper.GetString("twilioAuthToken")
 	twilioFromNumber := viper.GetString("twilioFromNumber")
 	twilioFallbackFromNumber := viper.GetString("twilioFallbackFromNumber")
+	environment := viper.GetString("environment")
+	smsCanaryNumber := viper.GetString("smsCanaryNumber")
+	smsCanaryInterval := viper.GetDuration("smsCanaryInterval")
 	// stripe vars
 	stripeAPISecret := viper.GetString("stripeApiSecret")
 	stripeWebhookSecret := viper.GetString("stripeWebhookSecret")
@@ -150,6 +167,14 @@ func main() {
 		log.Fatalf("invalid logLevel %q (allowed: debug, info, warn, error)", logLevel)
 	}
 	log.Init(logLevel, "stdout", os.Stderr)
+
+	environmentLabel, ok := environmentLabels[environment]
+	if !ok {
+		// a label is not worth refusing to start over: run unlabelled, as production
+		log.Warnw("unknown environment, using production: use development, staging or production",
+			"environment", environment)
+		environment = "production"
+	}
 
 	// Validate Stripe configuration
 	if stripeAPISecret == "" || stripeWebhookSecret == "" {
@@ -198,6 +223,7 @@ func main() {
 		OriginSecret:        viper.GetString("originSecret"),
 		OTPExpiry:           viper.GetDuration("otpExpiry"),
 		OTPCooldown:         viper.GetDuration("otpCooldown"),
+		MetricsToken:        viper.GetString("metricsToken"),
 	}
 
 	certGatewayKeys, err := csp.ParseCertGatewayKeys(viper.GetString(certGatewayPublicKeysKey))
@@ -270,20 +296,35 @@ func main() {
 		// without a primary, and the primary block above was skipped.
 		log.Warnw("backup SMTP relay configured but primary SMTP relay is not; backup will be ignored")
 	}
+	// smsCanary, when set, runs the SMS canary once the server is up
+	var smsCanary func(context.Context)
 	// create SMS notifications service if the required parameters are set and
 	// include it in the API configuration
 	if twilioAccountSid != "" && twilioAuthToken != "" && twilioFromNumber != "" {
-		apiConf.SMSService = new(twilio.SMS)
-		if err := apiConf.SMSService.New(&twilio.Config{
+		sms := new(twilio.SMS)
+		smsConf := &twilio.Config{
 			AccountSid:         twilioAccountSid,
 			AuthToken:          twilioAuthToken,
 			FromNumber:         twilioFromNumber,
 			FallbackFromNumber: twilioFallbackFromNumber,
-		}); err != nil {
+			Label:              environmentLabel,
+		}
+		// delivery status callbacks need the exact public https URL Twilio posts to
+		// (and signs); the localhost default would only hand Twilio a dead link
+		if u, err := url.Parse(server); err == nil && u.Scheme == "https" && u.Host != "" {
+			smsConf.StatusCallbackURL = strings.TrimSuffix(server, "/") + api.SMSStatusCallbackRoute
+			apiConf.SMSStatusHandler = sms.HandleStatusCallback
+		}
+		if err := sms.New(smsConf); err != nil {
 			log.Fatalf("could not create the SMS service: %v", err)
 		}
-		cspConf.SMSService = apiConf.SMSService
-		log.Infow("SMS service created", "from", twilioFromNumber, "fallbackFrom", twilioFallbackFromNumber)
+		apiConf.SMSService = sms
+		cspConf.SMSService = sms
+		log.Infow("SMS service created", "from", twilioFromNumber, "fallbackFrom", twilioFallbackFromNumber,
+			"statusCallback", smsConf.StatusCallbackURL)
+		if smsCanaryNumber != "" {
+			smsCanary = func(ctx context.Context) { sms.RunCanary(ctx, smsCanaryNumber, smsCanaryInterval) }
+		}
 	}
 
 	// create the CSP service and include it in the API configuration
@@ -316,7 +357,10 @@ func main() {
 	}
 	// create the local API server
 	api.New(ctx, apiConf).Start()
-	log.Infow("server started", "host", host, "port", port)
+	if smsCanary != nil {
+		go smsCanary(ctx)
+	}
+	log.Infow("server started", "host", host, "port", port, "environment", environment)
 	// wait forever, as the server is running in a goroutine
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
