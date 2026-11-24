@@ -92,20 +92,22 @@ func TestMaintenanceWriteBlock(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+	// handle() auto-wraps every POST/PUT/DELETE with maintenanceWriteBlock (deny-by-default).
+	// The tests below verify this wrapper directly; the handleExempt() path skips it.
 	blocked := maintenanceWriteBlock(m, func() time.Time { return now }, inner)
-	do := func() *httptest.ResponseRecorder {
+	do := func(path string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
-		blocked.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/process", http.NoBody))
+		blocked.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, http.NoBody))
 		return rec
 	}
 
 	// before the window: not blocked
 	now = time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)
-	c.Assert(do().Code, qt.Equals, http.StatusOK)
+	c.Assert(do("/processes/0x1/sign-batch").Code, qt.Equals, http.StatusOK)
 
 	// inside the window: blocked with 503 and Retry-After
 	now = time.Date(2026, 11, 23, 12, 50, 0, 0, time.UTC)
-	rec := do()
+	rec := do("/processes/0x1/sign-batch")
 	c.Assert(rec.Code, qt.Equals, http.StatusServiceUnavailable)
 	c.Assert(rec.Body.String(), qt.Contains, "50304")
 	// Retry-After = ceil(until-now) + jitter(0-60) = 600..660
@@ -114,9 +116,23 @@ func TestMaintenanceWriteBlock(t *testing.T) {
 	c.Assert(ra >= 600, qt.IsTrue)
 	c.Assert(ra <= 660, qt.IsTrue)
 
+	// sign/sign-batch/blind-sign/auth routes are all refused: they consume signing
+	// slots or send OTPs while the vote relay is unreachable.
+	for _, path := range []string{
+		"/processes/0x1/sign",
+		"/processes/0x1/sign-batch",
+		"/processes/0x1/blind-sign",
+		"/processes/0x1/blind-point",
+		"/processes/0x1/auth/step0",
+		"/processes/0x1/auth/resend",
+		"/cert-auth/assertions",
+	} {
+		c.Assert(do(path).Code, qt.Equals, http.StatusServiceUnavailable, qt.Commentf("path %q should be blocked", path))
+	}
+
 	// after the window: not blocked
 	now = time.Date(2026, 11, 23, 13, 0, 0, 0, time.UTC)
-	c.Assert(do().Code, qt.Equals, http.StatusOK)
+	c.Assert(do("/processes/0x1/sign-batch").Code, qt.Equals, http.StatusOK)
 
 	// nil window: handler passed through unchanged (maintenanceWriteBlock returns h as-is)
 	passThru := maintenanceWriteBlock(nil, time.Now, inner)

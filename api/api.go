@@ -449,10 +449,13 @@ func (a *API) initRouter() http.Handler {
 		// Don't fail completely, but log the error
 	}
 
+	// handle registers a route. All non-read methods (POST, PUT, DELETE) are wrapped with
+	// maintenanceWriteBlock so a new write route is blocked by default without any explicit
+	// marking. Use handleExempt for the small set of POST routes that must stay reachable
+	// through the window (session management, read-only checks, non-retrying webhooks).
 	handle := func(r chi.Router, method, pattern string, h http.HandlerFunc) {
 		log.Infow("new route", "method", method, "path", pattern)
-		// PUT and DELETE always change state; block them while the window is active.
-		if method == http.MethodPut || method == http.MethodDelete {
+		if method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions {
 			h = maintenanceWriteBlock(a.maintenance, time.Now, h)
 		}
 		switch method {
@@ -468,15 +471,13 @@ func (a *API) initRouter() http.Handler {
 			log.Errorf("unsupported method %s in api initRouter", method)
 		}
 	}
-	// wm (write-maintenance) wraps a POST handler so it is blocked during the window.
-	// Apply to POST routes that write to the chain or to critical shared state.
-	// Read-only POSTs (check, weight, sign-info, census validation, ticket, CSP auth/sign
-	// steps, votes/verify, cert-auth/assertions) must be left unwrapped so voters and
-	// SDK consumers can still operate through the window.
-	// External webhook callbacks that do not retry (Stripe, Twilio from #874) should also
-	// be registered without wm.
-	wm := func(h http.HandlerFunc) http.HandlerFunc {
-		return maintenanceWriteBlock(a.maintenance, time.Now, h)
+	// handleExempt registers a POST route that is exempt from maintenance blocking.
+	// Exempt routes: auth/session (login, refresh, oauth), read-only checks (check, weight,
+	// sign-info, census validation, votes/verify, ticket), and external webhook callbacks
+	// (Stripe, Twilio from #874) that do not retry on failure.
+	handleExempt := func(r chi.Router, pattern string, h http.HandlerFunc) {
+		log.Infow("new route", "method", "POST", "path", pattern)
+		r.Post(pattern, h)
 	}
 
 	// protected routes
@@ -487,18 +488,18 @@ func (a *API) initRouter() http.Handler {
 		r.Use(a.authenticator)
 		r.Use(limitBody(maxProtectedBodyBytes))
 
-		handle(r, http.MethodPost, authRefresTokenEndpoint, a.refreshTokenHandler)
+		handleExempt(r, authRefresTokenEndpoint, a.refreshTokenHandler)
 		handle(r, http.MethodGet, authAddressesEndpoint, a.organizationAddressesHandler)
-		handle(r, http.MethodPost, oauthLinkEndpoint, wm(a.oauthLinkHandler))
+		handle(r, http.MethodPost, oauthLinkEndpoint, a.oauthLinkHandler)
 		handle(r, http.MethodDelete, oauthUnlinkEndpoint, a.oauthUnlinkHandler)
 		handle(r, http.MethodGet, usersMeEndpoint, a.userInfoHandler)
 		handle(r, http.MethodPut, usersMeEndpoint, a.updateUserInfoHandler)
-		handle(r, http.MethodPost, usersMeEmailVerifyEndpoint, wm(a.updateUserEmailVerifyHandler))
+		handle(r, http.MethodPost, usersMeEmailVerifyEndpoint, a.updateUserEmailVerifyHandler)
 		handle(r, http.MethodPut, usersPasswordEndpoint, a.updateUserPasswordHandler)
-		handle(r, http.MethodPost, organizationsEndpoint, wm(a.createOrganizationHandler))
+		handle(r, http.MethodPost, organizationsEndpoint, a.createOrganizationHandler)
 		handle(r, http.MethodPut, organizationEndpoint, a.updateOrganizationHandler)
 		handle(r, http.MethodGet, organizationUsersEndpoint, a.organizationUsersHandler)
-		handle(r, http.MethodPost, organizationAddUserEndpoint, wm(a.inviteOrganizationUserHandler))
+		handle(r, http.MethodPost, organizationAddUserEndpoint, a.inviteOrganizationUserHandler)
 		handle(r, http.MethodPut, organizationUpdateUserEndpoint, a.updateOrganizationUserHandler)
 		handle(r, http.MethodDelete, organizationDeleteUserEndpoint, a.removeOrganizationUserHandler)
 		handle(r, http.MethodGet, organizationCensusesEndpoint, a.organizationCensusesHandler)
@@ -506,48 +507,48 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPut, organizationHandlePendingInvitationEndpoint, a.updatePendingUserInvitationHandler)
 		handle(r, http.MethodDelete, organizationHandlePendingInvitationEndpoint, a.deletePendingUserInvitationHandler)
 		handle(r, http.MethodGet, organizationMembersEndpoint, a.organizationMembersHandler)
-		handle(r, http.MethodPost, organizationAddMembersEndpoint, wm(a.addOrganizationMembersHandler))
+		handle(r, http.MethodPost, organizationAddMembersEndpoint, a.addOrganizationMembersHandler)
 		handle(r, http.MethodPut, organizationUpsertMemberEndpoint, a.upsertOrganizationMemberHandler)
 		handle(r, http.MethodDelete, organizationDeleteMembersEndpoint, a.deleteOrganizationMembersHandler)
-		handle(r, http.MethodPost, organizationMetaEndpoint, wm(a.addOrganizationMetaHandler))
+		handle(r, http.MethodPost, organizationMetaEndpoint, a.addOrganizationMetaHandler)
 		handle(r, http.MethodPut, organizationMetaEndpoint, a.updateOrganizationMetaHandler)
 		handle(r, http.MethodGet, organizationMetaEndpoint, a.organizationMetaHandler)
 		handle(r, http.MethodDelete, organizationMetaEndpoint, a.deleteOrganizationMetaHandler)
-		handle(r, http.MethodPost, organizationCreateTicketEndpoint, a.organizationCreateTicket) // read-only: no write
-		handle(r, http.MethodPost, organizationGroupsEndpoint, wm(a.createOrganizationMemberGroupHandler))
+		handleExempt(r, organizationCreateTicketEndpoint, a.organizationCreateTicket)
+		handle(r, http.MethodPost, organizationGroupsEndpoint, a.createOrganizationMemberGroupHandler)
 		handle(r, http.MethodGet, organizationGroupsEndpoint, a.organizationMemberGroupsHandler)
 		handle(r, http.MethodGet, organizationGroupEndpoint, a.organizationMemberGroupHandler)
 		handle(r, http.MethodGet, organizationGroupMembersEndpoint, a.listOrganizationMemberGroupsHandler)
 		handle(r, http.MethodPut, organizationGroupEndpoint, a.updateOrganizationMemberGroupHandler)
 		handle(r, http.MethodDelete, organizationGroupEndpoint, a.deleteOrganizationMemberGroupHandler)
 		handle(r, http.MethodGet, jobsEndpoint, a.jobsHandler)
-		handle(r, http.MethodPost, managedOrganizationsEndpoint, wm(a.createManagedOrganizationHandler))
+		handle(r, http.MethodPost, managedOrganizationsEndpoint, a.createManagedOrganizationHandler)
 		handle(r, http.MethodGet, managedOrganizationsEndpoint, a.managedOrganizationsHandler)
 		handle(r, http.MethodDelete, managedOrganizationEndpoint, a.deleteManagedOrganizationHandler)
 		handle(r, http.MethodPut, managedOrganizationEndpoint, a.updateManagedOrganizationHandler)
 		handle(r, http.MethodGet, integratorEndpoint, a.integratorInfoHandler)
 		handle(r, http.MethodGet, walletEndpoint, a.walletHandler)
-		handle(r, http.MethodPost, walletTopUpEndpoint, wm(a.createWalletTopUpHandler))
+		handle(r, http.MethodPost, walletTopUpEndpoint, a.createWalletTopUpHandler)
 		handle(r, http.MethodGet, walletInvoiceEndpoint, a.walletInvoiceHandler)
-		handle(r, http.MethodPost, integratorOrgAPIKeysEndpoint, wm(a.createAPIKeyHandler))
+		handle(r, http.MethodPost, integratorOrgAPIKeysEndpoint, a.createAPIKeyHandler)
 		handle(r, http.MethodGet, integratorOrgAPIKeysEndpoint, a.apiKeysHandler)
 		handle(r, http.MethodDelete, integratorOrgAPIKeyEndpoint, a.revokeAPIKeyHandler)
 		// late-bound: a method value would capture a.stripeHandlers as it is at router-build time
 		handle(r, http.MethodGet, walletCheckoutSession, func(w http.ResponseWriter, r *http.Request) {
 			a.stripeHandlers.GetCheckoutSession(w, r)
 		})
-		handle(r, http.MethodPost, objectStorageUploadTypedEndpoint, wm(a.objectStorage.UploadImageWithFormHandler))
+		handle(r, http.MethodPost, objectStorageUploadTypedEndpoint, a.objectStorage.UploadImageWithFormHandler)
 		// multi-question voting processes: authoring (the GET reads are public — see below)
-		handle(r, http.MethodPost, processesCreateEndpoint, wm(a.createVotingProcessHandler))
-		handle(r, http.MethodPost, processesCensusValidateEndpoint, a.validateProcessCensusHandler) // read-only: validate only
+		handle(r, http.MethodPost, processesCreateEndpoint, a.createVotingProcessHandler)
+		handleExempt(r, processesCensusValidateEndpoint, a.validateProcessCensusHandler)
 		handle(r, http.MethodPut, processesEndpoint, a.updateVotingProcessHandler)
 		handle(r, http.MethodGet, processesValidateEndpoint, a.validateVotingProcessHandler)
-		handle(r, http.MethodPost, processesPublishEndpoint, wm(a.publishVotingProcessHandler))
+		handle(r, http.MethodPost, processesPublishEndpoint, a.publishVotingProcessHandler)
 		handle(r, http.MethodGet, processesPriceEndpoint, a.processPriceHandler)
-		handle(r, http.MethodPost, processesCheckoutEndpoint, wm(a.createProcessCheckoutHandler))
+		handle(r, http.MethodPost, processesCheckoutEndpoint, a.createProcessCheckoutHandler)
 		handle(r, http.MethodGet, processesCheckoutEndpoint, a.processCheckoutStatusHandler)
 		handle(r, http.MethodDelete, processesCheckoutEndpoint, a.cancelProcessCheckoutHandler)
-		handle(r, http.MethodPost, processesCensusCheckoutEndpoint, wm(a.createProcessCensusCheckoutHandler))
+		handle(r, http.MethodPost, processesCensusCheckoutEndpoint, a.createProcessCensusCheckoutHandler)
 		handle(r, http.MethodPut, processesQuestionsStatusEndpoint, a.setVotingProcessQuestionsStatusHandler)
 		handle(r, http.MethodPut, processesQuestionStatusEndpoint, a.setVotingProcessQuestionStatusHandler)
 		handle(r, http.MethodPut, processesEndDateEndpoint, a.setVotingProcessEndDateHandler)
@@ -568,32 +569,32 @@ func (a *API) initRouter() http.Handler {
 		})
 		handle(r, http.MethodGet, infoEndpoint, a.InfoHandler)
 
-		handle(r, http.MethodPost, authLoginEndpoint, a.authLoginHandler)   // exempt: session management
-		handle(r, http.MethodPost, oauthLoginEndpoint, a.oauthLoginHandler)  // exempt: session management
-		handle(r, http.MethodPost, usersEndpoint, wm(a.registerHandler))
-		handle(r, http.MethodPost, verifyUserEndpoint, wm(a.verifyUserAccountHandler))
+		handleExempt(r, authLoginEndpoint, a.authLoginHandler)
+		handleExempt(r, oauthLoginEndpoint, a.oauthLoginHandler)
+		handle(r, http.MethodPost, usersEndpoint, a.registerHandler)
+		handle(r, http.MethodPost, verifyUserEndpoint, a.verifyUserAccountHandler)
 		handle(r, http.MethodGet, verifyUserCodeEndpoint, a.userVerificationCodeInfoHandler)
-		handle(r, http.MethodPost, verifyUserCodeEndpoint, wm(a.resendUserVerificationCodeHandler))
-		handle(r, http.MethodPost, usersRecoveryPasswordEndpoint, wm(a.recoverUserPasswordHandler))
-		handle(r, http.MethodPost, usersResetPasswordEndpoint, wm(a.resetUserPasswordHandler))
+		handle(r, http.MethodPost, verifyUserCodeEndpoint, a.resendUserVerificationCodeHandler)
+		handle(r, http.MethodPost, usersRecoveryPasswordEndpoint, a.recoverUserPasswordHandler)
+		handle(r, http.MethodPost, usersResetPasswordEndpoint, a.resetUserPasswordHandler)
 		handle(r, http.MethodGet, organizationEndpoint, a.organizationInfoHandler)
-		handle(r, http.MethodPost, organizationAcceptUserEndpoint, wm(a.acceptOrganizationUserInvitationHandler))
+		handle(r, http.MethodPost, organizationAcceptUserEndpoint, a.acceptOrganizationUserInvitationHandler)
 		handle(r, http.MethodGet, organizationRolesEndpoint, a.organizationRolesHandler)
 		handle(r, http.MethodGet, organizationTypesEndpoint, a.organizationsTypesHandler)
 		handle(r, http.MethodGet, organizationLanguagesEndpoint, a.organizationsLanguagesHandler)
 		handle(r, http.MethodGet, pricingEndpoint, a.pricingHandler)
 		// late-bound: a method value would capture a.stripeHandlers as it is at
 		// router-build time (nil when Stripe init failed or a test installs it later).
-		// External webhook callbacks must not use wm: senders like Stripe and Twilio (#874)
-		// do not retry and a 503 would cause missed payment/status events.
-		handle(r, http.MethodPost, paymentsWebhook, func(w http.ResponseWriter, r *http.Request) {
+		// Webhook callbacks use handleExempt: senders like Stripe and Twilio (#874)
+		// do not retry on failure, so a 503 would cause missed events.
+		handleExempt(r, paymentsWebhook, func(w http.ResponseWriter, r *http.Request) {
 			a.stripeHandlers.HandleWebhook(w, r)
 		})
 		handle(r, http.MethodGet, objectStorageDownloadTypedEndpoint, a.objectStorage.DownloadImageInlineHandler)
 		handle(r, http.MethodGet, jobStatusEndpoint, a.jobStatusHandler)
-		handle(r, http.MethodPost, voteEndpoint, wm(a.relayVoteHandler))
-		handle(r, http.MethodPost, votesEndpoint, wm(a.relayVotesHandler))
-		handle(r, http.MethodPost, votesVerifyEndpoint, a.verifyVotesHandler) // read-only: queries nullifiers
+		handle(r, http.MethodPost, voteEndpoint, a.relayVoteHandler)
+		handle(r, http.MethodPost, votesEndpoint, a.relayVotesHandler)
+		handleExempt(r, votesVerifyEndpoint, a.verifyVotesHandler)
 		// multi-question voting processes: public voter reads + CSP. The process list and single-read
 		// are public for published processes; drafts + per-question eligibility are gated in-handler to
 		// a manager/admin (or a voting:write API key) via optionalManager.
@@ -602,15 +603,15 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, processesQuestionEndpoint, a.votingProcessQuestionHandler)
 		handle(r, http.MethodGet, processesParticipantEndpoint, a.votingProcessParticipantHandler)
 		handle(r, http.MethodGet, processesResultsEndpoint, a.votingProcessResultsHandler)
-		handle(r, http.MethodPost, processesCheckEndpoint, cspHandlers.ProcessCheckHandler)
+		handleExempt(r, processesCheckEndpoint, cspHandlers.ProcessCheckHandler)
 		handle(r, http.MethodPost, processesAuthEndpoint, cspHandlers.ProcessAuthHandler)
 		handle(r, http.MethodPost, processesAuthResendEndpoint, cspHandlers.ProcessAuthResendHandler)
 		handle(r, http.MethodPost, processesSignEndpoint, cspHandlers.ProcessSignHandler)
 		handle(r, http.MethodPost, processesSignBatchEndpoint, cspHandlers.ProcessSignBatchHandler)
 		handle(r, http.MethodPost, processesBlindPointEndpoint, cspHandlers.ProcessBlindPointHandler)
 		handle(r, http.MethodPost, processesBlindSignEndpoint, cspHandlers.ProcessBlindSignHandler)
-		handle(r, http.MethodPost, processesWeightEndpoint, cspHandlers.ProcessWeightHandler)
-		handle(r, http.MethodPost, processesSignInfoEndpoint, cspHandlers.ProcessSignInfoHandler)
+		handleExempt(r, processesWeightEndpoint, cspHandlers.ProcessWeightHandler)
+		handleExempt(r, processesSignInfoEndpoint, cspHandlers.ProcessSignInfoHandler)
 		handle(r, http.MethodPost, certAuthAssertionsEndpoint, cspHandlers.CertAssertionHandler)
 	})
 	a.router = r
