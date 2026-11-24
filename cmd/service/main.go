@@ -79,6 +79,8 @@ func main() {
 	flag.String("twilioFromNumber", "", "Twilio from number")
 	flag.String("twilioFallbackFromNumber", "",
 		"numeric Twilio sender used when twilioFromNumber is refused for a recipient (Twilio error 21612)")
+	flag.String("environment", "",
+		"name of a non-production environment (e.g. DEV, STG), shown to users in SMS; leave empty in production")
 	flag.String("smsCanaryNumber", "",
 		"if set, send a delivery-check SMS to this number every smsCanaryInterval (enable on one instance only)")
 	flag.Duration("smsCanaryInterval", 24*time.Hour, "how often the SMS canary is sent (at least 1h)")
@@ -143,6 +145,8 @@ func main() {
 	twilioAuthToken := viper.GetString("twilioAuthToken")
 	twilioFromNumber := viper.GetString("twilioFromNumber")
 	twilioFallbackFromNumber := viper.GetString("twilioFallbackFromNumber")
+	// environment names a non-production deployment (DEV, STG); empty in production
+	environment := viper.GetString("environment")
 	smsCanaryNumber := viper.GetString("smsCanaryNumber")
 	smsCanaryInterval := viper.GetDuration("smsCanaryInterval")
 	// stripe vars
@@ -290,6 +294,7 @@ func main() {
 			AuthToken:          twilioAuthToken,
 			FromNumber:         twilioFromNumber,
 			FallbackFromNumber: twilioFallbackFromNumber,
+			Label:              environment,
 		}
 		// delivery status callbacks need the exact public https URL Twilio posts to
 		// (and signs); the localhost default would only hand Twilio a dead link
@@ -342,7 +347,7 @@ func main() {
 	if smsCanary != nil {
 		go smsCanary(ctx)
 	}
-	log.Infow("server started", "host", host, "port", port)
+	log.Infow("server started", "host", host, "port", port, "environment", environment)
 	// wait forever, as the server is running in a goroutine
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
