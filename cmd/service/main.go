@@ -207,7 +207,11 @@ func main() {
 		log.Fatalf("invalid %s: %v", maintenanceWindowKey, err)
 	}
 	if apiConf.Maintenance != nil {
-		log.Infow("maintenance window scheduled", "window", apiConf.Maintenance.String())
+		if !apiConf.Maintenance.Until.After(time.Now()) {
+			log.Warnw("maintenance window is already in the past and will have no effect", "window", apiConf.Maintenance.String())
+		} else {
+			log.Infow("maintenance window scheduled", "window", apiConf.Maintenance.String())
+		}
 	}
 
 	certGatewayKeys, err := csp.ParseCertGatewayKeys(viper.GetString(certGatewayPublicKeysKey))
