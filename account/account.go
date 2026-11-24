@@ -3,14 +3,10 @@
 package account
 
 import (
-	"context"
 	"fmt"
-	"net/url"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
-	vocdoniapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
@@ -33,18 +29,16 @@ type Account struct {
 }
 
 // New creates a new account with the given private key and API endpoint.
-// If the account doesn't exist, it creates a new one.
+// The account must already exist on chain with a balance: on a local or CI vocone, fund it at
+// genesis with voconed's --fundedAccounts.
 func New(privateKey string, apiEndpoint string) (*Account, error) {
-	// create the remote API client and ensure account exists
+	// create the remote API client
 	apiClient, err := apiclient.New(apiEndpoint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create API client: %w", err)
 	}
 	if err := apiClient.SetAccount(privateKey); err != nil {
 		return nil, fmt.Errorf("failed to set account: %w", err)
-	}
-	if err := ensureAccountExist(apiEndpoint, apiClient); err != nil {
-		return nil, fmt.Errorf("failed to ensure account exists: %w", err)
 	}
 	// create the signer
 	signer := ethereum.SignKeys{}
@@ -54,7 +48,8 @@ func New(privateKey string, apiEndpoint string) (*Account, error) {
 	// get account and log some info
 	account, err := apiClient.Account("")
 	if err != nil {
-		return nil, fmt.Errorf("failed to get account: %v", err)
+		return nil, fmt.Errorf("failed to get account %s, it must exist on chain before the "+
+			"backend starts (fund it, e.g. with voconed --fundedAccounts): %w", apiClient.MyAddress().Hex(), err)
 	}
 	log.Infow(
 		"Vocdoni account initialized",
@@ -95,34 +90,4 @@ func (a *Account) FaucetPackage(toAddr common.Address, amount uint64) (*models.F
 		"amount", amount,
 	)
 	return vochain.GenerateFaucetPackage(a.signer, toAddr, amount)
-}
-
-// ensureAccountExist checks if the account exists and creates it if it doesn't.
-func ensureAccountExist(baseURL string, cli *apiclient.HTTPclient) error {
-	if _, err := cli.Account(""); err == nil {
-		return nil
-	}
-	faucetURL, err := url.JoinPath(baseURL, "/open/claim", cli.MyAddress().Hex())
-	if err != nil {
-		return fmt.Errorf("error getting faucet URL: %w", err)
-	}
-	faucetPkg, err := apiclient.GetFaucetPackageFromRemoteService(faucetURL, "")
-	if err != nil {
-		return fmt.Errorf("failed to get faucet package: %w", err)
-	}
-	accountMetadata := &vocdoniapi.AccountMetadata{
-		Name:        map[string]string{"default": "Vocdoni SaaS backend"},
-		Description: map[string]string{"default": "Vocdoni SaaS backend proxy account"},
-		Version:     "1.0",
-	}
-	hash, err := cli.AccountBootstrap(faucetPkg, accountMetadata, nil)
-	if err != nil {
-		return fmt.Errorf("failed to bootstrap account: %w", err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*40)
-	defer cancel()
-	if err := waitTxMined(ctx, cli, hash); err != nil {
-		return fmt.Errorf("failed to wait for tx to be mined: %w", err)
-	}
-	return nil
 }

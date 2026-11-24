@@ -91,11 +91,11 @@ VOCDONI_SMTPPASSWORD=                        # attempt AUTH, which the fake serv
 ```
 
 `VOCDONI_PRIVATEKEY` must be a real hex key (the example placeholder is not one and the
-API refuses to start): `VOCDONI_PRIVATEKEY=$(openssl rand -hex 32)` — the `fundaccount`
-service funds it on the local chain.
+API refuses to start): `VOCDONI_PRIVATEKEY=$(openssl rand -hex 32)`. Fund its address on the
+local chain at genesis with `VOCONE_FUNDEDACCOUNTS=<address>:100000000` (see the README).
 
 ```bash
-# local chain + faucet funding + fake SMTP + API + Mongo (+ mongo-express on :8081)
+# local chain + fake SMTP + API + Mongo (+ mongo-express on :8081)
 docker compose --profile with-vocone --profile local-smtp up -d
 # forward real signed webhooks from Stripe to the local API — keep this running;
 # it prints the whsec_… that must be in .env (restart the api after setting it)
