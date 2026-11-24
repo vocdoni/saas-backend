@@ -39,6 +39,11 @@ const disableBlindCSPKey = "disable_blindcsp"
 // VOCDONI_CERT_GATEWAY_PUBLIC_KEYS like disableBlindCSPKey.
 const certGatewayPublicKeysKey = "cert_gateway_public_keys"
 
+// environmentLabels are the deployment environments (VOCDONI_ENVIRONMENT) and the
+// name each one shows users; production shows none. The environment only labels
+// things: behaviour belongs to its own settings, so staging runs what production runs.
+var environmentLabels = map[string]string{"dev": "DEV", "stg": "STG", "prod": ""}
+
 // initViper binds the flags and the VOCDONI_<FLAG> environment variables to v.
 func initViper(v *viper.Viper, flags *flag.FlagSet) error {
 	v.SetEnvPrefix("VOCDONI")
@@ -81,8 +86,7 @@ func main() {
 		"numeric Twilio sender used when twilioFromNumber is refused for a recipient (Twilio error 21612)")
 	flag.String("twilioVerifyServiceSid", "",
 		"Twilio Verify service (custom codes enabled) that delivers one-time codes; plain SMS if it fails")
-	flag.String("environment", "",
-		"name of a non-production environment (e.g. DEV, STG), shown to users in SMS; leave empty in production")
+	flag.String("environment", "prod", "deployment environment: dev, stg or prod; dev and stg are named in the SMS users get")
 	flag.String("smsCanaryNumber", "",
 		"if set, send a delivery-check SMS to this number every smsCanaryInterval (enable on one instance only)")
 	flag.Duration("smsCanaryInterval", 24*time.Hour, "how often the SMS canary is sent (at least 1h)")
@@ -148,8 +152,11 @@ func main() {
 	twilioFromNumber := viper.GetString("twilioFromNumber")
 	twilioFallbackFromNumber := viper.GetString("twilioFallbackFromNumber")
 	twilioVerifyServiceSID := viper.GetString("twilioVerifyServiceSid")
-	// environment names a non-production deployment (DEV, STG); empty in production
 	environment := viper.GetString("environment")
+	environmentLabel, ok := environmentLabels[environment]
+	if !ok {
+		log.Fatalf("unknown environment %q: use dev, stg or prod", environment)
+	}
 	smsCanaryNumber := viper.GetString("smsCanaryNumber")
 	smsCanaryInterval := viper.GetDuration("smsCanaryInterval")
 	// stripe vars
@@ -298,7 +305,7 @@ func main() {
 			FromNumber:         twilioFromNumber,
 			FallbackFromNumber: twilioFallbackFromNumber,
 			VerifyServiceSID:   twilioVerifyServiceSID,
-			Label:              environment,
+			Label:              environmentLabel,
 		}
 		// delivery status callbacks need the exact public https URL Twilio posts to
 		// (and signs); the localhost default would only hand Twilio a dead link

@@ -44,7 +44,7 @@ type Config struct {
 	// enabled) that delivers one-time codes: Verify picks a sender each country
 	// accepts. A code it fails to deliver is sent as a plain message instead.
 	VerifyServiceSID string
-	// Label, when set, names a non-production environment (VOCDONI_ENVIRONMENT): voter
+	// Label, when set, names a non-production environment ("DEV", "STG"): voter
 	// messages start with "[Label] " and the canary names it. Verify writes its own
 	// text from the service name, so give each environment its own Verify service.
 	Label string
