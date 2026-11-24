@@ -39,10 +39,11 @@ const disableBlindCSPKey = "disable_blindcsp"
 // VOCDONI_CERT_GATEWAY_PUBLIC_KEYS like disableBlindCSPKey.
 const certGatewayPublicKeysKey = "cert_gateway_public_keys"
 
-// environmentLabels are the deployment environments (VOCDONI_ENVIRONMENT) and the
-// name each one shows users; production shows none. The environment only labels
-// things: behaviour belongs to its own settings, so staging runs what production runs.
-var environmentLabels = map[string]string{"dev": "DEV", "stg": "STG", "prod": ""}
+// environmentLabels are the deployment environments (VOCDONI_ENVIRONMENT, named as
+// OpenTelemetry's deployment.environment.name) and the name each one shows users;
+// production shows none. The environment only labels things: behaviour belongs to
+// its own settings, so staging runs what production runs.
+var environmentLabels = map[string]string{"development": "DEV", "staging": "STG", "production": ""}
 
 // initViper binds the flags and the VOCDONI_<FLAG> environment variables to v.
 func initViper(v *viper.Viper, flags *flag.FlagSet) error {
@@ -86,7 +87,8 @@ func main() {
 		"numeric Twilio sender used when twilioFromNumber is refused for a recipient (Twilio error 21612)")
 	flag.String("twilioVerifyServiceSid", "",
 		"Twilio Verify service (custom codes enabled) that delivers one-time codes; plain SMS if it fails")
-	flag.String("environment", "prod", "deployment environment: dev, stg or prod; dev and stg are named in the SMS users get")
+	flag.String("environment", "production",
+		"deployment environment: development, staging or production; the first two are named in the SMS users get")
 	flag.String("smsCanaryNumber", "",
 		"if set, send a delivery-check SMS to this number every smsCanaryInterval (enable on one instance only)")
 	flag.Duration("smsCanaryInterval", 24*time.Hour, "how often the SMS canary is sent (at least 1h)")
@@ -153,10 +155,6 @@ func main() {
 	twilioFallbackFromNumber := viper.GetString("twilioFallbackFromNumber")
 	twilioVerifyServiceSID := viper.GetString("twilioVerifyServiceSid")
 	environment := viper.GetString("environment")
-	environmentLabel, ok := environmentLabels[environment]
-	if !ok {
-		log.Fatalf("unknown environment %q: use dev, stg or prod", environment)
-	}
 	smsCanaryNumber := viper.GetString("smsCanaryNumber")
 	smsCanaryInterval := viper.GetDuration("smsCanaryInterval")
 	// stripe vars
@@ -172,6 +170,14 @@ func main() {
 		log.Fatalf("invalid logLevel %q (allowed: debug, info, warn, error)", logLevel)
 	}
 	log.Init(logLevel, "stdout", os.Stderr)
+
+	environmentLabel, ok := environmentLabels[environment]
+	if !ok {
+		// a label is not worth refusing to start over: run unlabelled, as production
+		log.Warnw("unknown environment, using production: use development, staging or production",
+			"environment", environment)
+		environment = "production"
+	}
 
 	// Validate Stripe configuration
 	if stripeAPISecret == "" || stripeWebhookSecret == "" {
