@@ -100,6 +100,13 @@ func TestWalletInvoiceDownload(t *testing.T) {
 		"organizations", orgAddress.String(), "wallet", "history", external, "invoice")
 	c.Assert(outside.Code, qt.Equals, errors.ErrWalletInvoiceNotFound.Code)
 	c.Assert(outside.Error(), qt.Contains, "invoiced outside the platform")
+	// a manual credit whose deferred invoice is not issued yet: 404, told so, not told to retry
+	pending := topUpEntryID(t, orgAddress, stripe.ManualCreditKeyPrefix+bson.NewObjectID().Hex())
+	notIssued := requestAndExpectError(t, http.MethodGet, token, nil,
+		"organizations", orgAddress.String(), "wallet", "history", pending, "invoice")
+	c.Assert(notIssued.Code, qt.Equals, errors.ErrWalletInvoiceNotFound.Code)
+	c.Assert(notIssued.Error(), qt.Contains, "has not been issued yet")
+	c.Assert(notIssued.Error(), qt.Not(qt.Contains), "try again")
 
 	stranger := testCreateUser(t, "walletinvoicestr")
 	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodGet, stranger, nil,

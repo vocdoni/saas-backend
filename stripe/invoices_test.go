@@ -410,8 +410,9 @@ func TestIsStripeHost(t *testing.T) {
 
 // TestInvoiceOfLedgerKeyCreditKeys (AC1, AC14): a manual credit's key resolves to its paid
 // deferred invoice through the metadata search (the latest of several; invoices of another
-// source are ignored), and is ErrNoInvoice when none is paid yet or when the key is not the
-// prefix plus 24 hex characters, the latter with no Stripe call. An external credit's key is
+// source are ignored), is ErrInvoicePending when none is paid yet (TopUpInvoicePDF passes it
+// through), and ErrNoInvoice when the key is not the prefix plus 24 hex characters, with no
+// Stripe call. An external credit's key is
 // ErrExternalInvoice with no Stripe call, whatever follows the prefix. A failed search is a
 // Stripe error.
 func TestInvoiceOfLedgerKeyCreditKeys(t *testing.T) {
@@ -446,10 +447,12 @@ func TestInvoiceOfLedgerKeyCreditKeys(t *testing.T) {
 
 	answer = deferred("in_manual", TopUpSourceManual, 300)
 	_, err = client.InvoiceOfLedgerKey(key)
-	c.Assert(err, qt.ErrorIs, ErrNoInvoice)
+	c.Assert(err, qt.ErrorIs, ErrInvoicePending)
 	answer = ""
 	_, err = client.InvoiceOfLedgerKey(key)
-	c.Assert(err, qt.ErrorIs, ErrNoInvoice)
+	c.Assert(err, qt.ErrorIs, ErrInvoicePending)
+	_, err = (&Service{client: client}).TopUpInvoicePDF(key)
+	c.Assert(err, qt.ErrorIs, ErrInvoicePending)
 	answer = "fail"
 	_, err = client.InvoiceOfLedgerKey(key)
 	c.Assert(err, qt.ErrorMatches, ".*failed to search the invoice of manualcredit:.*")

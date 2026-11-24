@@ -63,6 +63,10 @@ var ErrExternalInvoice = fmt.Errorf("this top-up was invoiced outside the platfo
 // payment that credited the top-up, so a download right after paying may find neither.
 var ErrNoInvoice = fmt.Errorf("the top-up invoice is not available yet")
 
+// ErrInvoicePending is answered for a manual credit (ManualCreditKeyPrefix) whose deferred
+// invoice is not issued and paid yet: it is issued later, up to the 15th of the next month.
+var ErrInvoicePending = fmt.Errorf("the invoice of this top-up has not been issued yet")
+
 // InvoicePDF is an invoice's PDF as Stripe serves it: Number names the file, Body streams it and
 // must be closed by the caller.
 type InvoicePDF struct {
@@ -101,9 +105,11 @@ func IsStripeHost(u *url.URL) bool {
 // InvoiceOfLedgerKey returns the invoice of the top-up ledger row keyed idempotencyKey: a manual
 // invoice's key (InvoiceTopUpKey) names it, a manual credit's is its paid deferred invoice
 // (deferredInvoice), an external credit has none (ErrExternalInvoice, no Stripe call), and any
-// other key is the checkout session whose invoice it is. ErrNoInvoice when there is none yet, and
-// for a key that names no checkout session (resource_missing: a ledger row keyed by anything else
-// has no invoice); any other Stripe failure is errors.ErrStripeError.
+// other key is the checkout session whose invoice it is. ErrInvoicePending for a manual credit
+// whose deferred invoice is not paid yet; ErrNoInvoice when a checkout top-up has none yet, for a
+// malformed manual credit key, and for a key that names no checkout session (resource_missing: a
+// ledger row keyed by anything else has no invoice); any other Stripe failure is
+// errors.ErrStripeError.
 func (c *Client) InvoiceOfLedgerKey(idempotencyKey string) (*stripeapi.Invoice, error) {
 	switch {
 	case strings.HasPrefix(idempotencyKey, ExternalCreditKeyPrefix):
@@ -131,7 +137,8 @@ func (c *Client) InvoiceOfLedgerKey(idempotencyKey string) (*stripeapi.Invoice, 
 
 // deferredInvoice is the paid deferred invoice of the manual credit keyed key, found by its
 // metadata: ErrNoInvoice, with no Stripe call, for a key that is not ManualCreditKeyPrefix and a
-// 24-hex id, and when none is paid yet (search lags a few seconds behind a fresh invoice). Of
+// 24-hex id, and ErrInvoicePending when none is paid yet (it is issued later, and search lags a
+// few seconds behind a fresh invoice). Of
 // several, the most recent is served and the others are logged.
 func deferredInvoice(key string) (*stripeapi.Invoice, error) {
 	if !IsCreditKey(key, ManualCreditKeyPrefix) {
@@ -150,7 +157,7 @@ func deferredInvoice(key string) (*stripeapi.Invoice, error) {
 		return nil, errors.ErrStripeError.Withf("failed to search the invoice of %s: %v", key, err)
 	}
 	if len(found) == 0 {
-		return nil, ErrNoInvoice
+		return nil, ErrInvoicePending
 	}
 	latest := slices.MaxFunc(found, func(a, b *stripeapi.Invoice) int { return cmp.Compare(a.Created, b.Created) })
 	if len(found) > 1 {
@@ -161,7 +168,8 @@ func deferredInvoice(key string) (*stripeapi.Invoice, error) {
 }
 
 // TopUpInvoicePDF serves the invoice of the top-up ledger row keyed idempotencyKey
-// (InvoiceOfLedgerKey). ErrNoInvoice when there is none yet, or no PDF yet; a PDF URL off
+// (InvoiceOfLedgerKey). ErrNoInvoice when there is none yet, or no PDF yet, and ErrInvoicePending
+// for a manual credit whose deferred invoice is not issued yet; a PDF URL off
 // stripe.com is refused.
 func (s *Service) TopUpInvoicePDF(idempotencyKey string) (*InvoicePDF, error) {
 	invoice, err := s.client.InvoiceOfLedgerKey(idempotencyKey)
