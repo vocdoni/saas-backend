@@ -165,12 +165,10 @@ func TestPasswordSetupConcurrentDoubleClick(t *testing.T) {
 	statuses := make([]int, 2)
 	barrier := make(chan struct{})
 	for i := range 2 {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			<-barrier
 			_, statuses[i] = testRequest(t, http.MethodPost, token, nil, usersMePasswordSetupEndpoint)
-		}(i)
+		})
 	}
 	close(barrier)
 	wg.Wait()
