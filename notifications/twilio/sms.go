@@ -44,6 +44,10 @@ type Config struct {
 	// enabled) that delivers one-time codes: Verify picks a sender each country
 	// accepts. A code it fails to deliver is sent as a plain message instead.
 	VerifyServiceSID string
+	// Label, when set, names a non-production environment (VOCDONI_ENVIRONMENT): voter
+	// messages start with "[Label] " and the canary names it. Verify writes its own
+	// text from the service name, so give each environment its own Verify service.
+	Label string
 }
 
 // messageCreator is the part of the Twilio REST API the service uses.
@@ -142,6 +146,15 @@ func (tsms *SMS) statusCallbackURL(source string) string {
 	return tsms.config.StatusCallbackURL + "?" + url.Values{"source": {source}}.Encode()
 }
 
+// body is the message text: voter messages carry the environment label, the
+// canary names it in its own text.
+func (tsms *SMS) body(notification *notifications.Notification, source string) string {
+	if tsms.config.Label == "" || source == sourceCanary {
+		return notification.PlainBody
+	}
+	return "[" + tsms.config.Label + "] " + notification.PlainBody
+}
+
 // send creates one message from the given sender and waits for Twilio's answer
 // or for ctx to be done. The outcome is counted when Twilio answers, even if ctx
 // is done by then.
@@ -149,7 +162,7 @@ func (tsms *SMS) send(ctx context.Context, from string, notification *notificati
 	params := &api.CreateMessageParams{}
 	params.SetTo(notification.ToNumber)
 	params.SetFrom(from)
-	params.SetBody(notification.PlainBody)
+	params.SetBody(tsms.body(notification, source))
 	if callback := tsms.statusCallbackURL(source); callback != "" {
 		params.SetStatusCallback(callback)
 	}

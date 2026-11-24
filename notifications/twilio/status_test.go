@@ -19,7 +19,6 @@ import (
 	"github.com/twilio/twilio-go/client"
 	api "github.com/twilio/twilio-go/rest/api/v2010"
 	"github.com/vocdoni/saas-backend/notifications"
-	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 )
 
 const (
@@ -187,10 +186,32 @@ func TestStatusCallbackURLCarriesSource(t *testing.T) {
 
 func TestCanaryNotification(t *testing.T) {
 	c := qt.New(t)
-	c.Assert(mailtemplates.Load(), qt.IsNil)
-	n, err := canaryNotification("+34600000000")
+	n, err := canaryNotification("+34600000000", "DEV")
 	c.Assert(err, qt.IsNil)
 	c.Assert(n.ToNumber, qt.Equals, "+34600000000")
-	// the Spanish voter code text, with a 6-digit code
-	c.Assert(n.PlainBody, qt.Matches, `(?s).*código.*\d{6}.*`)
+	c.Assert(n.PlainBody, qt.Matches, `Your Vocdoni Canary \(DEV\) verification code is: \d{6}`)
+	n, err = canaryNotification("+34600000000", "")
+	c.Assert(err, qt.IsNil)
+	c.Assert(n.PlainBody, qt.Matches, `Your Vocdoni Canary verification code is: \d{6}`)
+}
+
+// bodyMessages records the body of each message.
+type bodyMessages struct{ bodies []string }
+
+func (b *bodyMessages) CreateMessage(params *api.CreateMessageParams) (*api.ApiV2010Message, error) {
+	b.bodies = append(b.bodies, *params.Body)
+	return &api.ApiV2010Message{}, nil
+}
+
+func TestSendLabel(t *testing.T) {
+	c := qt.New(t)
+	n := &notifications.Notification{ToNumber: "+34600000000", PlainBody: "code 123456"}
+	m := &bodyMessages{}
+	tsms := &SMS{config: &Config{FromNumber: "VOCDONI", Label: "STG"}, messages: m}
+	c.Assert(tsms.SendNotification(context.Background(), n), qt.IsNil)
+	// the canary names the environment in its own text, so it is not prefixed
+	c.Assert(tsms.deliver(context.Background(), n, sourceCanary), qt.IsNil)
+	tsms.config.Label = ""
+	c.Assert(tsms.SendNotification(context.Background(), n), qt.IsNil)
+	c.Assert(m.bodies, qt.DeepEquals, []string{"[STG] code 123456", "code 123456", "code 123456"})
 }
