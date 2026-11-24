@@ -38,7 +38,7 @@ type Config struct {
 	// Twilio refused with 21612 for FromNumber: an alphanumeric sender ID is not
 	// accepted in every country (some require it to be registered first).
 	FallbackFromNumber string
-	// Label, when set, names a non-production environment (VOCDONI_ENVIRONMENT): voter
+	// Label, when set, names a non-production environment ("DEV", "STG"): voter
 	// messages start with "[Label] " and the canary names it.
 	Label string
 }
