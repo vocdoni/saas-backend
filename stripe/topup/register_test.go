@@ -3,6 +3,7 @@ package topup
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/http"
 	"strings"
 	"sync"
@@ -75,7 +76,8 @@ func TestValidateBilling(t *testing.T) {
 
 // customerFake is a Stripe account for CreateCustomer: the customer search answers stamped (an
 // id, "" for none, "fail" for a 500), POST /v1/customers creates cus_<n> unless its tax id is
-// "bad" (Stripe's tax_id_invalid) and replays the customer of a known Idempotency-Key, and
+// "bad" (Stripe's tax_id_invalid), replays the customer of a known Idempotency-Key with the same
+// form and answers Stripe's idempotency_error for one with another form, and
 // POST /v1/checkout/sessions records the customer it was opened for.
 type customerFake struct {
 	mu       sync.Mutex
@@ -114,12 +116,18 @@ func (f *customerFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","message":"permission denied"}}`))
 			return
 		}
+		form := map[string]string{}
+		for k, v := range r.PostForm {
+			form[k] = v[0]
+		}
 		id, ok := f.replays[key]
+		if ok && !maps.Equal(f.created[id[len("cus_")]-'1'], form) {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"type":"idempotency_error","message":"Keys for idempotent requests ` +
+				`can only be used with the same parameters they were first used with."}}`))
+			return
+		}
 		if !ok {
-			form := map[string]string{}
-			for k, v := range r.PostForm {
-				form[k] = v[0]
-			}
 			f.created = append(f.created, form)
 			id = "cus_" + string(rune('0'+len(f.created)))
 			f.replays[key] = id
@@ -138,8 +146,9 @@ func (f *customerFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // TestCreateCustomer (AC2, AC11): the customer is created with the details, the tax id, the
-// organization stamp and tax location validated at once, under an Idempotency-Key per org and
-// details (the same details again are the same customer; other details another key). An org with
+// organization stamp and tax location validated at once, under an Idempotency-Key per org (the
+// same details again are the same customer; other details within 24 hours are ErrCustomerExists,
+// never a second customer, while the search lags). An org with
 // a customer stamped already is refused with it, a failed search refuses without creating, invalid
 // details never reach Stripe, and Stripe's refusal of the tax id is a *StripeRefusalError. A
 // checkout opened once the search finds the new customer bills it instead of creating another.
@@ -160,7 +169,7 @@ func TestCreateCustomer(t *testing.T) {
 		"tax_id_data[0][type]": "es_cif", "tax_id_data[0][value]": "G12345678",
 		"tax[validate_location]": "immediately", "metadata[address]": flowOrg.String(),
 	}})
-	c.Assert(f.keys[0], qt.Matches, "topup-customer:"+flowOrg.String()+":[0-9a-f]{16}")
+	c.Assert(f.keys[0], qt.Equals, "topup-customer:"+flowOrg.String())
 
 	// a retry with the same details (the response was lost, the search has not caught up): replayed
 	again, err := CreateCustomer(ctx, client, flowOrg, validBilling())
@@ -168,12 +177,15 @@ func TestCreateCustomer(t *testing.T) {
 	c.Assert(again.ID, qt.Equals, "cus_1")
 	c.Assert(f.created, qt.HasLen, 1)
 	c.Assert(f.keys[1], qt.Equals, f.keys[0])
+	// corrected details while the search still misses cus_1: refused, no second customer
 	other := validBilling()
 	other.Line2 = "2n pis"
-	_, err = CreateCustomer(ctx, client, flowOrg, other)
-	c.Assert(err, qt.IsNil)
-	c.Assert(f.keys[2], qt.Not(qt.Equals), f.keys[0])
-	c.Assert(f.created[1]["address[line2]"], qt.Equals, "2n pis")
+	customer, err = CreateCustomer(ctx, client, flowOrg, other)
+	c.Assert(err, qt.ErrorIs, ErrCustomerExists)
+	c.Assert(err, qt.ErrorMatches, ".*a customer was registered for this organization in the last 24 hours")
+	c.Assert(customer, qt.DeepEquals, Customer{})
+	c.Assert(f.keys[2], qt.Equals, f.keys[0])
+	c.Assert(f.created, qt.HasLen, 1)
 
 	bad := validBilling()
 	bad.TaxIDValue = "bad"

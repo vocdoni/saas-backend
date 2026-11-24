@@ -2,9 +2,6 @@ package topup
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -104,10 +101,13 @@ func (*StripeRefusalError) Unwrap() error { return ErrInvalid }
 // customer is stamped with already (ErrCustomerExists, with that customer), with or without an
 // address, and a failed search. Stripe validates the tax id and locates the address at once
 // (tax.validate_location immediately): a refusal is a *StripeRefusalError. The create is
-// idempotent per org and details for 24 hours (Stripe's Idempotency-Key), so a retry after a
-// lost response gets the same customer. Customer search lags behind a new customer: until it
-// catches up, the returned id is the only way to name it (Request.CustomerID,
-// DeferredInvoice.CustomerID).
+// idempotent per org for 24 hours (Stripe's Idempotency-Key "topup-customer:<org>"): a retry after
+// a lost response gets the same customer, and a second create for the org with other details is
+// ErrCustomerExists (with no customer) instead of a second customer. Customer search lags behind
+// a new customer: until it catches up, the returned id is the only way to name it
+// (Request.CustomerID, DeferredInvoice.CustomerID), and the search-based guard misses it once
+// the 24 hours are over; a caller that needs a consistent guard keeps its own org-to-customer
+// record.
 func CreateCustomer(ctx context.Context, c *stripe.Client, org common.Address, b BillingDetails) (Customer, error) {
 	b, err := ValidateBilling(b)
 	if err != nil {
@@ -137,10 +137,14 @@ func CreateCustomer(ctx context.Context, c *stripe.Client, org common.Address, b
 		params.Address.State = new(b.State)
 	}
 	params.Context = ctx
-	params.SetIdempotencyKey(customerIdempotencyKey(org, b))
+	params.SetIdempotencyKey("topup-customer:" + org.String())
 	customer, err := stripecustomer.New(params)
 	if err != nil {
 		var stripeErr *stripeapi.Error
+		if errors.As(err, &stripeErr) && stripeErr.Type == stripeapi.ErrorTypeIdempotency {
+			return Customer{}, fmt.Errorf("%w: a customer was registered for this organization in the last 24 hours",
+				ErrCustomerExists)
+		}
 		if errors.As(err, &stripeErr) && stripeErr.Type == stripeapi.ErrorTypeInvalidRequest &&
 			stripeErr.HTTPStatusCode == http.StatusBadRequest {
 			return Customer{}, &StripeRefusalError{Code: string(stripeErr.Code), Param: stripeErr.Param, Msg: stripeErr.Msg}
@@ -148,12 +152,4 @@ func CreateCustomer(ctx context.Context, c *stripe.Client, org common.Address, b
 		return Customer{}, fmt.Errorf("could not create the customer of organization %s: %w", org, err)
 	}
 	return customerOf(customer), nil
-}
-
-// customerIdempotencyKey is "topup-customer:<org>:<16 hex of the sha256 of b's JSON>": the same
-// details for the same org are one customer.
-func customerIdempotencyKey(org common.Address, b BillingDetails) string {
-	canonical, _ := json.Marshal(b) // a struct of strings: never fails
-	sum := sha256.Sum256(canonical)
-	return "topup-customer:" + org.String() + ":" + hex.EncodeToString(sum[:])[:16]
 }
