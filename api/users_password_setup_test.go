@@ -1,8 +1,11 @@
 package api
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -143,6 +146,44 @@ func TestPasswordSetupThrottlingAndGuessing(t *testing.T) {
 	// with the password set the flow is closed, also for the new session
 	requestAndAssertError(errors.ErrUserAlreadyHasPassword, t, http.MethodPost, session.Token,
 		&apicommon.UserPasswordSetup{Code: freshCode[1], NewPassword: "anotherpassword123"}, usersMePasswordSetupVerifyEndpoint)
+}
+
+// TestPasswordSetupConcurrentDoubleClick verifies that two simultaneous first-ever code requests
+// result in exactly one email: the second goroutine loses the atomic insert race and is blocked
+// instead of sending a competing code that would invalidate the first.
+func TestPasswordSetupConcurrentDoubleClick(t *testing.T) {
+	c := qt.New(t)
+	defer func() {
+		if err := testDB.DeleteAllDocuments(); err != nil {
+			c.Logf("cleanup: %v", err)
+		}
+	}()
+	user, token := testCreateOAuthOnlyUser(t)
+
+	// release both goroutines simultaneously before any code exists
+	var wg sync.WaitGroup
+	statuses := make([]int, 2)
+	barrier := make(chan struct{})
+	for i := range 2 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-barrier
+			_, statuses[i] = testRequest(t, http.MethodPost, token, nil, usersMePasswordSetupEndpoint)
+		}(i)
+	}
+	close(barrier)
+	wg.Wait()
+
+	// at least one request must have succeeded
+	c.Assert(statuses[0] == http.StatusOK || statuses[1] == http.StatusOK, qt.IsTrue)
+
+	// exactly one email must have been sent; the race loser is blocked, never mails
+	_ = waitForEmail(t, user.Email)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	_, err := testMailService.FindEmail(ctx, user.Email)
+	c.Assert(errors.Is(err, io.EOF), qt.IsTrue, qt.Commentf("a second email was unexpectedly delivered"))
 }
 
 // TestPasswordSetupNeedsMail checks no setup code is issued when the service runs without mail, since

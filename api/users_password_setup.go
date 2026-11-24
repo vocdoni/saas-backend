@@ -23,7 +23,7 @@ import (
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Success		200	{string}	string			"OK"
-//	@Failure		400	{object}	errors.Error	"Code sent recently, or no mail service"
+//	@Failure		400	{object}	errors.Error	"Code sent recently, send budget exhausted, or no mail service"
 //	@Failure		401	{object}	errors.Error	"Unauthorized"
 //	@Failure		409	{object}	errors.Error	"User already has a password"
 //	@Failure		500	{object}	errors.Error	"Internal server error"
@@ -44,14 +44,26 @@ func (a *API) requestPasswordSetupHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	// the session is authenticated, so unlike recovery a blocked send can be refused explicitly
-	if err := a.mailUserCode(r.Context(), user, db.CodeTypePasswordSetup,
-		mailtemplates.PasswordSetupNotification); err != nil {
-		if errors.Is(err, errCodeSendBlocked) {
+	if err := a.mailUserCode(r.Context(), mailCodeParams{
+		User:     user,
+		CodeType: db.CodeTypePasswordSetup,
+		Template: mailtemplates.PasswordSetupNotification,
+	}); err != nil {
+		switch {
+		case errors.Is(err, errCodeSendBlocked):
 			errors.ErrVerificationMaxAttempts.With("a password setup code was sent recently, retry later").Write(w)
-			return
+		case errors.Is(err, errCodeSendBudgetExhausted):
+			// send budget spent — tell the caller when the code expires so they can show an accurate wait time
+			v, dbErr := a.db.UserVerificationCode(user, db.CodeTypePasswordSetup)
+			if dbErr == nil {
+				errors.ErrVerificationMaxAttempts.WithData(apicommon.UserVerification{Expiration: v.Expiration}).Write(w)
+			} else {
+				errors.ErrVerificationMaxAttempts.Write(w)
+			}
+		default:
+			log.Warnw("could not send password setup code", "error", err)
+			errors.ErrGenericInternalServerError.Write(w)
 		}
-		log.Warnw("could not send password setup code", "error", err)
-		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 	apicommon.HTTPWriteOK(w)
@@ -72,6 +84,7 @@ func (a *API) requestPasswordSetupHandler(w http.ResponseWriter, r *http.Request
 //	@Failure		400		{object}	errors.Error	"Invalid input data or max attempts reached"
 //	@Failure		401		{object}	errors.Error	"Unauthorized, code mismatch or code expired"
 //	@Failure		409		{object}	errors.Error	"User already has a password"
+//	@Failure		413		{object}	errors.Error	"Request body too large"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Failure		503		{object}	errors.Error	"Server busy, retry after the Retry-After delay"
 //	@Router			/users/me/password/setup/verify [post]
@@ -96,7 +109,7 @@ func (a *API) verifyPasswordSetupHandler(w http.ResponseWriter, r *http.Request)
 	}
 	userVerification, err := a.db.UserVerificationCode(user, db.CodeTypePasswordSetup)
 	if err != nil {
-		if err != db.ErrNotFound {
+		if !errors.Is(err, db.ErrNotFound) {
 			log.Warnw("could not get password setup code", "error", err)
 		}
 		errors.ErrUnauthorized.Write(w)
@@ -111,7 +124,7 @@ func (a *API) verifyPasswordSetupHandler(w http.ResponseWriter, r *http.Request)
 	recorded, err := a.db.VerificationCodeCheckAndAddAttempt(user, db.CodeTypePasswordSetup,
 		apicommon.VerificationCodeMaxAttempts)
 	if err != nil {
-		if err != db.ErrNotFound {
+		if !errors.Is(err, db.ErrNotFound) {
 			log.Warnw("could not record password setup attempt", "error", err)
 		}
 		errors.ErrUnauthorized.Write(w)

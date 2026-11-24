@@ -864,13 +864,12 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 	// ownership, so the reset also verifies the account and replaces a password set by whoever registered it
 	codeType := db.CodeTypePasswordReset
 	template := mailtemplates.PasswordResetNotification
-	// a code delivered too recently means we silently skip sending another, preventing email flooding
-	// without leaking whether the account exists
 	// a blocked or unrecorded send is skipped silently, so the answer never reveals whether the account
 	// exists; failing to check the cooldown counts as blocked, so a storage error cannot bypass it
-	if err := a.mailUserCode(r.Context(), user, codeType, template); err != nil {
+	if err := a.mailUserCode(r.Context(), mailCodeParams{User: user, CodeType: codeType, Template: template}); err != nil {
 		switch {
-		case errors.Is(err, errCodeSendBlocked):
+		case errors.Is(err, errCodeSendBlocked), errors.Is(err, errCodeSendBudgetExhausted):
+			// silent skip — the answer never reveals whether the account exists or the send state
 		case errors.Is(err, errCodeSendUnchecked):
 			log.Warnw("could not check password recovery cooldown", "error", err)
 		default:
@@ -1013,19 +1012,28 @@ func codeReusable(v *db.UserVerification) bool {
 }
 
 var (
-	// errCodeSendBlocked means the OTP cooldown or the code's send budget blocks this delivery
+	// errCodeSendBlocked means the OTP cooldown blocks this delivery (the code is still young)
 	errCodeSendBlocked = fmt.Errorf("a code was sent recently")
+	// errCodeSendBudgetExhausted means the per-code send budget is spent; the user must wait until
+	// the code expires and a new one can be issued
+	errCodeSendBudgetExhausted = fmt.Errorf("send budget for this code is exhausted")
 	// errCodeSendUnchecked means the cooldown could not be checked or claimed, so nothing was sent
 	errCodeSendUnchecked = fmt.Errorf("could not check the code cooldown")
 )
+
+// mailCodeParams groups the parameters for mailUserCode.
+type mailCodeParams struct {
+	User     *db.User
+	CodeType db.CodeType
+	Template mailtemplates.MailTemplate
+}
 
 // mailUserCode mails the user a code of the given type under the shared resend rules: a delivery is
 // claimed atomically once per OTP cooldown, a still-usable code is resent rather than replaced (so a
 // repeated request cannot invalidate the code the user is about to type) within its send budget, and
 // an expired or exhausted code is replaced by a fresh one, which resets both budgets.
-func (a *API) mailUserCode(ctx context.Context, user *db.User, codeType db.CodeType,
-	template mailtemplates.MailTemplate,
-) error {
+func (a *API) mailUserCode(ctx context.Context, p mailCodeParams) error {
+	user, codeType, template := p.User, p.CodeType, p.Template
 	var code, link string
 	expiration := time.Now().Add(a.otpExpiry)
 	existing, err := a.db.UserVerificationCode(user, codeType)
@@ -1042,7 +1050,12 @@ func (a *API) mailUserCode(ctx context.Context, user *db.User, codeType db.CodeT
 		case err != nil && !errors.Is(err, db.ErrNotFound):
 			return fmt.Errorf("%w: %w", errCodeSendUnchecked, err)
 		case err != nil || !sent:
-			// blocked, or the code was replaced or consumed between the read and the claim
+			// blocked: either the cooldown has not elapsed, or the send budget is spent.
+			// When the code is reusable and the budget is already at its cap, the user is locked
+			// until the code expires — report that distinctly so callers can give accurate feedback.
+			if reusable && existing.Sends >= apicommon.VerificationCodeMaxSends {
+				return errCodeSendBudgetExhausted
+			}
 			return errCodeSendBlocked
 		}
 		if reusable {
@@ -1057,8 +1070,32 @@ func (a *API) mailUserCode(ctx context.Context, user *db.User, codeType db.CodeT
 			return fmt.Errorf("could not generate the code: %w", err)
 		}
 	case errors.Is(err, db.ErrNotFound):
-		if code, link, err = a.generateVerificationCodeAndLink(user, codeType); err != nil {
-			return fmt.Errorf("could not generate the code: %w", err)
+		// no code exists yet: generate one and claim the first send slot atomically so concurrent
+		// requests cannot both succeed and each send a mail with a different (invalidating) code
+		if a.mail != nil {
+			code = util.RandomHex(apicommon.VerificationCodeLength)
+		}
+		sealedCode, sealErr := internal.SealToken(code, user.Email, a.secret)
+		if sealErr != nil {
+			return fmt.Errorf("could not seal code: %w", sealErr)
+		}
+		if err = a.db.InsertVerificationCode(&db.UserVerification{
+			UserID:     user.ID,
+			SealedCode: sealedCode,
+			Type:       codeType,
+			Expiration: expiration,
+		}); errors.Is(err, db.ErrConflict) {
+			// a concurrent request won the insert; treat it as a blocked send
+			return errCodeSendBlocked
+		} else if err != nil {
+			return fmt.Errorf("could not create the code: %w", err)
+		}
+		webAppURI := userCodeWebAppURI(codeType)
+		if link, err = a.buildWebAppURL(webAppURI, map[string]any{
+			"email": user.Email,
+			"code":  code,
+		}); err != nil {
+			return fmt.Errorf("could not build code link: %w", err)
 		}
 	default:
 		return fmt.Errorf("%w: %w", errCodeSendUnchecked, err)
