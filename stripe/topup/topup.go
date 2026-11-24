@@ -4,7 +4,12 @@
 //
 // The invoice is billed to the organization's Stripe customer with VAT by Stripe Tax, and the
 // organization's wallet is credited once Stripe reports it paid: the invoice.paid webhook credits
-// it exactly once, keyed by the invoice. Nothing here writes the wallet.
+// it exactly once, keyed by the invoice. Prepare and Execute never write the wallet.
+//
+// The staff dashboard also credits money already received without a Stripe invoice at the time
+// (credit.go: PrepareCredit, Credit, the one wallet write here), invoices such a credit later
+// (deferred.go: IssueDeferredInvoice, ignored by the webhook) and registers an organization's
+// customer (register.go: CreateCustomer).
 //
 // The customer is the one GetCustomerByAddress finds for the organization. When none is found
 // (customer search is eventually consistent, and a customer a checkout created may not be
@@ -14,8 +19,9 @@
 // lookups find it, but only with evidence that it is the organization's and not another
 // tenant's: a checkout session of the customer for this organization (wallet_topup_org), or, for
 // a customer with no checkout session at all, an email that is an Admin of this organization and
-// belongs to no other one. A customer is never created, and one without an address is refused:
-// it has no tax location, and automatic tax would fail at finalization.
+// belongs to no other one. Prepare never creates a customer (CreateCustomer does, on its own), and
+// one without an address is refused: it has no tax location, and automatic tax would fail at
+// finalization.
 //
 // The invoice is created with collection_method send_invoice, due in 30 days, auto_advance off,
 // so Stripe never charges a saved payment method on its own. Exactly one Mode is given:
