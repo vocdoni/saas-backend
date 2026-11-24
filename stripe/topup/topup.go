@@ -195,7 +195,7 @@ func Prepare(ctx context.Context, ms Store, c *stripe.Client, r Request) (*Plan,
 	if err != nil {
 		return nil, err
 	}
-	duplicates, err := listDuplicates(ctx, r)
+	duplicates, err := recentDuplicates(ctx, r)
 	if err != nil {
 		return nil, err
 	}
@@ -430,10 +430,10 @@ func duplicateInvoices(invoices []*stripeapi.Invoice, r Request) []*stripeapi.In
 	return duplicates
 }
 
-// listDuplicates lists the invoices created within DuplicateWindow, billed to any customer (a
+// recentDuplicates lists the invoices created within DuplicateWindow, billed to any customer (a
 // retry naming another customer of the organization is a duplicate too), and keeps the
 // duplicates of r. The invoices are listed, not searched: search lags behind a fresh invoice.
-func listDuplicates(ctx context.Context, r Request) ([]*stripeapi.Invoice, error) {
+func recentDuplicates(ctx context.Context, r Request) ([]*stripeapi.Invoice, error) {
 	var invoices []*stripeapi.Invoice
 	params := &stripeapi.InvoiceListParams{
 		ListParams:   stripeapi.ListParams{Limit: new(int64(100))},
