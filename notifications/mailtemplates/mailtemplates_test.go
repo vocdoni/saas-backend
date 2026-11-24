@@ -25,6 +25,7 @@ func TestMailTemplateLoading(t *testing.T) {
 			"verification_account",
 			"verification_code_otp",
 			"forgot_password",
+			"password_setup",
 			"invite_admin",
 			"support",
 			"members_import_done",
@@ -633,4 +634,30 @@ func TestMailTemplateIntegration(t *testing.T) {
 		// Plain body should contain the original text
 		c.Assert(notification.PlainBody, qt.Contains, "<script>alert('xss')</script>")
 	})
+}
+
+func TestPasswordSetupNotification(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(Load(), qt.IsNil)
+	c.Assert(PasswordSetupNotification.WebAppURI, qt.Equals, "/account/password/setup")
+
+	plaintext, err := PasswordSetupNotification.Localized("en").Plaintext()
+	c.Assert(err, qt.IsNil)
+	c.Assert(plaintext.Subject, qt.Equals, "Set a password for your Vocdoni account")
+	c.Assert(plaintext.Body, qt.Contains, "Your Vocdoni password setup code is: {{.Code}}")
+
+	data := struct {
+		Code string
+		Link string
+	}{"SETUP123", "https://example.com/account/password/setup?code=SETUP123"}
+	for _, lang := range []string{"en", "es", "ca"} {
+		template := PasswordSetupNotification.Localized(lang)
+		c.Assert(template.HTMLFile, qt.Equals, "assets/password_setup_"+lang+".html")
+		notification, err := template.ExecTemplate(data)
+		c.Assert(err, qt.IsNil)
+		c.Assert(notification.Subject, qt.Not(qt.Equals), "")
+		c.Assert(notification.PlainBody, qt.Contains, data.Code)
+		c.Assert(notification.PlainBody, qt.Contains, data.Link)
+		c.Assert(notification.Body, qt.Contains, data.Code)
+	}
 }

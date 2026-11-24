@@ -551,6 +551,17 @@ type UserPasswordReset struct {
 	NewPassword string `json:"newPassword"`
 }
 
+// UserPasswordSetup represents a request to set the first password of an account that has none, with
+// the code mailed by POST /users/me/password/setup.
+// swagger:model UserPasswordSetup
+type UserPasswordSetup struct {
+	// Password setup code
+	Code string `json:"code"`
+
+	// New password
+	NewPassword string `json:"newPassword"`
+}
+
 // LoginResponse represents the response to a successful login request.
 // swagger:model LoginResponse
 type LoginResponse struct {

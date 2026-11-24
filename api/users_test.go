@@ -21,6 +21,7 @@ var (
 	verificationCodeRgx *regexp.Regexp
 	verificationLinkRgx *regexp.Regexp
 	passwordResetRgx    *regexp.Regexp
+	passwordSetupRgx    *regexp.Regexp
 )
 
 func init() {
@@ -60,6 +61,13 @@ func init() {
 	}
 	// clean the notification body to get only the password reset code and
 	passwordResetRgx = regexp.MustCompile(strings.Split(passwordResetNotification.PlainBody, "\n")[0])
+
+	// compose notification with the password setup code regex needle
+	passwordSetupNotification, err := testTemplateExec(mailtemplates.PasswordSetupNotification.Localized("en"))
+	if err != nil {
+		panic(err)
+	}
+	passwordSetupRgx = regexp.MustCompile(strings.Split(passwordSetupNotification.PlainBody, "\n")[0])
 }
 
 func TestRegisterHandler(t *testing.T) {

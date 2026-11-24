@@ -141,7 +141,7 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 	var webAppURI string
 	var linkParams map[string]any
 	switch codeType {
-	case db.CodeTypeVerifyAccount, db.CodeTypePasswordReset:
+	case db.CodeTypeVerifyAccount, db.CodeTypePasswordReset, db.CodeTypePasswordSetup:
 		// the target should be a database user
 		user, ok := target.(*db.User)
 		if !ok {
@@ -163,10 +163,7 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 			return "", "", err
 		}
 		// set the web app URI and the link parameters
-		webAppURI = mailtemplates.VerifyAccountNotification.WebAppURI
-		if codeType == db.CodeTypePasswordReset {
-			webAppURI = mailtemplates.PasswordResetNotification.WebAppURI
-		}
+		webAppURI = userCodeWebAppURI(codeType)
 		linkParams = map[string]any{
 			"email": user.Email,
 			"code":  verificationCode,
@@ -225,16 +222,24 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 // configuration. It returns the generated verification link and an error if
 // the link could not be generated.
 func (a *API) generateVerificationLink(user *db.User, codeType db.CodeType, code string) (string, error) {
-	webAppURI := mailtemplates.VerifyAccountNotification.WebAppURI
-	if codeType == db.CodeTypePasswordReset {
-		webAppURI = mailtemplates.PasswordResetNotification.WebAppURI
-	}
 	linkParams := map[string]any{
 		"email": user.Email,
 		"code":  code,
 	}
 
-	return a.buildWebAppURL(webAppURI, linkParams)
+	return a.buildWebAppURL(userCodeWebAppURI(codeType), linkParams)
+}
+
+// userCodeWebAppURI returns the web app page that redeems a user-targeted code of the given type.
+func userCodeWebAppURI(codeType db.CodeType) string {
+	switch codeType {
+	case db.CodeTypePasswordReset:
+		return mailtemplates.PasswordResetNotification.WebAppURI
+	case db.CodeTypePasswordSetup:
+		return mailtemplates.PasswordSetupNotification.WebAppURI
+	default:
+		return mailtemplates.VerifyAccountNotification.WebAppURI
+	}
 }
 
 // calculatePagination calculates PreviousPage, NextPage and LastPage.
