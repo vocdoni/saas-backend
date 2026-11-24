@@ -2,6 +2,7 @@ package twilio
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -45,7 +46,7 @@ func TestSendNotificationVerify(t *testing.T) {
 		return &SMS{config: conf, messages: m, verifications: v}, v, m
 	}
 
-	// a one-time code goes through Verify with the custom code and locale, no plain message
+	// a one-time code goes through Verify with the custom code and locale, no direct message
 	sms, v, m := newSMS("VA1", nil, nil)
 	c.Assert(sms.SendNotification(context.Background(), otp), qt.IsNil)
 	c.Assert(v.calls, qt.HasLen, 1)
@@ -58,7 +59,7 @@ func TestSendNotificationVerify(t *testing.T) {
 	c.Assert(*v.calls[0].TemplateCustomSubstitutions, qt.Equals, `{"ttl":"5"}`)
 	c.Assert(m.froms, qt.HasLen, 0)
 
-	// Verify failing falls back to the plain message path, sender fallback included
+	// Verify failing falls back to the direct message path, sender fallback included
 	sms, v, m = newSMS("VA1", twilioErr(60200), map[string]error{"VOCDONI": twilioErr(21612)})
 	c.Assert(sms.SendNotification(context.Background(), otp), qt.IsNil)
 	c.Assert(v.calls, qt.HasLen, 1)
@@ -75,7 +76,7 @@ func TestSendNotificationVerify(t *testing.T) {
 	c.Assert(v.calls, qt.HasLen, 0)
 	c.Assert(m.froms, qt.DeepEquals, []string{"VOCDONI"})
 
-	// a Verify call outliving the context is not followed by a plain resend
+	// a Verify call outliving the context is not followed by a direct resend
 	sms, v, m = newSMS("VA1", nil, nil)
 	v.delay = 200 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
@@ -118,7 +119,7 @@ func TestVerifyCountsSends(t *testing.T) {
 	c.Assert(newSMS(&fakeVerifications{}).SendNotification(context.Background(), otp), qt.IsNil)
 	c.Assert(count(sendAccepted, ""), qt.Equals, accepted+1)
 
-	// refused by Verify and resent as a plain message: rerouted, then accepted
+	// refused by Verify and resent as a direct message: rerouted, then accepted
 	c.Assert(newSMS(&fakeVerifications{err: twilioErr(60200)}).SendNotification(context.Background(), otp), qt.IsNil)
 	c.Assert(count(sendRerouted, "60200"), qt.Equals, rerouted+1)
 	c.Assert(count(sendAccepted, ""), qt.Equals, accepted+2)
@@ -134,4 +135,89 @@ func TestVerifyCountsSends(t *testing.T) {
 	}
 	c.Assert(count(sendRejected, "60200"), qt.Equals, rejected+1)
 	c.Assert(count(sendRerouted, "60200"), qt.Equals, rerouted+1)
+}
+
+func TestSendNotificationDirectPrefixes(t *testing.T) {
+	c := qt.New(t)
+	otp := &notifications.Notification{ToNumber: "+34600000000", PlainBody: "code 123456", OTPCode: "123456"}
+	newSMS := func(verr error, msgErrs map[string]error) (*SMS, *fakeVerifications, *fakeMessages) {
+		v := &fakeVerifications{err: verr}
+		m := &fakeMessages{errs: msgErrs}
+		conf := &Config{
+			FromNumber: "VOCDONI", FallbackFromNumber: "+15550001111", VerifyServiceSID: "VA1",
+			DirectPrefixes: []string{"+34", "+55"},
+		}
+		return &SMS{config: conf, messages: m, verifications: v}, v, m
+	}
+	refused := twilioErr(codeSenderRecipientMismatch)
+
+	// a direct-prefix code goes out as a direct message, Verify untouched
+	sms, v, m := newSMS(nil, nil)
+	c.Assert(sms.SendNotification(context.Background(), otp), qt.IsNil)
+	c.Assert(m.froms, qt.DeepEquals, []string{"VOCDONI"})
+	c.Assert(v.calls, qt.HasLen, 0)
+
+	// the sender fallback still comes first
+	sms, v, m = newSMS(nil, map[string]error{"VOCDONI": refused})
+	c.Assert(sms.SendNotification(context.Background(), otp), qt.IsNil)
+	c.Assert(m.froms, qt.DeepEquals, []string{"VOCDONI", "+15550001111"})
+	c.Assert(v.calls, qt.HasLen, 0)
+
+	// every sender refused: Verify delivers it
+	sms, v, m = newSMS(nil, map[string]error{"VOCDONI": refused, "+15550001111": refused})
+	c.Assert(sms.SendNotification(context.Background(), otp), qt.IsNil)
+	c.Assert(m.froms, qt.DeepEquals, []string{"VOCDONI", "+15550001111"})
+	c.Assert(v.calls, qt.HasLen, 1)
+
+	// Verify failing too ends there: the direct path was already tried
+	sms, v, m = newSMS(twilioErr(60200), map[string]error{"VOCDONI": refused, "+15550001111": refused})
+	c.Assert(sms.SendNotification(context.Background(), otp), qt.Not(qt.IsNil))
+	c.Assert(m.froms, qt.HasLen, 2)
+	c.Assert(v.calls, qt.HasLen, 1)
+
+	// any other refusal is not handed to Verify
+	sms, v, _ = newSMS(nil, map[string]error{"VOCDONI": twilioErr(21211)})
+	var permanent *notifications.PermanentError
+	c.Assert(errors.As(sms.SendNotification(context.Background(), otp), &permanent), qt.IsTrue)
+	c.Assert(v.calls, qt.HasLen, 0)
+
+	// other countries still go through Verify first
+	sms, v, m = newSMS(nil, nil)
+	other := &notifications.Notification{ToNumber: "+43600000000", PlainBody: "code 123456", OTPCode: "123456"}
+	c.Assert(sms.SendNotification(context.Background(), other), qt.IsNil)
+	c.Assert(v.calls, qt.HasLen, 1)
+	c.Assert(m.froms, qt.HasLen, 0)
+}
+
+func TestDirectPrefixesCountSends(t *testing.T) {
+	c := qt.New(t)
+	count := func(result, code string) float64 {
+		return testutil.ToFloat64(smsSends.WithLabelValues(sourceVoter, result, code))
+	}
+	rerouted, rejected, accepted := count(sendRerouted, "21612"), count(sendRejected, "60200"), count(sendAccepted, "")
+	refused := twilioErr(codeSenderRecipientMismatch)
+	newSMS := func(verr error) *SMS {
+		conf := &Config{
+			FromNumber: "VOCDONI", FallbackFromNumber: "+15550001111", VerifyServiceSID: "VA1",
+			DirectPrefixes: []string{"+34"},
+		}
+		m := &fakeMessages{errs: map[string]error{"VOCDONI": refused, "+15550001111": refused}}
+		return &SMS{config: conf, messages: m, verifications: &fakeVerifications{err: verr}}
+	}
+	otp := &notifications.Notification{ToNumber: "+34600000000", PlainBody: "code 123456", OTPCode: "123456"}
+
+	// both senders refused and Verify takes over: two rerouted sends, one accepted
+	c.Assert(newSMS(nil).SendNotification(context.Background(), otp), qt.IsNil)
+	c.Assert(count(sendRerouted, "21612"), qt.Equals, rerouted+2)
+	c.Assert(count(sendAccepted, ""), qt.Equals, accepted+1)
+
+	// Verify refusing as the last resort is rejected, not rerouted
+	c.Assert(newSMS(twilioErr(60200)).SendNotification(context.Background(), otp), qt.Not(qt.IsNil))
+	c.Assert(count(sendRejected, "60200"), qt.Equals, rejected+1)
+}
+
+func TestValidPrefixes(t *testing.T) {
+	c := qt.New(t)
+	got := validPrefixes([]string{"+34", "55", "", "+", "+3a", "+1234567", "+39"})
+	c.Assert(got, qt.DeepEquals, []string{"+34", "+55", "+39"})
 }

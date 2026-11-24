@@ -86,7 +86,9 @@ func main() {
 	flag.String("twilioFallbackFromNumber", "",
 		"numeric Twilio sender used when twilioFromNumber is refused for a recipient (Twilio error 21612)")
 	flag.String("twilioVerifyServiceSid", "",
-		"Twilio Verify service (custom codes enabled) that delivers one-time codes; plain SMS if it fails")
+		"Twilio Verify service (custom codes enabled) that delivers one-time codes; direct SMS if it fails")
+	flag.String("twilioDirectPrefixes", "",
+		"comma-separated number prefixes (+34,+55) whose codes go out as direct SMS, with Verify only on 21612")
 	flag.String("environment", "production",
 		"deployment environment: development, staging or production; the first two are named in the SMS users get")
 	flag.String("smsCanaryNumber", "",
@@ -154,6 +156,9 @@ func main() {
 	twilioFromNumber := viper.GetString("twilioFromNumber")
 	twilioFallbackFromNumber := viper.GetString("twilioFallbackFromNumber")
 	twilioVerifyServiceSID := viper.GetString("twilioVerifyServiceSid")
+	// split by hand: viper splits an env value on spaces, not commas
+	twilioDirectPrefixes := strings.FieldsFunc(viper.GetString("twilioDirectPrefixes"),
+		func(r rune) bool { return r == ',' || r == ' ' })
 	environment := viper.GetString("environment")
 	smsCanaryNumber := viper.GetString("smsCanaryNumber")
 	smsCanaryInterval := viper.GetDuration("smsCanaryInterval")
@@ -311,6 +316,7 @@ func main() {
 			FromNumber:         twilioFromNumber,
 			FallbackFromNumber: twilioFallbackFromNumber,
 			VerifyServiceSID:   twilioVerifyServiceSID,
+			DirectPrefixes:     twilioDirectPrefixes,
 			Label:              environmentLabel,
 		}
 		// delivery status callbacks need the exact public https URL Twilio posts to
@@ -325,7 +331,7 @@ func main() {
 		apiConf.SMSService = sms
 		cspConf.SMSService = sms
 		log.Infow("SMS service created", "from", twilioFromNumber, "fallbackFrom", twilioFallbackFromNumber,
-			"verifyService", twilioVerifyServiceSID, "statusCallback", smsConf.StatusCallbackURL)
+			"verifyService", twilioVerifyServiceSID, "directPrefixes", smsConf.DirectPrefixes, "statusCallback", smsConf.StatusCallbackURL)
 		if smsCanaryNumber != "" {
 			smsCanary = func(ctx context.Context) { sms.RunCanary(ctx, smsCanaryNumber, smsCanaryInterval) }
 		}

@@ -43,8 +43,12 @@ type Config struct {
 	FallbackFromNumber string
 	// VerifyServiceSID, when set, names a Twilio Verify service (with custom codes
 	// enabled) that delivers one-time codes: Verify picks a sender each country
-	// accepts. A code it fails to deliver is sent as a plain message instead.
+	// accepts. A code it fails to deliver is sent as a direct message instead.
 	VerifyServiceSID string
+	// DirectPrefixes are the number prefixes ("+34") known to take direct messages,
+	// which cost less than Verify's per-code fee: their codes go out as direct
+	// messages, and through Verify only when every sender is refused (21612).
+	DirectPrefixes []string
 	// Label, when set, names a non-production environment ("DEV", "STG"): voter
 	// messages start with "[Label] " and the canary names it. Verify writes its own
 	// text from the service name, so give each environment its own Verify service.
@@ -91,6 +95,7 @@ func (tsms *SMS) New(rawConfig any) error {
 	if err := os.Setenv(AuthTokenEnv, tsms.config.AuthToken); err != nil {
 		return err
 	}
+	config.DirectPrefixes = validPrefixes(config.DirectPrefixes)
 	// init Twilio REST client
 	rest := t.NewRestClient()
 	tsms.messages = rest.Api
@@ -106,15 +111,55 @@ func (tsms *SMS) New(rawConfig any) error {
 // returns an error if the notification could not be sent or if the context is
 // done.
 func (tsms *SMS) SendNotification(ctx context.Context, notification *notifications.Notification) error {
-	if tsms.config.VerifyServiceSID != "" && notification.OTPCode != "" {
-		err := tsms.verify(ctx, notification)
-		if err == nil || ctx.Err() != nil {
-			// on a timeout Verify may still deliver the code: a plain resend could duplicate it
+	switch {
+	case tsms.config.VerifyServiceSID == "" || notification.OTPCode == "":
+		return tsms.deliver(ctx, notification, sourceVoter)
+	case tsms.verifiesAfterDirect(notification):
+		// a 21612 is Twilio's synchronous refusal, so Verify cannot duplicate a sent code
+		err := tsms.deliver(ctx, notification, sourceVoter)
+		if twilioErrorCode(err) != codeSenderRecipientMismatch || ctx.Err() != nil {
 			return err
 		}
-		log.Warnw("twilio verify failed, sending the code as a plain message", "error", err)
+		log.Warnw("every sms sender refused for a direct-prefix recipient, sending the code through twilio verify")
+		return classifySendError(tsms.verify(ctx, notification))
 	}
+	err := tsms.verify(ctx, notification)
+	if err == nil || ctx.Err() != nil {
+		// on a timeout Verify may still deliver the code: a direct resend could duplicate it
+		return err
+	}
+	log.Warnw("twilio verify failed, sending the code as a direct message", "error", err)
 	return tsms.deliver(ctx, notification, sourceVoter)
+}
+
+// verifiesAfterDirect reports whether the notification is a one-time code for a
+// DirectPrefixes number, sent as a direct message with Verify as the last resort.
+func (tsms *SMS) verifiesAfterDirect(notification *notifications.Notification) bool {
+	if tsms.config.VerifyServiceSID == "" || notification.OTPCode == "" {
+		return false
+	}
+	for _, prefix := range tsms.config.DirectPrefixes {
+		if strings.HasPrefix(notification.ToNumber, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// validPrefixes returns the well-formed prefixes ("+34", "34"), with their "+".
+// A malformed one is dropped with a warning: its numbers then go through Verify,
+// which costs more but still delivers.
+func validPrefixes(prefixes []string) []string {
+	valid := make([]string, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		digits := strings.TrimPrefix(prefix, "+")
+		if digits == "" || len(digits) > 6 || strings.Trim(digits, "0123456789") != "" {
+			log.Warnw("ignoring malformed sms direct prefix", "prefix", prefix)
+			continue
+		}
+		valid = append(valid, "+"+digits)
+	}
+	return valid
 }
 
 // deliver sends the notification from FromNumber, resending it from the fallback
@@ -169,8 +214,12 @@ func (tsms *SMS) send(ctx context.Context, from string, notification *notificati
 	}
 	return await(ctx, func() error {
 		_, err := tsms.messages.CreateMessage(params)
+		// a refusal is rerouted when another sender or Verify takes the message over
 		refusal := sendRejected
-		if _, ok := tsms.fallbackFor(from, err); ok {
+		_, fallback := tsms.fallbackFor(from, err)
+		verifyNext := source == sourceVoter && twilioErrorCode(err) == codeSenderRecipientMismatch &&
+			tsms.verifiesAfterDirect(notification)
+		if fallback || verifyNext {
 			refusal = sendRerouted
 		}
 		recordSend(source, err, refusal)
@@ -194,9 +243,10 @@ func (tsms *SMS) verify(ctx context.Context, notification *notifications.Notific
 	}
 	return await(ctx, func() error {
 		_, err := tsms.verifications.CreateVerification(tsms.config.VerifyServiceSID, params)
-		// a refusal is resent as a plain message, unless the caller gave up by then
+		// a refusal is resent as a direct message, unless that was tried first or the
+		// caller gave up by then
 		refusal := sendRerouted
-		if ctx.Err() != nil {
+		if tsms.verifiesAfterDirect(notification) || ctx.Err() != nil {
 			refusal = sendRejected
 		}
 		recordSend(sourceVoter, err, refusal)
