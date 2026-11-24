@@ -154,6 +154,8 @@ func TestHandleInvoicePaid(t *testing.T) {
 	before := *fetches
 	c.Assert(event("in_checkout", TopUpSourceCheckout), qt.IsNil)
 	c.Assert(event("in_checkout", ""), qt.IsNil)
+	// a deferred invoice (a direct credit's, credited before it was issued): ignored too
+	c.Assert(event("in_checkout", TopUpSourceDeferred), qt.IsNil)
 	c.Assert(*fetches, qt.Equals, before)
 
 	// live state rules: not paid anymore, or nets nothing, credits nothing and is done
@@ -404,4 +406,67 @@ func TestIsStripeHost(t *testing.T) {
 		c.Assert(err, qt.IsNil, qt.Commentf("%q", raw))
 		c.Assert(IsStripeHost(u), qt.Equals, want, qt.Commentf("%q", raw))
 	}
+}
+
+// TestInvoiceOfLedgerKeyCreditKeys (AC1, AC14): a manual credit's key resolves to its paid
+// deferred invoice through the metadata search (the latest of several; invoices of another
+// source are ignored), and is ErrNoInvoice when none is paid yet or when the key is not the
+// prefix plus 24 hex characters, the latter with no Stripe call. An external credit's key is
+// ErrExternalInvoice with no Stripe call, whatever follows the prefix. A failed search is a
+// Stripe error.
+func TestInvoiceOfLedgerKeyCreditKeys(t *testing.T) {
+	c := qt.New(t)
+	key := ManualCreditKeyPrefix + "0123456789abcdef01234567"
+	var queries []string
+	answer := "" // the data of the search, "fail" for a 500
+	stubStripeAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.Assert(r.URL.Path, qt.Equals, "/v1/invoices/search")
+		queries = append(queries, r.URL.Query().Get("query"))
+		if answer == "fail" {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":{"type":"api_error"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"object":"search_result","url":"/v1/invoices/search","has_more":false,"data":[` + answer + `]}`))
+	}))
+	client := NewClient(&Config{APIKey: "sk_test_stub"})
+	deferred := func(id, source string, created int64) string {
+		return `{"id":"` + id + `","object":"invoice","status":"paid","created":` + jsonInt(created) + `,` +
+			`"invoice_pdf":"https://pay.stripe.com/invoice/` + id + `/pdf","metadata":{"` +
+			MetadataKeyWalletTopUpSource + `":"` + source + `","` + MetadataKeyWalletLedgerKey + `":"` + key + `"}}`
+	}
+
+	answer = deferred("in_old", TopUpSourceDeferred, 100) + "," + deferred("in_new", TopUpSourceDeferred, 200) + "," +
+		deferred("in_manual", TopUpSourceManual, 300)
+	invoice, err := client.InvoiceOfLedgerKey(key)
+	c.Assert(err, qt.IsNil)
+	c.Assert(invoice.ID, qt.Equals, "in_new")
+	c.Assert(invoice.InvoicePDF, qt.Equals, "https://pay.stripe.com/invoice/in_new/pdf")
+	c.Assert(queries, qt.DeepEquals, []string{"metadata['wallet_ledger_key']:'" + key + "' AND status:'paid'"})
+
+	answer = deferred("in_manual", TopUpSourceManual, 300)
+	_, err = client.InvoiceOfLedgerKey(key)
+	c.Assert(err, qt.ErrorIs, ErrNoInvoice)
+	answer = ""
+	_, err = client.InvoiceOfLedgerKey(key)
+	c.Assert(err, qt.ErrorIs, ErrNoInvoice)
+	answer = "fail"
+	_, err = client.InvoiceOfLedgerKey(key)
+	c.Assert(err, qt.ErrorMatches, ".*failed to search the invoice of manualcredit:.*")
+
+	queries = nil
+	for _, bad := range []string{
+		ManualCreditKeyPrefix, ManualCreditKeyPrefix + "0123456789ABCDEF01234567",
+		ManualCreditKeyPrefix + "0123456789abcdef0123456", ManualCreditKeyPrefix + "x' OR status:'paid",
+	} {
+		_, err := client.InvoiceOfLedgerKey(bad)
+		c.Assert(err, qt.ErrorIs, ErrNoInvoice, qt.Commentf("key %q", bad))
+	}
+	for _, external := range []string{ExternalCreditKeyPrefix + "0123456789abcdef01234567", ExternalCreditKeyPrefix + "anything"} {
+		_, err := client.InvoiceOfLedgerKey(external)
+		c.Assert(err, qt.ErrorIs, ErrExternalInvoice, qt.Commentf("key %q", external))
+		_, err = (&Service{client: client}).TopUpInvoicePDF(external)
+		c.Assert(err, qt.ErrorIs, ErrExternalInvoice)
+	}
+	c.Assert(queries, qt.HasLen, 0)
 }

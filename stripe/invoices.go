@@ -1,17 +1,21 @@
 package stripe
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	stripeapi "github.com/stripe/stripe-go/v87"
 	stripecheckoutsession "github.com/stripe/stripe-go/v87/checkout/session"
+	stripeinvoice "github.com/stripe/stripe-go/v87/invoice"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/pricing"
@@ -30,6 +34,29 @@ const invoiceTopUpKeyPrefix = "invoice:"
 // InvoiceTopUpKey is the idempotency key of the wallet credit of a manual top-up invoice: once
 // per invoice, whatever events Stripe replays.
 func InvoiceTopUpKey(invoiceID string) string { return invoiceTopUpKeyPrefix + invoiceID }
+
+// Direct credits: wallet top-ups the staff dashboard credits straight into the ledger, for money
+// already received. Their ledger key is a prefix and a 24-hex id (an ObjectID the dashboard
+// mints). A manual credit's invoice is issued later, as a deferred invoice
+// (TopUpSourceDeferred) carrying the key in MetadataKeyWalletLedgerKey; an external credit is
+// invoiced by hand outside the platform and has no invoice here.
+const (
+	ManualCreditKeyPrefix   = "manualcredit:"
+	ExternalCreditKeyPrefix = "externalcredit:"
+)
+
+// creditIDPattern is the id of a direct credit's key: an ObjectID in hex.
+var creditIDPattern = regexp.MustCompile(`^[0-9a-f]{24}$`)
+
+// IsCreditKey reports whether key is prefix followed by a 24-hex id.
+func IsCreditKey(key, prefix string) bool {
+	id, ok := strings.CutPrefix(key, prefix)
+	return ok && creditIDPattern.MatchString(id)
+}
+
+// ErrExternalInvoice is answered for an external credit (ExternalCreditKeyPrefix): it was
+// invoiced outside the platform, so there is no invoice to serve.
+var ErrExternalInvoice = fmt.Errorf("this top-up was invoiced outside the platform")
 
 // ErrNoInvoice is answered by TopUpInvoicePDF for a top-up whose invoice is not available yet:
 // Checkout attaches the invoice to its session, and Stripe renders the PDF, shortly after the
@@ -72,11 +99,18 @@ func IsStripeHost(u *url.URL) bool {
 }
 
 // InvoiceOfLedgerKey returns the invoice of the top-up ledger row keyed idempotencyKey: a manual
-// invoice's key (InvoiceTopUpKey) names it, any other key is the checkout session whose invoice
-// it is. ErrNoInvoice when the session has none yet, and for a key that names no checkout session
-// (resource_missing: a ledger row keyed by anything else has no invoice); any other Stripe
-// failure is errors.ErrStripeError.
+// invoice's key (InvoiceTopUpKey) names it, a manual credit's is its paid deferred invoice
+// (deferredInvoice), an external credit has none (ErrExternalInvoice, no Stripe call), and any
+// other key is the checkout session whose invoice it is. ErrNoInvoice when there is none yet, and
+// for a key that names no checkout session (resource_missing: a ledger row keyed by anything else
+// has no invoice); any other Stripe failure is errors.ErrStripeError.
 func (c *Client) InvoiceOfLedgerKey(idempotencyKey string) (*stripeapi.Invoice, error) {
+	switch {
+	case strings.HasPrefix(idempotencyKey, ExternalCreditKeyPrefix):
+		return nil, ErrExternalInvoice
+	case strings.HasPrefix(idempotencyKey, ManualCreditKeyPrefix):
+		return deferredInvoice(idempotencyKey)
+	}
 	invoiceID, ok := strings.CutPrefix(idempotencyKey, invoiceTopUpKeyPrefix)
 	if !ok {
 		session, err := stripecheckoutsession.Get(idempotencyKey, &stripeapi.CheckoutSessionParams{})
@@ -93,6 +127,37 @@ func (c *Client) InvoiceOfLedgerKey(idempotencyKey string) (*stripeapi.Invoice, 
 		invoiceID = session.Invoice.ID
 	}
 	return c.GetInvoice(invoiceID)
+}
+
+// deferredInvoice is the paid deferred invoice of the manual credit keyed key, found by its
+// metadata: ErrNoInvoice, with no Stripe call, for a key that is not ManualCreditKeyPrefix and a
+// 24-hex id, and when none is paid yet (search lags a few seconds behind a fresh invoice). Of
+// several, the most recent is served and the others are logged.
+func deferredInvoice(key string) (*stripeapi.Invoice, error) {
+	if !IsCreditKey(key, ManualCreditKeyPrefix) {
+		return nil, ErrNoInvoice
+	}
+	iter := stripeinvoice.Search(&stripeapi.InvoiceSearchParams{SearchParams: stripeapi.SearchParams{
+		Query: fmt.Sprintf("metadata['%s']:'%s' AND status:'paid'", MetadataKeyWalletLedgerKey, key),
+	}})
+	var found []*stripeapi.Invoice
+	for iter.Next() {
+		if invoice := iter.Invoice(); invoice.Metadata[MetadataKeyWalletTopUpSource] == TopUpSourceDeferred {
+			found = append(found, invoice)
+		}
+	}
+	if err := iter.Err(); err != nil {
+		return nil, errors.ErrStripeError.Withf("failed to search the invoice of %s: %v", key, err)
+	}
+	if len(found) == 0 {
+		return nil, ErrNoInvoice
+	}
+	latest := slices.MaxFunc(found, func(a, b *stripeapi.Invoice) int { return cmp.Compare(a.Created, b.Created) })
+	if len(found) > 1 {
+		log.Warnw("several paid deferred invoices for one direct credit, serving the latest",
+			"ledgerKey", key, "invoiceId", latest.ID, "count", len(found))
+	}
+	return latest, nil
 }
 
 // TopUpInvoicePDF serves the invoice of the top-up ledger row keyed idempotencyKey
