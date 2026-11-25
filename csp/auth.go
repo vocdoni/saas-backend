@@ -267,6 +267,22 @@ func (c *CSP) ClaimChallengeResend(token internal.HexBytes) error {
 	return nil
 }
 
+// ResendCoolDown returns how long until a resend of the code the token answers can be sent, zero if
+// it can be sent now. ok is false when there is no code to resend: an auth-only or verified token,
+// or a code that is gone, solved, expired or locked. It is a hint for clients; the resend itself is
+// still refused by the cooldown it reports.
+func (c *CSP) ResendCoolDown(token internal.HexBytes) (remaining time.Duration, ok bool) {
+	authToken, err := c.Storage.CSPAuth(token)
+	if err != nil || authToken.Verified {
+		return 0, false
+	}
+	challenge, err := c.challengeOf(authToken)
+	if err != nil || !c.challengeUsable(challenge) {
+		return 0, false
+	}
+	return max(c.notificationCoolDownTime-time.Since(challenge.LastSent()), 0), true
+}
+
 // coolDownError is the ErrAttemptCoolDownTime answer carrying the milliseconds left, at least one.
 func coolDownError(remaining time.Duration) errors.Error {
 	remaining = max(remaining, time.Millisecond)

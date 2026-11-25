@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"runtime"
+	"strconv"
 
 	"go.vocdoni.io/dvote/log"
 )
@@ -157,6 +158,11 @@ func (e Error) Write(w http.ResponseWriter) {
 	if e.HTTPstatus == http.StatusServiceUnavailable && w.Header().Get("Retry-After") == "" {
 		w.Header().Set("Retry-After", "10")
 	}
+	// a refusal that carries its wait in the body advertises it as Retry-After too, for generic
+	// HTTP clients; the body field stays the one SDKs read
+	if secs, ok := e.retryAfterSeconds(); ok && w.Header().Get("Retry-After") == "" {
+		w.Header().Set("Retry-After", strconv.FormatInt(secs, 10))
+	}
 	// Set the content type to JSON
 	w.Header().Set("Content-Type", "application/json")
 	http.Error(w, string(msg), e.HTTPstatus)
@@ -261,4 +267,24 @@ func As(err error, target any) bool {
 // compare err and the target and not call [Unwrap] on either.
 func Is(err error, target error) bool {
 	return stderrors.Is(err, target)
+}
+
+// retryAfterSeconds returns the whole seconds a refusal asks the client to wait, read from its
+// data: retryAfter (seconds) on any error, or coolDownTime (milliseconds) on ErrAttemptCoolDownTime,
+// the only error whose coolDownTime is a wait.
+func (e Error) retryAfterSeconds() (int64, bool) {
+	data, ok := e.Data.(map[string]any)
+	if !ok {
+		return 0, false
+	}
+	if v, ok := data["retryAfter"].(int64); ok && v > 0 {
+		return v, true
+	}
+	if e.Code != ErrAttemptCoolDownTime.Code {
+		return 0, false
+	}
+	if ms, ok := data["coolDownTime"].(int64); ok && ms > 0 {
+		return (ms + 999) / 1000, true
+	}
+	return 0, false
 }

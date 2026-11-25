@@ -35,6 +35,15 @@ func verifyProcessCSP(t *testing.T, pid, email string, authToken internal.HexByt
 	return verified.AuthToken
 }
 
+// assertCoolDownHint checks that a step 0 or resend response carries the milliseconds until its
+// code can be re-sent, within the notification cooldown.
+func assertCoolDownHint(c *qt.C, resp handlers.AuthResponse) {
+	c.Helper()
+	c.Assert(resp.CoolDownTime, qt.Not(qt.IsNil))
+	c.Assert(*resp.CoolDownTime >= 0, qt.IsTrue)
+	c.Assert(*resp.CoolDownTime <= cspNotificationCoolDownTime.Milliseconds(), qt.IsTrue)
+}
+
 // authProcessCSP runs the full process-scoped CSP auth flow (auth/0 -> OTP -> auth/1) and
 // returns the verified auth token.
 func authProcessCSP(t *testing.T, pid string, authReq *handlers.AuthRequest) internal.HexBytes {
@@ -162,6 +171,8 @@ func TestProcessCSP(t *testing.T) {
 		t, http.MethodPost, "", authReq(0), "processes", pid, "auth", "0",
 	)
 	c.Assert(step0.AuthToken, qt.Not(qt.HasLen), 0)
+	// the step 0 that sent the code says how long until it can be re-sent
+	assertCoolDownHint(c, step0)
 
 	// an unverified token cannot sign
 	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "",
@@ -187,6 +198,7 @@ func TestProcessCSP(t *testing.T) {
 		t, http.MethodPost, "", authReq(0), "processes", pid, "auth", "0",
 	)
 	c.Assert(again.AuthToken, qt.Not(qt.DeepEquals), step0.AuthToken)
+	assertCoolDownHint(c, again)
 	time.Sleep(cspNotificationCoolDownTime)
 
 	// a resend with a contact that does not match the member fails with the same
@@ -200,6 +212,7 @@ func TestProcessCSP(t *testing.T) {
 		&handlers.AuthResendRequest{AuthToken: step0.AuthToken, Email: members[0].Email},
 		"processes", pid, "auth", "resend")
 	c.Assert(resend.AuthToken, qt.Not(qt.HasLen), 0)
+	assertCoolDownHint(c, resend)
 	time.Sleep(cspNotificationCoolDownTime)
 
 	// wrong contacts spend the code's resends like real ones, whichever of its tokens they come

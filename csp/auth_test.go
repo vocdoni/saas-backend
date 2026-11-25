@@ -747,6 +747,39 @@ func TestAuthTokenReusesPendingChallenge(t *testing.T) {
 		c.Assert(csp.VerifyAuthToken(second, code), qt.IsNil)
 	})
 
+	c.Run("ResendCoolDown reports the wait until the pending code can be re-sent", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		const email = "reuse-hint@example.com"
+		first, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		code := fetchOTPCodeFromEmail(c, email)
+		second, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+
+		// every token of the code shares its wait, counted from the last send
+		for _, token := range []internal.HexBytes{first, second} {
+			remaining, ok := csp.ResendCoolDown(token)
+			c.Assert(ok, qt.IsTrue)
+			c.Assert(remaining > 59*time.Minute, qt.IsTrue)
+			c.Assert(remaining <= time.Hour, qt.IsTrue)
+		}
+		// once the cooldown has passed it can be re-sent now
+		setCoolDown(c, time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
+		remaining, ok := csp.ResendCoolDown(first)
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(remaining, qt.Equals, time.Duration(0))
+
+		// a solved code has nothing left to resend, through any of its tokens
+		c.Assert(csp.VerifyAuthToken(second, code), qt.IsNil)
+		for _, token := range []internal.HexBytes{first, second} {
+			_, ok := csp.ResendCoolDown(token)
+			c.Assert(ok, qt.IsFalse)
+		}
+		_, ok = csp.ResendCoolDown(internal.HexBytes("unknown-token"))
+		c.Assert(ok, qt.IsFalse)
+	})
+
 	c.Run("verifying one token kills the code for the others", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		const email = "reuse-sibling@example.com"

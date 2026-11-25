@@ -52,6 +52,10 @@ type AuthResponse struct {
 	// lowercase hex of an HMAC-SHA256, keyed from the service secret, of
 	// "vocdoni-voter-ref:" + process id + ":" + member id. Step 0 only.
 	VoterRef string `json:"voterRef,omitempty"`
+	// CoolDownTime is the milliseconds until the code just sent can be re-sent, on a step 0 or
+	// resend that left a code pending; absent when there is none, zero when it can be re-sent now.
+	// Clients count down from it rather than from a fixed value: the server sets the wait.
+	CoolDownTime *int64 `json:"coolDownTime,omitempty" example:"60000"`
 }
 
 // AuthRequest defines the payload for finishing the authentication process.

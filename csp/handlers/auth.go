@@ -53,7 +53,22 @@ func (c *CSPHandlers) handleAuthStep(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	apicommon.HTTPWriteJSON(w, &AuthResponse{AuthToken: res.token, VoterRef: res.voterRef})
+	resp := &AuthResponse{AuthToken: res.token, VoterRef: res.voterRef}
+	if step == 0 {
+		resp.CoolDownTime = c.resendCoolDown(res.token)
+	}
+	apicommon.HTTPWriteJSON(w, resp)
+}
+
+// resendCoolDown is AuthResponse.CoolDownTime for the token: the milliseconds until its code can be
+// re-sent, or nil when it has no code to resend.
+func (c *CSPHandlers) resendCoolDown(token internal.HexBytes) *int64 {
+	remaining, ok := c.csp.ResendCoolDown(token)
+	if !ok {
+		return nil
+	}
+	ms := remaining.Milliseconds()
+	return &ms
 }
 
 // validateContactInfo checks if at least one contact method is provided
