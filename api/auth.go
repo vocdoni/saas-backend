@@ -197,6 +197,10 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	// if the user doesn't exist, do oauth verification and on success create the new user
 	if err == db.ErrNotFound {
+		// signing up is a write: refused during a maintenance window, like POST /users
+		if a.maintenance.refuseInMaintenance(w, now) {
+			return
+		}
 		// Register the user
 		// extract from the external signature the user pubkey and verify matches the provided one
 		if err := account.VerifySignature(loginInfo.OAuthSignature, loginInfo.UserOAuthSignature, loginInfo.Address); err != nil {
@@ -263,11 +267,14 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		// update last authenticated timestamp with a field-specific write: the user snapshot
 		// was loaded before authentication, and writing it back whole could restore state an
-		// admin changed meanwhile
-		oauthProvider.LastAuthenticated = now
-		if err := a.db.SetUserOAuthProvider(user.ID, loginInfo.Provider, oauthProvider); err != nil {
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
+		// admin changed meanwhile. Skipped during a maintenance window, where login stays
+		// available but writes nothing, like the password login.
+		if !a.maintenance.active(now) {
+			oauthProvider.LastAuthenticated = now
+			if err := a.db.SetUserOAuthProvider(user.ID, loginInfo.Provider, oauthProvider); err != nil {
+				errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+				return
+			}
 		}
 	}
 	// generate a new token bound to the user's ID and current session version

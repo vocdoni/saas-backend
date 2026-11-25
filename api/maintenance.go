@@ -88,22 +88,30 @@ func maintenance(m *MaintenanceWindow, now func() time.Time) func(http.Handler) 
 }
 
 // maintenanceWriteBlock wraps h so that if the window is active, the request is refused
-// with ErrMaintenance and a jittered Retry-After hint pointing past the end of the window.
-// Apply to handlers that write to the chain or to critical shared state.
+// with refuseInMaintenance. Apply to handlers that write to the chain or to critical shared state.
 // If m is nil the wrapper is a no-op and h is returned unchanged.
 func maintenanceWriteBlock(m *MaintenanceWindow, now func() time.Time, h http.HandlerFunc) http.HandlerFunc {
 	if m == nil {
 		return h
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		t := now()
-		if m.active(t) {
-			// Jitter 0–60 s so clients spread retries instead of stampeding at exactly Until.
-			secs := int(math.Ceil(m.Until.Sub(t).Seconds())) + rand.Intn(61)
-			w.Header().Set("Retry-After", strconv.Itoa(max(secs, 1)))
-			errors.ErrMaintenance.Write(w)
+		if m.refuseInMaintenance(w, now()) {
 			return
 		}
 		h(w, r)
 	}
+}
+
+// refuseInMaintenance reports whether the window is active at now and, if so, answers
+// ErrMaintenance with a jittered Retry-After hint pointing past the end of the window.
+// Exempt handlers that write on some of their paths call it on those paths.
+func (m *MaintenanceWindow) refuseInMaintenance(w http.ResponseWriter, now time.Time) bool {
+	if !m.active(now) {
+		return false
+	}
+	// Jitter 0–60 s so clients spread retries instead of stampeding at exactly Until.
+	secs := int(math.Ceil(m.Until.Sub(now).Seconds())) + rand.Intn(61)
+	w.Header().Set("Retry-After", strconv.Itoa(max(secs, 1)))
+	errors.ErrMaintenance.Write(w)
+	return true
 }

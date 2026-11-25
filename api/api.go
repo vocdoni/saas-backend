@@ -463,7 +463,7 @@ func (a *API) initRouter() http.Handler {
 	// handle registers a route. All non-read methods (POST, PUT, DELETE) are wrapped with
 	// maintenanceWriteBlock so a new write route is blocked by default without any explicit
 	// marking. Use handleExempt for the small set of POST routes that must stay reachable
-	// through the window (session management, read-only checks, non-retrying webhooks).
+	// through the window (login and token refresh, read-only POSTs, the support ticket).
 	handle := func(r chi.Router, method, pattern string, h http.HandlerFunc) {
 		log.Infow("new route", "method", method, "path", pattern)
 		if method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions {
@@ -482,10 +482,10 @@ func (a *API) initRouter() http.Handler {
 			log.Errorf("unsupported method %s in api initRouter", method)
 		}
 	}
-	// handleExempt registers a POST route that is exempt from maintenance blocking.
-	// Exempt routes: auth/session (login, refresh, oauth), read-only checks (check, weight,
-	// sign-info, census validation, votes/verify, ticket), and external webhook callbacks
-	// (Stripe, Twilio from #874) that do not retry on failure.
+	// handleExempt registers a POST route that is exempt from maintenance blocking: login and
+	// token refresh (the OAuth login refuses sign-ups itself), read-only POSTs (check, weight,
+	// sign-info, census validation, votes/verify) and the support ticket. Webhooks are writes
+	// and never go here.
 	handleExempt := func(r chi.Router, pattern string, h http.HandlerFunc) {
 		log.Infow("new route", "method", "POST", "path", pattern)
 		r.Post(pattern, h)
@@ -525,6 +525,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPut, organizationMetaEndpoint, a.updateOrganizationMetaHandler)
 		handle(r, http.MethodGet, organizationMetaEndpoint, a.organizationMetaHandler)
 		handle(r, http.MethodDelete, organizationMetaEndpoint, a.deleteOrganizationMetaHandler)
+		// support stays reachable: the ticket sends a support email and writes nothing
 		handleExempt(r, organizationCreateTicketEndpoint, a.organizationCreateTicket)
 		handle(r, http.MethodPost, organizationGroupsEndpoint, a.createOrganizationMemberGroupHandler)
 		handle(r, http.MethodGet, organizationGroupsEndpoint, a.organizationMemberGroupsHandler)
@@ -580,7 +581,9 @@ func (a *API) initRouter() http.Handler {
 		})
 		handle(r, http.MethodGet, infoEndpoint, a.InfoHandler)
 		if a.smsStatus != nil {
-			handleExempt(r, SMSStatusCallbackRoute, a.smsStatus)
+			// Twilio does not retry status callbacks: statuses sent during a window are lost,
+			// which is accepted.
+			handle(r, http.MethodPost, SMSStatusCallbackRoute, a.smsStatus)
 		}
 		if a.metricsToken != "" {
 			handle(r, http.MethodGet, metricsEndpoint, requireBearer(a.metricsToken, promhttp.Handler()).ServeHTTP)
@@ -602,9 +605,9 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, pricingEndpoint, a.pricingHandler)
 		// late-bound: a method value would capture a.stripeHandlers as it is at
 		// router-build time (nil when Stripe init failed or a test installs it later).
-		// Webhook callbacks use handleExempt: senders like Stripe and Twilio (#874)
-		// do not retry on failure, so a 503 would cause missed events.
-		handleExempt(r, paymentsWebhook, func(w http.ResponseWriter, r *http.Request) {
+		// Stripe redelivers a refused webhook for up to 3 days, so events sent during a
+		// window are processed after it.
+		handle(r, http.MethodPost, paymentsWebhook, func(w http.ResponseWriter, r *http.Request) {
 			a.stripeHandlers.HandleWebhook(w, r)
 		})
 		handle(r, http.MethodGet, objectStorageDownloadTypedEndpoint, a.objectStorage.DownloadImageInlineHandler)
