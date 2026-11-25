@@ -119,7 +119,9 @@ Component packages (each is a focused service composed in `main.go`):
 - **`account/`** — wraps the Vocdoni blockchain account: signs transactions, funds accounts via
   faucet, computes election prices. This is the "remote signer" core.
 - **`notifications/`** — `NotificationService` interface with `smtp/` (email) and `twilio/` (SMS)
-  implementations, plus `mailtemplates/` (HTML/text email templates, loaded with `mailtemplates.Load()`).
+  implementations, plus `mailtemplates/` (one layout and components in `assets/mail/`, a content block per
+  email, strings per language in `assets/mail/i18n/<lang>.yaml`; `mailtemplates.Load(brand)` runs at start-up
+  and fails on any missing string or template; `go run ./cmd/mailpreview -out <dir>` renders them all).
   `FailoverService` composes multiple services and delivers via the first that succeeds; the service
   wires it from the optional `VOCDONI_BACKUPSMTP*` vars to fail over from the primary SMTP relay to a
   backup that shares the same sender identity. The CSP drains email/SMS through
@@ -149,7 +151,7 @@ Component packages (each is a focused service composed in `main.go`):
   return these. Predefined errors in `errors_definition.go`.
 - **`internal/`** — shared primitives: `HexBytes`, birthdate parsing, phone/argon2 helpers.
 - **`cmd/`** — `service/` (the API server), `userdel/` (GDPR user erasure), `topup/` (manual wallet
-  top-up as a Stripe invoice, credited by the `invoice.paid` webhook), `localsmtp/` (dev SMTP capture).
+  top-up as a Stripe invoice, credited by the `invoice.paid` webhook), `localsmtp/` (dev SMTP capture), `mailpreview/` (renders every email to HTML files).
 - **`assets/`** are embedded via `embed.go` (`//go:embed all:assets`).
 
 ## Conventions

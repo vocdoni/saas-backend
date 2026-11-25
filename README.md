@@ -122,6 +122,24 @@ VOCDONI_SMTPPORT=1025
 
 The fake SMTP server will log all received email messages to stdout.
 
+### Email templates and preview
+
+Every email is one shared layout (`assets/mail/layout.html`, `components.html`), a content block per
+email (`assets/mail/<name>.html`, plus `<name>.txt` for the subject, preheader and plain text) and one
+string file per language (`assets/mail/i18n/<lang>.yaml`, English is the source). To look at every
+email in every language and edge case without sending anything:
+
+```bash
+go run ./cmd/mailpreview -out ~/.cache/saas-backend/preview            # then open index.html
+go run ./cmd/mailpreview -out ~/.cache/saas-backend/preview -accent '#166534'
+```
+
+Two optional settings brand the emails: `VOCDONI_MAILACCENTCOLOR` (`#rrggbb`, default `#1d62e9`; the
+dark-mode link colour and the button label colour are derived from it) and `VOCDONI_MAILASSETSURL`
+(base URL of the logo images, default `{serverURL}/mail/assets`, served by this API at
+`GET /mail/assets/{file}`). The logos are generated from vocdoni-app's `Logo.tsx` by
+`scripts/mail-logos/make-logos.py`.
+
 ### Running with a local Vocone (standalone Vocdoni chain)
 
 If you want to run a fully local Vocdoni chain instead of relying on the remote API,
