@@ -16,6 +16,7 @@ Owner decisions so far (2026-11-25):
 - Support subject: "New ticket · {Type} · {Title}" (localized).
 - Members import: at most 10 issues listed, then "and N more"; the button says "Review the member base" and opens the
   app's member base. No CSV attachment. Completion shown as a date only, no time.
+- Organization logos in mail: only logos stored in our own object storage; external URLs are not shown.
 - Ignore the unpublished local branch `worktree-email-logo-import-limits` (commit 1e5193a); this work starts from main.
 
 ## Problem
@@ -207,7 +208,7 @@ the source for the other locales. Behaviour that changes:
 | Long unbroken values (emails, URLs, tokens) | wrap inside the card at 320px; never widen the layout |
 | Subjects | ≤ 78 characters after interpolation; interpolated user text is truncated with "…" to fit |
 | Support description | line breaks preserved; capped at 1,200 characters with a note that the full text is on the ticket |
-| Organization logo | the URL is `org.LogoURL()`. Shown only if (a) `objectstorage` `LocalName(url)` reports a local storage reference, rendered as the canonical `{ServerURL}/storage/{name}` URL, or (b) it is an absolute https URL; in both cases the path ends in .png/.jpg/.jpeg/.gif/.webp. Never SVG, `data:` or plain http. Rendered with `height` 32 (44 in the OTP tile) and `style="max-width:140px;width:auto"`. Otherwise the no-logo layout; never a broken-image placeholder for a rejected URL |
+| Organization logo | the URL is `org.LogoURL()`. Shown only if `objectstorage` `LocalName(url)` reports a local storage reference (owner decision: no external URLs, so an organization cannot put a tracking image in mail sent to other people), rendered as the canonical `{ServerURL}/storage/{name}` URL, and the name ends in .png/.jpg/.jpeg/.gif/.webp. External URLs, SVG and `data:` are never shown. Rendered with `height` 32 (44 in the OTP tile) and `style="max-width:140px;width:auto"`. Otherwise the no-logo layout; never a broken-image placeholder for a rejected URL |
 | Organization logo in Outlook desktop | the org logo and its tile are wrapped in an MSO conditional hide, so Outlook desktop (Word engine, which cannot size an image of unknown aspect ratio) shows the Vocdoni-only header; the mockups' fixed width/height pairs were per-sample and are not reproducible server-side |
 | Empty link (URL build failure, `api/org_members.go:41-44`) | the button and fallback link are omitted; the mail still sends |
 | OTP SMS | ≤ 134 characters including the `[Label] ` prefix when configured (2 UCS-2 segments); organization name truncated to 40 characters |
