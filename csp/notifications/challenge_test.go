@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
@@ -28,7 +29,7 @@ const (
 	adminPass         = "admin123"
 	testOrgName       = "Test Organization"
 	testOrgLogo       = "https://example.com/logo.png"
-	testRemainingTime = "5m30s"
+	testRemainingTime = 5*time.Minute + 30*time.Second
 )
 
 var testOrgAddress = common.HexToAddress("0xfafa")
@@ -180,11 +181,10 @@ func TestNewEmailChallengeSent(t *testing.T) {
 	seedNotification, err := mailtemplates.
 		VerifyOTPCodeNotification.
 		Localized("en").
-		ExecPlain(struct {
-			Code, Organization string
-		}{
+		ExecPlain(mailtemplates.OTPData{
 			Code:         `(.{6})`,
 			Organization: testOrgName,
+			ExpiryTime:   testRemainingTime,
 		})
 	c.Assert(err, qt.IsNil)
 	rgxNotification := regexp.MustCompile(seedNotification.PlainBody)
@@ -270,6 +270,8 @@ func TestNewSMSChallengeSent(t *testing.T) {
 	c.Assert(ch.Notification.ToAddress, qt.Equals, "")
 	c.Assert(ch.Notification.ToNumber, qt.Equals, testUserPhone)
 	c.Assert(ch.Notification.PlainBody, qt.Contains, "123456")
+	c.Assert(ch.Notification.PlainBody, qt.Contains, "Expires in 6 minutes")
+	c.Assert(ch.Notification.Body, qt.Equals, "") // SMS renders the plain text only
 	c.Assert(ch.Notification.Subject, qt.Contains, testOrgName)
 	// send the notification and check the result
 	c.Assert(ch.Send(context.Background(), testSMSService), qt.IsNil)

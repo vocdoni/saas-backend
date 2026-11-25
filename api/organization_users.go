@@ -176,8 +176,8 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		Role:                invite.Role,
 		CurrentUserID:       user.ID,
 	}
-	// generate the verification code and the verification link
-	code, link, err := a.generateVerificationCodeAndLink(orgInvite, db.CodeTypeOrgInvite)
+	// generate the invitation code; the mail carries it only inside the link
+	_, link, err := a.generateVerificationCodeAndLink(orgInvite, db.CodeTypeOrgInvite)
 	if err == db.ErrAlreadyExists {
 		errors.ErrDuplicateConflict.With("user is already invited to the organization").Write(w)
 		return
@@ -192,11 +192,12 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 	// the invite link
 	if err := a.sendMail(
 		r.Context(), org, invite.Email, mailtemplates.InviteNotification,
-		struct {
-			Organization string
-			Code         string
-			Link         string
-		}{apicommon.OrgDisplayName(org.Meta, org.Address.String()), code, link},
+		mailtemplates.InviteData{
+			Organization:     org.DisplayName(),
+			OrganizationLogo: org.LogoURL(),
+			Link:             link,
+			Expiry:           apicommon.InvitationExpiration,
+		},
 		time.Now().Add(apicommon.InvitationExpiration),
 	); err != nil {
 		// the invite was created, just the notification failed
@@ -468,11 +469,12 @@ func (a *API) updatePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 	// the invite link
 	if err := a.sendMail(
 		r.Context(), org, orgInvite.NewUserEmail, mailtemplates.InviteNotification,
-		struct {
-			Organization string
-			Code         string
-			Link         string
-		}{apicommon.OrgDisplayName(org.Meta, org.Address.String()), code, link},
+		mailtemplates.InviteData{
+			Organization:     org.DisplayName(),
+			OrganizationLogo: org.LogoURL(),
+			Link:             link,
+			Expiry:           apicommon.InvitationExpiration,
+		},
 		time.Now().Add(apicommon.InvitationExpiration),
 	); err != nil {
 		log.Warnw("could not send verification code email", "error", err)

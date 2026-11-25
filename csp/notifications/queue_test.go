@@ -105,10 +105,9 @@ func TestNotificationChallengeQueue(t *testing.T) {
 	// create a notification without to address to force an error during the
 	// sending (compose fails: a transient, retriable error)
 	c.Assert(mailtemplates.Load(mailtemplates.DefaultBrand()), qt.IsNil)
-	notification, err := mailtemplates.VerifyOTPCodeNotification.Localized(apicommon.DefaultLang).ExecPlain(struct {
-		Code         string
-		Organization string
-	}{"123456", testOrgName})
+	notification, err := mailtemplates.VerifyOTPCodeNotification.Localized(apicommon.DefaultLang).ExecPlain(mailtemplates.OTPData{
+		Code: "123456", Organization: testOrgName, ExpiryTime: testRemainingTime,
+	})
 	c.Assert(err, qt.IsNil)
 
 	c.Run("retries reached", func(c *qt.C) {
@@ -192,7 +191,7 @@ func TestNotificationChallengeQueue(t *testing.T) {
 		queue.Start()
 
 		// templates are already loaded by the parent test; do not call
-		// mailtemplates.Load(mailtemplates.DefaultBrand()) here as it races the parallel subtests that read
+		// mailtemplates.Load() here as it races the parallel subtests that read
 		// the template map concurrently.
 		nc, err := NewNotificationChallenge(EmailChallenge, apicommon.DefaultLang,
 			[]byte("user"), []byte("bundle"), testUserEmail, "123456", testOrgInfo, testRemainingTime)
@@ -207,10 +206,9 @@ func TestNotificationChallengeQueue(t *testing.T) {
 			c.Assert(err, qt.IsNil)
 			// parse the email body to get the verification code
 			seedNotification, err := mailtemplates.VerifyOTPCodeNotification.Localized(apicommon.DefaultLang).
-				ExecPlain(struct {
-					Code         string
-					Organization string
-				}{`(.{6})`, testOrgName})
+				ExecPlain(mailtemplates.OTPData{
+					Code: `(.{6})`, Organization: testOrgName, ExpiryTime: testRemainingTime,
+				})
 			c.Assert(err, qt.IsNil)
 			rgxNotification := regexp.MustCompile(seedNotification.PlainBody)
 			// verify the user

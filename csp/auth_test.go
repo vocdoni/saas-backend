@@ -30,6 +30,7 @@ func TestAuthToken(t *testing.T) {
 		MailService:              testMailService,
 		SMSService:               testSMSService,
 		NotificationCoolDownTime: time.Second * 5,
+		NotificationTTL:          time.Second * 5,
 		RootKey:                  *testRootKey,
 	})
 	c.Assert(err, qt.IsNil)
@@ -150,11 +151,10 @@ func TestAuthToken(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		// parse the email body to get the verification code
 		seedNotification, err := mailtemplates.VerifyOTPCodeNotification.Localized(apicommon.DefaultLang).
-			ExecPlain(struct {
-				Code             string
-				Organization     string
-				OrganizationLogo string
-			}{`(.{6})`, testOrgName, testOrgLogo})
+			ExecPlain(mailtemplates.OTPData{
+				// the test CSPs keep codes for 5-30 seconds, shown as "1 minute"
+				Code: `(.{6})`, Organization: testOrgName, OrganizationLogo: testOrgLogo, ExpiryTime: time.Minute,
+			})
 		c.Assert(err, qt.IsNil)
 		rgxNotification := regexp.MustCompile(seedNotification.PlainBody)
 		// verify the user
@@ -650,11 +650,9 @@ func fetchOTPCodeFromEmail(c *qt.C, email string) string {
 	c.Assert(err, qt.IsNil)
 
 	seedNotification, err := mailtemplates.VerifyOTPCodeNotification.Localized(apicommon.DefaultLang).
-		ExecPlain(struct {
-			Code             string
-			Organization     string
-			OrganizationLogo string
-		}{`(.{6})`, testOrgName, testOrgLogo})
+		ExecPlain(mailtemplates.OTPData{
+			Code: `(.{6})`, Organization: testOrgName, OrganizationLogo: testOrgLogo, ExpiryTime: time.Minute,
+		})
 	c.Assert(err, qt.IsNil)
 
 	rgxNotification := regexp.MustCompile(seedNotification.PlainBody)

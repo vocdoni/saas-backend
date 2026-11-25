@@ -11,11 +11,8 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-const (
-	DefaultOrgName = "Vocdoni"
-	DefaultOrgLogo = "https://tomato-giant-grasshopper-196.mypinata.cloud/ipfs/" +
-		"bafkreifqyu5m5as4gvcirlog5j267um24q7y4ri6r3svhsi7fda24676ny"
-)
+// DefaultOrgName names the organization in the voter's OTP when it has no name.
+const DefaultOrgName = "Vocdoni"
 
 // CSPHandlers is a struct that contains an instance of the CSP and the main
 // database (where the process and census data is stored). It is used to handle

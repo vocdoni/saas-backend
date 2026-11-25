@@ -96,7 +96,8 @@ func (nc *NotificationChallenge) Send(ctx context.Context, service notifications
 }
 
 // NewNotificationChallenge creates a new notification challenge based on the
-// provided parameters. It returns an error if the notification could not be
+// provided parameters. expiry is how long the code stays valid, shown to the
+// voter in words. It returns an error if the notification could not be
 // created.
 func NewNotificationChallenge(
 	cType notifications.NotificationType,
@@ -104,29 +105,37 @@ func NewNotificationChallenge(
 	userID, anchorID internal.HexBytes,
 	to, code string,
 	orgInfo OrganizationInfo,
-	remainingTime string,
+	expiry time.Duration,
 ) (
 	*NotificationChallenge, error,
 ) {
 	if userID == nil || anchorID == nil || to == "" || code == "" {
 		return nil, ErrInvalidNotificationInputs
 	}
-	n, err := mailtemplates.VerifyOTPCodeNotification.Localized(lang).ExecTemplate(struct {
-		Code             string
-		Organization     string
-		OrganizationLogo string
-		ExpiryTime       string
-	}{code, orgInfo.Name, orgInfo.Logo, remainingTime})
-	if err != nil {
-		return nil, errors.Join(ErrCreateNotification, err)
+	data := mailtemplates.OTPData{
+		Code:             code,
+		Organization:     orgInfo.Name,
+		OrganizationLogo: orgInfo.Logo,
+		ExpiryTime:       expiry,
 	}
+	template := mailtemplates.VerifyOTPCodeNotification.Localized(lang)
+	var n *notifications.Notification
+	var err error
 	switch cType {
 	case EmailChallenge:
-		n.ToAddress = to
+		if n, err = template.ExecTemplate(data); err == nil {
+			n.ToAddress = to
+		}
 	case SMSChallenge:
-		n.ToNumber = to
+		// the SMS is the plain text alone (one UCS-2 segment, no organization name)
+		if n, err = template.ExecPlain(data); err == nil {
+			n.ToNumber = to
+		}
 	default:
 		return nil, ErrInvalidNotificationType
+	}
+	if err != nil {
+		return nil, errors.Join(ErrCreateNotification, err)
 	}
 	return &NotificationChallenge{
 		OrgAddress:   orgInfo.Address,

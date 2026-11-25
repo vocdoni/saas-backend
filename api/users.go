@@ -105,10 +105,9 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 	// send the verification mail to the user email with the verification code
 	// and the verification link
 	if err := a.sendMail(r.Context(), nil, userInfo.Email,
-		mailtemplates.VerifyAccountNotification, struct {
-			Code string
-			Link string
-		}{code, link},
+		mailtemplates.VerifyAccountNotification, mailtemplates.CodeData{
+			Code: code, Link: link, Email: userInfo.Email, Expiry: a.otpExpiry,
+		},
 		time.Now().Add(a.otpExpiry),
 	); err != nil {
 		log.Warnw("could not send verification code", "error", err)
@@ -362,10 +361,9 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		}
 		// resend the existing verification code
 		if err := a.sendMail(r.Context(), nil, user.Email, mailtemplates.VerifyAccountNotification,
-			struct {
-				Code string
-				Link string
-			}{code, link},
+			mailtemplates.CodeData{
+				Code: code, Link: link, Email: user.Email, Expiry: time.Until(userVerification.Expiration),
+			},
 			userVerification.Expiration,
 		); err != nil {
 			log.Warnw("could not resend verification code", "error", err)
@@ -389,10 +387,9 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 	// send the verification mail to the user email with the verification code
 	// and the verification link
 	if err := a.sendMail(r.Context(), nil, user.Email, mailtemplates.VerifyAccountNotification,
-		struct {
-			Code string
-			Link string
-		}{newCode, link},
+		mailtemplates.CodeData{
+			Code: newCode, Link: link, Email: user.Email, Expiry: a.otpExpiry,
+		},
 		time.Now().Add(a.otpExpiry),
 	); err != nil {
 		log.Warnw("could not send verification code", "error", err)
@@ -616,10 +613,9 @@ func (a *API) sendEmailUpdateCode(ctx context.Context, user *db.User, pendingEma
 		return fmt.Errorf("could not build email update link: %w", err)
 	}
 	if err := a.sendMail(ctx, nil, pendingEmail, mailtemplates.VerifyEmailChangeNotification,
-		struct {
-			Code string
-			Link string
-		}{code, link},
+		mailtemplates.CodeData{
+			Code: code, Link: link, Email: pendingEmail, Expiry: a.otpExpiry,
+		},
 		expiration,
 	); err != nil {
 		return fmt.Errorf("could not send email update code: %w", err)
@@ -1101,10 +1097,9 @@ func (a *API) mailUserCode(ctx context.Context, p mailCodeParams) error {
 		return fmt.Errorf("%w: %w", errCodeSendUnchecked, err)
 	}
 	return a.sendMail(ctx, nil, user.Email, template,
-		struct {
-			Code string
-			Link string
-		}{code, link},
+		mailtemplates.CodeData{
+			Code: code, Link: link, Email: user.Email, Expiry: time.Until(expiration),
+		},
 		expiration,
 	)
 }

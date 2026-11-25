@@ -476,19 +476,8 @@ func (a *API) organizationCreateTicket(w http.ResponseWriter, r *http.Request) {
 	// people, so it must not carry the organization's language
 	lang := apicommon.NotificationLang(r.Context(), nil)
 	notification, err := mailtemplates.SupportNotification.Localized(lang).ExecTemplate(
-		struct {
-			Type         string
-			Organization string
-			Title        string
-			Description  string
-			Email        string
-		}{
-			Type:         ticketReq.TicketType,
-			Organization: apicommon.OrgDisplayName(org.Meta, org.Address.String()),
-			Title:        ticketReq.Title,
-			Description:  ticketReq.Description,
-			Email:        user.Email,
-		},
+		mailtemplates.NewSupportData(ticketReq.TicketType, ticketReq.Title, ticketReq.Description, user.Email,
+			apicommon.OrgDisplayName(org.Meta, org.Address.String())),
 	)
 	if err != nil {
 		log.Warnw("could not execute support notification template", "error", err)

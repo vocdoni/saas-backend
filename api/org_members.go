@@ -16,18 +16,6 @@ import (
 	"go.vocdoni.io/dvote/util"
 )
 
-// MembersImportCompletionData represents the data structure for members import completion email template
-type MembersImportCompletionData struct {
-	OrganizationName string
-	UserName         string
-	Link             string
-	TotalMembers     int
-	AddedMembers     int
-	ErrorCount       int
-	Errors           []string
-	CompletedAt      time.Time
-}
-
 // sendMembersImportCompletionEmail sends an email notification when members import is completed.
 // It runs detached from the request, so ctx must come from
 // context.WithoutCancel: NotificationLang needs the request values.
@@ -38,21 +26,24 @@ func (a *API) sendMembersImportCompletionEmail(ctx context.Context, user *db.Use
 		return // Email service not configured
 	}
 
+	// without a link the mail still goes out, just without the button
 	link, err := a.buildWebAppURL("/admin/memberbase/", nil)
 	if err != nil {
 		log.Errorf("failed to build web app URL for members import completion email: %v", err)
+		link = ""
 	}
 
-	data := MembersImportCompletionData{
-		OrganizationName: org.DisplayName(),
-		UserName:         user.FirstName + " " + user.LastName,
-		TotalMembers:     progress.Total,
-		AddedMembers:     progress.Added,
+	// the data caps the listed issues, so a file with thousands of bad rows still yields a small mail
+	data := mailtemplates.NewMembersImportData(mailtemplates.MembersImportResult{
+		Organization:     org.DisplayName(),
+		OrganizationLogo: org.LogoURL(),
+		UserName:         user.FirstName,
 		Link:             link,
-		ErrorCount:       len(progress.Errors),
+		Total:            progress.Total,
+		Added:            progress.Added,
 		Errors:           progress.ErrorsAsStrings(),
 		CompletedAt:      time.Now(),
-	}
+	})
 
 	if err := a.sendMail(ctx, org, user.Email, mailtemplates.MembersImportCompletionNotification,
 		data, time.Time{}); err != nil {
