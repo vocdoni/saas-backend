@@ -65,12 +65,13 @@ type challengeSend struct {
 
 // DestinationKey is the key under which a challenge records its sends to one destination: the
 // lowercase hex of the first 16 bytes of SHA-256 over the challenge type, ":" and the destination.
-// Contact matching ignores the case of emails, so they are lowercased first, or alternating the
-// casing of one address would dodge its cooldown; phones arrive normalized. The key reveals no
-// contact data.
+// Contact matching compares emails with strings.EqualFold, so they are folded the same way first
+// (upper then lower case maps each simple case-folding orbit, such as "ſ" and "s", to one form), or
+// another spelling of one address would dodge its cooldown; phones arrive normalized. The key
+// reveals no contact data.
 func DestinationKey(ctype notifications.ChallengeType, to string) string {
 	if ctype == notifications.EmailChallenge {
-		to = strings.ToLower(to)
+		to = strings.ToLower(strings.ToUpper(to))
 	}
 	sum := sha256.Sum256([]byte(string(ctype) + ":" + to))
 	return hex.EncodeToString(sum[:16])

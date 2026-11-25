@@ -74,6 +74,11 @@ func TestDestinationKey(t *testing.T) {
 	c := qt.New(t)
 	key := DestinationKey(notifications.EmailChallenge, "Voter@Example.com")
 	c.Assert(key, qt.Equals, DestinationKey(notifications.EmailChallenge, "voter@example.com"))
+	// spellings strings.EqualFold matches share one key: long s, Kelvin sign
+	c.Assert(DestinationKey(notifications.EmailChallenge, "\u017fuper@example.com"), qt.Equals,
+		DestinationKey(notifications.EmailChallenge, "super@example.com"))
+	c.Assert(DestinationKey(notifications.EmailChallenge, "\u212aate@example.com"), qt.Equals,
+		DestinationKey(notifications.EmailChallenge, "kate@example.com"))
 	c.Assert(key, qt.HasLen, 32)
 	c.Assert(key, qt.Not(qt.Equals), DestinationKey(notifications.SMSChallenge, "voter@example.com"))
 	c.Assert(DestinationKey(notifications.SMSChallenge, "+34600000001"), qt.Not(qt.Equals),
