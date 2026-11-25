@@ -2401,6 +2401,15 @@ definitions:
         example: deadbeef
         format: hex
         type: string
+      coolDownTime:
+        description: |-
+          CoolDownTime is the milliseconds until the code can be re-sent to the contact this request
+          named, on a step 0 or resend that left a code pending; absent when no resend is possible
+          (no code, its resends or the daily send cap spent), zero when it can be re-sent now. Other
+          contacts of the voter may be due sooner. Clients count down from it rather than from a fixed
+          value: the server sets the wait.
+        example: 60000
+        type: integer
       signature:
         example: deadbeef
         format: hex

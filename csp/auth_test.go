@@ -679,6 +679,64 @@ func TestAuthTokenReusesPendingChallenge(t *testing.T) {
 		c.Assert(csp.VerifyAuthToken(second, code), qt.IsNil)
 	})
 
+	c.Run("ResendCoolDown reports the wait until the pending code can be re-sent", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		const email = "reuse-hint@example.com"
+		first, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		code := fetchOTPCodeFromEmail(c, email)
+		second, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		dest := DestinationKey(notifications.EmailChallenge, email)
+
+		// every token of the code shares its wait, counted from the last send
+		for _, token := range []internal.HexBytes{first, second} {
+			remaining, ok := csp.ResendCoolDown(token, dest)
+			c.Assert(ok, qt.IsTrue)
+			c.Assert(remaining > 59*time.Minute, qt.IsTrue)
+			c.Assert(remaining <= time.Hour, qt.IsTrue)
+		}
+		// once the cooldown has passed it can be re-sent now
+		setCoolDown(c, time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
+		remaining, ok := csp.ResendCoolDown(first, dest)
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(remaining, qt.Equals, time.Duration(0))
+		// a destination never sent to is due at once
+		setCoolDown(c, time.Hour)
+		remaining, ok = csp.ResendCoolDown(first, DestinationKey(notifications.SMSChallenge, "+34600000000"))
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(remaining, qt.Equals, time.Duration(0))
+
+		// a resend the daily send cap would refuse is not advertised
+		origDaily := csp.maxDailyChallengeSends
+		csp.maxDailyChallengeSends = 1
+		_, ok = csp.ResendCoolDown(first, dest)
+		c.Assert(ok, qt.IsFalse)
+		csp.maxDailyChallengeSends = origDaily
+		// nor one the code's spent resends would
+		setCoolDown(c, time.Millisecond)
+		for range MaxChallengeResends {
+			time.Sleep(10 * time.Millisecond)
+			c.Assert(resendTo(csp, first, email, notifications.EmailChallenge), qt.IsNil)
+			c.Assert(fetchOTPCodeFromEmail(c, email), qt.Equals, code)
+		}
+		time.Sleep(10 * time.Millisecond)
+		for _, token := range []internal.HexBytes{first, second} {
+			_, ok := csp.ResendCoolDown(token, dest)
+			c.Assert(ok, qt.IsFalse)
+		}
+
+		// a solved code has nothing left to resend, through any of its tokens
+		c.Assert(csp.VerifyAuthToken(second, code), qt.IsNil)
+		for _, token := range []internal.HexBytes{first, second} {
+			_, ok := csp.ResendCoolDown(token, dest)
+			c.Assert(ok, qt.IsFalse)
+		}
+		_, ok = csp.ResendCoolDown(internal.HexBytes("unknown-token"), dest)
+		c.Assert(ok, qt.IsFalse)
+	})
+
 	c.Run("verifying one token kills the code for the others", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		const email = "reuse-sibling@example.com"

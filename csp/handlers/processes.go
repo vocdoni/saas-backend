@@ -367,7 +367,10 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 		writeResendError(w, err)
 		return
 	}
-	apicommon.HTTPWriteJSON(w, &AuthResponse{AuthToken: req.AuthToken})
+	apicommon.HTTPWriteJSON(w, &AuthResponse{
+		AuthToken:    req.AuthToken,
+		CoolDownTime: c.resendCoolDown(req.AuthToken, csp.DestinationKey(challengeType, to)),
+	})
 }
 
 // ProcessSignHandler godoc
