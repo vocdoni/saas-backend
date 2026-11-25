@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -254,4 +255,49 @@ func TestMaintenanceRouter(t *testing.T) {
 	user, err := testDB.UserByEmail(oauthEmail)
 	c.Assert(err, qt.IsNil)
 	c.Assert(user.OAuth["google"].LastAuthenticated.Equal(linkedAt), qt.IsTrue)
+}
+
+// TestMaintenanceTxWorkerWaitsOutWindow: a task queued inside the window runs only once the window
+// has ended, and a worker whose context ends during the window stops without running its task.
+func TestMaintenanceTxWorkerWaitsOutWindow(t *testing.T) {
+	c := qt.New(t)
+	noop := func(*db.JobResult, error) {}
+
+	now := time.Now()
+	m := &MaintenanceWindow{From: now.Add(-time.Second), Until: now.Add(time.Second)}
+	a := &API{ctx: t.Context(), maintenance: m}
+	q := &txQueue{tasks: make(chan txTask, 1)}
+	go a.txWorker(q)
+	defer close(q.tasks)
+	ran := make(chan time.Time, 1)
+	c.Assert(q.enqueueBatch([]txTask{{
+		jobID: "maintenance-wait", record: noop,
+		run: func() (*db.JobResult, error) { ran <- time.Now(); return nil, nil },
+	}}), qt.IsTrue)
+	select {
+	case at := <-ran:
+		c.Assert(at.Before(m.Until), qt.IsFalse, qt.Commentf("ran at %s, window ends %s", at, m.Until))
+	case <-time.After(10 * time.Second):
+		c.Fatal("task never ran after the window")
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	b := &API{ctx: ctx, maintenance: &MaintenanceWindow{From: now, Until: now.Add(time.Hour)}}
+	q2 := &txQueue{tasks: make(chan txTask, 1)}
+	done := make(chan struct{})
+	go func() {
+		b.txWorker(q2)
+		close(done)
+	}()
+	c.Assert(q2.enqueueBatch([]txTask{{
+		jobID: "maintenance-stop", record: noop,
+		run: func() (*db.JobResult, error) { ran <- time.Now(); return nil, nil },
+	}}), qt.IsTrue)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		c.Fatal("worker did not stop with its context")
+	}
+	c.Assert(ran, qt.HasLen, 0)
 }

@@ -269,7 +269,7 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 		// was loaded before authentication, and writing it back whole could restore state an
 		// admin changed meanwhile. Skipped during a maintenance window, where login stays
 		// available but writes nothing, like the password login.
-		if !a.maintenance.active(now) {
+		if !a.maintenance.Active(now) {
 			oauthProvider.LastAuthenticated = now
 			if err := a.db.SetUserOAuthProvider(user.ID, loginInfo.Provider, oauthProvider); err != nil {
 				errors.ErrGenericInternalServerError.WithErr(err).Write(w)

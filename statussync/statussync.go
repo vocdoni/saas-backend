@@ -37,6 +37,10 @@ type Config struct {
 	Interval       time.Duration
 	ConfirmTimeout time.Duration
 	Workers        int
+	// Paused, when set, reports whether the chain is in a scheduled maintenance window at now.
+	// While it is, due tasks stay queued with their attempts untouched, so the window gives up no
+	// confirmation and reconciles nothing to a halted chain.
+	Paused func(now time.Time) bool
 }
 
 // task is one queued reconciliation, keyed (for dedup) by its on-chain election id.
@@ -63,6 +67,7 @@ type Syncer struct {
 	interval    time.Duration
 	maxAttempts int
 	workers     int
+	paused      func(now time.Time) bool
 	ctx         context.Context
 
 	mu      sync.Mutex
@@ -94,6 +99,7 @@ func New(ctx context.Context, c *Config) *Syncer {
 		interval:    interval,
 		maxAttempts: maxAttempts,
 		workers:     workers,
+		paused:      c.Paused,
 		ctx:         ctx,
 		pending:     make(map[string]*task),
 		wake:        make(chan struct{}, 1),
@@ -174,12 +180,16 @@ func (s *Syncer) ProcessPending() int {
 }
 
 // processDue removes and processes tasks that are due (or all, when force), through a bounded worker
-// pool. Confirm tasks that haven't converged reschedule themselves. Returns the count processed.
+// pool; nothing is due while paused. Confirm tasks that haven't converged reschedule themselves.
+// Returns the count processed.
 // force is an internal due-vs-all selector (the ProcessPending test hook vs the interval loop).
 //
 //nolint:revive // flag-parameter: force is an internal mode selector, not user-facing control coupling
 func (s *Syncer) processDue(force bool) int {
 	now := time.Now()
+	if !force && s.paused != nil && s.paused(now) {
+		return 0
+	}
 	s.mu.Lock()
 	var due []*task
 	for k, t := range s.pending {

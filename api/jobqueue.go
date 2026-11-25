@@ -261,9 +261,16 @@ func (a *API) startTxQueues() {
 	}
 }
 
-// txWorker runs queued tasks and records each outcome on the job row.
+// txWorker runs queued tasks and records each outcome on the job row. A task due inside a
+// maintenance window waits for it to end: the chain is down on purpose, and running the task
+// would only fail it or spend its retries. The worker stops when the API context ends, leaving
+// its task like a process exit does.
 func (a *API) txWorker(q *txQueue) {
 	for task := range q.tasks {
+		if err := a.maintenance.waitOut(a.ctx, time.Now); err != nil {
+			q.held.release(task.jobID)
+			return
+		}
 		a.runTxTask(task)
 		q.held.release(task.jobID)
 	}

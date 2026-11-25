@@ -359,6 +359,7 @@ func main() {
 		Account:        acc,
 		Interval:       viper.GetDuration("statusSyncInterval"),
 		ConfirmTimeout: viper.GetDuration("statusSyncConfirmTimeout"),
+		Paused:         apiConf.Maintenance.Active,
 	})
 	apiConf.StatusSyncer = syncer
 	syncer.Start()

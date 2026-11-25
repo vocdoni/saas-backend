@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"math/rand"
@@ -21,7 +22,8 @@ const maintenanceHeader = "X-Maintenance-Window"
 const maintenanceMaxDuration = 24 * time.Hour
 
 // MaintenanceWindow is a scheduled downtime of the chain behind the API. Inside it, writes are
-// refused with ErrMaintenance; reads keep working, except those that need the chain.
+// refused with ErrMaintenance and queued chain work waits for it to end; reads keep working,
+// except those that need the chain.
 type MaintenanceWindow struct {
 	From  time.Time `json:"from"`
 	Until time.Time `json:"until"`
@@ -68,9 +70,32 @@ func (m *MaintenanceWindow) pending(now time.Time) bool {
 	return m != nil && now.Before(m.Until)
 }
 
-// active reports whether now is inside the window.
-func (m *MaintenanceWindow) active(now time.Time) bool {
+// Active reports whether now is inside the window. A nil window is never active.
+func (m *MaintenanceWindow) Active(now time.Time) bool {
 	return m.pending(now) && !now.Before(m.From)
+}
+
+// overlaps reports whether the span from start to end touches the window.
+func (m *MaintenanceWindow) overlaps(start, end time.Time) bool {
+	return m != nil && start.Before(m.Until) && !end.Before(m.From)
+}
+
+// waitOut blocks while the window is active and returns once it has ended, or with ctx's error
+// if ctx ends first. A nil or inactive window returns at once.
+func (m *MaintenanceWindow) waitOut(ctx context.Context, now func() time.Time) error {
+	for {
+		t := now()
+		if !m.Active(t) {
+			return nil
+		}
+		timer := time.NewTimer(m.Until.Sub(t))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 // maintenance announces the window on every response until it ends by setting the
@@ -106,7 +131,7 @@ func maintenanceWriteBlock(m *MaintenanceWindow, now func() time.Time, h http.Ha
 // ErrMaintenance with a jittered Retry-After hint pointing past the end of the window.
 // Exempt handlers that write on some of their paths call it on those paths.
 func (m *MaintenanceWindow) refuseInMaintenance(w http.ResponseWriter, now time.Time) bool {
-	if !m.active(now) {
+	if !m.Active(now) {
 		return false
 	}
 	// Jitter 0–60 s so clients spread retries instead of stampeding at exactly Until.
