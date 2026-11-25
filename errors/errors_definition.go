@@ -163,5 +163,5 @@ var (
 	ErrOrgTxBusy = Error{Code: 50303, HTTPstatus: http.StatusServiceUnavailable, Err: fmt.Errorf("another transaction for this organization is in progress, retry later"), LogLevel: "info"}
 	// ErrMaintenance: a write arrived during the scheduled maintenance window; Retry-After says
 	// when the window ends.
-	ErrMaintenance = Error{Code: 50304, HTTPstatus: http.StatusServiceUnavailable, Err: fmt.Errorf("scheduled maintenance in progress, retry after the Retry-After delay"), LogLevel: "info"}
+	ErrMaintenance = Error{Code: 50304, HTTPstatus: http.StatusServiceUnavailable, Err: fmt.Errorf("the service is under scheduled maintenance, please try again later"), LogLevel: "info"}
 )
