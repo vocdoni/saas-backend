@@ -6,7 +6,8 @@ Owner decisions (2026-11-25):
 - No persistent outbox. Compose the notification before claiming a send; roll the claim back when the push or the delivery fails.
 - Sending to a different destination of the voter inside the cooldown sends there, bounded per destination, by the code's resend budget and by the daily cap.
 - Shared attempts per code stay (accepted trade-off), documented in code, PR body and commit message.
-- Codes in flight at deploy (or rollback) time need not survive it: they are few, and the voter asks again. Compatibility is measured against the schema in production (`lts`), never against #737's unreleased one; the code carries no legacy branches.
+- Codes in flight at deploy time need not survive it: they are few, and the voter asks again. Compatibility is measured against the schema in production (`lts`), never against #737's unreleased one; the code carries no legacy branches.
+- No rollback to the previous code is planned; the design spends nothing on keeping one working.
 - The rest of elboletaire's review of #737 (2026-11-25) is fixed in the same PR.
 
 ## Problem
@@ -33,7 +34,7 @@ saas-backend#737 lets a repeated step 0 reuse the voter's pending code by issuin
 ## Non-goals
 
 - Persistent outbox or crash-safe delivery: a code in the in-memory queue at restart is lost (owner, 2026-11-25).
-- Keeping codes in flight across the deploy or a rollback (owner, 2026-11-25).
+- Keeping codes in flight across the deploy, or any rollback path to the previous code (owner, 2026-11-25).
 - Changing attempt sharing (stays per code), the send backoff (#893), error codes (#894), TTL cleanup of `cspTokens` (#895).
 - Any change to `cspTokensStatus` / `CSPProcess` semantics (signing budgets, consumption, blind nonces): their rows are untouched. But every db-internal resolution of an auth token — `fetchCSPAuthFromDB`, used by `ConsumeCSPProcess`, `ArmCSPProcessBlind`, `CSPProcess` and `IsCSPProcessConsumed`'s `UsedToken` re-check (`db/csp.go:412,492,349,381`) — adopts the token view, or every voter verified through a token other than the first would be refused at signing.
 - API shape changes beyond what #737 already adds (`coolDownTime` on success, `Retry-After`).
@@ -56,7 +57,7 @@ saas-backend#737 lets a repeated step 0 reuse the voter's pending code by issuin
 
 ```go
 type CSPAuth struct { // storage document; field names are the bson keys
-    ID         internal.HexBytes    // _id: the first token's value; never used to look a token up
+    ID         internal.HexBytes    // _id: random document id; never a token, never used to look one up
     UserID     internal.HexBytes    // userid
     AnchorID   internal.HexBytes    // bundleid
     CreatedAt  time.Time            // createdat: code expiry counts from here
@@ -73,7 +74,7 @@ type CSPAuthToken struct { ID internal.HexBytes; CreatedAt time.Time } // id, cr
 
 - `Tokens` holds at most `MaxChallengeTokens` (10) tokens.
 - There is no `verified` boolean: `verifiedby` set means verified, and it names the one token that may sign. Another token of the same code — which anyone holding the voter's login data can obtain with their own step 0 — never becomes verified by the voter solving the code.
-- `_id` equals the first token so that a rollback to the previous code still finds, and (through the down migration) still honours, a code solved by its first token.
+- `_id` is a fresh random id; rows migrated from `lts` keep theirs (which happens to equal their first token) and nothing relies on it.
 - A missing `sends` is an empty map: no destination has been sent the code yet.
 
 Destination key: lowercase hex of SHA-256 over `ctype + ":" + canonical(to)`, truncated to 16 bytes, where `canonical` lowercases emails (contact matching is already case-insensitive, `csp/handlers/auth.go:111`) and takes the normalized phone (`csp/handlers/auth.go:164`). Keying on the submitted spelling would let case-alternating one email bypass the per-destination cooldown. Delivery still uses `to` as submitted. The key names no contact data and is a valid field name.
@@ -122,7 +123,7 @@ A comment at `MaxChallengeAttempts` says, in 2-3 lines: attempts — and resends
 One migration on `cspTokens`:
 
 - Up: `updateMany` with a pipeline setting `tokens: [{id: "$_id", createdat: "$createdat"}]` on rows without `tokens`, and `verifiedby: "$_id"` on rows with `verified: true`; then create the unique index `{"tokens.id": 1}`, partial on `tokens.id` existing (rows an old instance inserts during a rolling deploy lack it and must not collide as nulls; those voters repeat step 0). The `verified` field of existing rows is left in place and ignored.
-- Down: drop the index; `$set verified: true` where `verifiedby == _id`. A code solved by a token other than its first stays unverified under the previous code, which is the safe reading.
+- Down: drop the index (the migration framework requires a down; no rollback to the previous code is planned).
 
 ### Alternatives considered
 
@@ -138,7 +139,7 @@ One migration on `cspTokens`:
 
 - Deploy: the migration normalizes every existing row, so the code has one shape to handle. A code in flight keeps working (its row gains `tokens`); one whose row an old instance writes during the rolling deploy is not found and the voter repeats step 0.
 - API: unchanged beyond #737. Behaviour changes vs `lts`: a repeated step 0 reuses the pending code; step 0 to a new destination inside the cooldown sends; step-0 re-sends count against the code's 3 resends; `auth/resend` gets the per-destination cooldown; failed sends give back cooldown and budgets.
-- Rollback: run the down migration, then deploy the previous code. It ignores `tokens`, `sends` and `verifiedby`; codes solved by their first token stay verified, other tokens stop resolving and those voters repeat step 0. The previous code's cooldown counts from `createdat`.
+- Rollback: not planned (owner, 2026-11-25). Reverting the PR before deploy is free; after deploy, fixes go forward.
 
 ## Failure modes and security
 
@@ -160,7 +161,7 @@ One migration on `cspTokens`:
 - [ ] AC4: the loser of concurrent resends reports the real wait (csp test with 3 concurrent `ResendChallenge`).
 - [ ] AC5: step 0 by email then by SMS inside the cooldown sends the SMS; alternating email/SMS sends at most once per destination per cooldown and at most `MaxChallengeResends` times per code (csp test).
 - [ ] AC6: cert-auth step 0 refused by the cooldown leaves the certificate code unused (api test).
-- [ ] AC7: the migration turns hand-inserted `lts`-shaped rows (pending, verified, auth-only) into documents that verify, re-send and sign; down restores `verified` only where `verifiedby == _id` (migration + csp tests).
+- [ ] AC7: the migration turns hand-inserted `lts`-shaped rows (pending, verified, auth-only) into documents that verify, re-send and sign (migration + csp tests).
 - [ ] AC8: the unique partial index on `tokens.id` exists after up and is gone after down; token lookups use it (db test on the index list).
 - [ ] AC9: full `csp`, `db`, `api`, `errors`, `migrations` suites, golangci-lint and the qt check pass on z6; swagger unchanged or regenerated.
 - [ ] AC10: a voter verified through a token other than the first signs (ECDSA and blind) and consumes the process; a token of the same code that did not solve it is refused (`ErrTokenNotVerified`), including in `IsCSPProcessConsumed` (api + db tests).
