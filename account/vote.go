@@ -55,15 +55,15 @@ func sendTxStatus(err error) int {
 	return status
 }
 
-// transientSendErr reports whether a SendTx error may be gone on a resend: a transport error, or
-// a 502/504 that only a proxy in front of the node answers. A 503 is definitive here: dvote has
-// already retried it, waiting a block each time.
+// transientSendErr reports whether a SendTx error may be gone on a resend: a transport error,
+// a 429 throttle reply, or a 502/504 from a proxy. A 503 is definitive here: dvote has already
+// retried it, waiting a block each time.
 func transientSendErr(err error) bool {
 	if strings.Contains(err.Error(), mempoolFullMsg) {
 		return false
 	}
 	switch sendTxStatus(err) {
-	case 0, 502, 504:
+	case 0, 429, 502, 504:
 		return true
 	default:
 		return false
@@ -113,6 +113,12 @@ func (a *Account) SubmitVote(ctx context.Context, stx, nullifier []byte) ([]byte
 			break
 		}
 		if !transientSendErr(sendErr) {
+			// voconed answers 503 (5040) for a tx stored but not yet confirmed by the standby;
+			// dvote exhausts its own 503 retries and returns mempoolFullMsg — treat that as
+			// maybeAccepted so the relay waits for mining before giving up.
+			if strings.Contains(sendErr.Error(), mempoolFullMsg) {
+				maybeAccepted = true
+			}
 			break
 		}
 		// a dial failure is retried too, but proves nothing reached the node: it is no reason to
