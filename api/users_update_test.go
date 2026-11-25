@@ -122,7 +122,7 @@ func TestCreatorEmailChangeKeepsSigner(t *testing.T) {
 	newEmail := fmt.Sprintf("creator-%d@test.com", internal.RandomInt(100000000000))
 	res := requestAndParse[apicommon.LoginResponse](t, http.MethodPut, token,
 		&apicommon.UserInfo{Email: newEmail, Password: testPass}, usersMeEndpoint)
-	mailCode := verificationCodeRgx.FindStringSubmatch(waitForEmail(t, newEmail))
+	mailCode := emailChangeCodeRgx.FindStringSubmatch(waitForEmail(t, newEmail))
 	c.Assert(len(mailCode) > 1, qt.IsTrue)
 	requestAndParse[apicommon.LoginResponse](t, http.MethodPost, res.Token,
 		&apicommon.UserVerification{Code: mailCode[1]}, usersMeEmailVerifyEndpoint)
