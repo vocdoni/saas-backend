@@ -1,13 +1,21 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/internal"
 )
 
 func TestParseMaintenanceWindow(t *testing.T) {
@@ -139,4 +147,111 @@ func TestMaintenanceWriteBlock(t *testing.T) {
 	rec = httptest.NewRecorder()
 	passThru.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/process", http.NoBody))
 	c.Assert(rec.Code, qt.Equals, http.StatusOK)
+}
+
+// TestMaintenanceRouter builds the real router with a window covering time.Now() and checks which
+// routes it refuses, so a write route registered with handleExempt or outside handle fails here.
+func TestMaintenanceRouter(t *testing.T) {
+	c := qt.New(t)
+
+	token := testCreateUser(t, testPass)
+	me := requestAndParse[apicommon.UserInfo](t, http.MethodGet, token, nil, usersMeEndpoint)
+
+	// an existing user with google already linked, to log in through OAuth inside the window
+	oauthEmail := fmt.Sprintf("maintenance-oauth-%d@test.com", internal.RandomInt(100000000))
+	oauthSig := fmt.Sprintf("user-oauth-signature-%d", internal.RandomInt(100000000))
+	sigHash, err := internal.HexHashPasswordContext(t.Context(), passwordSalt, oauthSig)
+	c.Assert(err, qt.IsNil)
+	linkedAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	_, err = testDB.SetUser(&db.User{
+		Email:    oauthEmail,
+		Verified: true,
+		OAuth: map[string]db.OAuthProvider{"google": {
+			ExternalID:        "0x0000000000000000000000000000000000000001",
+			SignatureHash:     sigHash,
+			LinkedAt:          linkedAt,
+			LastAuthenticated: linkedAt,
+		}},
+	})
+	c.Assert(err, qt.IsNil)
+
+	now := time.Now()
+	a := &API{
+		db:            testDB,
+		auth:          testAPI.auth,
+		csp:           testCSP,
+		objectStorage: testAPI.objectStorage,
+		account:       testAPI.account,
+		voteOnChain:   testAPI.voteOnChain,
+		maintenance:   &MaintenanceWindow{From: now.Add(-time.Minute), Until: now.Add(time.Hour)},
+		smsStatus:     func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) },
+	}
+	router := a.initRouter()
+
+	do := func(path, jwt string, body any) *httptest.ResponseRecorder {
+		t.Helper()
+		data, err := json.Marshal(body)
+		c.Assert(err, qt.IsNil)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(data))
+		req.Header.Set("Content-Type", "application/json")
+		if jwt != "" {
+			req.Header.Set("Authorization", "Bearer "+jwt)
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+	withProcess := func(pattern string) string {
+		return strings.Replace(pattern, "{processId}", internal.HexBytes(randomProcessID()).String(), 1)
+	}
+
+	unknownEmail := fmt.Sprintf("maintenance-signup-%d@test.com", internal.RandomInt(100000000))
+	blocked := []struct {
+		name, path, jwt string
+		body            any
+	}{
+		{"process sign", withProcess(processesSignEndpoint), "", map[string]any{}},
+		{"process publish", withProcess(processesPublishEndpoint), token, map[string]any{}},
+		{"registration", usersEndpoint, "", &apicommon.UserInfo{
+			Email: unknownEmail, Password: testPass, FirstName: "M", LastName: "W",
+		}},
+		{"stripe webhook", paymentsWebhook, "", map[string]any{}},
+		{"sms status callback", SMSStatusCallbackRoute, "", map[string]any{}},
+		{"oauth sign-up", oauthLoginEndpoint, "", &apicommon.OAuthLoginRequest{
+			Email: unknownEmail, Provider: "google", OAuthSignature: "sig", UserOAuthSignature: "user-sig",
+			Address: "0x0000000000000000000000000000000000000002",
+		}},
+	}
+	for _, tc := range blocked {
+		rec := do(tc.path, tc.jwt, tc.body)
+		c.Assert(rec.Code, qt.Equals, http.StatusServiceUnavailable, qt.Commentf("%s: %s", tc.name, rec.Body))
+		var apiErr errors.Error
+		c.Assert(json.Unmarshal(rec.Body.Bytes(), &apiErr), qt.IsNil, qt.Commentf("%s", tc.name))
+		c.Assert(apiErr.Code, qt.Equals, errors.ErrMaintenance.Code, qt.Commentf("%s", tc.name))
+		c.Assert(rec.Header().Get("Retry-After"), qt.Not(qt.Equals), "", qt.Commentf("%s", tc.name))
+	}
+	// neither sign-up path created the user
+	_, err = testDB.UserByEmail(unknownEmail)
+	c.Assert(err, qt.Equals, db.ErrNotFound)
+
+	exempt := []struct {
+		name, path, jwt string
+		body            any
+		want            int
+	}{
+		{"login", authLoginEndpoint, "", &apicommon.UserInfo{Email: me.Email, Password: testPass}, http.StatusOK},
+		{"refresh", authRefresTokenEndpoint, token, nil, http.StatusOK},
+		{"oauth login of a linked user", oauthLoginEndpoint, "", &apicommon.OAuthLoginRequest{
+			Email: oauthEmail, Provider: "google", OAuthSignature: "sig", UserOAuthSignature: oauthSig,
+		}, http.StatusOK},
+		{"votes verify", votesVerifyEndpoint, "", &apicommon.VerifyVotesRequest{}, http.StatusBadRequest},
+	}
+	for _, tc := range exempt {
+		rec := do(tc.path, tc.jwt, tc.body)
+		c.Assert(rec.Code, qt.Equals, tc.want, qt.Commentf("%s: %s", tc.name, rec.Body))
+	}
+	// the OAuth login inside the window wrote nothing
+	user, err := testDB.UserByEmail(oauthEmail)
+	c.Assert(err, qt.IsNil)
+	c.Assert(user.OAuth["google"].LastAuthenticated.Equal(linkedAt), qt.IsTrue)
 }
