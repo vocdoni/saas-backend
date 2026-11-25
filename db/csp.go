@@ -350,7 +350,7 @@ func (ms *MongoStorage) RollbackCSPAuthSend(r CSPSendRollback) (rolledBack bool,
 }
 
 // CSPAuth method returns the CSP authentication data for a given token. It
-// returns an error if the token is nil or the token does not exist.
+// returns ErrTokenNotFound if the token is empty or does not exist.
 func (ms *MongoStorage) CSPAuth(token internal.HexBytes) (*CSPAuth, error) {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
@@ -701,6 +701,10 @@ func (ms *MongoStorage) ClaimCSPProcessBlind(userID, processID, token internal.H
 // db-internal token resolution goes through it, so a token that did not solve its code never reads
 // as verified.
 func (ms *MongoStorage) fetchCSPAuthFromDB(ctx context.Context, token internal.HexBytes) (*CSPAuth, error) {
+	// an empty token would match documents without tokens
+	if len(token) == 0 {
+		return nil, ErrTokenNotFound
+	}
 	tokenData := new(CSPAuth)
 	if err := ms.cspTokens.FindOne(ctx, bson.M{"tokens.id": token}).Decode(tokenData); err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {

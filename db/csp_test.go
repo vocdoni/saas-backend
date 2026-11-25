@@ -33,6 +33,13 @@ func TestSetGetCSPAuth(t *testing.T) {
 	c.Run("nil bundleID", func(c *qt.C) {
 		c.Assert(testDB.SetCSPAuth(testAuthToken, testUserID, nil, ""), qt.ErrorIs, ErrBadInputs)
 	})
+	c.Run("empty token never matches a document without tokens", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		_, err := testDB.cspTokens.InsertOne(context.Background(), bson.M{"userid": testUserID, "bundleid": testCSPBundleID})
+		c.Assert(err, qt.IsNil)
+		_, err = testDB.CSPAuth(nil)
+		c.Assert(err, qt.ErrorIs, ErrTokenNotFound)
+	})
 	c.Run("valid token", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		// set the token and check it was set

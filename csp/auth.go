@@ -462,6 +462,8 @@ func (c *CSP) claimSend(challenge *db.CSPAuth, dest string) (db.CSPSendClaim, er
 			return db.CSPSendClaim{}, refusal
 		}
 	}
+	// both claims lost to concurrent sends that were gone by the re-read: rare, and retryable
+	log.Warnw("challenge send claim lost to concurrent sends twice", "challenge", challenge.ID)
 	return db.CSPSendClaim{}, ErrStorageFailure
 }
 
