@@ -185,10 +185,8 @@ func TestProcessCSP(t *testing.T) {
 	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "",
 		&handlers.CheckMembershipRequest{AuthToken: step0.AuthToken}, "processes", pid, "check")
 
-	// inside the cooldown a resend answers 40103 whatever the contact, spending no resend
-	requestAndAssertError(errors.ErrAttemptCoolDownTime, t, http.MethodPost, "",
-		&handlers.AuthResendRequest{AuthToken: step0.AuthToken, Email: "wrong-contact@example.com"},
-		"processes", pid, "auth", "resend")
+	// inside the cooldown, a resend to the destination the code was sent to answers 40103 and
+	// spends no resend
 	requestAndAssertError(errors.ErrAttemptCoolDownTime, t, http.MethodPost, "",
 		&handlers.AuthResendRequest{AuthToken: step0.AuthToken, Email: members[0].Email},
 		"processes", pid, "auth", "resend")
@@ -544,4 +542,41 @@ func TestProcessCSPSignRefusedAfterEnd(t *testing.T) {
 	}, "processes", f.pid, "sign")
 	c.Assert(apiErr.Code, qt.Equals, errors.ErrUnauthorized.Code)
 	c.Assert(apiErr.Error(), qt.Contains, "process has ended")
+}
+
+// TestProcessCSPSecondTokenSigns checks that of two tokens sharing one code, the one the voter
+// solved the code with signs even though it was not the first issued, and the other is refused.
+func TestProcessCSPSecondTokenSigns(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(1)...)
+
+	req := newVotingProcessRequest(orgAddress, memberIDs(members))
+	req.StartDate = ""
+	req.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname}
+	req.Questions = req.Questions[:1]
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint,
+	)
+	pid := created.ProcessID
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	election := got.Questions[0].UpstreamID
+
+	authReq := &handlers.AuthRequest{Name: members[0].Name, Surname: members[0].Surname, Email: members[0].Email}
+	first := postProcessAuth0(t, pid, authReq)
+	// a repeated step 0 returns a second token for the same pending code
+	second := postProcessAuth0(t, pid, authReq)
+	c.Assert(second, qt.Not(qt.DeepEquals), first)
+	verifyProcessCSP(t, pid, members[0].Email, second)
+
+	voter := ethereum.SignKeys{}
+	c.Assert(voter.Generate(), qt.IsNil)
+	// the token the code was not solved with cannot sign
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "",
+		&handlers.SignRequest{AuthToken: first, ProcessID: election, Payload: hex.EncodeToString(voter.Address().Bytes())},
+		"processes", pid, "sign")
+	testCSPSign(t, pid, second, election, voter.Address().Bytes())
 }

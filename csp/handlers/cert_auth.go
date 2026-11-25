@@ -406,7 +406,11 @@ func (c *CSPHandlers) certAuthFirstStep(in firstStepRequest) (res firstStepResul
 	if err != nil {
 		return firstStepResult{}, err
 	}
-	return firstStepResult{token: token, voterRef: c.csp.VoterRef(processID.Hex(), member.ID.Hex())}, nil
+	res = firstStepResult{token: token, voterRef: c.csp.VoterRef(processID.Hex(), member.ID.Hex())}
+	if toDestinations != "" {
+		res.dest = csp.DestinationKey(challengeType, toDestinations)
+	}
+	return res, nil
 }
 
 // spendCertCode consumes a certificate code whose step 0 failed on the voter's data, so the voter

@@ -17,6 +17,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/handlers"
+	cspnotifications "github.com/vocdoni/saas-backend/csp/notifications"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
@@ -296,5 +297,27 @@ func TestCertAuthStep0RetryLaterKeepsCode(t *testing.T) {
 		tok2 := postProcessAuth0(t, withEmail, login())
 		// each request returns a distinct token
 		c.Assert(tok1, qt.Not(qt.DeepEquals), tok2)
+	})
+
+	t.Run("2FA cooldown on a new code: 40103, and the code stays unused", func(t *testing.T) {
+		c := qt.New(t)
+		login := func() *handlers.AuthRequest {
+			verifier, challenge := testCertPKCE(t)
+			return &handlers.AuthRequest{
+				CertCode: newCertCode(t, withEmail, testDNI(41), challenge), CodeVerifier: verifier, Email: members[0].Email,
+			}
+		}
+		tok := postProcessAuth0(t, withEmail, login())
+		// lock the pending code so step 0 needs a new one, and date its last send far enough ahead
+		// that the 1 s test cooldown cannot run out during the request
+		dest := csp.DestinationKey(cspnotifications.EmailChallenge, members[0].Email)
+		_, err := testDB.DBClient.Database(testDBName).Collection("cspTokens").UpdateOne(context.Background(),
+			bson.M{"tokens.id": tok},
+			bson.M{"$set": bson.M{"attempts": csp.MaxChallengeAttempts, "sends." + dest: time.Now().Add(time.Hour)}})
+		c.Assert(err, qt.IsNil)
+		req := login()
+		apiErr := postProcessAuth0AndExpectError(t, withEmail, req)
+		c.Assert(apiErr.Code, qt.Equals, errors.ErrAttemptCoolDownTime.Code)
+		unused(c, req.CertCode)
 	})
 }
