@@ -472,6 +472,43 @@ func (c *CSPHandlers) typedAuthFirstStep(in firstStepRequest) (token internal.He
 	)
 }
 
+// submittedContact is the destination a resend request names, before it is checked against the
+// member: the destination determineContactMethod answers when the contact matches. A missing
+// contact answers like a wrong one; an auth-only census names none.
+func submittedContact(census *db.Census, req *AuthResendRequest, phone *voterPhone,
+) (string, notifications.ChallengeType, error) {
+	email := func() (string, notifications.ChallengeType, error) {
+		if req.Email == "" {
+			return "", "", errors.ErrCSPAuthFailed
+		}
+		return req.Email, notifications.EmailChallenge, nil
+	}
+	sms := func() (string, notifications.ChallengeType, error) {
+		if phone == nil {
+			return "", "", errors.ErrCSPAuthFailed
+		}
+		return phone.normalized, notifications.SMSChallenge, nil
+	}
+	switch census.Type {
+	case db.CensusTypeMail:
+		return email()
+	case db.CensusTypeSMS:
+		return sms()
+	case db.CensusTypeSMSorMail:
+		if req.Email != "" {
+			return email()
+		}
+		if req.Phone != "" {
+			return sms()
+		}
+		return "", "", errors.ErrInvalidUserData.Withf("no valid contact method provided")
+	case db.CensusTypeAuthOnly:
+		return "", "", nil
+	default:
+		return "", "", errors.ErrNotSupported.Withf("invalid census type")
+	}
+}
+
 // authSecondStep is the second step of the authentication process. It
 // receives the request and checks the token and the challenge solution
 // against the server data. If the data is valid, it returns the token and

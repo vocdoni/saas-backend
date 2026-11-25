@@ -17,6 +17,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/handlers"
+	cspnotifications "github.com/vocdoni/saas-backend/csp/notifications"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
@@ -233,9 +234,9 @@ func TestCertAuthStep0MemberEdited(t *testing.T) {
 	}
 }
 
-// TestCertAuthStep0RetryLaterKeepsCode: a step 0 refused for a reason the voter can only wait out
-// (the failed-attempt budget, 40017, or the 2FA cooldown) leaves the certificate code unspent, so
-// it redeems once the refusal is over.
+// TestCertAuthStep0RetryLaterKeepsCode: a step 0 refused because the failed-attempt budget (40017)
+// is exhausted leaves the certificate code unspent; a step 0 within the 2FA cooldown of a still-usable
+// code now returns a sibling token (not 40103), so the cert code is validly spent.
 func TestCertAuthStep0RetryLaterKeepsCode(t *testing.T) {
 	enableCertAuth(t)
 	token := testCreateUser(t, "adminpassword123")
@@ -281,7 +282,9 @@ func TestCertAuthStep0RetryLaterKeepsCode(t *testing.T) {
 		postProcessAuth0(t, authOnly, req)
 	})
 
-	t.Run("2FA cooldown", func(t *testing.T) {
+	t.Run("2FA within cooldown: usable code reused, cert code accepted", func(t *testing.T) {
+		// within the cooldown of a still-usable 2FA challenge, step 0 returns a sibling token
+		// rather than refusing: the cert code is validly spent and the voter proceeds to step 1
 		c := qt.New(t)
 		login := func() *handlers.AuthRequest {
 			verifier, challenge := testCertPKCE(t)
@@ -289,12 +292,32 @@ func TestCertAuthStep0RetryLaterKeepsCode(t *testing.T) {
 				CertCode: newCertCode(t, withEmail, testDNI(41), challenge), CodeVerifier: verifier, Email: members[0].Email,
 			}
 		}
-		postProcessAuth0(t, withEmail, login())
+		tok1 := postProcessAuth0(t, withEmail, login())
+		// second request within the cooldown: challenge still usable, sibling token issued
+		tok2 := postProcessAuth0(t, withEmail, login())
+		// each request returns a distinct token
+		c.Assert(tok1, qt.Not(qt.DeepEquals), tok2)
+	})
+
+	t.Run("2FA cooldown on a new code: 40103, and the code stays unused", func(t *testing.T) {
+		c := qt.New(t)
+		login := func() *handlers.AuthRequest {
+			verifier, challenge := testCertPKCE(t)
+			return &handlers.AuthRequest{
+				CertCode: newCertCode(t, withEmail, testDNI(41), challenge), CodeVerifier: verifier, Email: members[0].Email,
+			}
+		}
+		tok := postProcessAuth0(t, withEmail, login())
+		// lock the pending code so step 0 needs a new one, and date its last send far enough ahead
+		// that the 1 s test cooldown cannot run out during the request
+		dest := csp.DestinationKey(cspnotifications.EmailChallenge, members[0].Email)
+		_, err := testDB.DBClient.Database(testDBName).Collection("cspTokens").UpdateOne(context.Background(),
+			bson.M{"tokens.id": tok},
+			bson.M{"$set": bson.M{"attempts": csp.MaxChallengeAttempts, "sends." + dest: time.Now().Add(time.Hour)}})
+		c.Assert(err, qt.IsNil)
 		req := login()
 		apiErr := postProcessAuth0AndExpectError(t, withEmail, req)
 		c.Assert(apiErr.Code, qt.Equals, errors.ErrAttemptCoolDownTime.Code)
 		unused(c, req.CertCode)
-		time.Sleep(cspNotificationCoolDownTime)
-		postProcessAuth0(t, withEmail, req)
 	})
 }

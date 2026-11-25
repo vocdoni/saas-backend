@@ -344,3 +344,39 @@ func TestProcessBlindCSPOverwrite(t *testing.T) {
 	// overwrite (which reused the first proof rather than a new signature).
 	c.Assert(requestBlindPoint(t, pid, tok, election).Code, qt.Equals, "already_consumed")
 }
+
+// TestProcessBlindCSPSecondTokenSigns checks the blind flow with two tokens sharing one code: the
+// token the voter solved the code with blind-signs, the other is refused.
+func TestProcessBlindCSPSecondTokenSigns(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(1)...)
+
+	req := newVotingProcessRequest(orgAddress, memberIDs(members))
+	req.StartDate = ""
+	req.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname}
+	req.Census.Anonymous = true
+	req.Questions = req.Questions[:1]
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint,
+	)
+	pid := created.ProcessID
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	election := got.Questions[0].UpstreamID
+
+	authReq := &handlers.AuthRequest{Name: members[0].Name, Surname: members[0].Surname, Email: members[0].Email}
+	first := postProcessAuth0(t, pid, authReq)
+	second := postProcessAuth0(t, pid, authReq)
+	c.Assert(second, qt.Not(qt.DeepEquals), first)
+	verifyProcessCSP(t, pid, members[0].Email, second)
+
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "",
+		&handlers.BlindPointRequest{AuthToken: first, Elections: []internal.HexBytes{election}},
+		"processes", pid, "blind-point")
+	voter := ethereum.SignKeys{}
+	c.Assert(voter.Generate(), qt.IsNil)
+	c.Assert(testBlindSignBallot(t, pid, second, election, voter.Address().Bytes()), qt.Not(qt.IsNil))
+}

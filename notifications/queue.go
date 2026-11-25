@@ -40,6 +40,9 @@ type QueueItem struct {
 	CreatedAt    time.Time
 	Retries      int
 	Success      bool
+	// Attempted is set once the queue has called a provider for the item. A give-up with it unset
+	// delivered nothing, while one with it set may have been delivered despite the provider error.
+	Attempted bool
 	// ExpiresAt, if non-zero, is the deadline after which the notification
 	// content is considered stale and should not be delivered. The queue drops
 	// the item (with Success=false) without retrying when this time is passed.
@@ -240,6 +243,7 @@ func (q *Queue) deliver(item *QueueItem) {
 		return
 	}
 
+	item.Attempted = true
 	sendCtx, cancel := context.WithTimeout(q.ctx, 10*time.Second)
 	err := svc.SendNotification(sendCtx, item.Notification)
 	cancel()

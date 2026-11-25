@@ -141,6 +141,7 @@ func (sq *Queue) forwardResults() {
 			}
 			challenge.Success = item.Success
 			challenge.Retries = item.Retries
+			challenge.Attempted = item.Attempted
 			select {
 			case <-sq.ctx.Done():
 				return

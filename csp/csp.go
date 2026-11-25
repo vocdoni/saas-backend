@@ -18,14 +18,24 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-// MaxChallengeAttempts is the maximum number of challenge-code verification
-// attempts allowed for a single authentication token before it is rejected.
+// MaxChallengeAttempts is the maximum number of verification attempts one challenge code takes,
+// across every authentication token answering it, before it is locked. Attempts, like resends
+// (which repeated auth requests also spend), are per code rather than per token, since per-token
+// budgets would give 5 fresh guesses with every auth request. So whoever holds a voter's login
+// data can lock the voter's pending code or spend its resends, which no per-voter limit prevents
+// (they could already spend the daily send cap); #893 mitigates it.
 const MaxChallengeAttempts = 5
 
-// MaxChallengeResends is the number of times the challenge of a single authentication token can
-// be resent. New tokens are already spaced by the notification cooldown, so this bounds the
-// emails/SMS a member can be sent per cooldown period.
+// MaxChallengeResends is the number of times one challenge code can be sent again after its first
+// send, through a repeated auth request or a resend request, across every authentication token
+// answering it. Sends to one destination are also spaced by the notification cooldown, so this
+// bounds the emails/SMS a member can be sent for one code.
 const MaxChallengeResends = 3
+
+// MaxChallengeTokens is the number of authentication tokens one challenge code can be issued, its
+// first included. Past it, a request gets a new code instead, subject to the notification cooldown
+// and the daily send cap, so the tokens sharing a code stay bounded.
+const MaxChallengeTokens = 10
 
 // DefaultMaxDailyChallengeSends is the default cap on the OTP challenges (new tokens and resends
 // together) one member can be sent for one voting process per UTC day. The cooldown only spaces
@@ -73,10 +83,10 @@ type Config struct {
 	// disables the cap.
 	MaxHourlyAuthFailures int
 	// NotificationTTL is how long a CSP OTP challenge remains valid. After
-	// this window ResendChallenge returns ErrTokenExpired and queued but
+	// this window ClaimChallengeResend returns ErrTokenExpired and queued but
 	// undelivered notifications are dropped. Distinct from
-	// NotificationCoolDownTime (the anti-spam rate limit on new token
-	// requests). Zero uses notifications.DefaultOTPExpiry.
+	// NotificationCoolDownTime (the anti-spam minimum interval between sends
+	// of a challenge code). Zero uses notifications.DefaultOTPExpiry.
 	NotificationTTL time.Duration
 	// NotificationQueueWorkers is the number of concurrent notification senders.
 	// It bounds the maximum number of in-flight provider sends. Zero uses the
@@ -180,6 +190,36 @@ func countSentNotification(storage *db.MongoStorage, ch *notifications.Notificat
 	}
 }
 
+// settleNotifications consumes the queue's delivery results until the service context ends.
+func (c *CSP) settleNotifications() {
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case ch := <-c.notifyQueue.NotificationsSent:
+			log.Debugw("notification pop from queue",
+				"success", ch.Success,
+				"type", ch.Type,
+				"userID", ch.UserID,
+				"anchorID", ch.AnchorID)
+			c.settleNotification(ch)
+		}
+	}
+}
+
+// settleNotification accounts for a challenge the queue reports. A delivered one counts against
+// the organization's sent counters. A failed send no provider was called for gives back its claims;
+// one a provider failed keeps them, as the provider may have delivered it before failing.
+func (c *CSP) settleNotification(ch *notifications.NotificationChallenge) {
+	countSentNotification(c.Storage, ch)
+	if ch.Success || ch.Attempted {
+		return
+	}
+	if send, ok := ch.SendInfo.(*challengeSend); ok {
+		c.rollbackSend(send)
+	}
+}
+
 // New method creates a new CSP service. It requires a CSPConfig struct with
 // the configuration for the service. It returns the CSP service or an error
 // if the storage fails to initialize. It initializes the storage with the
@@ -199,22 +239,6 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 		BreakerMaxFailures: config.NotificationBreakerMaxFailures,
 		BreakerCooldown:    config.NotificationBreakerCooldown,
 	})
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case ch := <-queue.NotificationsSent:
-				log.Debugw("notification pop from queue",
-					"success", ch.Success,
-					"type", ch.Type,
-					"userID", ch.UserID,
-					"anchorID", ch.AnchorID)
-				countSentNotification(config.DB, ch)
-			}
-		}
-	}()
-	go queue.Start()
 	notificationCoolDownTime := config.NotificationCoolDownTime
 	if notificationCoolDownTime <= 0 {
 		notificationCoolDownTime = saasNotifications.DefaultOTPCooldown
@@ -245,6 +269,8 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 	}
 	c.blindCSPDisabled.Store(config.DisableBlindCSP)
 	c.SetCertGatewayKeys(config.CertGatewayKeys)
+	go c.settleNotifications()
+	go queue.Start()
 	return c, nil
 }
 

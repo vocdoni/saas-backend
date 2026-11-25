@@ -160,6 +160,7 @@ func TestQueueDeliverEmail(t *testing.T) {
 	case res := <-q.Done:
 		c.Assert(res.Success, qt.IsTrue)
 		c.Assert(res.Retries, qt.Equals, 0)
+		c.Assert(res.Attempted, qt.IsTrue)
 		c.Assert(svc.callCount(), qt.Equals, 1)
 	case <-time.After(5 * time.Second):
 		c.Fatal("timed out waiting for email delivery")
@@ -239,6 +240,7 @@ func TestQueueNilService(t *testing.T) {
 	select {
 	case res := <-q.Done:
 		c.Assert(res.Success, qt.IsFalse)
+		c.Assert(res.Attempted, qt.IsFalse)
 	case <-time.After(5 * time.Second):
 		c.Fatal("timed out waiting for nil-service drop")
 	}
@@ -261,6 +263,7 @@ func TestQueuePermanentFailure(t *testing.T) {
 	case res := <-q.Done:
 		c.Assert(res.Success, qt.IsFalse)
 		c.Assert(res.Retries, qt.Equals, 0)
+		c.Assert(res.Attempted, qt.IsTrue)
 		c.Assert(svc.callCount(), qt.Equals, 1)
 	case <-time.After(5 * time.Second):
 		c.Fatal("timed out waiting for permanent failure")
@@ -383,6 +386,7 @@ func TestQueueRetriesExhausted(t *testing.T) {
 	case res := <-q.Done:
 		c.Assert(res.Success, qt.IsFalse)
 		c.Assert(res.Retries, qt.Equals, maxRetries)
+		c.Assert(res.Attempted, qt.IsTrue)
 	case <-time.After(30 * time.Second):
 		c.Fatal("timed out waiting for retries to be exhausted")
 	}
@@ -441,9 +445,46 @@ func TestQueueItemExpired(t *testing.T) {
 	select {
 	case res := <-q.Done:
 		c.Assert(res.Success, qt.IsFalse)
+		c.Assert(res.Attempted, qt.IsFalse)
 		c.Assert(svc.callCount(), qt.Equals, 0)
 	case <-time.After(5 * time.Second):
 		c.Fatal("timed out waiting for expired item drop")
+	}
+}
+
+// An item the breaker holds back until its TTL passes is given up on without a provider call.
+func TestQueueBreakerOpenGiveUpNotAttempted(t *testing.T) {
+	c := qt.New(t)
+	c.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	svc := &configurableSvc{} // would succeed if called
+	q := NewQueue(ctx, QueueConfig{
+		Workers:            1,
+		TTL:                time.Minute,
+		MailService:        svc,
+		BreakerMaxFailures: 1,
+		BreakerCooldown:    time.Minute,
+	})
+	q.mailBreaker.RecordFailure() // open the breaker
+	q.Start()
+
+	// CreatedAt past the TTL, so the open breaker cannot soft-re-enqueue it
+	item := &QueueItem{
+		Notification: testNotification(),
+		Type:         Email,
+		CreatedAt:    time.Now().Add(-2 * time.Minute),
+	}
+	c.Assert(q.Push(item), qt.IsNil)
+
+	select {
+	case res := <-q.Done:
+		c.Assert(res.Success, qt.IsFalse)
+		c.Assert(res.Attempted, qt.IsFalse)
+		c.Assert(svc.callCount(), qt.Equals, 0)
+	case <-time.After(5 * time.Second):
+		c.Fatal("timed out waiting for breaker-open give-up")
 	}
 }
 

@@ -388,7 +388,7 @@ func (c *CSPHandlers) certAuthFirstStep(in firstStepRequest) (res firstStepResul
 	}
 	uID := internal.HexBytesFromString(member.ID.Hex())
 	if challengeType != "" {
-		if err := c.csp.ChallengeSendRefusal(uID, anchorID); err != nil {
+		if err := c.csp.ChallengeSendRefusal(uID, anchorID, csp.DestinationKey(challengeType, toDestinations)); err != nil {
 			return firstStepResult{}, err
 		}
 	}

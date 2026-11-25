@@ -44,19 +44,29 @@ func TestDailyChallengeSendCap(t *testing.T) {
 	token, err := newToken(testAnchorID)
 	c.Assert(err, qt.IsNil)
 
-	// second send: a resend of the same token, counting against the same daily budget
-	c.Assert(csp.ResendChallenge(token, dailyCapEmail, notifications.EmailChallenge,
-		apicommon.DefaultLang, "", "", testAddress.Address()), qt.IsNil)
+	// second send: a resend of the same token once the cooldown has passed, counting against the
+	// same daily budget
+	time.Sleep(2 * cooldown)
+	c.Assert(resendTo(csp, token, dailyCapEmail, notifications.EmailChallenge), qt.IsNil)
 
 	// the daily budget (2) is spent: further resends are refused even though the
-	// per-token resend cap (3) is not reached
-	err = csp.ResendChallenge(token, dailyCapEmail, notifications.EmailChallenge,
-		apicommon.DefaultLang, "", "", testAddress.Address())
+	// per-code resend cap (3) is not reached
+	time.Sleep(2 * cooldown)
+	err = resendTo(csp, token, dailyCapEmail, notifications.EmailChallenge)
 	c.Assert(err, qt.ErrorIs, errors.ErrVerificationMaxAttempts)
 	// the refusal tells when the daily window resets
 	assertRetryAfter(c, err, 24*time.Hour)
 
-	// ... and so are new tokens, even after the cooldown
+	// step 0 still hands out a token for the pending code, as the voter already holds it
+	time.Sleep(2 * cooldown)
+	sibling, err := newToken(testAnchorID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(sibling, qt.Not(qt.DeepEquals), token)
+
+	// ... but once that code is locked, a new one is refused, even after the cooldown
+	for range MaxChallengeAttempts {
+		c.Assert(csp.VerifyAuthToken(token, "000000x"), qt.Not(qt.IsNil))
+	}
 	time.Sleep(2 * cooldown)
 	_, err = newToken(testAnchorID)
 	c.Assert(err, qt.ErrorIs, errors.ErrVerificationMaxAttempts)
@@ -89,10 +99,17 @@ func TestDailyChallengeSendReleasedWhenNothingIsSent(t *testing.T) {
 	}
 	// a challenge that cannot be composed (unknown type) is never queued...
 	c.Assert(newToken("bogus"), qt.ErrorIs, ErrNotificationFailure)
-	// ... so it does not spend the only send of the day
+	// ... so it neither spends the only send of the day nor stays behind as a pending code
+	_, err = csp.Storage.LastCSPAuth(testUserID, testAnchorID)
+	c.Assert(err, qt.ErrorIs, db.ErrTokenNotFound)
 	time.Sleep(2 * cooldown)
-	c.Assert(newToken(notifications.EmailChallenge), qt.IsNil)
-	// which a queued one does
+	token, err := csp.AuthToken(testAnchorID, testUserID, email, notifications.EmailChallenge,
+		apicommon.DefaultLang, "", "", testAddress.Address())
+	c.Assert(err, qt.IsNil)
+	// which a queued one does: once that code is locked, a new one is refused
+	for range MaxChallengeAttempts {
+		c.Assert(csp.VerifyAuthToken(token, "000000x"), qt.Not(qt.IsNil))
+	}
 	time.Sleep(2 * cooldown)
 	c.Assert(newToken(notifications.EmailChallenge), qt.ErrorIs, errors.ErrVerificationMaxAttempts)
 }
