@@ -42,11 +42,9 @@ Decisions this plan takes where the spec leaves room (binding for every task):
 - D7. Missing organization name: invite and import use `org.DisplayName()` (no hex-address fallback) and the
   `*_no_org` strings; support keeps today's address fallback; the OTP keeps `DefaultOrgName` "Vocdoni".
 - D8. The English failed/empty import copy never says "completed" ("No members could be imported", row label
-  "Finished"); the approved Catalan keeps "no s’ha pogut completar" and "Completada". The import greeting uses
+  "Finished"); the approved Catalan keeps "no s’ha pogut completar" and "Finalitzada" (R16). The import greeting uses
   the first name only.
-- D9. OTP SMS text (English): "Code to vote at {Org}: {Code}. Expires in {Exp}. If you didn't ask for it,
-  ignore it." Every locale's `sms` string must render in ≤ 128 characters with a 40-character name, a 6-digit
-  code and "15 minutes" (134 minus the `[STG] ` label).
+- D9. OTP SMS text (English): ‘Code to vote: {Code}. Expires in {Exp}.’ The SMS names no organization. Every locale’s `sms` string must render in ≤ 64 characters with a 6-digit code and ‘15 minutes’ (70 minus the `[STG] ` label: one UCS-2 segment), checked per locale.
 - D10. The halo wordmark is drawn 120×28 (its real aspect ratio; the mockup squashed it to 26). The OTP
   header without a usable logo shows a monogram tile (first letter of the name).
 - D11. AC3a is checked as `git grep -l 'mypinata\|fonts.googleapis' -- ':!docs'`: the spec and this plan
@@ -103,9 +101,7 @@ Line numbers are those of the finished branch (scratch replay); they shift sligh
 - Language normalization: `apicommon.NormalizeLang` (`api/apicommon/lang.go:18`), `setLang`
   (`api/middlewares.go:262`), `validateDefaultLang` (`api/organizations.go:38`, now normalizes in place before
   storing), `NotificationLang` read side; `MailTemplate.Localized` exact match with English fallback.
-- SMS length: `NewNotificationChallenge` (`csp/notifications/challenge.go:102`) truncates the name to 40 and
-  uses `ExecPlain` for SMS; the `[Label] ` prefix is added in `notifications/twilio/sms.go:128`. Test:
-  `TestOTPSMSLength`.
+- SMS length: the SMS names no organization; `NewNotificationChallenge` uses `ExecPlain` for SMS; the `[Label] ` prefix is added in `notifications/twilio/sms.go:128`. Test: `TestOTPSMSLength` (one subtest per locale, ≤ 70 with the prefix).
 - The `Load` move in `cmd/service/main.go:252-262`: now unconditional and fatal, before the SMTP/Twilio blocks.
   `Load` (`notifications/mailtemplates/templates.go:77`) swaps state atomically.
 - Members import bounds `NewMembersImportData` (`notifications/mailtemplates/data_import.go:69`) and its call
@@ -762,9 +758,7 @@ String schema (all ten locale files follow `en.yaml` exactly; it is the schema):
   the fields its English string uses (Load enforces it).
 - Values are double-quoted YAML strings; `\\*` is a literal asterisk; `*text*` is emphasis; no HTML, no
   `{{if}}`. Count-dependent strings are `{one: …, other: …}` maps and must stay maps in every locale.
-- `verification_code_otp.sms` is also the SMS: ≤ 128 characters rendered with a 40-character name, a 6-digit
-  code and "15 minutes"; no `? ( ) [ ] + * | ^ $` in the English one (tests use it as a regular expression);
-  prefer straight apostrophes in languages that do not need accents (GSM-7).
+- `verification_code_otp.sms` is also the SMS: one line, ≤ 64 characters rendered with a 6-digit code and '15 minutes'; it names no organization; no `? ( ) [ ] + * | ^ $` in the English one (tests use it as a regular expression); prefer straight apostrophes.
 - Catalan: avoid elision before an interpolated name ("de l’organització {{.Organization}}", not
   "d’{{.Organization}}"); months carry their preposition (`"d’abril"`).
 
@@ -1080,20 +1074,19 @@ func TestRenderAllFixtures(t *testing.T) {
 
 func TestOTPSMSLength(t *testing.T) {
 	c := qt.New(t)
-	data := OTPData{
-		Code:         "472913",
-		Organization: Truncate(strings.Repeat("Col·legi Oficial d’Enginyeria", 5), OTPOrgNameMaxRunes),
-		ExpiryTime:   15 * time.Minute,
-	}
-	c.Assert(utf8.RuneCountInString(data.Organization) <= OTPOrgNameMaxRunes, qt.IsTrue)
+	data := OTPData{Code: "472913", Organization: fixtureOrg, ExpiryTime: 15 * time.Minute}
 	for _, lang := range apicommon.SupportedLangs {
-		n, err := VerifyOTPCodeNotification.Localized(lang).ExecPlain(data)
-		c.Assert(err, qt.IsNil)
-		sms := "[STG] " + n.PlainBody // the longest label prefix the SMS sender adds
-		c.Assert(utf8.RuneCountInString(sms) <= 134, qt.IsTrue, qt.Commentf("%s: %d: %q", lang, utf8.RuneCountInString(sms), sms))
-		c.Assert(n.PlainBody, qt.Not(qt.Contains), "\n", qt.Commentf(lang))
-		c.Assert(n.PlainBody, qt.Contains, "472913")
-		c.Assert(n.Body, qt.Equals, "") // ExecPlain renders no HTML
+		c.Run(lang, func(c *qt.C) {
+			n, err := VerifyOTPCodeNotification.Localized(lang).ExecPlain(data)
+			c.Assert(err, qt.IsNil)
+			sms := "[STG] " + n.PlainBody // the longest label prefix the SMS sender adds
+			c.Assert(utf8.RuneCountInString(sms) <= 70, qt.IsTrue,
+				qt.Commentf("%d runes: %q", utf8.RuneCountInString(sms), sms))
+			c.Assert(n.PlainBody, qt.Not(qt.Contains), "\n")
+			c.Assert(n.PlainBody, qt.Contains, "472913")
+			c.Assert(n.PlainBody, qt.Not(qt.Contains), fixtureOrg) // the SMS names no organization
+			c.Assert(n.Body, qt.Equals, "") // ExecPlain renders no HTML
+		})
 	}
 }
 
@@ -2414,8 +2407,6 @@ import (
 const (
 	// SupportDescriptionMaxRunes caps the support ticket description in the email.
 	SupportDescriptionMaxRunes = 1200
-	// OTPOrgNameMaxRunes caps the organization name in the OTP SMS.
-	OTPOrgNameMaxRunes = 40
 )
 
 // SupportData is the data of support.
@@ -3182,7 +3173,7 @@ Create `assets/mail/verification_code_otp.txt`:
 
 {{define "preheader"}}{{.L.Text "preheader"}}{{end}}
 
-{{/* the plain text is also the SMS: one line, at most 128 characters with a 40-character name */}}
+{{/* the plain text is also the SMS: one line, at most 64 characters rendered (one UCS-2 segment, no organization name) */}}
 {{define "plain"}}{{.L.Text "sms"}}{{end}}
 ```
 
@@ -3351,9 +3342,10 @@ verification_code_otp:
   ignore: "If you weren't expecting this code, you can ignore this message: nobody can vote on your behalf without it."
   footer_why: "You're receiving this message because {{.Organization}} uses this address to verify your identity before voting."
   footer_secured: "Voting secured by Vocdoni"
-  # also the SMS: at most 128 characters with a 40-character organization name, a 6-digit code
-  # and "15 minutes"; no ? ( ) [ ] + * | ^ $ (tests read it as a regular expression)
-  sms: "Code to vote at {{.Organization}}: {{.Code}}. Expires in {{.ExpiryTime}}. If you didn't ask for it, ignore it."
+  # also the SMS: one line, at most 64 characters rendered with a 6-digit code and "15 minutes"
+  # (70 minus the "[STG] " label, one UCS-2 segment); it names no organization; no ? ( ) [ ] + * | ^ $
+  # (tests read it as a regular expression)
+  sms: "Code to vote: {{.Code}}. Expires in {{.ExpiryTime}}."
 ```
 
 Create `assets/mail/i18n/ca.yaml`:
@@ -3482,7 +3474,7 @@ members_import_done:
   label_processed: "Membres processats"
   label_added: "Afegits"
   label_errors: "Errors"
-  label_completed: "Completada"
+  label_completed: "Finalitzada"
   issues_title: "Files que cal revisar"
   issues_title_first: "Primeres files que cal revisar"
   more_issues:
@@ -3516,7 +3508,7 @@ verification_code_otp:
   ignore: "Si no esperaves aquest codi, pots ignorar aquest missatge: ningú no pot votar en nom teu sense tenir-lo."
   footer_why: "Reps aquest missatge perquè {{.Organization}} fa servir aquesta adreça per verificar la teva identitat abans de votar."
   footer_secured: "Votació protegida amb la tecnologia de Vocdoni"
-  sms: "El teu codi per votar a {{.Organization}} és {{.Code}}. Caduca en {{.ExpiryTime}}. Si no l’has demanat, ignora’l."
+  sms: "Codi per votar: {{.Code}}. Caduca en {{.ExpiryTime}}."
 ```
 
 Create `assets/mail/i18n/es.yaml`:
@@ -3678,7 +3670,7 @@ verification_code_otp:
   ignore: "Si no esperabas este código, puedes ignorar este mensaje: nadie puede votar en tu nombre sin tenerlo."
   footer_why: "Recibes este mensaje porque {{.Organization}} usa esta dirección para verificar tu identidad antes de votar."
   footer_secured: "Votación protegida con la tecnología de Vocdoni"
-  sms: "Tu código para votar en {{.Organization}} es {{.Code}}. Caduca en {{.ExpiryTime}}. Si no lo has pedido, ignóralo."
+  sms: "Código para votar: {{.Code}}. Caduca en {{.ExpiryTime}}."
 ```
 
 Create the seven placeholders Task 6 fills in, each a single comment line (an empty file loads, every key
@@ -3764,7 +3756,7 @@ Expected: no output.
 Run: `go test -count=1 ./notifications/... ./api/apicommon/`
 Expected: every package `ok`; `notifications/mailtemplates` runs 19 top-level tests (`TestLocalesComplete`
 checks ca, en, es; `TestRenderAllFixtures` renders 18 fixtures × 10 languages, all ≤ 60 KB, subjects ≤ 78;
-`TestOTPSMSLength` measures 131 en, 133 ca, 134 es).
+`TestOTPSMSLength` measures 50 en, 50 ca, 54 es (with the `[STG] ` prefix)).
 Run: `~/.cache/saas-backend/bin/golangci-lint run ./notifications/... ./cmd/... ./csp/... ./api/...`
 Expected: `0 issues.`
 Run: `git grep -l 'mypinata\|fonts.googleapis' -- ':!docs'`
@@ -3783,7 +3775,7 @@ Interfaces this task provides to later tasks:
 - Data types `CodeData`, `InviteData`, `MembersImportResult` → `NewMembersImportData(r) MembersImportData`,
   `NewSupportData(ticketType, title, description, email, organization string) SupportData`, `OTPData`;
   `func Truncate(s string, n int) string`; consts `ImportIssuesShown` (10), `ImportIssueMaxRunes` (140),
-  `SupportDescriptionMaxRunes` (1200), `OTPOrgNameMaxRunes` (40), `MaxSubjectRunes` (78), `MaxHTMLBytes`
+  `SupportDescriptionMaxRunes` (1200), `MaxSubjectRunes` (78), `MaxHTMLBytes`
   (60 KiB), `ImportDone|ImportIssues|ImportFailed|ImportEmpty`.
 - `func Fixtures() []Fixture` (`Fixture{Name, Template, Data}`), `const FixtureOrgLogo`.
 - Unexported, used by Task 5: `assetsDir` ("assets/mail").
@@ -4300,8 +4292,7 @@ Change `csp/notifications/challenge.go` (exact diff against the state after the 
 +		}
  	case SMSChallenge:
 -		n.ToNumber = to
-+		// the SMS is the plain text alone; a short name keeps it within two segments
-+		data.Organization = mailtemplates.Truncate(data.Organization, mailtemplates.OTPOrgNameMaxRunes)
++		// the SMS is the plain text alone (one UCS-2 segment, no organization name)
 +		if n, err = template.ExecPlain(data); err == nil {
 +			n.ToNumber = to
 +		}
@@ -4398,14 +4389,13 @@ Notes for the reviewer:
 - `csp/handlers`: `DefaultOrgLogo` and the IPFS URL are gone; `orgNameAndLogo` returns an empty logo when
   the organization has none and the OTP shows the monogram. Logos that are not ours are dropped by the
   renderer (Task 3), not here.
-- `csp/notifications/challenge.go`: email renders HTML and plain text; SMS renders only the plain text
-  (`ExecPlain`) with the name truncated to 40 characters. A failed render is still `ErrCreateNotification`.
+- `csp/notifications/challenge.go`: email renders HTML and plain text; SMS renders only the plain text (`ExecPlain`, one UCS-2 segment, no organization name). A failed render is still `ErrCreateNotification`.
 
 Run: `go build ./... && go vet ./... && go test -count=1 ./notifications/... ./csp/testutil/ ./api/apicommon/`
 Expected: vet silent, all `ok`.
 Run: `git grep -l 'mypinata\|fonts.googleapis' -- ':!docs'`
 Expected: no output (exit status 1).
-Run (Docker): `go test -count=1 ./csp/notifications/`
+Run (Docker): `go test -count=1 -run 'TestNewEmailChallengeSent|TestNewSMSChallengeSent|TestNotificationChallengeQueue' ./csp/notifications/`
 Expected: `ok  github.com/vocdoni/saas-backend/csp/notifications`.
 Run (Docker): `go test -count=1 -run 'TestAuthToken|TestVerifyAuthToken|TestResendChallenge|TestAuthTokenResendAndVerifyFlow' ./csp/`
 Expected: `ok  github.com/vocdoni/saas-backend/csp`.
@@ -4714,7 +4704,8 @@ def main():
     shapes = {'wordmark': paths, 'mark': paths[:2]}
     out = pathlib.Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=pathlib.Path.home() / '.cache') as tmp:
+    (pathlib.Path.home() / '.cache' / 'saas-backend').mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=pathlib.Path.home() / '.cache' / 'saas-backend') as tmp:
         for name, shape in shapes.items():
             for tone, fill, stroke in TONES:
                 source_svg = pathlib.Path(tmp) / f'vocdoni-{name}-{tone}.svg'
@@ -4772,8 +4763,7 @@ Task 3) and translate every value, keeping:
 - no elision or article that depends on the organization's name (fr/it/pt: write "de l’organisation
   {{.Organization}}" / "dell’organizzazione {{.Organization}}" / "da organização {{.Organization}}" rather than
   attaching a contraction to the name);
-- `verification_code_otp.sms` on one line, ≤ 128 characters with a 40-character name (the test measures it);
-  use the shortest natural wording; plain apostrophes;
+- `verification_code_otp.sms` on one line, ≤ 64 characters rendered with a 6-digit code and '15 minutes' in that language (the per-locale test asserts ≤ 70 with the `[STG] ` prefix); it names no organization; use the shortest natural wording; plain apostrophes;
 - the first comment line of the file in that language, saying it is translated from English and pending a
   native review.
 
@@ -5082,7 +5072,9 @@ AC2 and the owner's review).
    - AC2 (controller): `go run ./cmd/mailpreview -out ~/.cache/saas-backend/preview`; screenshot ca and en,
      light and dark, at 375 and 600 px, compare with `~/.cache/saas-backend/mockups/shots/`. Known, accepted
      differences: date only (no time) in the import table, "Review the member base" button to
-     `/admin/memberbase/`, halo wordmark 28 px high, monogram tile in the OTP without a logo.
+     `/admin/memberbase/`, halo wordmark 28 px high, monogram tile in the OTP without a logo,
+     import preheader and intro omit the added-count clause (the plural scheme carries one count per string),
+     'a la Vocdoni App' instead of the mockups' 'a Vocdoni' (spec copy rule).
 2. Fable gate audit of the branch, rulings folded in, fixes re-reviewed.
 3. Merge order: one repo, one branch: `817-email-redesign` → `main` by pull request. Title
    `feat(mail): redesign the transactional emails`; the description ends with "Closes #817" and records:
@@ -5106,5 +5098,4 @@ AC2 and the owner's review).
    revert the merge commit (no data or schema change; queued notifications keep their rendered bodies).
 7. Post-release checks: `curl -sI {serverURL}/mail/assets/vocdoni-wordmark-black-halo@2x.png` → `200`,
    `Content-Type: image/png`, `Cache-Control: public, max-age=86400`, an `ETag`; the start-up log shows
-   `email templates loaded` with `templates 8 languages 10`; one OTP SMS on staging arrives in at most two
-   segments.
+   `email templates loaded` with `templates 8 languages 10`; one OTP SMS on staging arrives in one segment.

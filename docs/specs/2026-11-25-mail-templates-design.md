@@ -4,6 +4,7 @@ Status: approved (2026-11-25; Fable audit folded in)   Class: architectural
 Issue: #817
 Owner decisions so far (2026-11-25):
 - One shared layout + per-email content + one string file per language (not 24 hand-kept HTML files, not MJML).
+- OTP SMS: no organization name, one segment. en "Code to vote: {Code}. Expires in {Exp}.", ca "Codi per votar: {Code}. Caduca en {Exp}."; every locale ≤ 70 characters including the "[STG] " label (one UCS-2 segment), tested per locale.
 - All 10 app locales: ca, de, el, en, es, eu, fr, it, pt, pt-br. ca/es/en reviewed in depth; the other seven are
   translated from the reviewed English and need a native review before release (not blocking the merge).
 - Visual system: the app's new Fil theme (vocdoni-app `feat/fil-voter-flow`), accent configurable per deployment.
@@ -211,7 +212,7 @@ the source for the other locales. Behaviour that changes:
 | Organization logo | the URL is `org.LogoURL()`. Shown only if `objectstorage` `LocalName(url)` reports a local storage reference (owner decision: no external URLs, so an organization cannot put a tracking image in mail sent to other people), rendered as the canonical `{ServerURL}/storage/{name}` URL, and the name ends in .png/.jpg/.jpeg/.gif/.webp. External URLs, SVG and `data:` are never shown. Rendered with `height` 32 (44 in the OTP tile) and `style="max-width:140px;width:auto"`. Otherwise the no-logo layout; never a broken-image placeholder for a rejected URL |
 | Organization logo in Outlook desktop | the org logo and its tile are wrapped in an MSO conditional hide, so Outlook desktop (Word engine, which cannot size an image of unknown aspect ratio) shows the Vocdoni-only header; the mockups' fixed width/height pairs were per-sample and are not reproducible server-side |
 | Empty link (URL build failure, `api/org_members.go:41-44`) | the button and fallback link are omitted; the mail still sends |
-| OTP SMS | ≤ 134 characters including the `[Label] ` prefix when configured (2 UCS-2 segments); organization name truncated to 40 characters |
+| OTP SMS | names no organization (owner decision 2026-11-25): en "Code to vote: {Code}. Expires in {Exp}.", ca "Codi per votar: {Code}. Caduca en {Exp}."; every locale ≤ 70 characters including the "[STG] " label (one UCS-2 segment), tested per locale |
 | Dates | locale-formatted date only, in Europe/Madrid (fixed). The mailtemplates package imports `time/tzdata` so rendering never depends on host tzdata; a `LoadLocation` failure is a `Load()` failure |
 | Unknown or malformed language | falls back to English (today's behaviour) |
 
@@ -243,7 +244,7 @@ Text and HTML parts use `Content-Transfer-Encoding: quoted-printable` (Go `mime/
 - `go run ./cmd/mailpreview -out <dir>` renders every email × locale × fixture state (including the edge cases above)
   to HTML, the plain text and the subject, plus an `index.html`, using the default brand and optional `-accent`.
 - Tests: every locale has every key and no extra ones; every template renders for every locale and fixture without
-  error; no rendered email exceeds 60 KB; subjects ≤ 78 chars; OTP plain text ≤ 134 chars with a 40-char org name;
+  error; no rendered email exceeds 60 KB; subjects ≤ 78 chars; OTP SMS ≤ 70 chars with the label in every locale;
   interpolated HTML is escaped (a `<script>` in a support description arrives escaped); issue list capped at 10; logo
   URL filter cases; MIME parts decode back to the original UTF-8.
 - `csp/testutil/smtp.go` `FindEmail` parses the returned message (`net/mail` + `mime/multipart` +
