@@ -233,9 +233,9 @@ func TestCertAuthStep0MemberEdited(t *testing.T) {
 	}
 }
 
-// TestCertAuthStep0RetryLaterKeepsCode: a step 0 refused for a reason the voter can only wait out
-// (the failed-attempt budget, 40017, or the 2FA cooldown) leaves the certificate code unspent, so
-// it redeems once the refusal is over.
+// TestCertAuthStep0RetryLaterKeepsCode: a step 0 refused because the failed-attempt budget (40017)
+// is exhausted leaves the certificate code unspent; a step 0 within the 2FA cooldown of a still-usable
+// code now returns a sibling token (not 40103), so the cert code is validly spent.
 func TestCertAuthStep0RetryLaterKeepsCode(t *testing.T) {
 	enableCertAuth(t)
 	token := testCreateUser(t, "adminpassword123")
@@ -281,7 +281,9 @@ func TestCertAuthStep0RetryLaterKeepsCode(t *testing.T) {
 		postProcessAuth0(t, authOnly, req)
 	})
 
-	t.Run("2FA cooldown", func(t *testing.T) {
+	t.Run("2FA within cooldown: usable code reused, cert code accepted", func(t *testing.T) {
+		// within the cooldown of a still-usable 2FA challenge, step 0 returns a sibling token
+		// rather than refusing: the cert code is validly spent and the voter proceeds to step 1
 		c := qt.New(t)
 		login := func() *handlers.AuthRequest {
 			verifier, challenge := testCertPKCE(t)
@@ -289,12 +291,10 @@ func TestCertAuthStep0RetryLaterKeepsCode(t *testing.T) {
 				CertCode: newCertCode(t, withEmail, testDNI(41), challenge), CodeVerifier: verifier, Email: members[0].Email,
 			}
 		}
-		postProcessAuth0(t, withEmail, login())
-		req := login()
-		apiErr := postProcessAuth0AndExpectError(t, withEmail, req)
-		c.Assert(apiErr.Code, qt.Equals, errors.ErrAttemptCoolDownTime.Code)
-		unused(c, req.CertCode)
-		time.Sleep(cspNotificationCoolDownTime)
-		postProcessAuth0(t, withEmail, req)
+		tok1 := postProcessAuth0(t, withEmail, login())
+		// second request within the cooldown: challenge still usable, sibling token issued
+		tok2 := postProcessAuth0(t, withEmail, login())
+		// each request returns a distinct token
+		c.Assert(tok1, qt.Not(qt.DeepEquals), tok2)
 	})
 }

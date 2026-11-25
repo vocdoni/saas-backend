@@ -98,6 +98,146 @@ func TestVerifyCSPAuth(t *testing.T) {
 	})
 }
 
+func TestVerifyCSPAuthForChallenge(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	c.Assert(testDB.SetCSPAuth(testAuthToken, testUserID, testCSPBundleID, "secret"), qt.IsNil)
+	challenge, err := testDB.CSPAuth(testAuthToken)
+	c.Assert(err, qt.IsNil)
+	first := internal.HexBytes(uuid.New().String())
+	second := internal.HexBytes(uuid.New().String())
+	c.Assert(testDB.SetCSPAuthForChallenge(first, challenge, 10), qt.IsNil)
+	c.Assert(testDB.SetCSPAuthForChallenge(second, challenge, 10), qt.IsNil)
+
+	firstData, err := testDB.CSPAuth(first)
+	c.Assert(err, qt.IsNil)
+	c.Assert(firstData.ChallengeID, qt.DeepEquals, testAuthToken)
+	c.Assert(firstData.ChallengeToken(), qt.DeepEquals, testAuthToken)
+	c.Assert(firstData.UserID, qt.DeepEquals, testUserID)
+	c.Assert(firstData.AnchorID, qt.DeepEquals, testCSPBundleID)
+	c.Assert(firstData.Secret, qt.Equals, "")
+
+	// verifying one token consumes the shared challenge
+	c.Assert(testDB.VerifyCSPAuth(first), qt.IsNil)
+	firstData, err = testDB.CSPAuth(first)
+	c.Assert(err, qt.IsNil)
+	c.Assert(firstData.Verified, qt.IsTrue)
+	challenge, err = testDB.CSPAuth(testAuthToken)
+	c.Assert(err, qt.IsNil)
+	c.Assert(challenge.Secret, qt.Equals, "")
+	c.Assert(challenge.Verified, qt.IsFalse)
+
+	// so no other token answering it verifies anymore
+	c.Assert(testDB.VerifyCSPAuth(second), qt.ErrorIs, ErrChallengeConsumed)
+	secondData, err := testDB.CSPAuth(second)
+	c.Assert(err, qt.IsNil)
+	c.Assert(secondData.Verified, qt.IsFalse)
+}
+
+func TestSetCSPAuthForChallengeCap(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	const maxTokens = 2
+	c.Assert(testDB.SetCSPAuth(testAuthToken, testUserID, testCSPBundleID, "secret"), qt.IsNil)
+	challenge, err := testDB.CSPAuth(testAuthToken)
+	c.Assert(err, qt.IsNil)
+	var last internal.HexBytes
+	for range maxTokens {
+		last = internal.HexBytes(uuid.New().String())
+		c.Assert(testDB.SetCSPAuthForChallenge(last, challenge, maxTokens), qt.IsNil)
+	}
+	// the cap holds whichever token the challenge is reached through
+	lastData, err := testDB.CSPAuth(last)
+	c.Assert(err, qt.IsNil)
+	extra := internal.HexBytes(uuid.New().String())
+	c.Assert(testDB.SetCSPAuthForChallenge(extra, lastData, maxTokens), qt.ErrorIs, ErrChallengeTokensExhausted)
+	_, err = testDB.CSPAuth(extra)
+	c.Assert(err, qt.ErrorIs, ErrTokenNotFound)
+	challenge, err = testDB.CSPAuth(testAuthToken)
+	c.Assert(err, qt.IsNil)
+	c.Assert(challenge.Tokens, qt.Equals, maxTokens)
+
+	// a challenge row that is gone takes no tokens
+	gone := &CSPAuth{Token: invalidAuthToken, UserID: testUserID, AnchorID: testCSPBundleID}
+	c.Assert(testDB.SetCSPAuthForChallenge(extra, gone, maxTokens), qt.ErrorIs, ErrTokenNotFound)
+}
+
+func TestClaimReleaseCSPAuthResend(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	const maxResends = 2
+	c.Assert(testDB.SetCSPAuth(testAuthToken, testUserID, testCSPBundleID, "secret"), qt.IsNil)
+	resends := func() int {
+		token, err := testDB.CSPAuth(testAuthToken)
+		c.Assert(err, qt.IsNil)
+		return token.Resends
+	}
+	// releasing with nothing claimed never goes below zero
+	c.Assert(testDB.ReleaseCSPAuthResend(testAuthToken), qt.IsNil)
+	c.Assert(resends(), qt.Equals, 0)
+
+	for range maxResends {
+		claimed, err := testDB.ClaimCSPAuthResend(testAuthToken, maxResends)
+		c.Assert(err, qt.IsNil)
+		c.Assert(claimed, qt.IsTrue)
+	}
+	claimed, err := testDB.ClaimCSPAuthResend(testAuthToken, maxResends)
+	c.Assert(err, qt.IsNil)
+	c.Assert(claimed, qt.IsFalse)
+
+	// a released resend can be claimed again
+	c.Assert(testDB.ReleaseCSPAuthResend(testAuthToken), qt.IsNil)
+	c.Assert(resends(), qt.Equals, maxResends-1)
+	claimed, err = testDB.ClaimCSPAuthResend(testAuthToken, maxResends)
+	c.Assert(err, qt.IsNil)
+	c.Assert(claimed, qt.IsTrue)
+	c.Assert(testDB.ReleaseCSPAuthResend(nil), qt.ErrorIs, ErrBadInputs)
+}
+
+func TestClaimCSPAuthSend(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	c.Run("nil token", func(c *qt.C) {
+		_, err := testDB.ClaimCSPAuthSend(nil, time.Minute)
+		c.Assert(err, qt.ErrorIs, ErrBadInputs)
+	})
+	c.Run("non existing token", func(c *qt.C) {
+		claimed, err := testDB.ClaimCSPAuthSend(invalidAuthToken, 0)
+		c.Assert(err, qt.IsNil)
+		c.Assert(claimed, qt.IsFalse)
+	})
+	c.Run("cooldown counts from creation, then from the last send", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		c.Assert(testDB.SetCSPAuth(testAuthToken, testUserID, testCSPBundleID, "secret"), qt.IsNil)
+		token, err := testDB.CSPAuth(testAuthToken)
+		c.Assert(err, qt.IsNil)
+		c.Assert(token.LastSent(), qt.Equals, token.CreatedAt)
+
+		// created just now, which was the first send
+		claimed, err := testDB.ClaimCSPAuthSend(testAuthToken, time.Minute)
+		c.Assert(err, qt.IsNil)
+		c.Assert(claimed, qt.IsFalse)
+
+		time.Sleep(10 * time.Millisecond)
+		claimed, err = testDB.ClaimCSPAuthSend(testAuthToken, 5*time.Millisecond)
+		c.Assert(err, qt.IsNil)
+		c.Assert(claimed, qt.IsTrue)
+		token, err = testDB.CSPAuth(testAuthToken)
+		c.Assert(err, qt.IsNil)
+		c.Assert(token.LastSentAt.After(token.CreatedAt), qt.IsTrue)
+		c.Assert(token.LastSent(), qt.Equals, token.LastSentAt)
+
+		// the send just claimed restarts the cooldown
+		claimed, err = testDB.ClaimCSPAuthSend(testAuthToken, 5*time.Millisecond)
+		c.Assert(err, qt.IsNil)
+		c.Assert(claimed, qt.IsFalse)
+	})
+}
+
 func TestIncrementCSPAuthAttempts(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })

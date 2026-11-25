@@ -274,8 +274,9 @@ func TestProcessBlindCSPSwitchStopsAuthChallenges(t *testing.T) {
 	after := waitSentEmails(t, orgAddress, before.SentEmails+1)
 	c.Assert(after.SentSMS, qt.Equals, before.SentSMS)
 
-	// back on: the anonymous process sends challenges again
+	// back on: the anonymous process sends challenges again; wait out the resend cooldown first
 	setDisableBlindCSP(t, false)
+	time.Sleep(cspNotificationCoolDownTime)
 	resent := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "",
 		&handlers.AuthResendRequest{AuthToken: pending, Email: members[0].Email},
 		"processes", anonymousPID, "auth", "resend")
