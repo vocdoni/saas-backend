@@ -1,6 +1,7 @@
 # SaaS mailing templates redesign: design
 
-Status: draft   Class: architectural   Issue: #817
+Status: audited (2026-11-25, Fable: approve with changes, all 15 findings folded in)   Class: architectural
+Issue: #817
 Owner decisions so far (2026-11-25):
 - One shared layout + per-email content + one string file per language (not 24 hand-kept HTML files, not MJML).
 - All 10 app locales: ca, de, el, en, es, eu, fr, it, pt, pt-br. ca/es/en reviewed in depth; the other seven are
@@ -85,7 +86,17 @@ The backend sends eight kinds of email, each as three hand-kept HTML files plus 
 - **Loading and rendering** (`notifications/mailtemplates/templates.go`): `Load()` pairs `assets/<name>_<lang>.html`
   with `<name>_<lang>.yaml` from the embedded FS (`embed.go`); `MailTemplate.Localized(lang)` falls back to
   `DefaultLang` ("en"); `ExecTemplate(data)` renders the HTML with `html/template` and the YAML `subject`/`body` with
-  `text/template`, returning `notifications.Notification{Subject, Body, PlainBody}`. `ExecPlain` is used for SMS.
+  `text/template`, returning `notifications.Notification{Subject, Body, PlainBody}`. `ExecTemplate` is also used for
+  SMS, whose senders read only `PlainBody`; `ExecPlain` is exercised only by tests. `Load()` runs only inside the
+  SMTP-configured block of `cmd/service/main.go:270-298`.
+- **Default OTP logo**: `csp/handlers.DefaultOrgLogo` (`csp/handlers/handlers.go:14-18`) is the same IPFS gateway URL,
+  passed as the OTP organization logo when an organization has none (`csp/handlers/processes.go:1137-1143`).
+- **Stored logos**: `meta["logo"]` is a multilingual map read through `db.Organization.LogoURL()`
+  (`db/types.go:204-208`). Logos uploaded through this backend are absolute `{ServerURL}/storage/{md5}.{png|jpeg}`
+  URLs (`objectstorage/handlers.go:188-190`, `objectstorage/objectstorage.go:198-215`); `objectstorage` `LocalName`
+  (`objectstorage/objectstorage.go:143-165`) recognises them.
+- **Tests and SMTP output**: `csp/testutil/smtp.go:79-95` returns MailHog's raw MIME body and many tests regex it
+  (`api/api_test.go:96`, `api/lang_test.go`, `csp/auth_test.go`, `csp/notifications/*_test.go`).
 - **Language** (`api/apicommon/lang.go:27`): `?lang=` on public endpoints, else `org.DefaultLang`, else "en".
   `IsValidLang` also validates an organization's default language (`api/organizations.go:38`) and the supported list
   is exposed by an API response (`api/organizations.go:362`).
@@ -113,23 +124,35 @@ scripts/mail-logos/      the generator for images/ from vocdoni-app's Logo.tsx p
 ```
 
 The 48 old `assets/*.html|*.yaml` files, the IPFS URL and `assets/images/vocdoni_logo_mailing.png` are removed.
+`csp/handlers.DefaultOrgLogo` is removed too: `orgNameAndLogo` returns an empty logo when the organization has none,
+and the OTP email shows the monogram/no-logo layout (the `DefaultOrgName` "Vocdoni" fallback stays).
 
 ### Rendering
 
 - Public Go surface stays: `mailtemplates.<X>Notification.Localized(lang).ExecTemplate(data)` returns
   `*notifications.Notification{Subject, Body, PlainBody}` and `ExecPlain(data)` stays for SMS. `Load()` also loads
   and validates the layout, components and every locale at start-up and fails if anything is missing or malformed.
-- Translators never write HTML. String values may interpolate fields (`{{.Organization}}`) and mark emphasis with a
-  restricted syntax the renderer turns into `<strong>`; all interpolated data is HTML-escaped. A string missing in a
-  locale falls back to English for that string, and a test fails if any locale is missing a key.
-- Brand values are injected per render, not baked into the templates: accent colour, its dark-mode text colour,
-  logo URLs, site URL, support address. Defaults: accent `#1d62e9`, dark accent text `#6a99f1`.
+- `mailtemplates.Load()` moves out of the SMTP-only block in `cmd/service/main.go` and runs unconditionally at
+  start-up whenever email or SMS notifications are configured; a load or validation failure is fatal.
+- The SMS challenge path (`csp/notifications/challenge.go:114`) uses `ExecPlain` for `SMSChallenge`, skipping the
+  HTML render; `ExecPlain` stays public.
+- Translators never write HTML. String values may interpolate fields (`{{.Organization}}`). Emphasis is `*text*` →
+  `<strong>text</strong>`; a literal asterisk is `\*`; nesting, unmatched markers or any other markup in a string fail
+  `Load()`. All interpolated data is HTML-escaped. A string missing in a locale falls back to English for that string,
+  and a test fails if any locale is missing a key.
+- Brand values (accent colour, derived dark accent text, logo base URL, site URL, support address) are held by the
+  mailtemplates package: `Load()` becomes `Load(brand mailtemplates.Brand)`, and `mailtemplates.DefaultBrand()` returns
+  the defaults (accent `#1d62e9`, dark accent text `#6a99f1`) so existing test callers change mechanically to
+  `Load(mailtemplates.DefaultBrand())`. `ExecTemplate`/`ExecPlain` merge the brand into the template context under a
+  reserved key (`.Brand`), so call-site data structs are untouched. `cmd/service/main.go` fills the Brand from the new
+  flags; `cmd/mailpreview` from `-accent`.
 - New configuration (flags/env, with defaults that need no change in existing deployments):
   - `mailAccentColor`: `#rrggbb`, default `#1d62e9`. The dark-mode link colour is derived so it keeps ≥ 4.5:1 on the
     dark card; the button label is white or black, whichever passes 4.5:1 on the accent.
   - `mailAssetsURL`: base URL of the logo PNGs, default `{ServerURL}/mail/assets`.
 - This backend serves `assets/mail/images/*` at `GET /mail/assets/{file}` (public, no auth, immutable cache headers,
-  only files present in the embedded directory).
+  only files present in the embedded directory). Caching: `Cache-Control: public, max-age=86400` plus a strong `ETag`
+  (content hash); if a logo's artwork ever changes, it ships under a new filename.
 
 ### Visual system (normative values from the approved mockups)
 
@@ -158,7 +181,9 @@ Final Catalan subjects, preheaders and body copy are in the mockups' DESIGN.md a
 the source for the other locales. Behaviour that changes:
 
 - Every code email shows the code, its expiry in words ("15 minuts", "5 dies") from the real duration, and an
-  "if it wasn't you" line. Durations are formatted per locale by a helper, never `Duration.String()`.
+  "if it wasn't you" line. Durations are formatted per locale by a helper, never `Duration.String()`: whole minutes,
+  hours or days (rounding up), with unit words in the shared-strings section of each `i18n/<lang>.yaml` as
+  `duration.{minute,hour,day}.{one,other}`. No new dependency.
 - `forgot_password` states the real `otpExpiry`.
 - `invite_admin`: no code; button + fallback link; expiry (5 days); co-brand header.
 - `members_import_done`: four states chosen in Go, not in the template: all added; added with issues; nothing added
@@ -182,16 +207,30 @@ the source for the other locales. Behaviour that changes:
 | Long unbroken values (emails, URLs, tokens) | wrap inside the card at 320px; never widen the layout |
 | Subjects | ≤ 78 characters after interpolation; interpolated user text is truncated with "…" to fit |
 | Support description | line breaks preserved; capped at 1,200 characters with a note that the full text is on the ticket |
-| Organization logo | shown only if the URL is https (or a relative object-storage path resolved against `ServerURL`) and its path ends in .png/.jpg/.jpeg/.gif/.webp; never SVG, data: or http. Rendered at 32px height, max 140px wide (44px tile in OTP). Otherwise the no-logo layout. Never a broken-image placeholder for a rejected URL |
+| Organization logo | the URL is `org.LogoURL()`. Shown only if (a) `objectstorage` `LocalName(url)` reports a local storage reference, rendered as the canonical `{ServerURL}/storage/{name}` URL, or (b) it is an absolute https URL; in both cases the path ends in .png/.jpg/.jpeg/.gif/.webp. Never SVG, `data:` or plain http. Rendered with `height` 32 (44 in the OTP tile) and `style="max-width:140px;width:auto"`. Otherwise the no-logo layout; never a broken-image placeholder for a rejected URL |
+| Organization logo in Outlook desktop | the org logo and its tile are wrapped in an MSO conditional hide, so Outlook desktop (Word engine, which cannot size an image of unknown aspect ratio) shows the Vocdoni-only header; the mockups' fixed width/height pairs were per-sample and are not reproducible server-side |
+| Empty link (URL build failure, `api/org_members.go:41-44`) | the button and fallback link are omitted; the mail still sends |
 | OTP SMS | ≤ 134 characters including the `[Label] ` prefix when configured (2 UCS-2 segments); organization name truncated to 40 characters |
-| Dates | locale-formatted date only, in Europe/Madrid |
+| Dates | locale-formatted date only, in Europe/Madrid (fixed). The mailtemplates package imports `time/tzdata` so rendering never depends on host tzdata; a `LoadLocation` failure is a `Load()` failure |
 | Unknown or malformed language | falls back to English (today's behaviour) |
 
 ### Languages
 
-`SupportedLangs` grows to the app's ten locale codes, matching vocdoni-app's `src/i18n/locales` folder names, compared
-case-insensitively (`pt-BR` = `pt-br`). This also widens what an organization may set as its default language and the
-list the API returns (`api/organizations.go:38,362`), which is intended.
+Language rule (unchanged, owner-confirmed): mail about an organization goes in the organization's `DefaultLang`; the
+voter OTP goes in the voting page's language (`?lang=`) when the page sends one, else the organization's, else English
+(`apicommon.NotificationLang`). The only change is which values are valid.
+
+`SupportedLangs` grows to the app's ten locale codes, exactly the lowercase folder names of vocdoni-app
+`src/i18n/locales` (`ca de el en es eu fr it pt pt-br`). Language codes are lowercased once at the boundaries:
+`setLang` stores `strings.ToLower` of `?lang=`, `validateDefaultLang` lowercases before validating and the lowercased
+value is what is stored, and `NotificationLang` lowercases `org.DefaultLang` on read for pre-existing rows. Everything
+past those points (`IsValidLang`, the i18n file lookup) is exact-match lowercase. This widens what an organization may
+set as its default language and the list `GET /organizations/languages` returns (`api/organizations.go:38,356-364`),
+which is intended; no endpoint or field changes.
+
+Follow-up outside this repo (not blocking): confirm the new voter page in vocdoni-app passes the page language to the
+CSP auth calls (the integrator SDK's `ApiClient` has a `lang` option); if it does not, the voter gets the
+organization's language until vocdoni-app sets it.
 
 ### MIME
 
@@ -206,6 +245,10 @@ Text and HTML parts use `Content-Transfer-Encoding: quoted-printable` (Go `mime/
   error; no rendered email exceeds 60 KB; subjects ≤ 78 chars; OTP plain text ≤ 134 chars with a 40-char org name;
   interpolated HTML is escaped (a `<script>` in a support description arrives escaped); issue list capped at 10; logo
   URL filter cases; MIME parts decode back to the original UTF-8.
+- `csp/testutil/smtp.go` `FindEmail` parses the returned message (`net/mail` + `mime/multipart` +
+  `mime/quotedprintable`) and returns the decoded text and HTML parts; existing assertions that regex the body
+  (`api/api_test.go:96`, `api/lang_test.go`, `api/users_test.go:55-70`, `csp/auth_test.go`, `csp/notifications/*_test.go`)
+  keep matching decoded UTF-8 and are not rewritten one by one.
 
 ### Alternatives considered
 
@@ -246,13 +289,18 @@ Text and HTML parts use `Content-Transfer-Encoding: quoted-printable` (Go `mime/
 - [ ] AC2: `go run ./cmd/mailpreview -out ~/.cache/saas-backend/preview` renders 8 emails × 10 locales plus the edge
       fixtures without error; the controller screenshots ca/en light and dark at 375 and 600px and they match the
       approved mockups.
-- [ ] AC3: no file under `assets/` matches `mypinata`, `fonts.googleapis` or `7bit`-declared parts in SMTP output.
+- [ ] AC3a: `git grep -l 'mypinata\|fonts.googleapis'` over the whole repo returns nothing.
+- [ ] AC3b: a unit test on `composeBody` asserts both parts declare `quoted-printable`, the message carries `Date` and
+      `Message-ID` headers, and decoding the parts round-trips the original UTF-8.
 - [ ] AC4: a 3,000-issue import fixture renders ≤ 60 KB with 10 issues and "and 2,990 more".
 - [ ] AC5: `GET /mail/assets/vocdoni-wordmark-black-halo@2x.png` returns 200 with an image content type; an unknown
       file or `../` path returns 404.
 - [ ] AC6: the full test suite (`go test ./...`) and `golangci-lint run` pass.
-- [ ] AC7: one real send per email through the dev SMTP to a test inbox is checked by the owner in Gmail (web and app)
-      and Apple Mail before release.
+- [ ] AC7: one real send per email through the dev SMTP to test inboxes is checked by the owner before release in Gmail
+      (web and app), Apple Mail and Outlook.com (light and dark); Outlook desktop on Windows for the two code emails and
+      invite_admin, and Yahoo once for verification_account, if the owner has access (otherwise the PR says they were
+      not checked). Each client either matches the mockups or degrades to the documented fallback (no radius/max-width
+      and no org logo in Outlook desktop, no dark swap in Gmail IMAP).
 
 ## Constraints
 
@@ -266,7 +314,8 @@ Text and HTML parts use `Content-Transfer-Encoding: quoted-printable` (Go `mime/
 
 Approved mockups, gallery and the full copy: `~/.cache/saas-backend/mockups/` (`index.html`, `DESIGN.md`,
 `emails/*.html`); generator `~/.cache/saas-backend/mockup-tools/build.py`. Differences decided after the mockups:
-import button is "Review the member base" to `/admin/memberbase/`; completion shows the date only.
+import button is "Review the member base" to `/admin/memberbase/`; completion shows the date only, in the fixed
+Europe/Madrid zone (the mockups' "deployment zone" note is superseded); no org logo in Outlook desktop.
 
 ## Open questions
 
