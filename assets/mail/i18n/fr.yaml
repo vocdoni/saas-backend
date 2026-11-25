@@ -74,12 +74,12 @@ verify_email_change:
   plain_link: "Ou confirmez-la avec ce lien:"
 
 invite_admin:
-  subject: "Vous avez été invité à gérer {{.Organization}}"
-  subject_no_org: "Vous avez été invité à gérer une organisation sur Vocdoni App"
+  subject: "Invitation à gérer {{.Organization}}"
+  subject_no_org: "Invitation à gérer une organisation sur Vocdoni App"
   preheader: "Acceptez l'invitation pour rejoindre l'équipe. Elle expire dans {{.Expiry}}."
   heading: "Vous avez une invitation"
-  intro: "Vous avez été invité à rejoindre l'équipe d'administration de l'organisation *{{.Organization}}* sur Vocdoni App. Vous pourrez gérer les membres, les processus de vote et les résultats."
-  intro_no_org: "Vous avez été invité à rejoindre l'équipe d'administration d'une organisation sur Vocdoni App. Vous pourrez gérer les membres, les processus de vote et les résultats."
+  intro: "Une invitation vous a été envoyée pour rejoindre l'équipe d'administration de l'organisation *{{.Organization}}* sur Vocdoni App. Vous pourrez gérer les membres, les processus de vote et les résultats."
+  intro_no_org: "Une invitation vous a été envoyée pour rejoindre l'équipe d'administration d'une organisation sur Vocdoni App. Vous pourrez gérer les membres, les processus de vote et les résultats."
   button: "Accepter l'invitation"
   expires_note: "L'invitation expire dans {{.Expiry}}. Si vous ne l'attendiez pas, vous pouvez ignorer cet email."
   footer_why: "Vous recevez cet email parce qu'une organisation sur Vocdoni App a invité cette adresse."
