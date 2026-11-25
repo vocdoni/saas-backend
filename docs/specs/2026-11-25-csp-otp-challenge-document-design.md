@@ -25,7 +25,7 @@ saas-backend#737 lets a repeated step 0 reuse the voter's pending code by issuin
 ## Goals
 
 1. Every state change of one OTP code (issue token, claim attempt, verify, claim send, roll back send) is a single conditional update of one document.
-2. A send that never reached the voter (push failed, or the queue gave up delivering it) gives back its cooldown, its resend unit and its daily-cap unit.
+2. A send that never reached a provider (push failed, or the queue gave up before calling one) gives back its cooldown, its resend unit and its daily-cap unit. A send a provider was called for keeps them, whatever the provider answered: a failure the provider reports may still have delivered.
 3. A voter switching to another of their destinations inside the cooldown gets the code there; alternating destinations cannot send more than the budgets allow.
 4. A request that loses a send race reports the real remaining wait.
 5. The shared attempts-and-resends trade-off is explained where reviewers read it.
@@ -100,19 +100,19 @@ Callers keep a per-token view. `MongoStorage.CSPAuth(token)` and the db-internal
 
 A request whose send claim does not match re-reads the document and classifies the refusal: cooldown on `sends.{dest}` → `coolDownTime` from the stored value (finding 4); resends exhausted → `ErrVerificationMaxAttempts`; secret gone, attempts spent or expired → `ErrTokenExpired`. On step 0 only, a cooldown or exhausted-resends refusal is not an error: the token is returned and nothing is sent (the voter already holds the code).
 
-`auth/resend` runs the claim as one update — resend unit plus `sends.{dest}` for the *submitted* (normalized, not yet matched) contact — before checking the contact against the member. A wrong contact answers as today and keeps both spent (the probing bound). Only a claim that failed to send through no fault of the submission — push failure, async delivery failure, or losing the send race — is rolled back.
+`auth/resend` runs the claim as one update — resend unit plus `sends.{dest}` for the *submitted* (normalized, not yet matched) contact — before checking the contact against the member. A wrong contact answers as today and keeps both spent (the probing bound). Only a claim that failed to send through no fault of the submission — push failure, a queue give-up before any provider call, or losing the send race — is rolled back.
 
 ### Step 0
 
 1. Read the voter's last document for (user, anchor) (indexed `{userid, bundleid, createdat: -1}`, migration 0019).
 2. If its code is usable (secret, unexpired, attempts < Max, not verified) and has token room: push a token. If the voter's destination is due and the code has resends left, compose and claim a send to it (step-0 re-sends count as resends). If that send fails, drop the token and return the error. Otherwise return the token, sent or not (see refusal classification).
-3. Otherwise mint a new code, subject to the cooldown since the latest send of the previous code (max over its `sends`) and to the daily cap. A new code whose synchronous push fails is deleted, with the daily unit released; one whose *async* delivery fails keeps its document (the voter holds its token) and gets the standard rollback, so the next claim for any destination is immediately due.
+3. Otherwise mint a new code, subject to the cooldown since the latest send of the previous code (max over its `sends`) and to the daily cap. A new code whose synchronous push fails is deleted, with the daily unit released; one the queue gives up on before calling a provider keeps its document (the voter holds its token) and gets the standard rollback, so the next claim for any destination is immediately due.
 
 `ChallengeSendRefusal` (cert-auth peek) mirrors steps 2-3 read-only, for the request's destination.
 
 ### Sending
 
-`pushChallengeCode` takes one struct (`challengeSend`: user, anchor, document id, destination key, claim time, previous send time, daily-cap claim, code, expiry, delivery). Order: compose the message → claim the daily-cap unit → claim the send on the document → push. If the push fails: roll back the send claim and release the daily unit. The queue carries the `challengeSend` back in the result (`Meta` already carries the `*NotificationChallenge`); on `Success=false` the `NotificationsSent` consumer rolls back the send claim conditionally (`sends.{dest} == claimTime`, so a newer send is never undone) and releases the daily unit unconditionally — the failed send delivered nothing, whatever happened to the document since.
+`pushChallengeCode` takes one struct (`challengeSend`: user, anchor, document id, destination key, claim time, previous send time, daily-cap claim, code, expiry, delivery). Order: compose the message → claim the daily-cap unit → claim the send on the document → push. If the push fails: roll back the send claim and release the daily unit. The queue carries the `challengeSend` back in the result (`Meta` already carries the `*NotificationChallenge`) and marks whether it ever called a provider for the item (`Attempted`, set just before the first `SendNotification`). On `Success=false` with no provider call — expired in the queue, breaker open until the TTL, no service configured — the `NotificationsSent` consumer rolls back the send claim conditionally (`sends.{dest} == claimTime`, so a newer send is never undone) and releases the daily unit unconditionally — the send delivered nothing, whatever happened to the document since. On `Success=false` after a provider call, nothing is rolled back: a timeout or an error can follow an accepted message, and giving the budgets back would let a failing provider deliver codes past the daily cap.
 
 ### Shared attempts and resends (documented trade-off)
 
@@ -147,16 +147,16 @@ One migration on `cspTokens`:
 - A verify whose update fails leaves the code unsolved and retryable (attempt already counted).
 - Concurrent extra tokens cannot exceed the cap (positional `$exists` filter); the unique index keeps a token in one document.
 - Only the token that solved the code can sign; tokens obtained by someone else with the voter's login data never inherit the verification.
-- Rollback of a send only matches its own claim time, so it never undoes a later send; the daily unit of a failed send is always released.
+- Rollback of a send only matches its own claim time, so it never undoes a later send; the daily unit of a send no provider was called for is always released.
 - A wrong contact on `auth/resend` keeps its resend unit spent (contact probing stays bounded).
 - Destination keys reveal no contact data and are case-canonical for email; the token view never exposes the secret (`json:"-"`).
-- Delivery-failure rollback lets a voter retry at once; abuse stays bounded by the daily cap, which a failed send gives back only when nothing was delivered.
+- Rollback lets a voter retry at once only when no provider was called, so nothing can have been delivered; a provider failure keeps every budget spent, so a provider that fails after delivering cannot be used to send past the daily cap.
 - Restart with codes in the queue: those sends stay claimed (non-goal); the voter waits one cooldown.
 
 ## Acceptance criteria
 
 - [ ] AC1: verify is one update; a forced failure of the verify write leaves the code solvable (db test).
-- [ ] AC2: push failure and an async `Success=false` result both restore `sends.{dest}`, `resends` and the daily unit (csp tests with an unbuildable message and a failing mail service).
+- [ ] AC2: push failure and an async give-up before any provider call (expired in the queue, no service) both restore `sends.{dest}`, `resends` and the daily unit; an async `Success=false` after a provider call restores none of them (csp tests with an unbuildable message, an expired item and a failing mail service).
 - [ ] AC3: a failed step-0 re-send leaves no extra token (csp test).
 - [ ] AC4: the loser of concurrent resends reports the real wait (csp test with 3 concurrent `ResendChallenge`).
 - [ ] AC5: step 0 by email then by SMS inside the cooldown sends the SMS; alternating email/SMS sends at most once per destination per cooldown and at most `MaxChallengeResends` times per code (csp test).
