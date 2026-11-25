@@ -121,9 +121,9 @@ func (a *Account) SubmitVote(ctx context.Context, stx, nullifier []byte) ([]byte
 			}
 			break
 		}
-		// a dial failure is retried too, but proves nothing reached the node: it is no reason to
-		// wait for the tx to be mined afterwards
-		if !sendNeverLeft(sendErr) {
+		// a dial failure or a 429 is retried too, but proves the tx never reached the handler
+		// (voconed's throttle answers before reading it): no reason to wait for it to be mined
+		if !sendNeverLeft(sendErr) && sendTxStatus(sendErr) != 429 {
 			maybeAccepted = true
 		}
 		if !time.Now().Add(backoff).Before(deadline) || !sleepCtx(ctx, backoff) {

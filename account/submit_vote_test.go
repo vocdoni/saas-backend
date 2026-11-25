@@ -309,6 +309,22 @@ func TestSubmitVote429Retried(t *testing.T) {
 	c.Assert(lookups, qt.Equals, 0)
 }
 
+// A relay that only ever gets 429 fails without waiting for the tx by hash: the throttle
+// answered before the node read it.
+func TestSubmitVote429BudgetExhaustedNotWaited(t *testing.T) {
+	c := qt.New(t)
+	node := &fakeVoteNode{sends: []sendAnswer{answerStatus(429, "Too Many Requests")}}
+	a := newFakeVoteNode(c, node)
+	c.Patch(&voteRetryBudget, 150*time.Millisecond)
+
+	_, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)
+	c.Assert(err, qt.ErrorMatches, `(?s)could not submit vote tx: API error: 429.*`)
+	sends, polls, lookups := node.counts()
+	c.Assert(sends > 1, qt.IsTrue, qt.Commentf("sends: %d", sends))
+	c.Assert(polls, qt.Equals, 0)
+	c.Assert(lookups, qt.Equals, 1)
+}
+
 // AC4: when the budget runs out on transport errors, the failure names the last of them, and the
 // tx is still waited for by hash before the nullifier lookup (the node may hold it).
 func TestSubmitVoteBudgetExhausted(t *testing.T) {
