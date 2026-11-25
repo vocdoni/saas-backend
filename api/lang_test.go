@@ -213,3 +213,18 @@ func assertContentMatches(t *testing.T, content, lang string, regexps map[string
 		}
 	}
 }
+
+// TestDefaultLangIsNormalized tests that an organization's defaultLang is stored lowercase, so the
+// mail templates find its strings whatever case the client sent.
+func TestDefaultLangIsNormalized(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "superpassword123")
+	orgAddress := testCreateOrganization(t, token)
+	requestAndAssertCode(200, t, "PUT", token, &apicommon.OrganizationInfo{DefaultLang: "PT-BR"},
+		"organizations", orgAddress.String())
+	org := requestAndParse[apicommon.OrganizationInfo](t, "GET", token, nil, "organizations", orgAddress.String())
+	c.Assert(org.DefaultLang, qt.Equals, "pt-br")
+	// an unsupported code is still refused
+	requestAndAssertCode(400, t, "PUT", token, &apicommon.OrganizationInfo{DefaultLang: "xx"},
+		"organizations", orgAddress.String())
+}

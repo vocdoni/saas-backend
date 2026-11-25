@@ -32,10 +32,12 @@ func writePermissionError(w http.ResponseWriter, err error) {
 	errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 }
 
-// validateDefaultLang reports whether lang is a supported notification language, writing the
+// validateDefaultLang normalizes *lang in place (see apicommon.NormalizeLang), so the stored value
+// is the canonical one, and reports whether it is a supported notification language, writing the
 // error response when it is not. An empty value is accepted, meaning "unchanged".
-func validateDefaultLang(w http.ResponseWriter, lang string) bool {
-	if lang != "" && !apicommon.IsValidLang(lang) {
+func validateDefaultLang(w http.ResponseWriter, lang *string) bool {
+	*lang = apicommon.NormalizeLang(*lang)
+	if *lang != "" && !apicommon.IsValidLang(*lang) {
 		errors.ErrMalformedBody.Withf("invalid defaultLang").Write(w)
 		return false
 	}
@@ -89,7 +91,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		errors.ErrMalformedBody.Withf("invalid organization type").Write(w)
 		return
 	}
-	if !validateDefaultLang(w, orgInfo.DefaultLang) {
+	if !validateDefaultLang(w, &orgInfo.DefaultLang) {
 		return
 	}
 	if err := apicommon.ValidateMetaKeys(orgInfo.Meta); err != nil {
@@ -263,7 +265,7 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		errors.ErrMalformedBody.Write(w)
 		return
 	}
-	if !validateDefaultLang(w, newOrgInfo.DefaultLang) {
+	if !validateDefaultLang(w, &newOrgInfo.DefaultLang) {
 		return
 	}
 	if err := apicommon.ValidateMetaKeys(newOrgInfo.Meta); err != nil {

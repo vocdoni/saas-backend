@@ -66,6 +66,11 @@ func TestNotificationLang(t *testing.T) {
 		org:  nil,
 		want: DefaultLang,
 	}, {
+		name: "a stored org default is read lowercase",
+		ctx:  public(""),
+		org:  &db.Organization{DefaultLang: "PT-BR"},
+		want: "pt-br",
+	}, {
 		name: "an empty param is not a language",
 		ctx:  public(""),
 		org:  &db.Organization{},
@@ -84,6 +89,23 @@ func TestIsValidLang(t *testing.T) {
 	}
 	c.Assert(IsValidLang(""), qt.IsFalse)
 	c.Assert(IsValidLang("xx"), qt.IsFalse)
-	// exact match only: the API stores what it validates
+	// exact match only: the API normalizes before validating and stores what it validates
 	c.Assert(IsValidLang("EN"), qt.IsFalse)
+	c.Assert(IsValidLang("pt-BR"), qt.IsFalse)
+	c.Assert(IsValidLang("pt_br"), qt.IsFalse)
+}
+
+func TestSupportedLangs(t *testing.T) {
+	c := qt.New(t)
+	// the web app's locale folders, in this exact lowercase form
+	c.Assert(SupportedLangs, qt.DeepEquals, []string{"ca", "de", "el", "en", "es", "eu", "fr", "it", "pt", "pt-br"})
+	c.Assert(IsValidLang(DefaultLang), qt.IsTrue)
+}
+
+func TestNormalizeLang(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(NormalizeLang("pt-BR"), qt.Equals, "pt-br")
+	c.Assert(NormalizeLang(" EU "), qt.Equals, "eu")
+	c.Assert(NormalizeLang(""), qt.Equals, "")
+	c.Assert(IsValidLang(NormalizeLang("PT-BR")), qt.IsTrue)
 }
