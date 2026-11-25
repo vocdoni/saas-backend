@@ -1,6 +1,6 @@
 # SaaS mailing templates redesign: design
 
-Status: audited (2026-11-25, Fable: approve with changes, all 15 findings folded in)   Class: architectural
+Status: approved (2026-11-25; Fable audit folded in)   Class: architectural
 Issue: #817
 Owner decisions so far (2026-11-25):
 - One shared layout + per-email content + one string file per language (not 24 hand-kept HTML files, not MJML).
