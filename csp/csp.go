@@ -19,7 +19,11 @@ import (
 )
 
 // MaxChallengeAttempts is the maximum number of verification attempts one challenge code takes,
-// across every authentication token answering it, before it is locked.
+// across every authentication token answering it, before it is locked. Attempts, like resends
+// (which repeated auth requests also spend), are per code rather than per token, since per-token
+// budgets would give 5 fresh guesses with every auth request. So whoever holds a voter's login
+// data can lock the voter's pending code or spend its resends, which no per-voter limit prevents
+// (they could already spend the daily send cap); #893 mitigates it.
 const MaxChallengeAttempts = 5
 
 // MaxChallengeResends is the number of times one challenge code can be sent again after its first
