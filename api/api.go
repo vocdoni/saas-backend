@@ -2,7 +2,12 @@
 //
 //	@title						Vocdoni SaaS API
 //	@version					1.0
-//	@description				API for Vocdoni SaaS Backend
+//	@description				API for Vocdoni SaaS Backend.
+//	@description				Scheduled maintenance: while a window announced in the X-Maintenance-Window header and in
+//	@description				GET /info is active, every POST, PUT and DELETE answers 503 with error code 50304 and a
+//	@description				Retry-After header pointing past the end of the window. Login, token refresh, read-only POSTs
+//	@description				(process check, weight and sign-info, census validation, votes/verify) and the support ticket
+//	@description				stay available; POST /oauth/login answers 50304 only when it would sign up a new user.
 //	@termsOfService				http://swagger.io/terms/
 //
 //	@contact.name				API Support
