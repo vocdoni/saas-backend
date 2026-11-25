@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/stripe"
 )
@@ -76,15 +77,16 @@ func TestValidateBilling(t *testing.T) {
 
 // customerFake is a Stripe account for CreateCustomer: the customer search answers stamped (an
 // id, "" for none, "fail" for a 500), POST /v1/customers creates cus_<n> unless its tax id is
-// "bad" (Stripe's tax_id_invalid), replays the customer of a known Idempotency-Key with the same
-// form and answers Stripe's idempotency_error for one with another form, and
+// "bad" (Stripe's tax_id_invalid, saved under its Idempotency-Key as Stripe does), replays the
+// result of a known Idempotency-Key with the same form and answers Stripe's idempotency_error for
+// one with another form, GET /v1/customers lists every customer created, and
 // POST /v1/checkout/sessions records the customer it was opened for.
 type customerFake struct {
 	mu       sync.Mutex
 	stamped  string
 	created  []map[string]string // the form of every create Stripe executed
 	keys     []string            // the Idempotency-Key of every create request
-	replays  map[string]string
+	replays  map[string]string   // Idempotency-Key -> customer id, or "refused:<form>" for a refusal
 	sessions []string
 }
 
@@ -105,7 +107,20 @@ func (f *customerFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/v1/customers" && r.Method == http.MethodPost:
 		key := r.Header.Get("Idempotency-Key")
 		f.keys = append(f.keys, key)
-		if r.PostForm.Get("tax_id_data[0][value]") == "bad" {
+		form := map[string]string{}
+		for k, v := range r.PostForm {
+			form[k] = v[0]
+		}
+		refusal := "refused:" + r.PostForm.Encode()
+		saved, used := f.replays[key]
+		switch {
+		case used && strings.HasPrefix(saved, "refused:") && saved != refusal:
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"type":"idempotency_error","message":"Keys for idempotent requests ` +
+				`can only be used with the same parameters they were first used with."}}`))
+			return
+		case (used && saved == refusal) || (!used && form["tax_id_data[0][value]"] == "bad"):
+			f.replays[key] = refusal
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","code":"tax_id_invalid",` +
 				`"param":"tax_id_data[0][value]","message":"Invalid value for es_cif: bad"}}`))
@@ -115,10 +130,6 @@ func (f *customerFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","message":"permission denied"}}`))
 			return
-		}
-		form := map[string]string{}
-		for k, v := range r.PostForm {
-			form[k] = v[0]
 		}
 		id, ok := f.replays[key]
 		if ok && !maps.Equal(f.created[id[len("cus_")]-'1'], form) {
@@ -136,6 +147,18 @@ func (f *customerFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			`"email":"` + r.PostForm.Get("email") + `","address":{"line1":"` + r.PostForm.Get("address[line1]") + `",` +
 			`"country":"` + r.PostForm.Get("address[country]") + `"},` +
 			`"metadata":{"address":"` + r.PostForm.Get("metadata[address]") + `"}}`))
+	case r.URL.Path == "/v1/customers" && r.Method == http.MethodGet:
+		if r.URL.Query().Get("created[gte]") == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		data := []string{}
+		for i, form := range f.created {
+			data = append(data, `{"id":"cus_`+string(rune('1'+i))+`","object":"customer",`+
+				`"metadata":{"address":"`+form["metadata[address]"]+`"}}`)
+		}
+		_, _ = w.Write([]byte(`{"object":"list","url":"/v1/customers","has_more":false,"data":[` +
+			strings.Join(data, ",") + `]}`))
 	case r.URL.Path == "/v1/checkout/sessions" && r.Method == http.MethodPost:
 		f.sessions = append(f.sessions, r.PostForm.Get("customer"))
 		_, _ = w.Write([]byte(`{"id":"cs_1","object":"checkout.session"}`))
@@ -147,8 +170,9 @@ func (f *customerFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // TestCreateCustomer (AC2, AC11): the customer is created with the details, the tax id, the
 // organization stamp and tax location validated at once, under an Idempotency-Key per org (the
-// same details again are the same customer; other details within 24 hours are ErrCustomerExists,
-// never a second customer, while the search lags). An org with
+// same details again are the same customer; other details within 24 hours are ErrCustomerExists
+// with the customer the consistent list finds, never a second customer, while the search lags; a
+// create Stripe refused does not block the corrected details). An org with
 // a customer stamped already is refused with it, a failed search refuses without creating, invalid
 // details never reach Stripe, and Stripe's refusal of the tax id is a *StripeRefusalError. A
 // checkout opened once the search finds the new customer bills it instead of creating another.
@@ -177,30 +201,40 @@ func TestCreateCustomer(t *testing.T) {
 	c.Assert(again.ID, qt.Equals, "cus_1")
 	c.Assert(f.created, qt.HasLen, 1)
 	c.Assert(f.keys[1], qt.Equals, f.keys[0])
-	// corrected details while the search still misses cus_1: refused, no second customer
+	// other details while the search still misses cus_1: the list finds it, no second customer
 	other := validBilling()
 	other.Line2 = "2n pis"
 	customer, err = CreateCustomer(ctx, client, flowOrg, other)
 	c.Assert(err, qt.ErrorIs, ErrCustomerExists)
-	c.Assert(err, qt.ErrorMatches, ".*a customer was registered for this organization in the last 24 hours")
-	c.Assert(customer, qt.DeepEquals, Customer{})
+	c.Assert(customer.ID, qt.Equals, "cus_1")
 	c.Assert(f.keys[2], qt.Equals, f.keys[0])
 	c.Assert(f.created, qt.HasLen, 1)
 
+	// Stripe refuses the tax id; the refusal is saved under the org's key, yet the corrected details
+	// create the customer, and other details after that are refused with it
+	refusedOrg := common.Address{0x0b}
 	bad := validBilling()
 	bad.TaxIDValue = "bad"
-	_, err = CreateCustomer(ctx, client, flowOrg, bad)
+	_, err = CreateCustomer(ctx, client, refusedOrg, bad)
 	c.Assert(err, qt.ErrorIs, ErrInvalid)
 	var refusal *StripeRefusalError
 	c.Assert(errors.As(err, &refusal), qt.IsTrue)
 	c.Assert(*refusal, qt.DeepEquals, StripeRefusalError{
 		Code: "tax_id_invalid", Param: "tax_id_data[0][value]", Msg: "Invalid value for es_cif: bad",
 	})
+	customer, err = CreateCustomer(ctx, client, refusedOrg, validBilling())
+	c.Assert(err, qt.IsNil)
+	c.Assert(customer.ID, qt.Equals, "cus_2")
+	c.Assert(f.keys[len(f.keys)-1], qt.Equals, "topup-customer:"+refusedOrg.String()+":"+billingHash(validBilling()))
+	customer, err = CreateCustomer(ctx, client, refusedOrg, other)
+	c.Assert(err, qt.ErrorIs, ErrCustomerExists)
+	c.Assert(customer.ID, qt.Equals, "cus_2")
+	c.Assert(f.created, qt.HasLen, 2)
 
 	// a permission error is a Stripe failure, not the admin's bad details
 	denied := validBilling()
 	denied.TaxIDValue = "denied"
-	_, err = CreateCustomer(ctx, client, flowOrg, denied)
+	_, err = CreateCustomer(ctx, client, common.Address{0x0d}, denied)
 	c.Assert(err, qt.ErrorMatches, "could not create the customer of organization .*")
 	c.Assert(errors.Is(err, ErrInvalid), qt.IsFalse)
 

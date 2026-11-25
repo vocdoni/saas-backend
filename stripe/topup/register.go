@@ -2,12 +2,16 @@ package topup
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/mail"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -102,12 +106,14 @@ func (*StripeRefusalError) Unwrap() error { return ErrInvalid }
 // address, and a failed search. Stripe validates the tax id and locates the address at once
 // (tax.validate_location immediately): a refusal is a *StripeRefusalError. The create is
 // idempotent per org for 24 hours (Stripe's Idempotency-Key "topup-customer:<org>"): a retry after
-// a lost response gets the same customer, and a second create for the org with other details is
-// ErrCustomerExists (with no customer) instead of a second customer. Customer search lags behind
+// a lost response gets the same customer. A create for the org with other details within those
+// 24 hours gets Stripe's idempotency_error; Stripe keeps refused creates under the key too, so
+// the customers created in the last 25 hours are listed (consistent, unlike the search): one
+// stamped with org is ErrCustomerExists with it, none means the earlier create was refused and the
+// corrected details are created under a key of the org and the details. Customer search lags behind
 // a new customer: until it catches up, the returned id is the only way to name it
-// (Request.CustomerID, DeferredInvoice.CustomerID), and the search-based guard misses it once
-// the 24 hours are over; a caller that needs a consistent guard keeps its own org-to-customer
-// record.
+// (Request.CustomerID, DeferredInvoice.CustomerID); a caller that needs a consistent guard keeps
+// its own org-to-customer record and serializes registrations per org.
 func CreateCustomer(ctx context.Context, c *stripe.Client, org common.Address, b BillingDetails) (Customer, error) {
 	b, err := ValidateBilling(b)
 	if err != nil {
@@ -139,12 +145,20 @@ func CreateCustomer(ctx context.Context, c *stripe.Client, org common.Address, b
 	params.Context = ctx
 	params.SetIdempotencyKey("topup-customer:" + org.String())
 	customer, err := stripecustomer.New(params)
-	if err != nil {
-		var stripeErr *stripeapi.Error
-		if errors.As(err, &stripeErr) && stripeErr.Type == stripeapi.ErrorTypeIdempotency {
-			return Customer{}, fmt.Errorf("%w: a customer was registered for this organization in the last 24 hours",
-				ErrCustomerExists)
+	var stripeErr *stripeapi.Error
+	if errors.As(err, &stripeErr) && stripeErr.Type == stripeapi.ErrorTypeIdempotency {
+		found, listErr := recentCustomerOf(ctx, org)
+		switch {
+		case listErr != nil:
+			return Customer{}, fmt.Errorf("could not list the recent customers of organization %s, retry later: %w",
+				org, listErr)
+		case found != nil:
+			return customerOf(found), fmt.Errorf("%w: organization %s is stamped on customer %s", ErrCustomerExists, org, found.ID)
 		}
+		params.SetIdempotencyKey("topup-customer:" + org.String() + ":" + billingHash(b))
+		customer, err = stripecustomer.New(params)
+	}
+	if err != nil {
 		if errors.As(err, &stripeErr) && stripeErr.Type == stripeapi.ErrorTypeInvalidRequest &&
 			stripeErr.HTTPStatusCode == http.StatusBadRequest {
 			return Customer{}, &StripeRefusalError{Code: string(stripeErr.Code), Param: stripeErr.Param, Msg: stripeErr.Msg}
@@ -152,4 +166,29 @@ func CreateCustomer(ctx context.Context, c *stripe.Client, org common.Address, b
 		return Customer{}, fmt.Errorf("could not create the customer of organization %s: %w", org, err)
 	}
 	return customerOf(customer), nil
+}
+
+// recentCustomerOf is the customer stamped with org among those created in the last 25 hours
+// (Stripe's idempotency window plus a margin), or nil. The list, unlike the search, is consistent
+// with a create that just returned.
+func recentCustomerOf(ctx context.Context, org common.Address) (*stripeapi.Customer, error) {
+	params := &stripeapi.CustomerListParams{
+		CreatedRange: &stripeapi.RangeQueryParams{GreaterThanOrEqual: time.Now().Add(-25 * time.Hour).Unix()},
+	}
+	params.Context = ctx
+	params.Limit = new(int64(100))
+	customers := stripecustomer.List(params)
+	for customers.Next() {
+		if customer := customers.Customer(); !customer.Deleted && strings.EqualFold(customer.Metadata["address"], org.String()) {
+			return customer, nil
+		}
+	}
+	return nil, customers.Err()
+}
+
+// billingHash names a set of billing details in an idempotency key.
+func billingHash(b BillingDetails) string {
+	details, _ := json.Marshal(b) // a struct of strings always marshals
+	sum := sha256.Sum256(details)
+	return hex.EncodeToString(sum[:16])
 }
