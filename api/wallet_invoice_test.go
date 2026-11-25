@@ -12,6 +12,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/stripe"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -93,6 +94,19 @@ func TestWalletInvoiceDownload(t *testing.T) {
 	c.Assert(notYet.Error(), qt.Contains, "not available yet")
 	// nothing reached Stripe for the rows that are not invoiced top-ups of this wallet
 	c.Assert(fake.invoiceKeys, qt.DeepEquals, []string{"cs_invoice_1", "cs_invoice_1", "cs_invoice_1"})
+	// a top-up invoiced by hand outside the platform (an external credit): 404, told so
+	external := topUpEntryID(t, orgAddress, stripe.ExternalCreditKeyPrefix+bson.NewObjectID().Hex())
+	outside := requestAndExpectError(t, http.MethodGet, token, nil,
+		"organizations", orgAddress.String(), "wallet", "history", external, "invoice")
+	c.Assert(outside.Code, qt.Equals, errors.ErrWalletInvoiceNotFound.Code)
+	c.Assert(outside.Error(), qt.Contains, "invoiced outside the platform")
+	// a manual credit whose deferred invoice is not issued yet: 404, told so, not told to retry
+	pending := topUpEntryID(t, orgAddress, stripe.ManualCreditKeyPrefix+bson.NewObjectID().Hex())
+	notIssued := requestAndExpectError(t, http.MethodGet, token, nil,
+		"organizations", orgAddress.String(), "wallet", "history", pending, "invoice")
+	c.Assert(notIssued.Code, qt.Equals, errors.ErrWalletInvoiceNotFound.Code)
+	c.Assert(notIssued.Error(), qt.Contains, "has not been issued yet")
+	c.Assert(notIssued.Error(), qt.Not(qt.Contains), "try again")
 
 	stranger := testCreateUser(t, "walletinvoicestr")
 	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodGet, stranger, nil,
