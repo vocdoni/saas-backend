@@ -1,0 +1,45 @@
+{{define "subject"}}
+{{- if eq .State "done"}}{{if .Organization}}{{.L.Subject "subject_done"}}{{else}}{{.L.Subject "subject_done_no_org"}}{{end}}
+{{- else if eq .State "issues"}}{{if .Organization}}{{.L.Subjectn "subject_issues" .ErrorCount}}{{else}}{{.L.Subjectn "subject_issues_no_org" .ErrorCount}}{{end}}
+{{- else}}{{if .Organization}}{{.L.Subject "subject_failed"}}{{else}}{{.L.Subject "subject_failed_no_org"}}{{end}}{{end}}
+{{- end}}
+
+{{define "preheader"}}
+{{- if eq .State "done"}}{{.L.Textn "preheader_done" .Added}}
+{{- else if eq .State "issues"}}{{.L.Textn "preheader_issues" .ErrorCount}}
+{{- else if eq .State "failed"}}{{.L.Text "preheader_failed"}}
+{{- else}}{{.L.Text "preheader_empty"}}{{end}}
+{{- end}}
+
+{{define "plain"}}
+{{- if eq .State "done"}}{{.L.Text "heading_done"}}{{else if eq .State "issues"}}{{.L.Text "heading_issues"}}{{else}}{{.L.Text "heading_failed"}}{{end}}
+
+{{if .UserName}}{{.L.Text "greeting"}}{{else}}{{.L.Text "greeting_no_name"}}{{end}} {{template "intro" .}}
+
+{{.L.Text "label_processed"}}: {{.L.V .Total}}
+{{.L.Text "label_added"}}: {{.L.V .Added}}
+{{.L.Text "label_errors"}}: {{.L.V .ErrorCount}}
+{{.L.Text "label_completed"}}: {{.L.V .CompletedAt}}
+{{if .Issues}}
+{{if .MoreIssues}}{{.L.Text "issues_title_first"}}{{else}}{{.L.Text "issues_title"}}{{end}}
+{{range .Issues}}- {{.}}
+{{end}}{{if .MoreIssues}}{{.L.Textn "more_issues" .MoreIssues}}
+{{end}}{{end}}
+{{if eq .State "issues"}}{{.L.Text "fix_hint"}}
+{{end}}
+{{if .Link}}{{.L.Text "button"}}: {{.Link}}
+{{end}}
+--
+{{.L.Text "footer_why"}}
+{{.L.Text "shared.footer_tagline"}} · {{.Brand.SiteURL}}
+{{.L.Text "shared.footer_help"}} {{.Brand.SupportEmail}}{{end}}
+
+{{define "intro"}}
+{{- if .Organization}}
+{{- if eq .State "done"}}{{.L.Text "intro_done"}}{{else if eq .State "issues"}}{{.L.Text "intro_issues"}}
+{{- else if eq .State "failed"}}{{.L.Text "intro_failed"}}{{else}}{{.L.Text "intro_empty"}}{{end}}
+{{- else}}
+{{- if eq .State "done"}}{{.L.Text "intro_done_no_org"}}{{else if eq .State "issues"}}{{.L.Text "intro_issues_no_org"}}
+{{- else if eq .State "failed"}}{{.L.Text "intro_failed_no_org"}}{{else}}{{.L.Text "intro_empty_no_org"}}{{end}}
+{{- end}}
+{{- end}}

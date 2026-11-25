@@ -136,7 +136,7 @@ func TestNewEmailChallengeSent(t *testing.T) {
 	)
 	c.Assert(err, qt.ErrorIs, ErrCreateNotification)
 	// load email templates
-	c.Assert(mailtemplates.Load(), qt.IsNil)
+	c.Assert(mailtemplates.Load(mailtemplates.DefaultBrand()), qt.IsNil)
 	// invalid notification type
 	_, err = NewNotificationChallenge(
 		"invalid",
@@ -202,7 +202,7 @@ func TestNewSMSChallengeSent(t *testing.T) {
 	c := qt.New(t)
 
 	// load templates
-	c.Assert(mailtemplates.Load(), qt.IsNil)
+	c.Assert(mailtemplates.Load(mailtemplates.DefaultBrand()), qt.IsNil)
 
 	// invalid inputs
 	_, err := NewNotificationChallenge(

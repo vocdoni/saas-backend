@@ -1,0 +1,97 @@
+{{/* Components shared by every email. Colours are the Fil light values; layout.html overrides
+them for dark mode by class. Strings come in as arguments, or from the shared.* keys only. */}}
+
+{{define "wordmark"}}{{/* arg: Brand */}}{{notMsoIf}}<img src="{{.AssetsURL}}/vocdoni-wordmark-black-halo@2x.png" class="logo-light" width="120" height="28" alt="Vocdoni" style="display:block;border:0;">
+<div class="logo-dark" style="display:none;overflow:hidden;mso-hide:all;max-height:0;">
+<img src="{{.AssetsURL}}/vocdoni-wordmark-white@2x.png" width="120" height="26" alt="Vocdoni" style="border:0;"></div>
+{{notMsoEnd}}{{msoIf}}<img src="{{.AssetsURL}}/vocdoni-wordmark-black@2x.png" width="120" height="26" alt="Vocdoni">{{msoEnd}}{{end}}
+
+{{define "header_vocdoni"}}{{/* arg: Brand */}}<td class="sm-px" align="left" style="padding:36px 40px 20px;">
+{{template "wordmark" .}}
+</td>{{end}}
+
+{{define "header_cobrand"}}{{/* arg: the email context; org logo right, hidden in Outlook desktop */}}{{with .L.OrgLogo}}<td class="sm-px" style="padding:36px 40px 20px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+<td align="left" valign="middle">{{template "wordmark" $.Brand}}</td>
+<td align="right" valign="middle">{{notMsoIf}}<table role="presentation" cellpadding="0" cellspacing="0" align="right"><tr>
+<td class="tile" style="background-color:#ffffff;border:1px solid #e5e5e5;border-radius:6px;padding:5px;">
+<img src="{{.}}" height="32" alt="" style="display:block;border:0;border-radius:3px;height:32px;max-width:140px;width:auto;"></td>
+</tr></table>{{notMsoEnd}}</td>
+</tr></table>
+</td>{{else}}{{template "header_vocdoni" $.Brand}}{{end}}{{end}}
+
+{{define "header_org"}}{{/* arg: the OTP context; the organization is the protagonist */}}<td align="center" style="padding:36px 24px 20px;">
+<table role="presentation" cellpadding="0" cellspacing="0" align="center"><tr>
+{{with .L.OrgLogo}}<td class="tile" style="background-color:#ffffff;border:1px solid #e5e5e5;border-radius:6px;padding:6px;">
+{{notMsoIf}}<img src="{{.}}" height="44" alt="" style="display:block;border:0;border-radius:4px;height:44px;max-width:140px;width:auto;">{{notMsoEnd}}</td>{{else}}<td class="tile" width="56" height="56" align="center" valign="middle" style="background-color:#ffffff;border:1px solid #e5e5e5;border-radius:6px;width:56px;height:56px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:22px;line-height:56px;font-weight:600;color:#171717;">{{$.L.Initial $.Organization}}</td>{{end}}
+</tr></table>
+<p class="t1" style="margin:12px 0 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:16px;line-height:22px;font-weight:600;color:#171717;word-break:break-word;">{{.Organization}}</p>
+</td>{{end}}
+
+{{define "heading"}}{{/* arg: HTML */}}<h1 class="t1 sm-h1" style="margin:0 0 14px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:24px;line-height:30px;font-weight:600;letter-spacing:-0.4px;color:#171717;">{{.}}</h1>{{end}}
+
+{{define "para"}}{{/* arg: HTML; body text */}}<p class="t1" style="margin:0 0 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:16px;line-height:24px;color:#171717;">{{.}}</p>{{end}}
+
+{{define "para_small"}}{{/* arg: HTML; secondary text */}}<p class="t2" style="margin:0 0 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;line-height:20px;color:#4d4d4d;">{{.}}</p>{{end}}
+
+{{define "muted"}}{{/* args: Text (HTML), Top (px) */}}<p class="t3" style="margin:{{.Top}}px 0 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;line-height:19px;color:#6b6b6b;">{{.Text}}</p>{{end}}
+
+{{define "code_box"}}{{/* args: Code, Caption (HTML); a read-only field */}}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 24px;">
+<tr><td class="field" align="center" style="background-color:#ffffff;border:1px solid #8f8f8f;border-radius:6px;padding:18px 16px;">
+<span class="code t1 sm-code" style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono','Courier New',monospace;font-size:28px;line-height:36px;letter-spacing:6px;font-weight:600;color:#171717;word-break:break-all;-webkit-user-select:all;user-select:all;">{{.Code}}</span><br>
+<span class="t3" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;line-height:22px;color:#6b6b6b;">{{.Caption}}</span>
+</td></tr></table>{{end}}
+
+{{define "link"}}{{/* args: URL, Text, Brand, Break (bool: let a long URL wrap anywhere) */}}<a class="link" href="{{.URL}}" target="_blank" rel="noopener" style="color:{{.Brand.Accent}};text-decoration:none;font-weight:500;{{if .Break}}word-break:break-all;{{end}}">{{.Text}}</a>{{end}}
+
+{{define "button"}}{{/* args: Label (text), URL, Brand; VML for Outlook desktop */}}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 24px;">
+<tr><td align="left">
+{{msoIf}}<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{.URL}}" style="height:46px;v-text-anchor:middle;width:280px;" arcsize="13%" strokecolor="{{.Brand.Accent}}" fillcolor="{{.Brand.Accent}}">
+<w:anchorlock/>
+<center style="color:{{.Brand.AccentLabel}};font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:600;">{{.Label}}</center>
+</v:roundrect>{{msoEnd}}
+{{notMsoIf}}<table role="presentation" cellpadding="0" cellspacing="0"><tr>
+<td style="background-color:{{.Brand.Accent}};border-radius:6px;">
+<a href="{{.URL}}" target="_blank" rel="noopener" style="display:inline-block;padding:13px 28px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:15px;line-height:20px;font-weight:600;color:{{.Brand.AccentLabel}};text-decoration:none;border-radius:6px;">{{.Label}}</a>
+</td></tr></table>{{notMsoEnd}}
+</td></tr></table>{{end}}
+
+{{define "fallback_link"}}{{/* args: L, URL, Brand */}}<p class="t3" style="margin:0 0 8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;line-height:19px;color:#6b6b6b;">{{.L.HTML "shared.button_fallback"}}<br>{{template "link" (dict "URL" .URL "Text" .URL "Brand" .Brand "Break" true)}}</p>{{end}}
+
+{{define "actions"}}{{/* args: L, Intro (HTML, optional), Label, URL, Brand; nothing at all without a URL */}}{{if .URL}}{{with .Intro}}{{template "para" .}}{{end}}
+{{template "button" .}}
+{{template "fallback_link" .}}{{end}}{{end}}
+
+{{define "kv_start"}}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 24px;">{{end}}
+
+{{define "kv_row"}}{{/* args: Label, Value, Err (bool) */}}<tr><td class="t3 kv" style="padding:11px 12px 11px 0;border-top:1px solid #e5e5e5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;line-height:20px;color:#6b6b6b;">{{.Label}}</td>
+<td class="{{if .Err}}err{{else}}t1{{end}} kv" align="right" style="padding:11px 0;border-top:1px solid #e5e5e5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;line-height:20px;font-weight:600;color:{{if .Err}}#ca2a30{{else}}#171717{{end}};word-break:break-word;">{{.Value}}</td></tr>{{end}}
+
+{{define "kv_end"}}</table>{{end}}
+
+{{define "notice_start"}}{{/* arg: true for an error notice */}}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+<tr>{{if .}}<td class="notice-err" style="background-color:#fff0f0;border:1px solid #efc6c5;border-radius:6px;padding:14px 18px;">{{else}}<td class="inset" style="background-color:#f5f5f5;border:1px solid #e5e5e5;border-radius:6px;padding:14px 18px;">{{end}}{{end}}
+
+{{define "notice_end"}}</td></tr></table>{{end}}
+
+{{define "notice_title"}}{{/* args: Text (HTML), Err (bool) */}}<p class="{{if .Err}}err{{else}}t1{{end}}" style="margin:0 0 6px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;line-height:20px;font-weight:600;color:{{if .Err}}#ca2a30{{else}}#171717{{end}};">{{.Text}}</p>{{end}}
+
+{{define "notice_line"}}{{/* arg: HTML or text; a value from the data */}}<p class="t1" style="margin:0 0 6px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;line-height:20px;color:#171717;word-break:break-word;">{{.}}</p>{{end}}
+
+{{define "notice_note"}}{{/* arg: HTML; a caption inside a notice */}}<p class="t3" style="margin:0 0 6px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;line-height:20px;color:#6b6b6b;">{{.}}</p>{{end}}
+
+{{define "footer_std"}}{{/* args: Why (HTML), L, Brand */}}<td align="left" class="sm-px" style="padding:24px 40px 48px;">
+<p class="t3" style="margin:0 0 8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;line-height:19px;color:#6b6b6b;">{{.Why}}</p>
+<p class="t3" style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;line-height:19px;color:#6b6b6b;">
+{{.L.HTML "shared.footer_tagline"}} · {{template "link" (dict "URL" .Brand.SiteURL "Text" "vocdoni.io" "Brand" .Brand)}}<br>
+{{.L.HTML "shared.footer_help"}} {{template "link" (dict "URL" (printf "mailto:%s" .Brand.SupportEmail) "Text" .Brand.SupportEmail "Brand" .Brand)}}</p>
+</td>{{end}}
+
+{{define "footer_otp"}}{{/* args: Why (HTML), Secured (text), Brand */}}<td align="center" class="sm-px" style="padding:24px 40px 48px;">
+<p class="t3" style="margin:0 0 8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;line-height:19px;color:#6b6b6b;">{{.Why}}</p>
+<p class="t3" style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;line-height:19px;color:#6b6b6b;">{{template "link" (dict "URL" .Brand.SiteURL "Text" .Secured "Brand" .Brand)}}</p>
+</td>{{end}}
+
+{{define "para_pair"}}{{/* args: First, Second (HTML); one body paragraph */}}<p class="t1" style="margin:0 0 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:16px;line-height:24px;color:#171717;">{{.First}} {{.Second}}</p>{{end}}
+
+{{define "notice_lines"}}{{/* arg: []string; keeps the line breaks of untrusted text */}}<p class="t2" style="margin:0 0 6px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;line-height:20px;color:#4d4d4d;word-break:break-word;">{{range $i, $line := .}}{{if $i}}<br>{{end}}{{$line}}{{end}}</p>{{end}}

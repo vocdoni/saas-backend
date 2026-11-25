@@ -1,0 +1,9 @@
+{{define "header"}}{{template "header_org" .}}{{end}}
+
+{{define "content"}}{{template "heading" (.L.HTML "heading")}}
+{{template "para" (.L.HTML "intro")}}
+{{template "code_box" (dict "Code" .Code "Caption" (.L.HTML "expires"))}}
+{{template "para_small" (.L.HTML "enter")}}
+{{template "muted" (dict "Text" (.L.HTML "ignore") "Top" 4)}}{{end}}
+
+{{define "footer"}}{{template "footer_otp" (dict "Why" (.L.HTML "footer_why") "Secured" (.L.Text "footer_secured") "Brand" .Brand)}}{{end}}

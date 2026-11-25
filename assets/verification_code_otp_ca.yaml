@@ -1,3 +1,0 @@
-subject: "Codi de Verificació - {{.Organization}}"
-body: |
-  El teu codi de verificació és: {{.Code}}

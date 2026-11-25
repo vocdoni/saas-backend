@@ -1,0 +1,24 @@
+{{define "subject"}}{{.L.Subject "subject"}}{{end}}
+
+{{define "preheader"}}{{.L.Text "preheader"}}{{end}}
+
+{{define "plain"}}{{.L.Text "heading"}}
+
+{{.L.Text "intro"}}
+
+{{.L.Text "label_title"}}: {{.Title}}
+{{.L.Text "label_type"}}: {{.Type}}
+{{.L.Text "label_user"}}: {{.Email}}
+{{.L.Text "label_org"}}: {{.Organization}}
+
+{{.L.Text "label_description"}}:
+{{.Description}}
+{{if .Truncated}}
+{{.L.Text "truncated"}}
+{{end}}
+{{.L.Text "reassure"}}
+
+--
+{{.L.Text "footer_why"}}
+{{.L.Text "shared.footer_tagline"}} · {{.Brand.SiteURL}}
+{{.L.Text "shared.footer_help"}} {{.Brand.SupportEmail}}{{end}}

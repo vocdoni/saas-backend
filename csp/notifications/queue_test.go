@@ -104,7 +104,7 @@ func TestNotificationChallengeQueue(t *testing.T) {
 	c := qt.New(t)
 	// create a notification without to address to force an error during the
 	// sending (compose fails: a transient, retriable error)
-	c.Assert(mailtemplates.Load(), qt.IsNil)
+	c.Assert(mailtemplates.Load(mailtemplates.DefaultBrand()), qt.IsNil)
 	notification, err := mailtemplates.VerifyOTPCodeNotification.Localized(apicommon.DefaultLang).ExecPlain(struct {
 		Code         string
 		Organization string
@@ -192,7 +192,7 @@ func TestNotificationChallengeQueue(t *testing.T) {
 		queue.Start()
 
 		// templates are already loaded by the parent test; do not call
-		// mailtemplates.Load() here as it races the parallel subtests that read
+		// mailtemplates.Load(mailtemplates.DefaultBrand()) here as it races the parallel subtests that read
 		// the template map concurrently.
 		nc, err := NewNotificationChallenge(EmailChallenge, apicommon.DefaultLang,
 			[]byte("user"), []byte("bundle"), testUserEmail, "123456", testOrgInfo, testRemainingTime)

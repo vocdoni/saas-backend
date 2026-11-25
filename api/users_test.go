@@ -28,7 +28,7 @@ func init() {
 	// create a regex to find the verification code in the email
 	codeRgx := fmt.Sprintf(`(.{%d})`, apicommon.VerificationCodeLength*2)
 	// load the email templates
-	if err := mailtemplates.Load(); err != nil {
+	if err := mailtemplates.Load(mailtemplates.DefaultBrand()); err != nil {
 		panic(err)
 	}
 	// wrap the mail template execution to force plain body and set the regex

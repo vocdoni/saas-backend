@@ -1,0 +1,8 @@
+{{define "header"}}{{template "header_cobrand" .}}{{end}}
+
+{{define "content"}}{{template "heading" (.L.HTML "heading")}}
+{{if .Organization}}{{template "para" (.L.HTML "intro")}}{{else}}{{template "para" (.L.HTML "intro_no_org")}}{{end}}
+{{template "actions" (dict "L" .L "Label" (.L.Text "button") "URL" .Link "Brand" .Brand)}}
+{{template "muted" (dict "Text" (.L.HTML "expires_note") "Top" 8)}}{{end}}
+
+{{define "footer"}}{{template "footer_std" (dict "Why" (.L.HTML "footer_why") "L" .L "Brand" .Brand)}}{{end}}

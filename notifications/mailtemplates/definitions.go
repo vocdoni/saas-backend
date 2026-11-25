@@ -1,57 +1,63 @@
-// Package mailtemplates provides predefined email templates for various notification types
-// such as account verification, password reset, and organization invitations,
-// along with utilities for rendering email content.
+// Package mailtemplates renders the transactional emails: one shared layout and set of
+// components (assets/mail), one content block per email, and the strings of every language in
+// assets/mail/i18n/<lang>.yaml.
 package mailtemplates
 
-// VerifyAccountNotification is the notification to be sent when a user creates
-// an account and needs to verify it.
+// VerifyAccountNotification is sent when a user creates an account and needs to verify it.
 var VerifyAccountNotification = MailTemplate{
 	File:      "verification_account",
 	WebAppURI: "/account/verify",
 }
 
-// VerifyOTPCodeNotification is the notification to be sent when a user wants
-// to login using OTP code.
+// VerifyOTPCodeNotification is the voter's CSP challenge, by email or (plain text) by SMS.
 var VerifyOTPCodeNotification = MailTemplate{
 	File: "verification_code_otp",
 }
 
-// PasswordResetNotification is the notification to be sent when a user requests
-// a password reset.
+// PasswordResetNotification is sent when a user requests a password reset.
 var PasswordResetNotification = MailTemplate{
 	File:      "forgot_password",
 	WebAppURI: "/account/password/reset",
 }
 
-// PasswordSetupNotification is the notification sent when a signed-in account without a password
-// (OAuth-only) asks to add one, with the code that proves it owns the mailbox.
+// PasswordSetupNotification is sent when a signed-in account without a password (OAuth-only)
+// asks to add one, with the code that proves it owns the mailbox.
 var PasswordSetupNotification = MailTemplate{
 	File:      "password_setup",
 	WebAppURI: "/account/password/setup",
 }
 
-// VerifyEmailChangeNotification is the notification sent to the new address
-// when a user asks to change their account email, with the code that confirms it.
+// VerifyEmailChangeNotification is sent to the new address when a user asks to change their
+// account email, with the code that confirms it.
 var VerifyEmailChangeNotification = MailTemplate{
 	File:      "verify_email_change",
 	WebAppURI: "/account/email/verify",
 }
 
-// InviteNotification is the notification to be sent when a user is invited
-// to be an admin of an organization.
+// InviteNotification is sent when a user is invited to administer an organization.
 var InviteNotification = MailTemplate{
 	File:      "invite_admin",
 	WebAppURI: "/account/invite",
 }
 
-// SupportNotification is the notification to be sent when a user creates
-// a new support ticket.
+// SupportNotification is sent to the support desk, with the user in CC, for a new ticket.
 var SupportNotification = MailTemplate{
 	File: "support",
 }
 
-// MembersImportCompletionNotification is the notification to be sent when
-// a members import process is completed.
+// MembersImportCompletionNotification is sent to the admin who ran a members import when it ends.
 var MembersImportCompletionNotification = MailTemplate{
 	File: "members_import_done",
+}
+
+// All lists every email; Load compiles each one.
+var All = []MailTemplate{
+	VerifyAccountNotification,
+	PasswordResetNotification,
+	PasswordSetupNotification,
+	VerifyEmailChangeNotification,
+	InviteNotification,
+	MembersImportCompletionNotification,
+	SupportNotification,
+	VerifyOTPCodeNotification,
 }
