@@ -3481,6 +3481,36 @@ paths:
       summary: Poll the status of an async job
       tags:
       - jobs
+  /mail/assets/{file}:
+    get:
+      description: |-
+        Get one of the Vocdoni logo images the transactional emails link to. Only the images
+        embedded in the service are served; any other name is a 404. Cached for a day and
+        revalidated by ETag.
+      parameters:
+      - description: Image file name, e.g. vocdoni-wordmark-black-halo@2x.png
+        in: path
+        name: file
+        required: true
+        type: string
+      produces:
+      - image/png
+      responses:
+        "200":
+          description: The image
+          schema:
+            type: file
+        "304":
+          description: 'Not modified: If-None-Match matched the ETag'
+          schema:
+            type: string
+        "404":
+          description: No such image
+          schema:
+            type: string
+      summary: Get an email image
+      tags:
+      - mail
   /oauth/login:
     post:
       consumes:

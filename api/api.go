@@ -50,6 +50,9 @@
 //	@tag.name					storage
 //	@tag.description			Object storage operations
 //
+//	@tag.name					mail
+//	@tag.description			Images the transactional emails link to
+//
 //	@tag.name					health
 //	@tag.description			Service health & info
 package api
@@ -585,6 +588,7 @@ func (a *API) initRouter() http.Handler {
 			a.stripeHandlers.HandleWebhook(w, r)
 		})
 		handle(r, http.MethodGet, objectStorageDownloadTypedEndpoint, a.objectStorage.DownloadImageInlineHandler)
+		handle(r, http.MethodGet, mailAssetsEndpoint, mailAssetHandler)
 		handle(r, http.MethodGet, jobStatusEndpoint, a.jobStatusHandler)
 		handle(r, http.MethodPost, voteEndpoint, a.relayVoteHandler)
 		handle(r, http.MethodPost, votesEndpoint, a.relayVotesHandler)
