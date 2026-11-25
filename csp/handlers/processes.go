@@ -180,8 +180,9 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 //	@Description	fails with 40103, whose data.coolDownTime holds the milliseconds left, and spends no
 //	@Description	resend. A code can be sent again at most 3 times, counted across every token sharing
 //	@Description	it and including the re-sends of a repeated step 0. A contact that does not match the
-//	@Description	member spends one of them too, and starts that contact's cooldown. A send that never
-//	@Description	reaches the voter gives back its resend, its cooldown and its daily send.
+//	@Description	member spends one of them too, and starts that contact's cooldown. A send the service
+//	@Description	gives up on before handing it to the email or SMS provider gives back its resend, its
+//	@Description	cooldown and its daily send; one the provider fails keeps them spent.
 //	@Description	For an anonymous census it is refused (400, 40037, "anonymous voting is temporarily unavailable") while the
 //	@Description	service has anonymous voting off.
 //	@Tags			processes

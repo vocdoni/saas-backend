@@ -61,6 +61,9 @@ type NotificationChallenge struct {
 	ExpiresAt time.Time
 	Retries   int
 	Success   bool
+	// Attempted is set once the queue has called a provider for the challenge: a failed send with it
+	// set may still have reached the voter.
+	Attempted bool
 	// SendInfo is the sender's record of this send, carried back untouched on NotificationsSent
 	// so the sender can settle the delivery result.
 	SendInfo any

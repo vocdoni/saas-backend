@@ -5628,8 +5628,9 @@ paths:
         fails with 40103, whose data.coolDownTime holds the milliseconds left, and spends no
         resend. A code can be sent again at most 3 times, counted across every token sharing
         it and including the re-sends of a repeated step 0. A contact that does not match the
-        member spends one of them too, and starts that contact's cooldown. A send that never
-        reaches the voter gives back its resend, its cooldown and its daily send.
+        member spends one of them too, and starts that contact's cooldown. A send the service
+        gives up on before handing it to the email or SMS provider gives back its resend, its
+        cooldown and its daily send; one the provider fails keeps them spent.
         For an anonymous census it is refused (400, 40037, "anonymous voting is temporarily unavailable") while the
         service has anonymous voting off.
       parameters:

@@ -204,12 +204,11 @@ func (c *CSP) settleNotifications() {
 }
 
 // settleNotification accounts for a challenge the queue reports. A delivered one counts against
-// the organization's sent counters. One given up on (expired, permanently failed, no service
-// configured) gives back the claims of its send, so the voter can ask again at once and keeps the
-// daily budget nothing was delivered for.
+// the organization's sent counters. A failed send no provider was called for gives back its claims;
+// one a provider failed keeps them, as the provider may have delivered it before failing.
 func (c *CSP) settleNotification(ch *notifications.NotificationChallenge) {
 	countSentNotification(c.Storage, ch)
-	if ch.Success {
+	if ch.Success || ch.Attempted {
 		return
 	}
 	if send, ok := ch.SendInfo.(*challengeSend); ok {

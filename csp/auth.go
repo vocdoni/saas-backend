@@ -541,8 +541,8 @@ func (*CSP) composeChallenge(code challengeCode, delivery challengeDelivery,
 }
 
 // pushChallengeCode pushes the message of send to the queue, which carries send back with the
-// delivery result so a delivery given up on gives back its claims (settleNotification). When the
-// message never reached the queue, it gives them back itself and queued is false. A synchronous
+// delivery result so a send no provider was called for gives back its claims (settleNotification).
+// When the message never reached the queue, it gives them back itself and queued is false. A synchronous
 // delivery that timed out is still queued and keeps them for the queue result to settle.
 func (c *CSP) pushChallengeCode(send *challengeSend) (queued bool, err error) {
 	send.ch.SendInfo = send
@@ -561,7 +561,7 @@ func (c *CSP) pushChallengeCode(send *challengeSend) (queued bool, err error) {
 	return false, ErrNotificationFailure
 }
 
-// rollbackSend gives back the claims of a send that never reached the voter: the send on the
+// rollbackSend gives back the claims of a send no provider was called for: the send on the
 // challenge, unless a later send replaced it, and the daily-cap unit, always, as nothing was
 // delivered for it.
 func (c *CSP) rollbackSend(send *challengeSend) {
@@ -596,8 +596,8 @@ func (c *CSP) claimDailyChallengeSend(uID, anchorID internal.HexBytes) (db.CSPCo
 	return res.Claim, nil
 }
 
-// releaseChallengeSend gives back a claimDailyChallengeSend unit for a send that delivered
-// nothing. A nil claim is a no-op. Storage errors are logged: at worst the member loses one unit
+// releaseChallengeSend gives back a claimDailyChallengeSend unit for a send no provider was called
+// for. A nil claim is a no-op. Storage errors are logged: at worst the member loses one unit
 // of today's budget.
 func (c *CSP) releaseChallengeSend(claim db.CSPCounterClaim) {
 	if err := c.Storage.ReleaseCSPCounter(claim); err != nil {

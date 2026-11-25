@@ -2,6 +2,7 @@ package csp
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -79,13 +80,60 @@ func TestDestinationKey(t *testing.T) {
 		DestinationKey(notifications.SMSChallenge, "+34600000002"))
 }
 
-// TestChallengeSendRollback checks that a send that never reached the voter gives back its claim on
-// the destination, its resend and its daily-cap unit (AC2).
+// rejectingMailService is a mail provider that rejects every message permanently, so the queue
+// gives up after a single provider call.
+type rejectingMailService struct{}
+
+func (rejectingMailService) New(any) error { return nil }
+
+func (rejectingMailService) SendNotification(context.Context, *saasNotifications.Notification) error {
+	return &saasNotifications.PermanentError{Err: fmt.Errorf("mailbox unavailable")}
+}
+
+// newRejectingCSP returns a CSP whose mail provider rejects every message and that has no SMS
+// service, with one queue worker so results are settled in the order the sends were pushed.
+func newRejectingCSP(c *qt.C, daily int) *CSP {
+	c.Helper()
+	testDB, err := db.New(testMongoURI, test.RandomDatabaseName())
+	c.Assert(err, qt.IsNil)
+	csp, err := New(context.Background(), &Config{
+		DB:                       testDB,
+		MailService:              rejectingMailService{},
+		NotificationCoolDownTime: time.Hour,
+		NotificationTTL:          time.Hour,
+		NotificationQueueWorkers: 1,
+		MaxDailyChallengeSends:   daily,
+		RootKey:                  *testRootKey,
+		SyncDelivery:             true,
+	})
+	c.Assert(err, qt.IsNil)
+	return csp
+}
+
+// waitSettled waits until every send csp pushed so far has been settled. It pushes an SMS for
+// another member, which no provider is called for, and waits for its rollback: with one worker
+// the queue settles results in push order.
+func waitSettled(c *qt.C, csp *CSP) {
+	c.Helper()
+	markerUser := internal.HexBytes(fmt.Sprintf("marker-%d", time.Now().UnixNano()))
+	marker, err := csp.AuthToken(testAnchorID, markerUser, "+34600000099", notifications.SMSChallenge,
+		apicommon.DefaultLang, testOrgName, testOrgLogo, testAddress.Address())
+	c.Assert(err, qt.IsNil)
+	eventually(c, func() bool {
+		data, err := csp.Storage.CSPAuth(marker)
+		c.Assert(err, qt.IsNil)
+		return len(data.Sends) == 0
+	})
+}
+
+// TestChallengeSendRollback checks that a send no provider was called for gives back its claim on
+// the destination, its resend and its daily-cap unit, while one a provider failed keeps them, as
+// it may have been delivered (AC2).
 func TestChallengeSendRollback(t *testing.T) {
 	c := qt.New(t)
 
-	c.Run("async delivery failure", func(c *qt.C) {
-		// no mail service: the queue gives every email up and reports Success=false
+	c.Run("async give-up before any provider call", func(c *qt.C) {
+		// no mail service: the queue gives every email up without a provider call
 		csp := newChallengeCSP(c, time.Hour, nil, 1)
 		const email = "rollback-async@example.com"
 		first, err := stepZero(csp, email, notifications.EmailChallenge)
@@ -103,6 +151,33 @@ func TestChallengeSendRollback(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(second, qt.Not(qt.DeepEquals), first)
 		eventually(c, settled)
+	})
+
+	c.Run("provider failure keeps the send", func(c *qt.C) {
+		csp := newRejectingCSP(c, 1)
+		const email = "provider-fail@example.com"
+		token, err := stepZero(csp, email, notifications.EmailChallenge)
+		c.Assert(err, qt.IsNil)
+		waitSettled(c, csp)
+		data, err := csp.Storage.CSPAuth(token)
+		c.Assert(err, qt.IsNil)
+		_, ok := data.Sends[DestinationKey(notifications.EmailChallenge, email)]
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(dailySendsLeft(c, csp, 1), qt.IsFalse)
+	})
+
+	c.Run("resend the provider fails keeps its resend", func(c *qt.C) {
+		csp := newRejectingCSP(c, 2)
+		const emailA, emailB = "provider-fail-a@example.com", "provider-fail-b@example.com"
+		token, err := stepZero(csp, emailA, notifications.EmailChallenge)
+		c.Assert(err, qt.IsNil)
+		c.Assert(resendTo(csp, token, emailB, notifications.EmailChallenge), qt.IsNil)
+		waitSettled(c, csp)
+		data, err := csp.Storage.CSPAuth(token)
+		c.Assert(err, qt.IsNil)
+		c.Assert(data.Resends, qt.Equals, 1)
+		c.Assert(data.Sends, qt.HasLen, 2)
+		c.Assert(dailySendsLeft(c, csp, 2), qt.IsFalse)
 	})
 
 	c.Run("resend whose message cannot be built", func(c *qt.C) {
