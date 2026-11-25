@@ -23,7 +23,8 @@ date:
     "octobre", "novembre", "décembre"]
 
 number:
-  group: " "
+  group: " "
+  min_grouping: "1"
 
 verification_account:
   subject: "Vérifiez votre compte Vocdoni"
@@ -140,7 +141,7 @@ support:
   label_user: "Utilisateur"
   label_org: "Organisation"
   label_description: "Description"
-  truncated: "Description tronquée à 1 200 caractères; le texte complet est dans le ticket."
+  truncated: "Description tronquée à {{.DescriptionLimit}} caractères; le texte complet est dans le ticket."
   reassure: "Si vous avez ouvert cette demande, vous n'avez rien d'autre à faire: nous vous répondrons dans ce même fil dès que possible."
   footer_why: "Ce ticket a été créé depuis le formulaire d'assistance de Vocdoni App."
 

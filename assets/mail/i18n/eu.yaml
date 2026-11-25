@@ -24,6 +24,7 @@ date:
 
 number:
   group: "."
+  min_grouping: "1"
 
 verification_account:
   subject: "Egiaztatu zure Vocdoni kontua"
@@ -140,7 +141,7 @@ support:
   label_user: "Erabiltzailea"
   label_org: "Erakundea"
   label_description: "Deskribapena"
-  truncated: "Deskribapena 1.200 karakteretan moztuta; testu osoa txartelean dago."
+  truncated: "Deskribapena {{.DescriptionLimit}} karakteretan moztuta; testu osoa txartelean dago."
   reassure: "Eskaera hau zuk ireki baduzu, ez duzu beste ezer egin beharrik: ahalik eta lasterren erantzungo dizugu hari honetan bertan."
   footer_why: "Txartel hau Vocdoni App-eko laguntza-formularioaren bidez sortu da."
 

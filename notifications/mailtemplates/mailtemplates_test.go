@@ -221,6 +221,112 @@ func TestCodeEmailsPlainText(t *testing.T) {
 	}
 }
 
+// TestNumberFormatting verifies that each locale formats numbers the same way ICU does, including
+// the minimum-grouping-digits rule (es/it/pt do not group four-digit numbers) and that fr/pt use
+// U+00A0 (no-break space) rather than a plain ASCII space as the thousands separator.
+func TestNumberFormatting(t *testing.T) {
+	c := qt.New(t)
+	st := loaded.Load()
+	f := func(lang string) formatter {
+		return formatter{loc: st.locales[lang], en: st.locales["en"], zone: st.zone}
+	}
+	// nbsp is U+00A0; plain ASCII space must never appear as a group separator in any locale.
+	const nbsp = " "
+	for _, tc := range []struct {
+		lang string
+		n    int64
+		want string
+	}{
+		// seven: never grouped in any locale
+		{"ca", 7, "7"},
+		{"de", 7, "7"},
+		{"el", 7, "7"},
+		{"en", 7, "7"},
+		{"es", 7, "7"},
+		{"eu", 7, "7"},
+		{"fr", 7, "7"},
+		{"it", 7, "7"},
+		{"pt-br", 7, "7"},
+		{"pt", 7, "7"},
+		// 1248: grouped with min_grouping=1 (ca/de/el/en/eu/fr/pt-br), ungrouped with 2 (es/it/pt)
+		{"ca", 1248, "1.248"},
+		{"de", 1248, "1.248"},
+		{"el", 1248, "1.248"},
+		{"en", 1248, "1,248"},
+		{"eu", 1248, "1.248"},
+		{"pt-br", 1248, "1.248"},
+		{"fr", 1248, "1" + nbsp + "248"},
+		{"es", 1248, "1248"},
+		{"it", 1248, "1248"},
+		{"pt", 1248, "1248"},
+		// 12480: grouped in all locales (5 digits >= threshold for every min_grouping)
+		{"ca", 12480, "12.480"},
+		{"de", 12480, "12.480"},
+		{"el", 12480, "12.480"},
+		{"en", 12480, "12,480"},
+		{"eu", 12480, "12.480"},
+		{"pt-br", 12480, "12.480"},
+		{"fr", 12480, "12" + nbsp + "480"},
+		{"es", 12480, "12.480"},
+		{"it", 12480, "12.480"},
+		{"pt", 12480, "12" + nbsp + "480"},
+		// 1234567: grouped in all locales
+		{"ca", 1234567, "1.234.567"},
+		{"de", 1234567, "1.234.567"},
+		{"el", 1234567, "1.234.567"},
+		{"en", 1234567, "1,234,567"},
+		{"eu", 1234567, "1.234.567"},
+		{"pt-br", 1234567, "1.234.567"},
+		{"fr", 1234567, "1" + nbsp + "234" + nbsp + "567"},
+		{"es", 1234567, "1.234.567"},
+		{"it", 1234567, "1.234.567"},
+		{"pt", 1234567, "1" + nbsp + "234" + nbsp + "567"},
+	} {
+		got, err := f(tc.lang).number(tc.n)
+		c.Assert(err, qt.IsNil, qt.Commentf("%s %d", tc.lang, tc.n))
+		c.Assert(got, qt.Equals, tc.want, qt.Commentf("%s %d", tc.lang, tc.n))
+	}
+}
+
+// TestNoPlainSpaceGroupSeparator ensures no locale uses a plain ASCII space as number.group,
+// which would allow numbers to wrap at the separator in email clients.
+func TestNoPlainSpaceGroupSeparator(t *testing.T) {
+	c := qt.New(t)
+	st := loaded.Load()
+	for _, lang := range apicommon.SupportedLangs {
+		loc := st.locales[lang]
+		e, ok := loc.entries["number.group"]
+		if !ok {
+			continue // falls back to English ","
+		}
+		c.Assert(strings.Contains(e.raw, " "), qt.IsFalse,
+			qt.Commentf("%s number.group %q contains a plain ASCII space", lang, e.raw))
+	}
+}
+
+// TestSupportTruncatedLimit verifies that the rendered support email shows the formatted
+// description limit for English ("1,200") and Spanish ("1200", no grouping for 4 digits).
+func TestSupportTruncatedLimit(t *testing.T) {
+	c := qt.New(t)
+	var truncatedFx Fixture
+	for _, fx := range Fixtures() {
+		if fx.Name == "support_longdesc" {
+			truncatedFx = fx
+		}
+	}
+	c.Assert(truncatedFx.Name, qt.Equals, "support_longdesc")
+
+	for _, tc := range []struct{ lang, want string }{
+		{"en", "1,200"},
+		{"es", "1200"},
+	} {
+		n, err := truncatedFx.Template.Localized(tc.lang).ExecTemplate(truncatedFx.Data)
+		c.Assert(err, qt.IsNil, qt.Commentf("%s", tc.lang))
+		c.Assert(n.Body, qt.Contains, tc.want, qt.Commentf("%s body should contain %q", tc.lang, tc.want))
+		c.Assert(n.PlainBody, qt.Contains, tc.want, qt.Commentf("%s plain should contain %q", tc.lang, tc.want))
+	}
+}
+
 func TestLocalizedFallsBack(t *testing.T) {
 	c := qt.New(t)
 	for _, lang := range []string{"", "xx", "EN", "pt_BR"} {

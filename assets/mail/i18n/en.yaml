@@ -26,6 +26,7 @@ date:
 
 number:
   group: ","
+  min_grouping: "1"
 
 verification_account:
   subject: "Verify your Vocdoni account"
@@ -142,7 +143,7 @@ support:
   label_user: "User"
   label_org: "Organization"
   label_description: "Description"
-  truncated: "Description cut at 1,200 characters; the full text is on the ticket."
+  truncated: "Description cut at {{.DescriptionLimit}} characters; the full text is on the ticket."
   reassure: "If you opened this request, there's nothing else to do: we'll reply in this same thread as soon as we can."
   footer_why: "This ticket was created from the Vocdoni App support form."
 

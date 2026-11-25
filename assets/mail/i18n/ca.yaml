@@ -25,6 +25,7 @@ date:
 
 number:
   group: "."
+  min_grouping: "1"
 
 verification_account:
   subject: "Verifica el teu compte de Vocdoni"
@@ -141,7 +142,7 @@ support:
   label_user: "Usuari"
   label_org: "Organització"
   label_description: "Descripció"
-  truncated: "Descripció retallada a 1.200 caràcters; el text complet queda al tiquet."
+  truncated: "Descripció retallada a {{.DescriptionLimit}} caràcters; el text complet queda al tiquet."
   reassure: "Si has obert tu aquesta sol·licitud, no cal que facis res més: et respondrem en aquest mateix fil tan aviat com puguem."
   footer_why: "Aquest tiquet s’ha creat des del formulari de suport de la Vocdoni App."
 

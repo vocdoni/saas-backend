@@ -24,6 +24,7 @@ date:
 
 number:
   group: "."
+  min_grouping: "2"
 
 verification_account:
   subject: "Verifica tu cuenta de Vocdoni"
@@ -140,7 +141,7 @@ support:
   label_user: "Usuario"
   label_org: "Organización"
   label_description: "Descripción"
-  truncated: "Descripción recortada a 1.200 caracteres; el texto completo queda en el tique."
+  truncated: "Descripción recortada a {{.DescriptionLimit}} caracteres; el texto completo queda en el tique."
   reassure: "Si has abierto tú esta solicitud, no tienes que hacer nada más: te responderemos en este mismo hilo lo antes posible."
   footer_why: "Este tique se ha creado desde el formulario de soporte de Vocdoni App."
 

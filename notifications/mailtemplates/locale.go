@@ -216,20 +216,32 @@ func (f formatter) date(t time.Time) (string, error) {
 	}))
 }
 
-// number writes n with the locale's thousands separator (number.group).
+// number writes n with the locale's thousands separator (number.group), applying grouping only
+// when the digit count is at least 3+minGrouping (number.min_grouping). With minGrouping=1 a
+// four-digit number like 1248 is grouped; with minGrouping=2 it is not, and five digits are
+// needed (12480 → "12.480").
 func (f formatter) number(n int64) (string, error) {
 	group, err := f.lookup("number.group")
 	if err != nil {
 		return "", err
+	}
+	minGroupEntry, err := f.lookup("number.min_grouping")
+	if err != nil {
+		return "", err
+	}
+	minGroup, err := strconv.Atoi(minGroupEntry.raw)
+	if err != nil || minGroup < 1 {
+		return "", fmt.Errorf("number.min_grouping: expected a positive integer, got %q", minGroupEntry.raw)
 	}
 	digits := strconv.FormatInt(n, 10)
 	sign := ""
 	if n < 0 {
 		sign, digits = "-", digits[1:]
 	}
+	applyGrouping := len(digits) >= 3+minGroup
 	var out strings.Builder
 	for i, d := range digits {
-		if i > 0 && (len(digits)-i)%3 == 0 {
+		if applyGrouping && i > 0 && (len(digits)-i)%3 == 0 {
 			out.WriteString(group.raw)
 		}
 		out.WriteString(string(d))

@@ -15,24 +15,26 @@ const (
 
 // SupportData is the data of support.
 type SupportData struct {
-	Type         string
-	Title        string
-	Description  string // at most SupportDescriptionMaxRunes, see NewSupportData
-	Truncated    bool   // the description was cut
-	Email        string
-	Organization string
+	Type             string
+	Title            string
+	Description      string // at most SupportDescriptionMaxRunes, see NewSupportData
+	Truncated        bool   // the description was cut
+	Email            string
+	Organization     string
+	DescriptionLimit int // always SupportDescriptionMaxRunes; used by support.truncated
 }
 
 // NewSupportData caps the description, keeping its line breaks.
 func NewSupportData(ticketType, title, description, email, organization string) SupportData {
 	cut := Truncate(description, SupportDescriptionMaxRunes)
 	return SupportData{
-		Type:         ticketType,
-		Title:        title,
-		Description:  cut,
-		Truncated:    cut != description,
-		Email:        email,
-		Organization: organization,
+		Type:             ticketType,
+		Title:            title,
+		Description:      cut,
+		Truncated:        cut != description,
+		Email:            email,
+		Organization:     organization,
+		DescriptionLimit: SupportDescriptionMaxRunes,
 	}
 }
 

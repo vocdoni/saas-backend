@@ -24,6 +24,7 @@ date:
 
 number:
   group: "."
+  min_grouping: "1"
 
 verification_account:
   subject: "Bestätige dein Vocdoni-Konto"
@@ -140,7 +141,7 @@ support:
   label_user: "Benutzer"
   label_org: "Organisation"
   label_description: "Beschreibung"
-  truncated: "Beschreibung nach 1.200 Zeichen abgeschnitten; der vollständige Text ist im Ticket."
+  truncated: "Beschreibung nach {{.DescriptionLimit}} Zeichen abgeschnitten; der vollständige Text ist im Ticket."
   reassure: "Falls du diese Anfrage gestellt hast, musst du nichts weiter tun: wir antworten sobald wie möglich in diesem Thread."
   footer_why: "Dieses Ticket wurde über das Support-Formular von Vocdoni App erstellt."
 

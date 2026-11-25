@@ -24,6 +24,7 @@ date:
 
 number:
   group: "."
+  min_grouping: "2"
 
 verification_account:
   subject: "Verifica il tuo account Vocdoni"
@@ -140,7 +141,7 @@ support:
   label_user: "Utente"
   label_org: "Organizzazione"
   label_description: "Descrizione"
-  truncated: "Descrizione troncata a 1.200 caratteri; il testo completo è nel ticket."
+  truncated: "Descrizione troncata a {{.DescriptionLimit}} caratteri; il testo completo è nel ticket."
   reassure: "Se hai aperto tu questa richiesta, non devi fare nient'altro: ti risponderemo in questo stesso thread il prima possibile."
   footer_why: "Questo ticket è stato creato dal modulo di assistenza di Vocdoni App."
 
