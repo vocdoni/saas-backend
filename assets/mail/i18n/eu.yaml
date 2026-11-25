@@ -1,1 +1,160 @@
-# eu: pending translation from en.yaml (task 6); missing keys fall back to English.
+# Euskara: ingelesatik itzulia, oraindik jatorrizko hiztunek berrikusteke.
+
+shared:
+  button_fallback: "Botoia ez bada funtzionatzen, kopiatu eta itsatsi esteka hau zure arakatzailean:"
+  code_expires: "{{.Expiry}} barru iraungiko da"
+  footer_tagline: "Vocdoni, bozka digital segurua eta egiaztagarria"
+  footer_help: "Laguntza behar al duzu? Idatzi helbide honetara:"
+
+duration:
+  minute:
+    one: "minutu 1"
+    other: "{{.N}} minutu"
+  hour:
+    one: "ordu 1"
+    other: "{{.N}} ordu"
+  day:
+    one: "egun 1"
+    other: "{{.N}} egun"
+
+date:
+  format: "{{.Year}}ko {{.Month}} {{.Day}}a"
+  months: ["urtarrilaren", "otsailaren", "martxoaren", "apirilaren", "maiatzaren", "ekainaren",
+    "uztailaren", "abuztuaren", "irailaren", "urriaren", "azaroaren", "abenduaren"]
+
+number:
+  group: "."
+
+verification_account:
+  subject: "Egiaztatu zure Vocdoni kontua"
+  preheader: "Erabili {{.Code}} kodea zure kontua aktibatzeko. {{.Expiry}} barru iraungiko da."
+  heading: "Berretsi zure helbide elektronikoa"
+  intro: "Eskerrik asko Vocdoni kontu bat sortzeagatik. Erabili kode hau zure helbidea egiaztatzeko:"
+  or_button: "Edo egiaztatu zure kontua klik batez:"
+  button: "Kontua egiaztatu"
+  ignore: "Vocdoni konturik sortu ez baduzu, mezu elektroniko hau lasai alde batera utzi dezakezu."
+  footer_why: "Mezu elektroniko hau jasotzen duzu norbaitek helbide hau Vocdoni-n erregistratu duelako."
+  plain_code: "Zure Vocdoni egiaztapen-kodea: {{.Code}}"
+  plain_link: "Edo egiaztatu zure kontua esteka honekin:"
+
+forgot_password:
+  subject: "Berrezarri zure Vocdoni pasahitza"
+  preheader: "Zure pasahitza berrezartzeko kodea {{.Expiry}} barru iraungiko da."
+  heading: "Berrezarri pasahitza"
+  intro: "Eskaria jaso dugu *{{.Email}}* helbidearekin lotutako Vocdoni kontuaren pasahitza aldatzeko. Erabili kode hau:"
+  or_button: "Edo berrezarri hemen bertan:"
+  button: "Berrezarri pasahitza"
+  ignore: "Hori eskatu ez baduzu, mezu elektroniko hau alde batera utzi dezakezu: uneko pasahitzak funtzionatzen jarraituko du."
+  footer_why: "Mezu elektroniko hau jasotzen duzu helbide honentzat pasahitz berrezartzeko eskaria egin delako."
+  plain_code: "Zure Vocdoni pasahitz berrezartzeko kodea: {{.Code}}"
+  plain_link: "Edo berrezarri esteka honekin:"
+
+password_setup:
+  subject: "Gehitu pasahitza zure Vocdoni kontuari"
+  preheader: "Berretsi {{.Code}} kodearekin. {{.Expiry}} barru iraungiko da."
+  heading: "Gehitu pasahitza"
+  intro: "Pasahitz bat gehitzeko eskaria egin duzu zure Vocdoni kontuari, non orain kanpoko hornitzaile batekin hasten duzun saioa. Berretsi kode honekin:"
+  or_button: "Edo ezarri hemen bertan:"
+  button: "Ezarri pasahitza"
+  ignore: "Hori eskatu ez baduzu, mezu elektroniko hau alde batera utzi dezakezu: ez da pasahitzik sortuko eta ohiko moduan sartuko zara."
+  footer_why: "Mezu elektroniko hau jasotzen duzu helbide honen kontuan pasahitz bat gehitzeko eskaria egin delako."
+  plain_code: "Zure Vocdoni pasahitz konfigurazio-kodea: {{.Code}}"
+  plain_link: "Edo ezarri esteka honekin:"
+
+verify_email_change:
+  subject: "Berretsi zure helbide elektroniko berria"
+  preheader: "Berretsi aldaketa {{.Code}} kodearekin. {{.Expiry}} barru iraungiko da."
+  heading: "Berretsi helbide berria"
+  intro: "Eskaria egin duzu zure Vocdoni kontuak helbide hau (*{{.Email}}*) erabiltzeko. Berretsi kode honekin:"
+  or_button: "Edo berretsi klik batez:"
+  button: "Berretsi helbidea"
+  ignore: "Zu ez bazinen, mezu elektroniko hau alde batera utzi dezakezu: kontuak oraingo helbidearekin jarraituko du."
+  footer_why: "Mezu elektroniko hau jasotzen duzu norbaitek helbide hau Vocdoni kontu baten helbide elektronikotzat adierazi duelako."
+  plain_code: "Zure helbide elektroniko berria baieztatzeko kodea: {{.Code}}"
+  plain_link: "Edo berretsi esteka honekin:"
+
+invite_admin:
+  subject: "{{.Organization}} kudeatzen parte hartzera gonbidatu zaituzte"
+  subject_no_org: "Vocdoni App-en erakunde bat kudeatzen parte hartzera gonbidatu zaituzte"
+  preheader: "Onartu gonbidapena taldeari bat egiteko. {{.Expiry}} barru iraungiko da."
+  heading: "Gonbidapena duzu"
+  intro: "*{{.Organization}}* erakundearen administrazio-taldean parte hartzera gonbidatu zaituzte Vocdoni App-en. Kideak, botazio-prozesuak eta emaitzak kudeatu ahal izango dituzu."
+  intro_no_org: "Vocdoni App-en erakunde baten administrazio-taldean parte hartzera gonbidatu zaituzte. Kideak, botazio-prozesuak eta emaitzak kudeatu ahal izango dituzu."
+  button: "Onartu gonbidapena"
+  expires_note: "Gonbidapena {{.Expiry}} barru iraungiko da. Ez bazinen espero, mezu elektroniko hau alde batera utzi dezakezu."
+  footer_why: "Mezu elektroniko hau jasotzen duzu Vocdoni App-eko erakunde batek helbide hau gonbidatu duelako."
+  plain_link: "Onartu gonbidapena esteka honekin:"
+
+members_import_done:
+  subject_done: "Kideen inportazioa amaituta: {{.Organization}}"
+  subject_done_no_org: "Kideen inportazioa amaituta"
+  subject_issues:
+    one: "Inportazioa amaitu da akats batekin: {{.Organization}}"
+    other: "Inportazioa amaitu da {{.ErrorCount}} akatekin: {{.Organization}}"
+  subject_issues_no_org:
+    one: "Inportazioa amaitu da akats batekin"
+    other: "Inportazioa amaitu da {{.ErrorCount}} akatekin"
+  subject_failed: "Ezin izan da kideen inportazioa osatu: {{.Organization}}"
+  subject_failed_no_org: "Ezin izan da kideen inportazioa osatu"
+  preheader_done:
+    one: "Kide bat gehitu da."
+    other: "{{.Added}} kide gehitu dira."
+  preheader_issues:
+    one: "1 errenkada berrikusteko."
+    other: "{{.ErrorCount}} errenkada berrikusteko."
+  preheader_failed: "Ezin izan da erregistrorik gehitu; egiaztatu fitxategiaren formatua."
+  preheader_empty: "Fitxategian ez zegoen errenkadik eta ez da erregistrorik gehitu."
+  heading_done: "Inportazioa amaituta"
+  heading_issues: "Inportazioa amaituta akatekin"
+  heading_failed: "Ezin izan da kideen inportazioa osatu"
+  greeting: "Kaixo, {{.UserName}}."
+  greeting_no_name: "Kaixo."
+  intro_done: "Dena ondo joan da! *{{.Organization}}* erakundeko kideen inportazioa amaituta dago eta errenkada guztiak gehitu dira."
+  intro_done_no_org: "Dena ondo joan da! Kideen inportazioa amaituta dago eta errenkada guztiak gehitu dira."
+  intro_issues: "*{{.Organization}}* erakundeko kideen inportazioa amaituta dago, baina errenkada batzuk ezin izan dira inportatu."
+  intro_issues_no_org: "Kideen inportazioa amaituta dago, baina errenkada batzuk ezin izan dira inportatu."
+  intro_failed: "*{{.Organization}}* erakundeko kideen inportazioa amaituta dago, baina ezin izan da erregistrorik gehitu. Egiaztatu fitxategiak txantiloia betetzen duela eta saiatu berriro."
+  intro_failed_no_org: "Kideen inportazioa amaituta dago, baina ezin izan da erregistrorik gehitu. Egiaztatu fitxategiak txantiloia betetzen duela eta saiatu berriro."
+  intro_empty: "*{{.Organization}}* erakundeko kideen inportazioa amaituta dago, baina fitxategian ez zegoen errenkadik eta ez da erregistrorik gehitu."
+  intro_empty_no_org: "Kideen inportazioa amaituta dago, baina fitxategian ez zegoen errenkadik eta ez da erregistrorik gehitu."
+  label_processed: "Prozesatutako kideak"
+  label_added: "Gehitutakoak"
+  label_errors: "Akatak"
+  label_completed: "Amaituta"
+  issues_title: "Berrikusteko errenkadak"
+  issues_title_first: "Lehenengo berrikusteko errenkadak"
+  more_issues:
+    one: "eta akats bat gehiago"
+    other: "eta {{.MoreIssues}} akats gehiago"
+  fix_hint: "Zuzendu errenkada hauek fitxategian eta inportatu berriro; gainontzekoak kideen oinarrian daude dagoeneko."
+  button: "Berrikusi kideen oinarria"
+  footer_why: "Mezu elektroniko hau jasotzen duzu Vocdoni App-en erakunde hau kudeatzen duzulako."
+
+support:
+  subject: "Txartel berria · {{.Type}} · {{.Title}}"
+  preheader: "{{.Email}} ({{.Organization}}) helbidetik."
+  heading: "Laguntza-eskaera berria"
+  intro: "Txartel bat ireki da Vocdoni App-etik. Eskatzailea kopia batean dago eta erantzunak hari honetan jasoko ditu."
+  label_title: "Izenburua"
+  label_type: "Mota"
+  label_user: "Erabiltzailea"
+  label_org: "Erakundea"
+  label_description: "Deskribapena"
+  truncated: "Deskribapena 1.200 karakteretan moztuta; testu osoa txartelean dago."
+  reassure: "Eskaera hau zuk ireki baduzu, ez duzu beste ezer egin beharrik: ahalik eta lasterren erantzungo dizugu hari honetan bertan."
+  footer_why: "Txartel hau Vocdoni App-eko laguntza-formularioaren bidez sortu da."
+
+verification_code_otp:
+  subject: "Botatzeko zure kodea: {{.Organization}}"
+  preheader: "Egiaztapen-kodea {{.Code}}. {{.ExpiryTime}} barru iraungiko da."
+  heading: "Botatzeko zure kodea"
+  intro: "*{{.Organization}}* erakundeak kode hau bidali dizu bozkatu aurretik zure nortasuna egiaztatzeko:"
+  expires: "{{.ExpiryTime}} barru iraungiko da"
+  enter: "Sartu bozkatzeko orrian jarraitzeko."
+  ignore: "Ez bazinen espero kode hau, mezu hau alde batera utzi dezakezu: inork ezin du zure izenean bozkatu kode hau gabe."
+  footer_why: "Mezu hau jasotzen duzu {{.Organization}} erakundeak helbide hau erabiltzen duelako bozkatu aurretik zure nortasuna egiaztatzeko."
+  footer_secured: "Bozketa Vocdoni-ren bidez babestuta"
+  # also the SMS: one line, at most 64 characters rendered with a 6-digit code and "15 minutu"
+  # (70 minus the "[STG] " label, one UCS-2 segment); it names no organization; no ? ( ) [ ] + * | ^ $
+  # (tests read it as a regular expression)
+  sms: "Botatzeko kodea: {{.Code}}. {{.ExpiryTime}} barru iraungiko da."

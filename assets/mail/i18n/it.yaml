@@ -1,1 +1,160 @@
-# it: pending translation from en.yaml (task 6); missing keys fall back to English.
+# Italiano: tradotto dall'inglese, in attesa di revisione da parte di madrelingua.
+
+shared:
+  button_fallback: "Se il pulsante non funziona, copia e incolla questo link nel tuo browser:"
+  code_expires: "Scade in {{.Expiry}}"
+  footer_tagline: "Vocdoni, voto digitale sicuro e verificabile"
+  footer_help: "Hai bisogno di aiuto? Scrivi a"
+
+duration:
+  minute:
+    one: "1 minuto"
+    other: "{{.N}} minuti"
+  hour:
+    one: "1 ora"
+    other: "{{.N}} ore"
+  day:
+    one: "1 giorno"
+    other: "{{.N}} giorni"
+
+date:
+  format: "{{.Day}} {{.Month}} {{.Year}}"
+  months: ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto",
+    "settembre", "ottobre", "novembre", "dicembre"]
+
+number:
+  group: "."
+
+verification_account:
+  subject: "Verifica il tuo account Vocdoni"
+  preheader: "Usa il codice {{.Code}} per attivare il tuo account. Scade in {{.Expiry}}."
+  heading: "Conferma il tuo indirizzo email"
+  intro: "Grazie per aver creato un account Vocdoni. Usa questo codice per verificare il tuo indirizzo:"
+  or_button: "Oppure verifica il tuo account con un clic:"
+  button: "Verifica account"
+  ignore: "Se non hai creato un account Vocdoni, puoi ignorare questa email."
+  footer_why: "Ricevi questa email perché qualcuno ha registrato questo indirizzo su Vocdoni."
+  plain_code: "Il tuo codice di verifica Vocdoni è: {{.Code}}"
+  plain_link: "Oppure verifica il tuo account con questo link:"
+
+forgot_password:
+  subject: "Reimposta la tua password Vocdoni"
+  preheader: "Il tuo codice per reimpostare la password scade in {{.Expiry}}."
+  heading: "Reimposta la password"
+  intro: "Abbiamo ricevuto una richiesta di reimpostazione della password dell'account Vocdoni associato a *{{.Email}}*. Usa questo codice:"
+  or_button: "Oppure reimpostala direttamente qui:"
+  button: "Reimposta la password"
+  ignore: "Se non hai fatto questa richiesta, puoi ignorare questa email: la tua password attuale continuerà a funzionare."
+  footer_why: "Ricevi questa email perché è stata richiesta la reimpostazione della password per questo indirizzo."
+  plain_code: "Il tuo codice per reimpostare la password Vocdoni è: {{.Code}}"
+  plain_link: "Oppure reimpostala con questo link:"
+
+password_setup:
+  subject: "Aggiungi una password al tuo account Vocdoni"
+  preheader: "Confermalo con il codice {{.Code}}. Scade in {{.Expiry}}."
+  heading: "Aggiungi una password"
+  intro: "Hai chiesto di aggiungere una password al tuo account Vocdoni, dove ora accedi con un provider esterno. Confermalo con questo codice:"
+  or_button: "Oppure impostala direttamente qui:"
+  button: "Imposta la password"
+  ignore: "Se non hai fatto questa richiesta, puoi ignorare questa email: non verrà creata nessuna password e continuerai ad accedere come al solito."
+  footer_why: "Ricevi questa email perché qualcuno ha chiesto di aggiungere una password all'account di questo indirizzo."
+  plain_code: "Il tuo codice per impostare la password Vocdoni è: {{.Code}}"
+  plain_link: "Oppure impostala con questo link:"
+
+verify_email_change:
+  subject: "Conferma il tuo nuovo indirizzo email"
+  preheader: "Conferma il cambiamento con il codice {{.Code}}. Scade in {{.Expiry}}."
+  heading: "Conferma il nuovo indirizzo"
+  intro: "Hai chiesto che il tuo account Vocdoni utilizzi questo indirizzo (*{{.Email}}*). Confermalo con questo codice:"
+  or_button: "Oppure confermalo con un clic:"
+  button: "Conferma l'indirizzo"
+  ignore: "Se non eri tu, puoi ignorare questa email: il tuo account manterrà l'indirizzo attuale."
+  footer_why: "Ricevi questa email perché qualcuno ha indicato questo indirizzo come nuova email di un account Vocdoni."
+  plain_code: "Il tuo codice per confermare il nuovo indirizzo email è: {{.Code}}"
+  plain_link: "Oppure confermalo con questo link:"
+
+invite_admin:
+  subject: "Hai ricevuto un invito a gestire {{.Organization}}"
+  subject_no_org: "Hai ricevuto un invito a gestire un'organizzazione su Vocdoni App"
+  preheader: "Accetta l'invito per entrare a far parte del team. Scade in {{.Expiry}}."
+  heading: "Hai un invito"
+  intro: "Hai ricevuto un invito a entrare a far parte del team di amministrazione dell'organizzazione *{{.Organization}}* su Vocdoni App. Potrai gestire i membri, i processi di voto e i risultati."
+  intro_no_org: "Hai ricevuto un invito a entrare a far parte del team di amministrazione di un'organizzazione su Vocdoni App. Potrai gestire i membri, i processi di voto e i risultati."
+  button: "Accetta l'invito"
+  expires_note: "L'invito scade in {{.Expiry}}. Se non lo aspettavi, puoi ignorare questa email."
+  footer_why: "Ricevi questa email perché un'organizzazione su Vocdoni App ha invitato questo indirizzo."
+  plain_link: "Accetta l'invito con questo link:"
+
+members_import_done:
+  subject_done: "Importazione membri completata nell'organizzazione {{.Organization}}"
+  subject_done_no_org: "Importazione membri completata"
+  subject_issues:
+    one: "Importazione completata con 1 errore nell'organizzazione {{.Organization}}"
+    other: "Importazione completata con {{.ErrorCount}} errori nell'organizzazione {{.Organization}}"
+  subject_issues_no_org:
+    one: "Importazione completata con 1 errore"
+    other: "Importazione completata con {{.ErrorCount}} errori"
+  subject_failed: "Nessun membro è stato importato nell'organizzazione {{.Organization}}"
+  subject_failed_no_org: "Nessun membro è stato importato"
+  preheader_done:
+    one: "1 membro aggiunto."
+    other: "{{.Added}} membri aggiunti."
+  preheader_issues:
+    one: "1 riga da verificare."
+    other: "{{.ErrorCount}} righe da verificare."
+  preheader_failed: "Nessun record è stato aggiunto. Verifica il formato del file."
+  preheader_empty: "Il file non conteneva righe e nessun record è stato aggiunto."
+  heading_done: "Importazione completata"
+  heading_issues: "Importazione completata con errori"
+  heading_failed: "Nessun membro è stato importato"
+  greeting: "Ciao, {{.UserName}}."
+  greeting_no_name: "Ciao."
+  intro_done: "Tutto fatto! L'importazione dei membri nell'organizzazione *{{.Organization}}* è terminata e tutte le righe sono state aggiunte."
+  intro_done_no_org: "Tutto fatto! L'importazione dei membri è terminata e tutte le righe sono state aggiunte."
+  intro_issues: "L'importazione dei membri nell'organizzazione *{{.Organization}}* è terminata, ma alcune righe non sono state importate."
+  intro_issues_no_org: "L'importazione dei membri è terminata, ma alcune righe non sono state importate."
+  intro_failed: "L'importazione dei membri nell'organizzazione *{{.Organization}}* è terminata, ma nessun record è stato aggiunto. Verifica che il file segua il modello e riprova."
+  intro_failed_no_org: "L'importazione dei membri è terminata, ma nessun record è stato aggiunto. Verifica che il file segua il modello e riprova."
+  intro_empty: "L'importazione dei membri nell'organizzazione *{{.Organization}}* è terminata, ma il file non conteneva righe e nessun record è stato aggiunto."
+  intro_empty_no_org: "L'importazione dei membri è terminata, ma il file non conteneva righe e nessun record è stato aggiunto."
+  label_processed: "Membri elaborati"
+  label_added: "Aggiunti"
+  label_errors: "Errori"
+  label_completed: "Completata"
+  issues_title: "Righe da verificare"
+  issues_title_first: "Prime righe da verificare"
+  more_issues:
+    one: "e 1 altro errore"
+    other: "e {{.MoreIssues}} altri errori"
+  fix_hint: "Correggi queste righe nel file e importale di nuovo; le altre sono già nella base dei membri."
+  button: "Verifica la base dei membri"
+  footer_why: "Ricevi questa email perché gestisci questa organizzazione su Vocdoni App."
+
+support:
+  subject: "Nuovo ticket · {{.Type}} · {{.Title}}"
+  preheader: "Da {{.Email}} ({{.Organization}})."
+  heading: "Nuova richiesta di assistenza"
+  intro: "È stato aperto un ticket da Vocdoni App. La persona che lo ha aperto è in copia e riceverà le risposte in questo thread."
+  label_title: "Titolo"
+  label_type: "Tipo"
+  label_user: "Utente"
+  label_org: "Organizzazione"
+  label_description: "Descrizione"
+  truncated: "Descrizione troncata a 1.200 caratteri; il testo completo è nel ticket."
+  reassure: "Se hai aperto tu questa richiesta, non devi fare nient'altro: ti risponderemo in questo stesso thread il prima possibile."
+  footer_why: "Questo ticket è stato creato dal modulo di assistenza di Vocdoni App."
+
+verification_code_otp:
+  subject: "Il tuo codice per votare nell'organizzazione {{.Organization}}"
+  preheader: "Codice di verifica {{.Code}}. Scade in {{.ExpiryTime}}."
+  heading: "Il tuo codice per votare"
+  intro: "L'organizzazione *{{.Organization}}* ti ha inviato questo codice per verificare la tua identità prima di votare:"
+  expires: "Scade in {{.ExpiryTime}}"
+  enter: "Inseriscilo nella pagina di voto per continuare."
+  ignore: "Se non aspettavi questo codice, puoi ignorare questo messaggio: nessuno può votare al tuo posto senza di esso."
+  footer_why: "Ricevi questo messaggio perché l'organizzazione {{.Organization}} utilizza questo indirizzo per verificare la tua identità prima di votare."
+  footer_secured: "Voto protetto da Vocdoni"
+  # also the SMS: one line, at most 64 characters rendered with a 6-digit code and "15 minuti"
+  # (70 minus the "[STG] " label, one UCS-2 segment); it names no organization; no ? ( ) [ ] + * | ^ $
+  # (tests read it as a regular expression)
+  sms: "Codice per votare: {{.Code}}. Scade in {{.ExpiryTime}}."
