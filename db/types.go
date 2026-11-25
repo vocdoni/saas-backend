@@ -624,6 +624,10 @@ type VoteType struct {
 	// MaxTotalCost bounds the sum of value^costExponent across a ballot's fields
 	// (0 = no limit). Used by multichoice/approval to cap the number of selections.
 	MaxTotalCost uint32 `json:"maxTotalCost,omitempty" bson:"maxTotalCost,omitempty"`
+	// MinValue is the smallest value a ballot field may take, and MinTotalCost the smallest
+	// sum of value^costExponent a ballot may have (0 = no minimum for either).
+	MinValue     uint32 `json:"minValue,omitempty" bson:"minValue,omitempty"`
+	MinTotalCost uint32 `json:"minTotalCost,omitempty" bson:"minTotalCost,omitempty"`
 }
 
 // ElectionType describes the election envelope and mode flags.
@@ -720,11 +724,10 @@ type ProcessesBundle struct {
 // is kept in step with its BallotProtocol: whichever half is supplied, the other is derived
 // (account.ResolveBallotShape), so the two always describe the same ballot.
 //
-// MinChoices is a validation hint only — the protocol has no on-chain minimum-count field, so it
-// is the one value that cannot be derived. It is kept as sent for multichoice (clamped to
-// MaxChoices), where a voter may legitimately be asked for at least N; for singlechoice it is
-// always 1, that ballot being the single field a voter fills, so a stated 0 would describe a
-// submission the chain cannot express. UniqueChoices is not supported by any named type and
+// MinChoices is the protocol's MinTotalCost: for multichoice the least number of selections
+// (clamped to MaxChoices), for singlechoice 1 when the empty ballot is rejected. A singlechoice
+// authored through its type always gets 1, that ballot being the single field a voter fills.
+// UniqueChoices is not supported by any named type and
 // requests setting it on a multichoice are rejected: with one 0/1 field per choice, a
 // unique-values ballot admits no vote at all (issue #619), while a voter already cannot select
 // the same choice twice. A ranked ballot — the one shape that does use uniqueValues — is its own
@@ -756,6 +759,10 @@ type BallotProtocol struct {
 	MaxTotalCost      uint32 `json:"maxTotalCost" bson:"maxTotalCost"`
 	UniqueValues      bool   `json:"uniqueValues" bson:"uniqueValues"`
 	CostFromWeight    bool   `json:"costFromWeight" bson:"costFromWeight"`
+	// MinValue and MinTotalCost are the lower bounds matching MaxValue and MaxTotalCost (0 = no
+	// minimum). With costExponent 0 every field costs 1, so MinTotalCost counts fields.
+	MinValue     uint32 `json:"minValue" bson:"minValue"`
+	MinTotalCost uint32 `json:"minTotalCost" bson:"minTotalCost"`
 }
 
 // VotingProcess is the container document of the multi-question /processes API. It

@@ -52,24 +52,28 @@ func VoteTypeFromQuestion(q *db.VotingProcessQuestion) (db.VoteType, error) {
 		CostExponent:      bp.CostExponent,
 		UniqueChoices:     bp.UniqueValues,
 		MaxTotalCost:      bp.MaxTotalCost,
+		MinValue:          bp.MinValue,
+		MinTotalCost:      bp.MinTotalCost,
 	}, nil
 }
 
 // BallotProtocolFromType derives the canonical on-chain ballot parameters of a named question
 // type:
-//   - singlechoice picks one of N choices (one field, value = the chosen Choice.Value);
-//   - multichoice is approval-style (one field per choice, each 0/1, with MaxTotalCost bounding
-//     the number of selections);
+//   - singlechoice picks one of N choices (one field, value = the chosen Choice.Value). Its cost
+//     exponent is 0, so a ballot costs its number of fields (v^0 = 1, 0^0 included): MinTotalCost
+//     1 rejects the empty ballot [] while still admitting the choice valued 0;
+//   - multichoice is approval-style (one field per choice, each 0/1, with MaxTotalCost and
+//     MinTotalCost bounding the number of selections);
 //   - ranked assigns every choice a distinct rank (one field per choice holding its rank 0..N-1,
 //     so uniqueValues holds); the convention is highest-value-wins;
 //   - cumulative spreads a budget across the choices (maxValue 0 is the "amounts" marker; the
 //     per-value cap comes from MaxTotalCost and CostExponent, 1 for a linear budget or 2 for
 //     quadratic).
 //
-// setup.MinChoices has no protocol counterpart and is ignored — the chain has no minimum-count
-// field. setup.UniqueChoices is ignored too: the only named type that uses uniqueValues is ranked,
-// and it derives the flag from the type, not from this field. Callers reject a multichoice that
-// sets it at the API boundary rather than silently dropping it.
+// setup.MinChoices maps onto MinTotalCost for singlechoice (capped at 1) and multichoice; ranked
+// and cumulative take no minimum. setup.UniqueChoices is ignored: the only named type that uses
+// uniqueValues is ranked, and it derives the flag from the type, not from this field. Callers
+// reject a multichoice that sets it at the API boundary rather than silently dropping it.
 //
 // MaxVoteOverwrites and CostFromWeight are always zero here: QuestionTypeSetup has no field that
 // could express them, so a protocol carrying either is simply not a named shape.
@@ -83,13 +87,24 @@ func BallotProtocolFromType(
 	case db.VotingTypeSingleChoice:
 		// MaxValue must cover the highest client-supplied Choice.Value, which need not be a
 		// contiguous 0..n-1 range, so derive it from the actual values rather than the count.
-		return &db.BallotProtocol{MaxCount: 1, MaxValue: MaxChoiceValue(choices)}, nil
+		return &db.BallotProtocol{
+			MaxCount:     1,
+			MaxValue:     MaxChoiceValue(choices),
+			MinTotalCost: min(setup.MinChoices, 1),
+		}, nil
 	case db.VotingTypeMultiChoice:
+		// the minimum is clamped to what a ballot can select, so the derived protocol always
+		// admits a vote: MaxChoices when bounded, otherwise every choice.
+		reachable := setup.MaxChoices
+		if reachable == 0 {
+			reachable = uint32(len(choices))
+		}
 		return &db.BallotProtocol{
 			MaxCount:     uint32(len(choices)),
 			MaxValue:     1,
 			CostExponent: 1,
 			MaxTotalCost: setup.MaxChoices,
+			MinTotalCost: min(setup.MinChoices, reachable),
 		}, nil
 	case db.VotingTypeRanked:
 		// Ranking needs at least two choices to mean anything. maxValue reaches N-1 so the N
@@ -184,9 +199,9 @@ func QuestionTypeFromBallotProtocol(
 		qType string
 		setup db.QuestionTypeSetup
 	}{
-		{db.VotingTypeSingleChoice, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1}},
+		{db.VotingTypeSingleChoice, db.QuestionTypeSetup{MinChoices: bp.MinTotalCost, MaxChoices: 1}},
 		{db.VotingTypeMultiChoice, db.QuestionTypeSetup{
-			MinChoices: minChoicesFor(bp.MaxTotalCost),
+			MinChoices: bp.MinTotalCost,
 			MaxChoices: bp.MaxTotalCost,
 		}},
 		{db.VotingTypeRanked, db.QuestionTypeSetup{}},
@@ -204,14 +219,9 @@ func QuestionTypeFromBallotProtocol(
 	return "", db.QuestionTypeSetup{}, false
 }
 
-// minChoicesFor returns the canonical minimum for a bounded selection, keeping the invariant
-// MinChoices <= MaxChoices true for an unbounded (MaxChoices 0) multichoice.
-func minChoicesFor(maxChoices uint32) uint32 {
-	if maxChoices == 0 {
-		return 0
-	}
-	return 1
-}
+// MaxMinCostExponent is the highest costExponent the chain accepts on an election that sets
+// minTotalCost (voconed NewProcessTx), which bounds the cost of checking the minimum.
+const MaxMinCostExponent = 8
 
 // ValidateBallotProtocol reports why a raw ballot protocol could never yield a countable ballot.
 //
@@ -225,6 +235,17 @@ func ValidateBallotProtocol(bp *db.BallotProtocol) error {
 	}
 	if bp.MaxCount == 0 {
 		return fmt.Errorf("maxCount must be greater than zero")
+	}
+	// The chain's NewProcessTx consistency rules for the minimums: an election breaking them is
+	// rejected at publish, or admits no ballot on a node that does not check them.
+	if bp.MaxValue > 0 && bp.MinValue > bp.MaxValue {
+		return fmt.Errorf("minValue %d greater than maxValue %d", bp.MinValue, bp.MaxValue)
+	}
+	if bp.MaxTotalCost > 0 && bp.MinTotalCost > bp.MaxTotalCost {
+		return fmt.Errorf("minTotalCost %d greater than maxTotalCost %d", bp.MinTotalCost, bp.MaxTotalCost)
+	}
+	if bp.MinTotalCost > 0 && bp.CostExponent > MaxMinCostExponent {
+		return fmt.Errorf("costExponent %d greater than %d with minTotalCost set", bp.CostExponent, MaxMinCostExponent)
 	}
 	// uniqueValues demands every field of the ballot hold a distinct value, so there have to be
 	// at least as many legal values (0..maxValue) as there are fields. A dense layout with
@@ -286,10 +307,13 @@ type BallotShape struct {
 // that disagree are an error rather than a silent win for the protocol: a client editing a
 // question through its TypeSetup would otherwise get a 200 and none of its edit.
 //
-// MinChoices is the one thing that cannot be derived, having no on-chain counterpart, and is
-// carried over from the input for multichoice only, clamped to the resolved MaxChoices. A
-// singlechoice ballot is the single field a voter always fills, so its minimum is canonically 1;
-// storing the 0 a caller gets by omitting TypeSetup would state a rule the ballot does not have.
+// The minimums (MinValue, MinTotalCost) are the one part a client may state on either half
+// without contradiction: a supplied protocol that states none takes the ones typeSetup declares, so
+// echoing a stored draft does not erase its minChoices, while one that states any keeps its own.
+//
+// A singlechoice authored through its type always requires a selection (minChoices 1, on chain
+// minTotalCost 1): its ballot is the single field a voter fills. One that accepts the empty ballot
+// is expressible only through a protocol with minTotalCost 0, which reads back as minChoices 0.
 //
 // A question with no choices yet is returned untouched: it cannot be published (publish
 // validation rejects it) and there is nothing to derive a protocol from.
@@ -299,35 +323,51 @@ func ResolveBallotShape(in BallotShapeInput) (BallotShape, error) {
 	}
 	protocol := in.Protocol
 	if protocol == nil {
-		derived, err := BallotProtocolFromType(in.Type, in.TypeSetup, in.Choices)
+		setup := in.TypeSetup
+		if in.Type == db.VotingTypeSingleChoice {
+			setup.MinChoices = 1
+		}
+		derived, err := BallotProtocolFromType(in.Type, setup, in.Choices)
 		if err != nil {
 			return BallotShape{}, err
 		}
 		protocol = derived
 	}
+	var stated *db.BallotProtocol
+	if in.Protocol != nil && in.Type != "" {
+		if derived, err := BallotProtocolFromType(in.Type, in.TypeSetup, in.Choices); err == nil {
+			stated = derived
+		}
+	}
+	if stated != nil && !hasMinimums(*in.Protocol) && withoutMinimums(*stated) == *in.Protocol {
+		if err := ValidateBallotProtocol(stated); err != nil {
+			return BallotShape{}, err
+		}
+		protocol = stated
+	}
 	qType, setup, ok := QuestionTypeFromBallotProtocol(protocol, in.Choices)
 	if !ok {
 		return BallotShape{Protocol: protocol}, nil
 	}
-	// Both halves supplied and both name a ballot: they have to name the same one. The protocol
-	// wins, so without this a client that reads a draft, edits its typeSetup and PUTs the whole
-	// body back would lose the edit silently — responses always carry a protocol now.
-	if in.Protocol != nil && in.Type != "" {
-		stated, err := BallotProtocolFromType(in.Type, in.TypeSetup, in.Choices)
-		if err == nil && *stated != *in.Protocol {
-			return BallotShape{}, fmt.Errorf(
-				"ballotProtocol describes a %s ballot, which contradicts the stated type %q and its typeSetup; "+
-					"omit ballotProtocol to define the ballot through type/typeSetup", qType, in.Type,
-			)
-		}
-	}
-	// MinChoices is the client's alone — the protocol has no counterpart to check it against. It is
-	// only meaningful for multichoice: a singlechoice ballot is the one field a voter always fills,
-	// so its minimum is canonically 1 whatever the caller stated.
-	if qType == in.Type && qType == db.VotingTypeMultiChoice {
-		setup.MinChoices = min(in.TypeSetup.MinChoices, setup.MaxChoices)
+	// Both halves supplied and both name a ballot: they have to name the same one, minimums aside.
+	// The protocol wins, so without this a client that reads a draft, edits its typeSetup and PUTs
+	// the whole body back would lose the edit silently — responses always carry a protocol now.
+	if stated != nil && withoutMinimums(*stated) != withoutMinimums(*protocol) {
+		return BallotShape{}, fmt.Errorf(
+			"ballotProtocol describes a %s ballot, which contradicts the stated type %q and its typeSetup; "+
+				"omit ballotProtocol to define the ballot through type/typeSetup", qType, in.Type,
+		)
 	}
 	return BallotShape{Type: qType, TypeSetup: setup, Protocol: protocol}, nil
+}
+
+func hasMinimums(bp db.BallotProtocol) bool {
+	return bp.MinValue > 0 || bp.MinTotalCost > 0
+}
+
+func withoutMinimums(bp db.BallotProtocol) db.BallotProtocol {
+	bp.MinValue, bp.MinTotalCost = 0, 0
+	return bp
 }
 
 // ElectionTypeFromQuestion builds the on-chain election flags for a question. autostart and

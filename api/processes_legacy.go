@@ -602,14 +602,16 @@ func legacyBallotProtocol(election *dvoteapi.Election, questions int) *db.Ballot
 		MaxVoteOverwrites: election.TallyMode.MaxVoteOverwrites,
 		MaxTotalCost:      election.TallyMode.MaxTotalCost,
 		CostExponent:      election.TallyMode.CostExponent,
+		MinValue:          election.TallyMode.MinValue,
+		MinTotalCost:      election.TallyMode.MinTotalCost,
 	}
 	switch {
 	case questions == 1:
 		// the whole ballot belongs to the only question, tally mode included
 	case int(election.TallyMode.MaxCount) == questions:
-		// one ballot field per question: each question owns a single field of the ballot. A cost cap or
+		// one ballot field per question: each question owns a single field of the ballot. A cost bound or
 		// uniqueValues constrains the fields jointly, so it is no one question's to state.
-		if bp.MaxTotalCost > 0 || election.VoteMode.EnvelopeType != nil &&
+		if bp.MaxTotalCost > 0 || bp.MinTotalCost > 0 || election.VoteMode.EnvelopeType != nil &&
 			(election.VoteMode.UniqueValues || election.VoteMode.CostFromWeight) {
 			return nil
 		}
@@ -670,13 +672,13 @@ func legacyCorroboratedType(
 
 // legacyNamedShape recognises the named type a question's ballot runs, as
 // account.QuestionTypeFromBallotProtocol does, but through a costExponent the chain never read: it only
-// applies with a cost cap (maxTotalCost > 0 or costFromWeight), and elections published outside the
+// applies with a cost bound (maxTotalCost > 0, minTotalCost > 0 or costFromWeight), and elections published outside the
 // draft flow stamp one regardless (the record behind the projection carries 1). Without that, an exact
 // comparison would deny such a ballot the name it runs. The shape's Protocol is the canonical one, so
 // Type still re-derives it exactly; it differs from the chain's only in that inert field.
 func legacyNamedShape(bp *db.BallotProtocol, choices []db.Choice) (account.BallotShape, bool) {
 	candidates := []db.BallotProtocol{*bp}
-	if bp.MaxTotalCost == 0 && !bp.CostFromWeight {
+	if bp.MaxTotalCost == 0 && bp.MinTotalCost == 0 && !bp.CostFromWeight {
 		for _, exponent := range []uint32{0, 1} { // the only exponents a named uncapped shape derives
 			if exponent != bp.CostExponent {
 				alt := *bp

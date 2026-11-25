@@ -100,7 +100,8 @@ func TestLegacyProjectionExplorerElection(t *testing.T) {
 		c.Assert(q.Choices, qt.HasLen, 2)
 		// the question's own slice of the ballot: one field, valued over the two choices.
 		c.Assert(q.BallotProtocol, qt.DeepEquals, &db.BallotProtocol{MaxCount: 1, MaxValue: 1})
-		c.Assert(q.TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1})
+		// the chain set no minimum, so the empty ballot counted: minChoices says so
+		c.Assert(q.TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 0, MaxChoices: 1})
 		c.Assert(legacyTestDeclaredType(q), qt.Not(qt.IsNil))
 		c.Assert(q.Results, qt.Not(qt.IsNil))
 		c.Assert(q.Results.VoteCount, qt.Equals, uint64(8))
@@ -327,6 +328,30 @@ func TestLegacyProjectionJointConstraints(t *testing.T) {
 	for _, q := range questions {
 		c.Assert(q.BallotProtocol, qt.IsNil)
 		c.Assert(q.Type, qt.Equals, "")
+	}
+}
+
+// TestLegacyProjectionMinimums checks that the ballot minimums the chain runs reach the projection: on a
+// single question they are its own (a singlechoice requiring a selection), and on a one-field-per-question
+// ballot a minimum total cost bounds the fields together, so no question can state it.
+func TestLegacyProjectionMinimums(t *testing.T) {
+	c := qt.New(t)
+	election := legacyTestElection([][]uint64{{3, 2, 1}}, []map[string]any{legacyTestChoices("Statuto", 3)})
+	election.TallyMode.MaxValue = 2
+	election.TallyMode.MinTotalCost = 1
+	content := testAPI.legacyContentOf(context.Background(), election, nil)
+	questions := legacyElectionQuestions(bson.NewObjectID(), election, content)
+	c.Assert(questions, qt.HasLen, 1)
+	c.Assert(questions[0].BallotProtocol, qt.DeepEquals, &db.BallotProtocol{MaxCount: 1, MaxValue: 2, MinTotalCost: 1})
+	c.Assert(questions[0].Type, qt.Equals, db.VotingTypeSingleChoice)
+	c.Assert(questions[0].TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1})
+
+	joint := legacyTestElection([][]uint64{{8, 0}, {8, 0}},
+		[]map[string]any{legacyTestQuestion("Statuto"), legacyTestQuestion("Consiglio")})
+	joint.TallyMode.MinTotalCost = 2
+	content = testAPI.legacyContentOf(context.Background(), joint, nil)
+	for _, q := range legacyElectionQuestions(bson.NewObjectID(), joint, content) {
+		c.Assert(q.BallotProtocol, qt.IsNil)
 	}
 }
 

@@ -180,10 +180,11 @@ func TestVotingProcessLegacyDraftShapeRoundTrip(t *testing.T) {
 	c.Assert(got.Questions[0].Type, qt.Equals, db.VotingTypeMultiChoice)
 	c.Assert(got.Questions[0].TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 2})
 	c.Assert(*got.Questions[0].BallotProtocol, qt.Equals, db.BallotProtocol{
-		MaxCount: 2, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2,
+		MaxCount: 2, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2, MinTotalCost: 1,
 	})
+	// the stored protocol has no minimum, so the empty ballot would count: minChoices says so
 	c.Assert(got.Questions[1].Type, qt.Equals, db.VotingTypeSingleChoice)
-	c.Assert(got.Questions[1].TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1})
+	c.Assert(got.Questions[1].TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 0, MaxChoices: 1})
 	c.Assert(*got.Questions[1].BallotProtocol, qt.Equals, db.BallotProtocol{MaxCount: 1, MaxValue: 1})
 
 	// the read reconciles what it serves, not what is stored
@@ -274,7 +275,7 @@ func TestVotingProcessUpdateBallotShapeEcho(t *testing.T) {
 	edited := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, adminToken, nil, "processes", pid)
 	c.Assert(edited.Questions[1].TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1})
 	c.Assert(*edited.Questions[1].BallotProtocol, qt.Equals, db.BallotProtocol{
-		MaxCount: 2, MaxValue: 1, CostExponent: 1, MaxTotalCost: 1,
+		MaxCount: 2, MaxValue: 1, CostExponent: 1, MaxTotalCost: 1, MinTotalCost: 1,
 	})
 }
 
@@ -387,7 +388,8 @@ func TestVotingProcessAuthoringErrors(t *testing.T) {
 	got := requestAndParse[apicommon.VotingProcessResponse](
 		t, http.MethodGet, adminToken, nil, "processes", inferred.ProcessID)
 	qt.Assert(t, got.Questions[0].Type, qt.Equals, db.VotingTypeSingleChoice)
-	qt.Assert(t, got.Questions[0].TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1})
+	// the raw protocol sets no minimum, so it accepts the empty ballot and reads back as minChoices 0
+	qt.Assert(t, got.Questions[0].TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 0, MaxChoices: 1})
 
 	// a user with no role on the org -> 401
 	otherToken := testCreateUser(t, "otherpassword123")
@@ -646,7 +648,7 @@ func TestVotingProcessResults(t *testing.T) {
 	// halves are there and they agree
 	c.Assert(pub.Type, qt.Equals, db.VotingTypeSingleChoice)
 	c.Assert(pub.BallotProtocol, qt.Not(qt.IsNil))
-	c.Assert(*pub.BallotProtocol, qt.Equals, db.BallotProtocol{MaxCount: 1, MaxValue: 1})
+	c.Assert(*pub.BallotProtocol, qt.Equals, db.BallotProtocol{MaxCount: 1, MaxValue: 1, MinTotalCost: 1})
 }
 
 // TestVotingProcessPublicReads verifies the process list and single read are public for published
@@ -1037,7 +1039,8 @@ func TestVotingProcessBallotShapeConsistency(t *testing.T) {
 	c.Assert(got.Questions[0].Type, qt.Equals, db.VotingTypeSingleChoice)
 	c.Assert(got.Questions[0].TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1})
 	c.Assert(got.Questions[0].BallotProtocol, qt.Not(qt.IsNil))
-	c.Assert(*got.Questions[0].BallotProtocol, qt.Equals, db.BallotProtocol{MaxCount: 1, MaxValue: 1})
+	// minTotalCost 1 with costExponent 0 rejects the empty ballot: every field costs 1
+	c.Assert(*got.Questions[0].BallotProtocol, qt.Equals, db.BallotProtocol{MaxCount: 1, MaxValue: 1, MinTotalCost: 1})
 
 	// Q2 multichoice over the same two: one 0/1 field per choice, at most maxChoices selected,
 	// and — the point of #619 — never uniqueValues
@@ -1045,7 +1048,7 @@ func TestVotingProcessBallotShapeConsistency(t *testing.T) {
 	c.Assert(got.Questions[1].TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 2})
 	c.Assert(got.Questions[1].BallotProtocol, qt.Not(qt.IsNil))
 	c.Assert(*got.Questions[1].BallotProtocol, qt.Equals, db.BallotProtocol{
-		MaxCount: 2, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2,
+		MaxCount: 2, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2, MinTotalCost: 1,
 	})
 
 	// each half re-derives the other, so a client can edit through either one

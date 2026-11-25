@@ -251,6 +251,8 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 			MaxVoteOverwrites: ep.VoteType.MaxVoteOverwrites,
 			MaxTotalCost:      ep.VoteType.MaxTotalCost,
 			CostExponent:      ep.VoteType.CostExponent,
+			MinValue:          ep.VoteType.MinValue,
+			MinTotalCost:      ep.VoteType.MinTotalCost,
 		},
 		Mode: &models.ProcessMode{
 			AutoStart:     ep.ElectionType.Autostart,

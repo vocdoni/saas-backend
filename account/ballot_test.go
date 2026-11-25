@@ -42,6 +42,7 @@ func TestVoteTypeFromQuestion(t *testing.T) {
 		c.Assert(vt.MaxValue, qt.Equals, uint32(1))
 		c.Assert(vt.CostExponent, qt.Equals, uint32(1))
 		c.Assert(vt.MaxTotalCost, qt.Equals, uint32(2)) // maxChoices
+		c.Assert(vt.MinTotalCost, qt.Equals, uint32(1)) // minChoices
 		// A legacy question stored before uniqueChoices was rejected keeps the flag in its
 		// TypeSetup, and publishing it must ignore it: one 0/1 field per choice plus
 		// uniqueValues is unsatisfiable, so the election would tally every vote to zero (#619).
@@ -128,15 +129,15 @@ func valuedChoices(values ...uint32) []db.Choice {
 func TestBallotProtocolFromType(t *testing.T) {
 	c := qt.New(t)
 
-	c.Run("singlechoice ignores typeSetup entirely", func(c *qt.C) {
-		want := db.BallotProtocol{MaxCount: 1, MaxValue: 2}
-		for _, setup := range []db.QuestionTypeSetup{
-			{},
-			{MinChoices: 1, MaxChoices: 1},
-			{MinChoices: 3, MaxChoices: 7, UniqueChoices: true},
+	c.Run("singlechoice reads only minChoices, as a 0/1 minimum", func(c *qt.C) {
+		for setup, minTotalCost := range map[db.QuestionTypeSetup]uint32{
+			{}:                             0,
+			{MinChoices: 1, MaxChoices: 1}: 1,
+			{MinChoices: 3, MaxChoices: 7, UniqueChoices: true}: 1,
 		} {
 			bp, err := BallotProtocolFromType(db.VotingTypeSingleChoice, setup, choices(3))
 			c.Assert(err, qt.IsNil)
+			want := db.BallotProtocol{MaxCount: 1, MaxValue: 2, MinTotalCost: minTotalCost}
 			c.Assert(*bp, qt.Equals, want, qt.Commentf("setup %+v", setup))
 		}
 	})
@@ -154,7 +155,7 @@ func TestBallotProtocolFromType(t *testing.T) {
 			db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 2, UniqueChoices: true}, choices(4))
 		c.Assert(err, qt.IsNil)
 		c.Assert(*bp, qt.Equals, db.BallotProtocol{
-			MaxCount: 4, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2,
+			MaxCount: 4, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2, MinTotalCost: 1,
 		})
 	})
 
@@ -267,16 +268,29 @@ func TestQuestionTypeFromBallotProtocol(t *testing.T) {
 
 	c.Run("recognises the named shapes", func(c *qt.C) {
 		qType, setup, ok := QuestionTypeFromBallotProtocol(
-			&db.BallotProtocol{MaxCount: 1, MaxValue: 2}, choices(3))
+			&db.BallotProtocol{MaxCount: 1, MaxValue: 2, MinTotalCost: 1}, choices(3))
 		c.Assert(ok, qt.IsTrue)
 		c.Assert(qType, qt.Equals, db.VotingTypeSingleChoice)
 		c.Assert(setup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1})
+
+		// with no minimum the empty ballot counts, and the setup says so
+		qType, setup, ok = QuestionTypeFromBallotProtocol(
+			&db.BallotProtocol{MaxCount: 1, MaxValue: 2}, choices(3))
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(qType, qt.Equals, db.VotingTypeSingleChoice)
+		c.Assert(setup, qt.Equals, db.QuestionTypeSetup{MinChoices: 0, MaxChoices: 1})
+
+		qType, setup, ok = QuestionTypeFromBallotProtocol(
+			&db.BallotProtocol{MaxCount: 4, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2, MinTotalCost: 1}, choices(4))
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(qType, qt.Equals, db.VotingTypeMultiChoice)
+		c.Assert(setup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 2})
 
 		qType, setup, ok = QuestionTypeFromBallotProtocol(
 			&db.BallotProtocol{MaxCount: 4, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2}, choices(4))
 		c.Assert(ok, qt.IsTrue)
 		c.Assert(qType, qt.Equals, db.VotingTypeMultiChoice)
-		c.Assert(setup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 2})
+		c.Assert(setup, qt.Equals, db.QuestionTypeSetup{MinChoices: 0, MaxChoices: 2})
 
 		// ranked: the permutation ballot saas-integrator-demo sends, now named
 		qType, setup, ok = QuestionTypeFromBallotProtocol(
@@ -309,6 +323,10 @@ func TestQuestionTypeFromBallotProtocol(t *testing.T) {
 			"padded max count":  {MaxCount: 9, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2},
 			"cost on a single":  {MaxCount: 1, MaxValue: 2, CostExponent: 1},
 			"single with total": {MaxCount: 1, MaxValue: 2, MaxTotalCost: 1},
+			"min value":         {MaxCount: 1, MaxValue: 2, MinValue: 1, MinTotalCost: 1},
+			"single min cost 2": {MaxCount: 1, MaxValue: 2, MinTotalCost: 2},
+			"multi min > max":   {MaxCount: 3, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2, MinTotalCost: 3},
+			"cumulative full":   {MaxCount: 3, CostExponent: 2, MaxTotalCost: 12, MinTotalCost: 12},
 		} {
 			_, _, ok := QuestionTypeFromBallotProtocol(bp, choices(3))
 			c.Assert(ok, qt.IsFalse, qt.Commentf("%s was given a name it does not have", name))
@@ -353,7 +371,9 @@ func TestBallotShapeUnambiguous(t *testing.T) {
 			// always carries uniqueValues:false with costExponent:1, so it can never collide with
 			// ranked (uniqueValues:true) or singlechoice (costExponent:0) for any maxTotalCost.
 			add(db.VotingTypeSingleChoice, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1})
+			add(db.VotingTypeSingleChoice, db.QuestionTypeSetup{MinChoices: 0, MaxChoices: 1})
 			add(db.VotingTypeMultiChoice, db.QuestionTypeSetup{MaxChoices: uint32(n)})
+			add(db.VotingTypeMultiChoice, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: uint32(n)})
 			if n >= 2 { // ranked needs at least two choices
 				add(db.VotingTypeRanked, db.QuestionTypeSetup{})
 			}
@@ -488,11 +508,51 @@ func TestResolveBallotShapeProtocolWins(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(shape.Type, qt.Equals, db.VotingTypeMultiChoice)
 		c.Assert(shape.TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 2})
+		// the echoed protocol states no minimum, so it takes the one typeSetup declares
+		c.Assert(shape.Protocol.MinTotalCost, qt.Equals, uint32(1))
+	})
+
+	c.Run("a protocol that states its minimum keeps it", func(c *qt.C) {
+		shape, err := ResolveBallotShape(BallotShapeInput{
+			Type:      db.VotingTypeMultiChoice,
+			TypeSetup: db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 2},
+			Protocol:  &db.BallotProtocol{MaxCount: 4, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2, MinTotalCost: 2},
+			Choices:   choices(4),
+		})
+		c.Assert(err, qt.IsNil)
+		c.Assert(shape.TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 2, MaxChoices: 2})
+		c.Assert(shape.Protocol.MinTotalCost, qt.Equals, uint32(2))
+	})
+
+	c.Run("a singlechoice protocol without minimum accepts the empty ballot", func(c *qt.C) {
+		// singlechoice ignores typeSetup, so an omitted one does not upgrade the protocol
+		bp := &db.BallotProtocol{MaxCount: 1, MaxValue: 2}
+		shape, err := ResolveBallotShape(BallotShapeInput{
+			Type: db.VotingTypeSingleChoice, Protocol: bp, Choices: choices(3),
+		})
+		c.Assert(err, qt.IsNil)
+		c.Assert(shape.Type, qt.Equals, db.VotingTypeSingleChoice)
+		c.Assert(shape.TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 0, MaxChoices: 1})
+		c.Assert(*shape.Protocol, qt.Equals, *bp)
+
+		// and a protocol with the minimum needs no typeSetup to keep it
+		shape, err = ResolveBallotShape(BallotShapeInput{
+			Type: db.VotingTypeSingleChoice, Protocol: &db.BallotProtocol{MaxCount: 1, MaxValue: 2, MinTotalCost: 1},
+			Choices: choices(3),
+		})
+		c.Assert(err, qt.IsNil)
+		c.Assert(shape.TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1})
+	})
+
+	c.Run("a singlechoice authored through its type requires a selection", func(c *qt.C) {
+		shape, err := ResolveBallotShape(BallotShapeInput{Type: db.VotingTypeSingleChoice, Choices: choices(3)})
+		c.Assert(err, qt.IsNil)
+		c.Assert(*shape.Protocol, qt.Equals, db.BallotProtocol{MaxCount: 1, MaxValue: 2, MinTotalCost: 1})
 	})
 
 	c.Run("the type is inferred from a protocol alone", func(c *qt.C) {
 		shape, err := ResolveBallotShape(BallotShapeInput{
-			Protocol: &db.BallotProtocol{MaxCount: 4, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2},
+			Protocol: &db.BallotProtocol{MaxCount: 4, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2, MinTotalCost: 1},
 			Choices:  choices(4),
 		})
 		c.Assert(err, qt.IsNil)
@@ -508,6 +568,13 @@ func TestResolveBallotShapeProtocolWins(t *testing.T) {
 		})
 		c.Assert(err, qt.IsNil)
 		c.Assert(shape.TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 2, MaxChoices: 2})
+		c.Assert(shape.Protocol.MinTotalCost, qt.Equals, uint32(2))
+	})
+
+	c.Run("an unbounded multichoice minimum is clamped to the choices", func(c *qt.C) {
+		bp, err := BallotProtocolFromType(db.VotingTypeMultiChoice, db.QuestionTypeSetup{MinChoices: 9}, choices(3))
+		c.Assert(err, qt.IsNil)
+		c.Assert(bp.MinTotalCost, qt.Equals, uint32(3))
 	})
 
 	c.Run("a question with no choices is left alone", func(c *qt.C) {
@@ -539,6 +606,10 @@ func TestValidateBallotProtocol(t *testing.T) {
 			"one short at the uint32 ceiling": {MaxCount: math.MaxUint32, MaxValue: math.MaxUint32 - 2, UniqueValues: true},
 			// amounts mode (maxValue 0) with no budget and no costFromWeight: every field unbounded
 			"unbounded cumulative": {MaxCount: 3, MaxValue: 0, CostExponent: 1, MaxTotalCost: 0},
+			// the chain's NewProcessTx consistency rules for the minimums
+			"minValue over maxValue":         {MaxCount: 2, MaxValue: 2, MinValue: 3},
+			"minTotalCost over maxTotalCost": {MaxCount: 4, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2, MinTotalCost: 3},
+			"minTotalCost with exponent 9":   {MaxCount: 2, MaxValue: 3, CostExponent: 9, MinTotalCost: 1},
 		} {
 			c.Assert(ValidateBallotProtocol(bp), qt.Not(qt.IsNil), qt.Commentf("%s", name))
 		}
@@ -552,6 +623,10 @@ func TestValidateBallotProtocol(t *testing.T) {
 			"multichoice":           {MaxCount: 4, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2},
 			"cumulative/quadratic":  {MaxCount: 3, MaxValue: 0, CostExponent: 2, MaxTotalCost: 12},
 			"quadratic":             {MaxCount: 3, MaxValue: 4, CostExponent: 2, MaxTotalCost: 12},
+			"singlechoice required": {MaxCount: 1, MaxValue: 2, MinTotalCost: 1},
+			"full budget":           {MaxCount: 3, CostExponent: 2, MaxTotalCost: 12, MinTotalCost: 12},
+			"minimums, no maximums": {MaxCount: 3, MaxValue: 0, CostExponent: 8, MaxTotalCost: 5, MinValue: 7, MinTotalCost: 1},
+			"exponent 9, no min":    {MaxCount: 2, MaxValue: 3, CostExponent: 9},
 			// exactly enough values for the fields, where maxValue+1 overflows uint32: computed in
 			// uint32 it wraps to 0 and this permutation reads as unsatisfiable
 			"permutation at the uint32 ceiling": {MaxCount: math.MaxUint32, MaxValue: math.MaxUint32, UniqueValues: true},
