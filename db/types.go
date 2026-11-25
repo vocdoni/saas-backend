@@ -263,6 +263,9 @@ type Census struct {
 	Published   PublishedCensus      `json:"published" bson:"published"`
 	AuthFields  OrgMemberAuthFields  `json:"authFields" bson:"orgMemberAuthFields"`
 	TwoFaFields OrgMemberTwoFaFields `json:"twoFaFields" bson:"orgMemberTwoFaFields"`
+	// Attested marks a census whose voters an integrator vouches for with signed attestations
+	// instead of a member list; nil is a memberbase census. Size holds its declared maximum.
+	Attested *AttestedCensus `json:"attested,omitempty" bson:"attested,omitempty"`
 	// CertAuth makes voters prove their nationalId (the only auth field such a census has) with a
 	// Spanish personal certificate, through the certificate gateway, instead of typing it. The
 	// census may still require an email or SMS code afterwards (TwoFaFields).
@@ -270,6 +273,20 @@ type Census struct {
 
 	CreatedAt time.Time `json:"createdAt" bson:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt" bson:"updatedAt"`
+}
+
+// AttestedCensus is the attestation configuration of a census. Signer is the only address whose
+// attestations auth/0 and the sign endpoints accept; SignerHistory lists every signer with the time
+// it became active, so the published attestations stay verifiable after a rotation.
+type AttestedCensus struct {
+	Signer        common.Address      `json:"signer" bson:"signer"`
+	SignerHistory []AttestationSigner `json:"signerHistory" bson:"signerHistory"`
+}
+
+// AttestationSigner is one entry of an attested census signer history.
+type AttestationSigner struct {
+	Signer common.Address `json:"signer" bson:"signer"`
+	From   time.Time      `json:"from" bson:"from"`
 }
 
 // An org member belongs to an organization and her details that will be

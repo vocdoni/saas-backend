@@ -85,6 +85,83 @@ definitions:
         format: hex
         type: string
     type: object
+  apicommon.AttestationDomainInfo:
+    properties:
+      name:
+        type: string
+      verifyingContract:
+        type: string
+      version:
+        type: string
+    type: object
+  apicommon.AttestationRecordEntry:
+    properties:
+      contactHash:
+        format: hex
+        type: string
+      expiresAt:
+        type: integer
+      questions:
+        items:
+          $ref: '#/definitions/apicommon.AttestedQuestion'
+        type: array
+      signature:
+        format: hex
+        type: string
+      signer:
+        type: string
+      voterId:
+        format: hex
+        type: string
+    type: object
+  apicommon.AttestationSignerRequest:
+    properties:
+      signer:
+        example: 0x71C7656EC7ab88b098defB751B7401B5f6d8976F
+        type: string
+    type: object
+  apicommon.AttestedCensusSizeRequest:
+    properties:
+      size:
+        type: integer
+    type: object
+  apicommon.AttestedCensusSizeResponse:
+    properties:
+      jobId:
+        type: string
+      size:
+        type: integer
+    type: object
+  apicommon.AttestedCensusSpec:
+    properties:
+      maxCensusSize:
+        description: MaxCensusSize is the declared maximum number of voters; it prices
+          and sizes the process.
+        type: integer
+      signer:
+        description: Signer is the address whose attestations the CSP accepts.
+        example: 0x71C7656EC7ab88b098defB751B7401B5f6d8976F
+        type: string
+      signerHistory:
+        description: SignerHistory lists every signer with the time it became active.
+          Response-only.
+        items:
+          $ref: '#/definitions/db.AttestationSigner'
+        type: array
+      verifyingContract:
+        description: |-
+          VerifyingContract is the verifyingContract of the attestation EIP-712 domain: the address of
+          the CSP signer of this environment. Response-only.
+        type: string
+    type: object
+  apicommon.AttestedQuestion:
+    properties:
+      questionId:
+        type: string
+      upstreamId:
+        format: hex
+        type: string
+    type: object
   apicommon.CensusSpec:
     properties:
       anonymous:
@@ -93,6 +170,13 @@ definitions:
           and the CSP blind-signs each ballot so it cannot link a signature to the voter. Orthogonal to
           the mail/sms/auth 2FA channel; may be combined with Weighted (V2 binds the weight into the salt).
         type: boolean
+      attested:
+        allOf:
+        - $ref: '#/definitions/apicommon.AttestedCensusSpec'
+        description: |-
+          Attested makes the census an attested one: an integrator vouches for each voter with an EIP-712
+          attestation instead of a member list. It excludes groupId, memberIds, authFields, weighted,
+          anonymous and question eligibility, and allows twoFaFields [], ["email"] or ["phone"].
       authFields:
         description: |-
           AuthFields are the member fields a voter logs in with. "password" is checked against the
@@ -1152,6 +1236,23 @@ definitions:
       totalItems:
         type: integer
     type: object
+  apicommon.ProcessAttestationsResponse:
+    properties:
+      attestations:
+        items:
+          $ref: '#/definitions/apicommon.AttestationRecordEntry'
+        type: array
+      domain:
+        $ref: '#/definitions/apicommon.AttestationDomainInfo'
+      maxCensusSize:
+        type: integer
+      pagination:
+        $ref: '#/definitions/apicommon.Pagination'
+      signerHistory:
+        items:
+          $ref: '#/definitions/db.AttestationSigner'
+        type: array
+    type: object
   apicommon.ProcessCensusCheckoutRequest:
     properties:
       censusSize:
@@ -1231,6 +1332,11 @@ definitions:
           $ref: '#/definitions/apicommon.ProcessParticipantQuestionVote'
         type: array
       surname:
+        type: string
+      voterId:
+        description: VoterID is the attested voter an attested census looks up, which
+          has no member behind it.
+        format: hex
         type: string
     type: object
   apicommon.ProcessParticipantQuestionVote:
@@ -1984,6 +2090,15 @@ definitions:
       returnURL:
         type: string
     type: object
+  db.AttestationSigner:
+    properties:
+      from:
+        type: string
+      signer:
+        items:
+          type: integer
+        type: array
+    type: object
   db.BallotProtocol:
     properties:
       costExponent:
@@ -2350,8 +2465,33 @@ definitions:
       status:
         type: string
     type: object
+  handlers.AttestationPayload:
+    properties:
+      contactHash:
+        example: deadbeef
+        format: hex
+        type: string
+      expiresAt:
+        example: 1762700000
+        type: integer
+      processId:
+        example: 64b7f0e0a1b2c3d4e5f60718
+        format: hex
+        type: string
+      voterId:
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
   handlers.AuthRequest:
     properties:
+      attestation:
+        allOf:
+        - $ref: '#/definitions/handlers.AttestationPayload'
+        description: |-
+          Attestation and Signature authenticate a voter of an attested census in place of the member
+          fields above; Contact and Salt open its contactHash when the census uses 2FA. They are only
+          read for an attested census.
       birthDate:
         type: string
       certCode:
@@ -2363,6 +2503,8 @@ definitions:
         description: |-
           CodeVerifier is the PKCE verifier (43 to 128 base64url characters) whose
           base64url(sha256(...)) the voting page sent to the certificate gateway as codeChallenge.
+        type: string
+      contact:
         type: string
       email:
         type: string
@@ -2381,6 +2523,14 @@ definitions:
         type: string
       phone:
         type: string
+      salt:
+        example: deadbeef
+        format: hex
+        type: string
+      signature:
+        example: deadbeef
+        format: hex
+        type: string
       surname:
         type: string
     type: object
@@ -2390,9 +2540,15 @@ definitions:
         example: deadbeef
         format: hex
         type: string
+      contact:
+        type: string
       email:
         type: string
       phone:
+        type: string
+      salt:
+        example: deadbeef
+        format: hex
         type: string
     type: object
   handlers.AuthResponse:
@@ -5524,6 +5680,95 @@ paths:
       summary: Update a voting process draft
       tags:
       - processes
+  /processes/{processId}/attestation-signer:
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Make signer the only address whose attestations the CSP accepts for the process, and
+        append it to the signer history. Tokens issued under an earlier signer stop signing
+        (40808); voters authenticate again with an attestation of the new signer. Works on a
+        draft or a published process. Requires Manager/Admin role.
+      parameters:
+      - description: Voting process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: New signer
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.AttestationSignerRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.AttestedCensusSpec'
+        "400":
+          description: Not an attested census, or a zero signer
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Rotate the attestation signer of an attested census
+      tags:
+      - processes
+  /processes/{processId}/attestations:
+    get:
+      description: |-
+        Public, paginated audit of an attested census once it is over: the EIP-712 domain, the
+        signer history and, per attested voter the CSP signed for, the attestation it signed
+        against and the questions it signed. Served once every question is ENDED or RESULTS,
+        at the scheduled end or earlier if the process was ended early; 409 (40809) before.
+        The records carry no contact, salt or voting address.
+      parameters:
+      - description: Voting process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: 'Page number (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - description: 'Items per page (default: 10)'
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessAttestationsResponse'
+        "400":
+          description: Not an attested census
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Process not ended yet (40809)
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Published attestation records of an attested census
+      tags:
+      - processes
   /processes/{processId}/auth/{step}:
     post:
       consumes:
@@ -5551,6 +5796,8 @@ paths:
         40017 with data.retryAfter.
         Step 0 for an anonymous census is refused (400, 40037, "anonymous voting is temporarily
         unavailable") while the service has anonymous voting off.
+        Step 0 on an attested census refuses a voter not signed for yet once as many voters as
+        the census size were (409, 40810).
         For a census with certAuth, step 0 takes certCode and codeVerifier (plus the email or phone when
         the census has 2FA) and no typed login field, else 40005; an unknown, expired, used or foreign
         code, or a wrong verifier, answers 40802 and the code is spent, as it is by a wrong contact or a
@@ -5592,6 +5839,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "404":
           description: Process, census, or organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Attested census full (40810)
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -5642,8 +5893,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Invalid/expired token, token not belonging to the process,
-            or contact mismatch
+          description: Invalid, expired or foreign token, contact mismatch, or rotated
+            signer (40808)
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
@@ -5999,6 +6250,67 @@ paths:
       security:
       - BearerAuth: []
       summary: Buy census headroom for a paid process
+      tags:
+      - processes
+  /processes/{processId}/census/size:
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Raise the maxCensusSize of a published process whose census is attested. The size only
+        grows; the growth is priced as adding members is (402 past what was paid, 422 when it
+        needs a custom quote). Every open question is resized on chain by an async job (202 with
+        jobId); 200 when no question needs it. Requires Manager/Admin role.
+      parameters:
+      - description: Voting process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: New declared size
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.AttestedCensusSizeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.AttestedCensusSizeResponse'
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/apicommon.AttestedCensusSizeResponse'
+        "400":
+          description: Not an attested census, or the size shrinks
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "402":
+          description: Census growth beyond the price paid
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Process is not published
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "422":
+          description: Census size requires a custom quote
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Busy (50302), retry after Retry-After
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Grow the declared size of an attested census
       tags:
       - processes
   /processes/{processId}/check:
@@ -6657,7 +6969,7 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.UpdateQuestionCensusResponse'
         "400":
-          description: Invalid input data, or a member is not part of the census
+          description: Invalid input data, member not in the census, or attested census
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -6815,7 +7127,8 @@ paths:
         bound to the process; authorizes the member against the question's eligibility subset
         and consumes the per-election signing slot (a question cannot be signed twice).
         Body: authToken, electionId (the question's on-chain election id) and payload (the voter
-        address). tokenR is unused.
+        address). tokenR is unused. On an attested census, a voter not signed for yet is refused
+        once as many voters as the census size were (409, 40810).
       parameters:
       - description: Process ID
         in: path
@@ -6846,6 +7159,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "404":
           description: Process, census, or user not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Attested census full (40810)
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -6879,7 +7196,10 @@ paths:
         it; retry), auth_invalid (the token was invalidated mid-batch and every remaining
         entry is stamped with it; authenticate again), address_mismatch (that election was
         already signed for a different address; re-send with the address sign-info
-        reports) or sign_failed (internal failure; retry). Retry ONLY the entries that
+        reports), census_full (an attested census filled up with other voters first; every
+        remaining entry is stamped with it) or sign_failed (internal failure; retry). A voter
+        of an attested census not signed for yet is refused upfront once as many voters as the
+        census size were (409, 40810). Retry ONLY the entries that
         carry a retryable code: re-sending the whole batch re-signs the ballots that
         already succeeded, and every signature, re-signs included, counts toward the election's
         limit (MaxCSPSignaturesPerElection, 10 in total) — past it the election is permanently
@@ -6914,6 +7234,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "404":
           description: Census or user not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Attested census full (40810)
           schema:
             $ref: '#/definitions/errors.Error'
         "413":
