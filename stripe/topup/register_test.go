@@ -225,7 +225,7 @@ func TestCreateCustomer(t *testing.T) {
 	customer, err = CreateCustomer(ctx, client, refusedOrg, validBilling())
 	c.Assert(err, qt.IsNil)
 	c.Assert(customer.ID, qt.Equals, "cus_2")
-	c.Assert(f.keys[len(f.keys)-1], qt.Equals, "topup-customer:"+refusedOrg.String()+":"+billingHash(validBilling()))
+	c.Assert(f.keys[5], qt.Equals, "topup-customer:"+refusedOrg.String()+":"+billingHash(validBilling()))
 	customer, err = CreateCustomer(ctx, client, refusedOrg, other)
 	c.Assert(err, qt.ErrorIs, ErrCustomerExists)
 	c.Assert(customer.ID, qt.Equals, "cus_2")
