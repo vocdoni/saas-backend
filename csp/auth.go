@@ -2,9 +2,12 @@
 package csp
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -25,19 +28,67 @@ type challengeDelivery struct {
 	org   notifications.OrganizationInfo
 }
 
+// dest is the destination key of the delivery (DestinationKey).
+func (d challengeDelivery) dest() string {
+	return DestinationKey(d.ctype, d.to)
+}
+
+// challengeCode is a code to deliver: whose it is and when it expires.
+type challengeCode struct {
+	userID    internal.HexBytes
+	anchorID  internal.HexBytes
+	code      string
+	expiresAt time.Time
+}
+
+// challengeSend is one send of a challenge code: the composed message and the claims it holds,
+// given back if the message never reaches the voter. The queue carries it back with the delivery
+// result (NotificationChallenge.SendInfo).
+type challengeSend struct {
+	// challengeID is the challenge document the send was claimed on.
+	challengeID internal.HexBytes
+	// dest is the destination key the send was claimed for.
+	dest string
+	// claimedAt is the send time the claim stored; a rollback only matches it, so it never undoes a
+	// later send.
+	claimedAt time.Time
+	// previous is the destination's send time before the claim, zero when it had none.
+	previous time.Time
+	// resend reports whether the claim spent one of the code's resends; a new code's first send
+	// spends none.
+	resend bool
+	// daily is the unit of the member's daily send budget the send holds.
+	daily db.CSPCounterClaim
+	// ch is the composed message.
+	ch *notifications.NotificationChallenge
+}
+
+// DestinationKey is the key under which a challenge records its sends to one destination: the
+// lowercase hex of the first 16 bytes of SHA-256 over the challenge type, ":" and the destination.
+// Contact matching ignores the case of emails, so they are lowercased first, or alternating the
+// casing of one address would dodge its cooldown; phones arrive normalized. The key reveals no
+// contact data.
+func DestinationKey(ctype notifications.ChallengeType, to string) string {
+	if ctype == notifications.EmailChallenge {
+		to = strings.ToLower(to)
+	}
+	sum := sha256.Sum256([]byte(string(ctype) + ":" + to))
+	return hex.EncodeToString(sum[:16])
+}
+
 // AuthToken method generates a new authentication token for a user, anchored to
-// a voting process, and sends its challenge code.
+// a voting process, and sends its challenge code to `to`.
 //
-// While the user's previous code is still usable (unverified, not expired and
-// not locked by failed attempts), it is reused rather than replaced: the new
-// token answers the same challenge, so every code the user received keeps
-// working. The code is re-sent only once the notification cooldown has passed;
-// inside it the token is returned without sending anything. Each call still
-// returns a distinct token, so whoever only knows the user's login data never
-// holds the token the user verifies.
+// While the user's last code is still usable (unverified, not expired and not locked by failed
+// attempts) and can take another token, it is reused rather than replaced: the new token answers
+// the same code, so every code the user received keeps working. The code is re-sent to `to` unless
+// it was sent there less than the notification cooldown ago, its resends are spent, or so is the
+// daily send cap; in those cases the token is returned without sending anything, as the user
+// already holds the code. Each call returns a distinct token, so whoever only knows the user's
+// login data never holds the token the user verifies.
 //
-// Once the previous code is no longer usable, a new challenge is created, still
-// subject to the cooldown since the last send. It returns the token as HexBytes.
+// Otherwise a new code is created, subject to the cooldown since the last code's latest send and
+// to the daily send cap. It returns the token as HexBytes.
 func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 	ctype notifications.ChallengeType, lang string,
 	orgName, orgLogo string, orgAddress common.Address,
@@ -61,91 +112,180 @@ func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 		org:   notifications.OrganizationInfo{Address: orgAddress, Name: orgName, Logo: orgLogo},
 	}
 
-	// get last token for the user and anchor, and the challenge it answers
-	var challenge *db.CSPAuth
-	lastToken, err := c.Storage.LastCSPAuth(uID, anchorID)
-	if err != nil && err != db.ErrTokenNotFound {
+	last, err := c.Storage.LastCSPAuth(uID, anchorID)
+	if err != nil && !errors.Is(err, db.ErrTokenNotFound) {
 		log.Warnw("error getting last token",
 			"userID", uID,
 			"anchorID", anchorID,
 			"error", err)
 		return nil, ErrStorageFailure
 	}
-	if lastToken != nil {
-		if challenge, err = c.challengeOf(lastToken); err != nil && err != db.ErrTokenNotFound {
-			return nil, ErrStorageFailure
-		}
+	if last == nil {
+		return c.newChallenge(uID, anchorID, delivery)
 	}
-
-	if challenge != nil && !lastToken.Verified && c.challengeUsable(challenge) {
-		token := newAuthToken()
-		err := c.Storage.SetCSPAuthForChallenge(token, challenge, MaxChallengeTokens)
-		switch err {
-		case nil:
-			// the voter already holds this code, so a spent daily send budget only skips the re-send
-			if _, err := c.resendChallengeCode(challenge, delivery); err != nil &&
-				!errors.Is(err, errors.ErrVerificationMaxAttempts) {
-				return nil, err
-			}
-			return token, nil
-		case db.ErrChallengeTokensExhausted, db.ErrTokenNotFound:
-			// the pending code cannot take more tokens (or is gone): send a new one below
-		default:
-			log.Warnw("error setting token for pending challenge",
-				"userID", uID,
-				"anchorID", anchorID,
-				"error", err)
-			return nil, ErrStorageFailure
+	if c.challengeUsable(last) {
+		token, err := c.reuseChallenge(last, delivery)
+		if err != nil || token != nil {
+			return token, err
 		}
+		// the code took no more tokens, or stopped being usable meanwhile: a new one follows
 	}
+	if remaining := c.coolDownSince(last.LastSend()); remaining > 0 {
+		log.Warnw("cooldown time not reached",
+			"userID", uID,
+			"anchorID", anchorID,
+			"challenge", last.ID)
+		return nil, coolDownError(remaining)
+	}
+	return c.newChallenge(uID, anchorID, delivery)
+}
 
-	// check if the last code was sent less than the cooldown time ago
-	if challenge != nil {
-		remainingTime := c.notificationCoolDownTime - time.Since(challenge.LastSent())
-		if remainingTime > 0 {
-			log.Warnw("cooldown time not reached",
-				"userID", uID,
-				"anchorID", anchorID,
-				"lastToken", lastToken.Token)
-			return nil, errors.ErrAttemptCoolDownTime.WithData(map[string]any{"coolDownTime": remainingTime.Milliseconds()})
-		}
+// coolDownSince is how long the notification cooldown still runs after a send at sentAt; zero or
+// less once it has passed, or when there was no send.
+func (c *CSP) coolDownSince(sentAt time.Time) time.Duration {
+	if sentAt.IsZero() {
+		return 0
+	}
+	return c.notificationCoolDownTime - time.Since(sentAt)
+}
+
+// reuseChallenge issues a new token for the user's pending code and re-sends the code to the
+// delivery's destination when that is due. It returns a nil token, and no error, when the code
+// takes no more tokens or stopped being usable before the send was claimed, so the caller creates
+// a new code instead. A send refused by the destination's cooldown, the code's resends or the
+// daily cap still returns the token, as the user holds the code; any other failed send drops the
+// token again.
+func (c *CSP) reuseChallenge(challenge *db.CSPAuth, delivery challengeDelivery) (internal.HexBytes, error) {
+	token := newAuthToken()
+	added, err := c.Storage.AddCSPAuthToken(db.CSPTokenRequest{
+		ChallengeID: challenge.ID,
+		Token:       token,
+		MaxTokens:   MaxChallengeTokens,
+		MaxAttempts: MaxChallengeAttempts,
+		TTL:         c.notificationTTL,
+	})
+	if err != nil {
+		log.Warnw("error adding token to pending challenge",
+			"userID", challenge.UserID,
+			"anchorID", challenge.AnchorID,
+			"challenge", challenge.ID,
+			"error", err)
+		return nil, ErrStorageFailure
+	}
+	if !added {
+		return nil, nil
+	}
+	if !c.sendDue(challenge, delivery.dest()) {
+		return token, nil
+	}
+	err = c.resendCode(challenge, delivery)
+	if err == nil || errors.Is(err, errors.ErrAttemptCoolDownTime) || errors.Is(err, errors.ErrVerificationMaxAttempts) {
+		return token, nil
+	}
+	if dropErr := c.Storage.RemoveCSPAuthToken(challenge.ID, token); dropErr != nil {
+		log.Warnw("error dropping token of unsent challenge",
+			"userID", challenge.UserID,
+			"anchorID", challenge.AnchorID,
+			"challenge", challenge.ID,
+			"error", dropErr)
+	}
+	if errors.Is(err, ErrTokenExpired) {
+		return nil, nil
+	}
+	return nil, err
+}
+
+// sendDue reports whether challenge's code can be sent to dest now: it has resends left and was
+// not sent there within the cooldown. ClaimCSPAuthSend decides; this only skips composing a send
+// that would certainly be refused.
+func (c *CSP) sendDue(challenge *db.CSPAuth, dest string) bool {
+	return challenge.Resends < MaxChallengeResends && c.coolDownSince(challenge.Sends[dest]) <= 0
+}
+
+// resendCode re-sends challenge's code on a repeated auth request, in order: compose the message,
+// claim a unit of the daily send cap, claim the send on the challenge, push. Each failed step
+// gives back what the earlier ones claimed.
+func (c *CSP) resendCode(challenge *db.CSPAuth, delivery challengeDelivery) error {
+	ch, err := c.composeResend(challenge, delivery)
+	if err != nil {
+		return err
+	}
+	daily, err := c.claimDailyChallengeSend(challenge.UserID, challenge.AnchorID)
+	if err != nil {
+		return err
+	}
+	dest := delivery.dest()
+	claim, err := c.claimSend(challenge, dest)
+	if err != nil {
+		c.releaseChallengeSend(daily)
+		return err
+	}
+	_, err = c.pushChallengeCode(&challengeSend{
+		challengeID: challenge.ID,
+		dest:        dest,
+		claimedAt:   claim.At,
+		previous:    claim.Previous,
+		resend:      true,
+		daily:       daily,
+		ch:          ch,
+	})
+	return err
+}
+
+// newChallenge creates a new code for the user and sends it, in order: compose the message, claim
+// a unit of the daily send cap, store the code with its first send, push. A code that never
+// reached the queue is deleted again.
+func (c *CSP) newChallenge(uID, anchorID internal.HexBytes, delivery challengeDelivery) (internal.HexBytes, error) {
+	token, secret, code := c.generateToken()
+	ch, err := c.composeChallenge(challengeCode{
+		userID:    uID,
+		anchorID:  anchorID,
+		code:      code,
+		expiresAt: time.Now().Add(c.notificationTTL),
+	}, delivery)
+	if err != nil {
+		return nil, err
 	}
 	// cap the challenges (new tokens + resends) this member can be sent for this process today:
 	// the cooldown only spaces sends, so without a cap a member's contact could be flooded with
 	// one email/SMS per cooldown period all day long
-	sendClaim, err := c.claimDailyChallengeSend(uID, anchorID)
+	daily, err := c.claimDailyChallengeSend(uID, anchorID)
 	if err != nil {
 		return nil, err
 	}
-	// give the unit back unless a challenge reached the notification queue
-	queued := false
-	defer func() {
-		if !queued {
-			c.releaseChallengeSend(sendClaim)
-		}
-	}()
-	// generate a new token, secret and code
-	token, secret, code := c.generateToken()
-	// create the new token
-	if err := c.Storage.SetCSPAuth(token, uID, anchorID, secret); err != nil {
-		log.Warnw("error setting new token",
+	dest := delivery.dest()
+	challenge, err := c.Storage.NewCSPChallenge(db.CSPChallengeRequest{
+		Token:    token,
+		UserID:   uID,
+		AnchorID: anchorID,
+		Secret:   secret,
+		Dest:     dest,
+	})
+	if err != nil {
+		log.Warnw("error storing new challenge",
 			"userID", uID,
 			"anchorID", anchorID,
-			"token", token,
 			"error", err)
+		c.releaseChallengeSend(daily)
 		return nil, ErrStorageFailure
 	}
 	log.Debugw("new auth token stored",
 		"userID", uID,
 		"anchorID", anchorID,
 		"token", token)
-	queued, err = c.pushChallengeCode(uID, anchorID, code, time.Now().Add(c.notificationTTL), delivery)
+	queued, err := c.pushChallengeCode(&challengeSend{
+		challengeID: challenge.ID,
+		dest:        dest,
+		claimedAt:   challenge.Sends[dest],
+		daily:       daily,
+		ch:          ch,
+	})
 	if err != nil {
 		// a code that never reached the queue must not look pending, or the next step 0 would
 		// hand out a token for it without sending anything
 		if !queued {
-			if delErr := c.Storage.DeleteCSPAuth(token); delErr != nil {
-				log.Warnw("error deleting unsent token", "userID", uID, "anchorID", anchorID, "error", delErr)
+			if _, delErr := c.Storage.DeleteCSPChallenge(challenge.ID); delErr != nil {
+				log.Warnw("error deleting unsent challenge", "userID", uID, "anchorID", anchorID, "error", delErr)
 			}
 		}
 		return nil, err
@@ -153,55 +293,28 @@ func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 	return token, nil
 }
 
-// challengeCooldown reports whether AuthToken would reuse the member's pending code on the anchor
-// process (usable and with token room left), which neither the cooldown nor the daily cap refuses.
-// Otherwise it refuses a new code while the cooldown since the last send runs. Only called by
-// ChallengeSendRefusal; AuthToken inlines the same logic to share the challenge lookup.
-func (c *CSP) challengeCooldown(uID, anchorID internal.HexBytes) (reuse bool, err error) {
-	lastToken, err := c.Storage.LastCSPAuth(uID, anchorID)
-	if err != nil && err != db.ErrTokenNotFound {
+// ChallengeSendRefusal returns, without spending anything, the refusal AuthToken would answer
+// right now for the member on the anchor process: the cooldown since the last code's latest send
+// (once that code cannot be reused), or the daily send cap. It is a peek, for a caller that must
+// not spend something else (a certificate code) on a request AuthToken would refuse; AuthToken
+// still enforces both. Reusing a usable code that can take another token is never refused,
+// whichever destination the request names, so the peek needs none.
+func (c *CSP) ChallengeSendRefusal(uID, anchorID internal.HexBytes) error {
+	last, err := c.Storage.LastCSPAuth(uID, anchorID)
+	if err != nil && !errors.Is(err, db.ErrTokenNotFound) {
 		log.Warnw("error getting last token",
 			"userID", uID,
 			"anchorID", anchorID,
 			"error", err)
-		return false, ErrStorageFailure
+		return ErrStorageFailure
 	}
-	if lastToken == nil {
-		return false, nil
-	}
-	challenge, err := c.challengeOf(lastToken)
-	if err != nil && err != db.ErrTokenNotFound {
-		return false, ErrStorageFailure
-	}
-	if challenge == nil {
-		return false, nil
-	}
-	// a usable code with token room left is reused; past that AuthToken needs a new code, which
-	// the cooldown spaces
-	if !lastToken.Verified && c.challengeUsable(challenge) && challenge.Tokens < MaxChallengeTokens {
-		return true, nil
-	}
-	remainingTime := c.notificationCoolDownTime - time.Since(challenge.LastSent())
-	if remainingTime > 0 {
-		log.Warnw("cooldown time not reached",
-			"userID", uID,
-			"anchorID", anchorID,
-			"lastToken", lastToken.Token)
-		return false, errors.ErrAttemptCoolDownTime.WithData(map[string]any{"coolDownTime": remainingTime.Milliseconds()})
-	}
-	return false, nil
-}
-
-// ChallengeSendRefusal returns, without spending anything, the refusal AuthToken would answer
-// right now for the member on the anchor process: the cooldown since the last code send (once the
-// last code is spent or expired), or the daily send cap. It is a peek, for a caller that must not
-// spend something else (a certificate code) on a request AuthToken would refuse; AuthToken still
-// enforces both. When the last code is still usable and can take another token, there is no
-// refusal since AuthToken would reuse it.
-func (c *CSP) ChallengeSendRefusal(uID, anchorID internal.HexBytes) error {
-	reuse, err := c.challengeCooldown(uID, anchorID)
-	if err != nil || reuse {
-		return err
+	if last != nil {
+		if c.challengeUsable(last) && len(last.Tokens) < MaxChallengeTokens {
+			return nil
+		}
+		if remaining := c.coolDownSince(last.LastSend()); remaining > 0 {
+			return coolDownError(remaining)
+		}
 	}
 	reached, err := c.Storage.CSPCounterReached(db.CSPCounterChallengeSends, counterKey(uID, anchorID),
 		c.maxDailyChallengeSends)
@@ -217,70 +330,93 @@ func (c *CSP) ChallengeSendRefusal(uID, anchorID internal.HexBytes) error {
 	return nil
 }
 
-// ClaimChallengeResend atomically spends one of the at most MaxChallengeResends resends of the
-// challenge code an authentication token answers, returning ErrVerificationMaxAttempts once they
-// are all spent. The count is kept on the challenge, so every token sharing a code shares its
-// resends. Each resend sends an email or an SMS paid by the platform. A resend request must claim
-// before it checks the submitted contact, so a wrong contact spends one too: otherwise a token
-// holder could probe a member's other contact (say, the phone once they know the email) with
-// unlimited resends. Inside the notification cooldown of a still usable code it spends nothing and
-// fails with ErrAttemptCoolDownTime carrying the remaining milliseconds, as the resend would send
-// nothing anyway.
-func (c *CSP) ClaimChallengeResend(token internal.HexBytes) error {
+// ResendClaim is a resend ClaimChallengeResend claimed: the send ResendChallenge makes once the
+// caller has matched the contact against the member. A claim never passed to ResendChallenge
+// stays spent.
+type ResendClaim struct {
+	challenge *db.CSPAuth
+	to        string
+	ctype     notifications.ChallengeType
+	send      challengeSend
+}
+
+// ClaimChallengeResend claims, in one update of the code the token answers, one of the code's
+// MaxChallengeResends resends and the send to the submitted destination (to, ctype). The caller
+// claims before checking that destination against the member, so a wrong contact keeps both
+// spent: otherwise a token holder could probe a member's other contact (say, the phone once they
+// know the email) with unlimited resends. The resends are counted per code, so every token sharing
+// it shares them. Inside the destination's cooldown it spends nothing and fails with
+// ErrAttemptCoolDownTime carrying the remaining milliseconds; once the resends are spent it fails
+// with ErrVerificationMaxAttempts.
+func (c *CSP) ClaimChallengeResend(token internal.HexBytes, to string, ctype notifications.ChallengeType,
+) (*ResendClaim, error) {
 	if len(token) == 0 {
-		return ErrInvalidAuthToken
+		return nil, ErrInvalidAuthToken
 	}
-	authTokenData, err := c.Storage.CSPAuth(token)
+	if to == "" || ctype == "" {
+		return nil, errors.ErrInvalidData.Withf("missing challenge destination or type")
+	}
+	challenge, err := c.Storage.CSPAuth(token)
 	if err != nil {
-		if err == db.ErrTokenNotFound {
-			return ErrInvalidAuthToken
+		if errors.Is(err, db.ErrTokenNotFound) {
+			return nil, ErrInvalidAuthToken
 		}
 		log.Warnw("error getting token for resend",
 			"token", token,
 			"error", err)
-		return ErrStorageFailure
+		return nil, ErrStorageFailure
 	}
-	challenge, err := c.challengeOf(authTokenData)
+	dest := DestinationKey(ctype, to)
+	claim, err := c.claimSend(challenge, dest)
 	if err != nil {
-		if err == db.ErrTokenNotFound {
-			return ErrTokenExpired
-		}
-		return ErrStorageFailure
+		return nil, err
 	}
-	// verified tokens and unusable codes go on to ResendChallenge, which reports why
-	if !authTokenData.Verified && c.challengeUsable(challenge) {
-		if remaining := c.notificationCoolDownTime - time.Since(challenge.LastSent()); remaining > 0 {
-			return coolDownError(remaining)
-		}
-	}
-	claimed, err := c.Storage.ClaimCSPAuthResend(challenge.Token, MaxChallengeResends)
-	if err != nil {
-		log.Warnw("error recording challenge resend",
-			"token", token,
-			"challenge", challenge.Token,
-			"error", err)
-		return ErrStorageFailure
-	}
-	if !claimed {
-		return errors.ErrVerificationMaxAttempts.Withf("challenge resend limit reached, request a new token")
-	}
-	return nil
+	return &ResendClaim{
+		challenge: challenge,
+		to:        to,
+		ctype:     ctype,
+		send: challengeSend{
+			challengeID: challenge.ID,
+			dest:        dest,
+			claimedAt:   claim.At,
+			previous:    claim.Previous,
+			resend:      true,
+		},
+	}, nil
 }
 
-// ResendCoolDown returns how long until a resend of the code the token answers can be sent, zero if
-// it can be sent now. ok is false when there is no code to resend: an auth-only or verified token,
-// or a code that is gone, solved, expired or locked. It is a hint for clients; the resend itself is
-// still refused by the cooldown it reports.
-func (c *CSP) ResendCoolDown(token internal.HexBytes) (remaining time.Duration, ok bool) {
-	authToken, err := c.Storage.CSPAuth(token)
-	if err != nil || authToken.Verified {
+// ResendChallenge sends the code of a resend claimed with ClaimChallengeResend, counting it against
+// the member's daily challenge budget. If the message cannot be composed or the daily budget is
+// spent, nothing is sent and the claim is given back.
+func (c *CSP) ResendChallenge(claim *ResendClaim, lang string, org notifications.OrganizationInfo) error {
+	if claim == nil {
+		return ErrInvalidAuthToken
+	}
+	send := &claim.send
+	ch, err := c.composeResend(claim.challenge, challengeDelivery{to: claim.to, ctype: claim.ctype, lang: lang, org: org})
+	if err != nil {
+		c.rollbackSend(send)
+		return err
+	}
+	if send.daily, err = c.claimDailyChallengeSend(claim.challenge.UserID, claim.challenge.AnchorID); err != nil {
+		c.rollbackSend(send)
+		return err
+	}
+	send.ch = ch
+	_, err = c.pushChallengeCode(send)
+	return err
+}
+
+// ResendCoolDown returns how long until the code the token answers can be sent again to the
+// destination dest (DestinationKey), zero if it can be sent now. ok is false when there is no code
+// to resend: an auth-only or verified token, or a code that is gone, solved, expired or locked. It
+// is a hint for clients; the resend itself is still refused by the cooldown it reports.
+func (c *CSP) ResendCoolDown(token internal.HexBytes, dest string) (remaining time.Duration, ok bool) {
+	challenge, err := c.Storage.CSPAuth(token)
+	if err != nil || challenge.Verified || !c.challengeUsable(challenge) {
 		return 0, false
 	}
-	challenge, err := c.challengeOf(authToken)
-	if err != nil || !c.challengeUsable(challenge) {
-		return 0, false
-	}
-	return max(c.notificationCoolDownTime-time.Since(challenge.LastSent()), 0), true
+	return max(c.coolDownSince(challenge.Sends[dest]), 0), true
 }
 
 // coolDownError is the ErrAttemptCoolDownTime answer carrying the milliseconds left, at least one.
@@ -289,191 +425,156 @@ func coolDownError(remaining time.Duration) errors.Error {
 	return errors.ErrAttemptCoolDownTime.WithData(map[string]any{"coolDownTime": remaining.Milliseconds()})
 }
 
-// ResendChallenge re-sends the challenge code a pending token answers, counting it against the
-// member's daily challenge budget, at most once per notification cooldown: inside it, it fails
-// with ErrAttemptCoolDownTime carrying the remaining milliseconds and giving back the resend. The
-// caller must have spent one of the code's resends with ClaimChallengeResend first.
-func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
-	ctype notifications.ChallengeType, lang string,
-	orgName, orgLogo string, orgAddress common.Address,
-) error {
-	// check the input parameters
-	if len(token) == 0 {
-		return ErrInvalidAuthToken
+// claimSend claims a send of challenge's code to dest (ClaimCSPAuthSend). When the claim does not
+// match it re-reads the challenge and returns why (sendRefusal), so a request that lost a send race
+// reports the wait the winner stored; if nothing refuses the send any more, it claims once again.
+func (c *CSP) claimSend(challenge *db.CSPAuth, dest string) (db.CSPSendClaim, error) {
+	req := db.CSPSendClaimRequest{
+		ChallengeID: challenge.ID,
+		Dest:        dest,
+		CoolDown:    c.notificationCoolDownTime,
+		TTL:         c.notificationTTL,
+		MaxAttempts: MaxChallengeAttempts,
+		MaxResends:  MaxChallengeResends,
 	}
-	if to == "" || ctype == "" {
-		return errors.ErrInvalidData.Withf("missing challenge destination or type")
-	}
-
-	// get the user data from the token
-	authTokenData, err := c.Storage.CSPAuth(token)
-	if err != nil {
-		log.Warnw("error getting user data by token",
-			"token", token,
-			"error", err)
-		return ErrInvalidAuthToken
-	}
-	challenge, err := c.challengeOf(authTokenData)
-	if err != nil {
-		if err == db.ErrTokenNotFound {
-			return ErrTokenExpired
+	for range 2 {
+		claim, claimed, err := c.Storage.ClaimCSPAuthSend(req)
+		if err != nil {
+			log.Warnw("error claiming challenge send",
+				"userID", challenge.UserID,
+				"anchorID", challenge.AnchorID,
+				"challenge", challenge.ID,
+				"error", err)
+			return db.CSPSendClaim{}, ErrStorageFailure
 		}
-		return ErrStorageFailure
-	}
-
-	remainingTime := c.notificationTTL - time.Since(challenge.CreatedAt)
-	// an already-verified token is always reported as such, regardless of age,
-	// so it never masquerades as merely expired
-	if authTokenData.Verified {
-		coolDown := remainingTime.Seconds()
-		if coolDown < 0 {
-			coolDown = 0
+		if claimed {
+			return claim, nil
 		}
-		return errors.ErrUserAlreadyVerified.WithData(map[string]any{"coolDownTime": coolDown})
+		fresh, err := c.Storage.CSPAuth(challenge.Token)
+		if err != nil {
+			if errors.Is(err, db.ErrTokenNotFound) {
+				return db.CSPSendClaim{}, ErrTokenExpired
+			}
+			log.Warnw("error reading challenge after a refused send", "challenge", challenge.ID, "error", err)
+			return db.CSPSendClaim{}, ErrStorageFailure
+		}
+		if refusal := c.sendRefusal(fresh, dest); refusal != nil {
+			return db.CSPSendClaim{}, refusal
+		}
 	}
-	if remainingTime <= 0 {
-		log.Warnw("resend requested but OTP has expired",
-			"userID", authTokenData.UserID,
-			"anchorID", authTokenData.AnchorID,
-			"token", authTokenData.Token)
-		return ErrTokenExpired
+	return db.CSPSendClaim{}, ErrStorageFailure
+}
+
+// sendRefusal is why a send of challenge's code to dest cannot be claimed, read from a fresh copy
+// of the challenge viewed through the requesting token; nil when nothing refuses it.
+func (c *CSP) sendRefusal(challenge *db.CSPAuth, dest string) error {
+	if challenge.Verified {
+		// a verified token is always reported as such, regardless of age, so it never
+		// masquerades as merely expired
+		left := max(c.notificationTTL-time.Since(challenge.CreatedAt), 0)
+		return errors.ErrUserAlreadyVerified.WithData(map[string]any{"coolDownTime": left.Seconds()})
 	}
-	// reject tokens whose challenge has no stored secret (legacy rows, auth-only
-	// tokens, or a challenge already solved through another token): regenerating
-	// a code from an empty secret would yield a guessable value. Reject as well a
-	// challenge locked by failed attempts, whose code can no longer be accepted.
-	// ErrTokenExpired prompts the client to restart the OTP flow rather than
-	// treating it as a hard failure.
-	if challenge.Secret == "" || challenge.Attempts >= MaxChallengeAttempts {
-		log.Warnw("resend requested for token without usable challenge",
-			"userID", authTokenData.UserID,
-			"anchorID", authTokenData.AnchorID,
-			"token", token,
+	// no secret (solved, or never had one), expired or locked: ErrTokenExpired prompts the client
+	// to restart the OTP flow, and a code is never regenerated from an empty secret
+	if !c.challengeUsable(challenge) {
+		log.Warnw("send requested for token without usable challenge",
+			"userID", challenge.UserID,
+			"anchorID", challenge.AnchorID,
+			"token", challenge.Token,
 			"attempts", challenge.Attempts)
 		return ErrTokenExpired
 	}
-	sent, err := c.resendChallengeCode(challenge, challengeDelivery{
-		to:    to,
-		ctype: ctype,
-		lang:  lang,
-		org:   notifications.OrganizationInfo{Address: orgAddress, Name: orgName, Logo: orgLogo},
-	})
-	if err != nil {
-		return err
+	if remaining := c.coolDownSince(challenge.Sends[dest]); remaining > 0 {
+		return coolDownError(remaining)
 	}
-	if !sent {
-		// a concurrent request sent the code since ClaimChallengeResend checked the cooldown: this
-		// one sent nothing, so give its resend back
-		if err := c.Storage.ReleaseCSPAuthResend(challenge.Token); err != nil {
-			log.Warnw("error releasing challenge resend",
-				"challenge", challenge.Token,
-				"error", err)
-		}
-		return coolDownError(c.notificationCoolDownTime - time.Since(challenge.LastSent()))
+	if challenge.Resends >= MaxChallengeResends {
+		return errors.ErrVerificationMaxAttempts.Withf("challenge resend limit reached, request a new token")
 	}
 	return nil
 }
 
-// challengeOf returns the row holding the OTP challenge the given token answers,
-// which is the token itself unless it was issued for an existing challenge. It
-// returns db.ErrTokenNotFound if that row no longer exists.
-func (c *CSP) challengeOf(authToken *db.CSPAuth) (*db.CSPAuth, error) {
-	if len(authToken.ChallengeID) == 0 {
-		return authToken, nil
-	}
-	challenge, err := c.Storage.CSPAuth(authToken.ChallengeID)
-	if err != nil && err != db.ErrTokenNotFound {
-		log.Warnw("error getting challenge of token",
-			"token", authToken.Token,
-			"challenge", authToken.ChallengeID,
-			"error", err)
-	}
-	return challenge, err
-}
-
-// challengeUsable reports whether the challenge's code can still be accepted: it
-// has a secret (not yet solved), is not expired and is not locked by attempts.
+// challengeUsable reports whether the challenge's code can still be accepted: it has a secret (not
+// yet solved), is not verified, not expired and not locked by attempts.
 func (c *CSP) challengeUsable(challenge *db.CSPAuth) bool {
 	return challenge.Secret != "" &&
+		len(challenge.VerifiedBy) == 0 &&
 		challenge.Attempts < MaxChallengeAttempts &&
 		time.Since(challenge.CreatedAt) < c.notificationTTL
 }
 
-// resendChallengeCode sends the code of an existing challenge again, counting it against the
-// member's daily challenge budget, unless it was sent less than the notification cooldown ago, in
-// which case it sends nothing, spends no budget and returns sent=false.
-func (c *CSP) resendChallengeCode(challenge *db.CSPAuth, delivery challengeDelivery) (sent bool, err error) {
-	// inside the cooldown nothing is sent, so there is no budget to claim; the conditional send
-	// claim below still settles concurrent requests that all saw the cooldown as passed
-	if time.Since(challenge.LastSent()) < c.notificationCoolDownTime {
-		return false, nil
-	}
-	sendClaim, err := c.claimDailyChallengeSend(challenge.UserID, challenge.AnchorID)
-	if err != nil {
-		return false, err
-	}
-	// give the unit back unless a challenge reached the notification queue
-	queued := false
-	defer func() {
-		if !queued {
-			c.releaseChallengeSend(sendClaim)
-		}
-	}()
-	claimed, err := c.Storage.ClaimCSPAuthSend(challenge.Token, c.notificationCoolDownTime)
-	if err != nil {
-		log.Warnw("error recording challenge send",
-			"userID", challenge.UserID,
-			"anchorID", challenge.AnchorID,
-			"challenge", challenge.Token,
-			"error", err)
-		return false, ErrStorageFailure
-	}
-	if !claimed {
-		return false, nil
-	}
+// composeResend composes the message carrying challenge's existing code, which expires with the
+// code.
+func (c *CSP) composeResend(challenge *db.CSPAuth, delivery challengeDelivery,
+) (*notifications.NotificationChallenge, error) {
 	code, err := c.regenerateTokenCode(challenge.Secret)
 	if err != nil {
 		log.Warnw("error regenerating token code",
 			"userID", challenge.UserID,
 			"anchorID", challenge.AnchorID,
-			"challenge", challenge.Token,
+			"challenge", challenge.ID,
 			"error", err)
-		return false, ErrChallengeCodeFailure
+		return nil, ErrChallengeCodeFailure
 	}
-	expiresAt := challenge.CreatedAt.Add(c.notificationTTL)
-	queued, err = c.pushChallengeCode(challenge.UserID, challenge.AnchorID, code, expiresAt, delivery)
-	if err != nil {
-		return false, err
-	}
-	return true, nil
+	return c.composeChallenge(challengeCode{
+		userID:    challenge.UserID,
+		anchorID:  challenge.AnchorID,
+		code:      code,
+		expiresAt: challenge.CreatedAt.Add(c.notificationTTL),
+	}, delivery)
 }
 
-// pushChallengeCode composes the notification carrying a challenge code, advertising the time
-// left until the code expires, and pushes it to the queue to be sent. It reports whether the
-// challenge reached the queue, which it may have done even when it returns an error.
-func (c *CSP) pushChallengeCode(uID, anchorID internal.HexBytes, code string,
-	expiresAt time.Time, delivery challengeDelivery,
-) (queued bool, err error) {
-	ch, err := notifications.NewNotificationChallenge(delivery.ctype, delivery.lang, uID, anchorID,
-		delivery.to, code, delivery.org, time.Until(expiresAt).Round(time.Second).String())
+// composeChallenge composes the notification carrying a challenge code, advertising the time left
+// until the code expires.
+func (*CSP) composeChallenge(code challengeCode, delivery challengeDelivery,
+) (*notifications.NotificationChallenge, error) {
+	ch, err := notifications.NewNotificationChallenge(delivery.ctype, delivery.lang, code.userID, code.anchorID,
+		delivery.to, code.code, delivery.org, time.Until(code.expiresAt).Round(time.Second).String())
 	if err != nil {
 		log.Warnw("error composing notification challenge",
-			"userID", uID,
-			"anchorID", anchorID,
+			"userID", code.userID,
+			"anchorID", code.anchorID,
 			"error", err)
-		return false, ErrNotificationFailure
+		return nil, ErrNotificationFailure
 	}
-	ch.ExpiresAt = expiresAt
-	err = c.pushChallenge(ch)
-	queued = err == nil || errors.Is(err, errChallengeStillQueued)
-	if err != nil {
-		log.Warnw("error pushing notification challenge",
-			"userID", uID,
-			"anchorID", anchorID,
-			"error", err)
-		return queued, ErrNotificationFailure
+	ch.ExpiresAt = code.expiresAt
+	return ch, nil
+}
+
+// pushChallengeCode pushes the message of send to the queue, which carries send back with the
+// delivery result so a delivery given up on gives back its claims (settleNotification). When the
+// message never reached the queue, it gives them back itself and queued is false. A synchronous
+// delivery that timed out is still queued and keeps them for the queue result to settle.
+func (c *CSP) pushChallengeCode(send *challengeSend) (queued bool, err error) {
+	send.ch.SendInfo = send
+	err = c.pushChallenge(send.ch)
+	if err == nil {
+		return true, nil
 	}
-	return true, nil
+	log.Warnw("error pushing notification challenge",
+		"userID", send.ch.UserID,
+		"anchorID", send.ch.AnchorID,
+		"error", err)
+	if errors.Is(err, errChallengeStillQueued) {
+		return true, ErrNotificationFailure
+	}
+	c.rollbackSend(send)
+	return false, ErrNotificationFailure
+}
+
+// rollbackSend gives back the claims of a send that never reached the voter: the send on the
+// challenge, unless a later send replaced it, and the daily-cap unit, always, as nothing was
+// delivered for it.
+func (c *CSP) rollbackSend(send *challengeSend) {
+	if _, err := c.Storage.RollbackCSPAuthSend(db.CSPSendRollback{
+		ChallengeID: send.challengeID,
+		Dest:        send.dest,
+		ClaimedAt:   send.claimedAt,
+		Previous:    send.previous,
+		Resend:      send.resend,
+	}); err != nil {
+		log.Warnw("error rolling back challenge send", "challenge", send.challengeID, "error", err)
+	}
+	c.releaseChallengeSend(send.daily)
 }
 
 // claimDailyChallengeSend claims one unit of the member's daily challenge-send budget for the
@@ -495,9 +596,9 @@ func (c *CSP) claimDailyChallengeSend(uID, anchorID internal.HexBytes) (db.CSPCo
 	return res.Claim, nil
 }
 
-// releaseChallengeSend gives back a claimDailyChallengeSend unit when no challenge was queued, so
-// a storage or composition failure does not spend the member's daily budget. Storage errors are
-// logged: at worst the member loses one unit of today's budget.
+// releaseChallengeSend gives back a claimDailyChallengeSend unit for a send that delivered
+// nothing. A nil claim is a no-op. Storage errors are logged: at worst the member loses one unit
+// of today's budget.
 func (c *CSP) releaseChallengeSend(claim db.CSPCounterClaim) {
 	if err := c.Storage.ReleaseCSPCounter(claim); err != nil {
 		log.Warnw("error releasing daily challenge send", "error", err)
@@ -603,21 +704,11 @@ func (c *CSP) VerifyAuthToken(token internal.HexBytes, solution string) error {
 			"error", err)
 		return ErrInvalidAuthToken
 	}
-	challenge, err := c.challengeOf(authTokenData)
-	if err != nil {
-		if err == db.ErrTokenNotFound {
-			return ErrTokenExpired
-		}
-		return ErrStorageFailure
-	}
-	// reject tokens whose challenge has no stored secret. This covers legacy rows
-	// created before per-token secrets existed, auth-only tokens, and challenges
-	// already solved (whose secret was wiped), through this token or another one
-	// sharing the challenge: in all cases the OTP would be derived from an empty
-	// secret and thus trivially guessable, so the token is not OTP-verifiable. An
-	// already-verified token is rejected the same way. ErrTokenExpired prompts
-	// the client to restart the OTP flow rather than treating it as a hard failure.
-	if authTokenData.Verified || challenge.Secret == "" {
+	// reject tokens whose code has no secret: auth-only grants, and codes already solved through
+	// this token or another one. An OTP derived from an empty secret would be trivially guessable.
+	// ErrTokenExpired prompts the client to restart the OTP flow rather than treating it as a hard
+	// failure.
+	if authTokenData.Verified || authTokenData.Secret == "" {
 		log.Warnw("verification attempted for token without challenge secret",
 			"userID", authTokenData.UserID,
 			"anchorID", authTokenData.AnchorID,
@@ -625,25 +716,29 @@ func (c *CSP) VerifyAuthToken(token internal.HexBytes, solution string) error {
 		return ErrTokenExpired
 	}
 	// reject if the OTP window has passed
-	if time.Since(challenge.CreatedAt) > c.notificationTTL {
+	if time.Since(authTokenData.CreatedAt) > c.notificationTTL {
 		log.Warnw("OTP expired",
 			"userID", authTokenData.UserID,
 			"anchorID", authTokenData.AnchorID,
 			"token", token)
 		return ErrTokenExpired
 	}
-	// claim one attempt on the challenge before comparing the code: the conditional
-	// increment only succeeds while attempts are below the cap, so concurrent
-	// requests cannot all evaluate a guess against the same stale count. Attempts
-	// are counted per challenge, so issuing more tokens for it grants no more.
-	recorded, err := c.Storage.IncrementCSPAuthAttempts(challenge.Token, MaxChallengeAttempts)
+	// claim one attempt on the code before comparing it: the conditional increment only succeeds
+	// while attempts are below the cap, so concurrent requests cannot all evaluate a guess against
+	// the same stale count. Attempts are counted per code, so issuing more tokens for it grants no
+	// more.
+	recorded, err := c.Storage.IncrementCSPAuthAttempts(token, MaxChallengeAttempts)
+	if errors.Is(err, db.ErrChallengeConsumed) {
+		// a concurrent verification solved the code first
+		return ErrTokenExpired
+	}
 	if err != nil {
 		// fail closed: if we cannot persist the attempt, do not allow the
 		// verification to proceed, otherwise attempt limiting could be
 		// bypassed while the database is unhealthy
 		log.Warnw("error claiming challenge attempt",
 			"token", token,
-			"challenge", challenge.Token,
+			"challenge", authTokenData.ID,
 			"error", err)
 		return ErrStorageFailure
 	}
@@ -655,7 +750,7 @@ func (c *CSP) VerifyAuthToken(token internal.HexBytes, solution string) error {
 			"attempts", MaxChallengeAttempts) // the conditional increment never exceeds the cap
 		return ErrTooManyAttempts
 	}
-	if !c.verifySolution(challenge.Secret, solution) {
+	if !c.verifySolution(authTokenData.Secret, solution) {
 		log.Warnw("challenge code does not match",
 			"userID", authTokenData.UserID,
 			"anchorID", authTokenData.AnchorID,
@@ -706,43 +801,19 @@ func (*CSP) verifySolution(secret, solution string) bool {
 	return subtle.ConstantTimeCompare([]byte(code), []byte(solution)) == 1
 }
 
-// createAuthOnlyToken creates a pre-verified token for auth-only censuses
-// that don't require challenge verification. It generates a token and immediately
-// marks it as verified.
+// createAuthOnlyToken creates a pre-verified token for auth-only censuses, which need no challenge.
 func (c *CSP) createAuthOnlyToken(anchorID, uID internal.HexBytes) (internal.HexBytes, error) {
-	// generate a new token (we don't need the code for auth-only)
-	bToken, err := uuid.New().MarshalBinary()
-	if err != nil {
-		log.Warnw("error marshalling token",
-			"error", err,
-			"userID", uID,
-			"anchorID", anchorID)
-		return nil, ErrInvalidAuthToken
-	}
-
-	// create the new token (auth-only tokens need no OTP secret)
-	if err := c.Storage.SetCSPAuth(bToken, uID, anchorID, ""); err != nil {
-		log.Warnw("error setting new token",
+	token := newAuthToken()
+	if err := c.Storage.SetVerifiedCSPAuth(token, uID, anchorID); err != nil {
+		log.Warnw("error setting new auth-only token",
 			"userID", uID,
 			"anchorID", anchorID,
 			"error", err)
 		return nil, ErrStorageFailure
 	}
-
-	// immediately verify the token since no challenge is needed
-	if err := c.Storage.VerifyCSPAuth(bToken); err != nil {
-		log.Warnw("error verifying auth-only token",
-			"userID", uID,
-			"anchorID", anchorID,
-			"token", bToken,
-			"error", err)
-		return nil, ErrStorageFailure
-	}
-
 	log.Debugw("new auth-only token created and verified",
 		"userID", uID,
 		"anchorID", anchorID,
-		"token", bToken)
-
-	return bToken, nil
+		"token", token)
+	return token, nil
 }

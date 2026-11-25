@@ -22,14 +22,15 @@ import (
 // across every authentication token answering it, before it is locked.
 const MaxChallengeAttempts = 5
 
-// MaxChallengeResends is the number of resend requests one challenge code can take, across every
-// authentication token answering it. Resends are also spaced by the notification cooldown, so
-// this bounds the emails/SMS a member can be sent for one code.
+// MaxChallengeResends is the number of times one challenge code can be sent again after its first
+// send, through a repeated auth request or a resend request, across every authentication token
+// answering it. Sends to one destination are also spaced by the notification cooldown, so this
+// bounds the emails/SMS a member can be sent for one code.
 const MaxChallengeResends = 3
 
-// MaxChallengeTokens is the number of extra authentication tokens repeated auth requests can be
-// issued for one pending challenge code. Past it, a request gets a new code instead, subject to
-// the notification cooldown and the daily send cap, so the tokens sharing a code stay bounded.
+// MaxChallengeTokens is the number of authentication tokens one challenge code can be issued, its
+// first included. Past it, a request gets a new code instead, subject to the notification cooldown
+// and the daily send cap, so the tokens sharing a code stay bounded.
 const MaxChallengeTokens = 10
 
 // DefaultMaxDailyChallengeSends is the default cap on the OTP challenges (new tokens and resends
@@ -78,7 +79,7 @@ type Config struct {
 	// disables the cap.
 	MaxHourlyAuthFailures int
 	// NotificationTTL is how long a CSP OTP challenge remains valid. After
-	// this window ResendChallenge returns ErrTokenExpired and queued but
+	// this window ClaimChallengeResend returns ErrTokenExpired and queued but
 	// undelivered notifications are dropped. Distinct from
 	// NotificationCoolDownTime (the anti-spam minimum interval between sends
 	// of a challenge code). Zero uses notifications.DefaultOTPExpiry.
@@ -185,6 +186,37 @@ func countSentNotification(storage *db.MongoStorage, ch *notifications.Notificat
 	}
 }
 
+// settleNotifications consumes the queue's delivery results until the service context ends.
+func (c *CSP) settleNotifications() {
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case ch := <-c.notifyQueue.NotificationsSent:
+			log.Debugw("notification pop from queue",
+				"success", ch.Success,
+				"type", ch.Type,
+				"userID", ch.UserID,
+				"anchorID", ch.AnchorID)
+			c.settleNotification(ch)
+		}
+	}
+}
+
+// settleNotification accounts for a challenge the queue reports. A delivered one counts against
+// the organization's sent counters. One given up on (expired, permanently failed, no service
+// configured) gives back the claims of its send, so the voter can ask again at once and keeps the
+// daily budget nothing was delivered for.
+func (c *CSP) settleNotification(ch *notifications.NotificationChallenge) {
+	countSentNotification(c.Storage, ch)
+	if ch.Success {
+		return
+	}
+	if send, ok := ch.SendInfo.(*challengeSend); ok {
+		c.rollbackSend(send)
+	}
+}
+
 // New method creates a new CSP service. It requires a CSPConfig struct with
 // the configuration for the service. It returns the CSP service or an error
 // if the storage fails to initialize. It initializes the storage with the
@@ -204,22 +236,6 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 		BreakerMaxFailures: config.NotificationBreakerMaxFailures,
 		BreakerCooldown:    config.NotificationBreakerCooldown,
 	})
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case ch := <-queue.NotificationsSent:
-				log.Debugw("notification pop from queue",
-					"success", ch.Success,
-					"type", ch.Type,
-					"userID", ch.UserID,
-					"anchorID", ch.AnchorID)
-				countSentNotification(config.DB, ch)
-			}
-		}
-	}()
-	go queue.Start()
 	notificationCoolDownTime := config.NotificationCoolDownTime
 	if notificationCoolDownTime <= 0 {
 		notificationCoolDownTime = saasNotifications.DefaultOTPCooldown
@@ -250,6 +266,8 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 	}
 	c.blindCSPDisabled.Store(config.DisableBlindCSP)
 	c.SetCertGatewayKeys(config.CertGatewayKeys)
+	go c.settleNotifications()
+	go queue.Start()
 	return c, nil
 }
 

@@ -61,6 +61,9 @@ type NotificationChallenge struct {
 	ExpiresAt time.Time
 	Retries   int
 	Success   bool
+	// SendInfo is the sender's record of this send, carried back untouched on NotificationsSent
+	// so the sender can settle the delivery result.
+	SendInfo any
 }
 
 // Valid methid checks if the notification challenge is valid. A valid

@@ -47,14 +47,12 @@ func TestDailyChallengeSendCap(t *testing.T) {
 	// second send: a resend of the same token once the cooldown has passed, counting against the
 	// same daily budget
 	time.Sleep(2 * cooldown)
-	c.Assert(csp.ResendChallenge(token, dailyCapEmail, notifications.EmailChallenge,
-		apicommon.DefaultLang, "", "", testAddress.Address()), qt.IsNil)
+	c.Assert(resendTo(csp, token, dailyCapEmail, notifications.EmailChallenge), qt.IsNil)
 
 	// the daily budget (2) is spent: further resends are refused even though the
 	// per-code resend cap (3) is not reached
 	time.Sleep(2 * cooldown)
-	err = csp.ResendChallenge(token, dailyCapEmail, notifications.EmailChallenge,
-		apicommon.DefaultLang, "", "", testAddress.Address())
+	err = resendTo(csp, token, dailyCapEmail, notifications.EmailChallenge)
 	c.Assert(err, qt.ErrorIs, errors.ErrVerificationMaxAttempts)
 	// the refusal tells when the daily window resets
 	assertRetryAfter(c, err, 24*time.Hour)
