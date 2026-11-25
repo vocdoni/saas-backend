@@ -12,9 +12,8 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 )
 
-// completeLocales are the languages whose files must hold every key. Task 6 of the plan widens it
-// to apicommon.SupportedLangs once the seven translations land.
-var completeLocales = []string{"ca", "en", "es"}
+// completeLocales are the languages whose files must hold every key.
+var completeLocales = apicommon.SupportedLangs
 
 func TestLocalesComplete(t *testing.T) {
 	c := qt.New(t)
