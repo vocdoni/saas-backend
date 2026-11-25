@@ -5001,8 +5001,11 @@ paths:
         403 (40181) for a managed organization. 404 (40185) for a row that is not a top-up,
         a row of another wallet or an unknown id (the two are indistinguishable), and a
         top-up whose invoice is not available yet: Stripe attaches and renders it shortly
-        after the payment that credited the top-up, so try again in a moment. The file is
-        named after the invoice number.
+        after the payment that credited the top-up, so try again in a moment. Also 404 for a
+        top-up credited for money received whose invoice has not been issued yet (it is
+        issued later, up to the 15th of the next month), and for a top-up invoiced outside
+        the platform (by hand), which has no invoice to serve. The file
+        is named after the invoice number.
       parameters:
       - description: Organization address
         in: path
@@ -5034,7 +5037,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
-          description: No such movement, or its invoice is not available yet
+          description: No such movement, no invoice yet or not issued yet, or invoiced
+            outside the platform
           schema:
             $ref: '#/definitions/errors.Error'
         "500":

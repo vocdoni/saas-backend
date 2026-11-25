@@ -48,6 +48,13 @@ const (
 	TopUpSourceCheckout = "checkout"
 	// TopUpSourceManual marks a manual top-up invoice (cmd/topup), credited when it is paid.
 	TopUpSourceManual = "manual"
+	// TopUpSourceDeferred marks the invoice issued after the fact for a direct credit (a
+	// ManualCreditKeyPrefix ledger row): the wallet was credited before it existed, so the
+	// invoice.paid webhook ignores it, as it ignores every source but TopUpSourceManual.
+	TopUpSourceDeferred = "deferred"
+	// MetadataKeyWalletLedgerKey is set on a deferred invoice and names the ledger row it
+	// invoices (its idempotency key), so InvoiceOfLedgerKey finds it.
+	MetadataKeyWalletLedgerKey = "wallet_ledger_key"
 )
 
 // PaymentLineItem is one server-priced line of a one-time purchase.
