@@ -121,7 +121,7 @@ members_import_done:
   label_processed: "Prozesatutako kideak"
   label_added: "Gehitutakoak"
   label_errors: "Akatak"
-  label_completed: "Amaituta"
+  label_completed: "Amaiera"
   issues_title: "Berrikusteko errenkadak"
   issues_title_first: "Lehenengo berrikusteko errenkadak"
   more_issues:

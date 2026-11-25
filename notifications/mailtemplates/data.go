@@ -11,6 +11,10 @@ import (
 const (
 	// SupportDescriptionMaxRunes caps the support ticket description in the email.
 	SupportDescriptionMaxRunes = 1200
+	// SupportTitleMaxRunes caps the support ticket title interpolated in the email.
+	SupportTitleMaxRunes = 200
+	// SupportTypeMaxRunes caps the support ticket type interpolated in the email.
+	SupportTypeMaxRunes = 60
 )
 
 // SupportData is the data of support.
@@ -28,8 +32,8 @@ type SupportData struct {
 func NewSupportData(ticketType, title, description, email, organization string) SupportData {
 	cut := Truncate(description, SupportDescriptionMaxRunes)
 	return SupportData{
-		Type:             ticketType,
-		Title:            title,
+		Type:             Truncate(ticketType, SupportTypeMaxRunes),
+		Title:            Truncate(title, SupportTitleMaxRunes),
 		Description:      cut,
 		Truncated:        cut != description,
 		Email:            email,

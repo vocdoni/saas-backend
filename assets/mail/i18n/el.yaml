@@ -121,7 +121,7 @@ members_import_done:
   label_processed: "Μέλη που επεξεργάστηκαν"
   label_added: "Προστέθηκαν"
   label_errors: "Σφάλματα"
-  label_completed: "Ολοκληρώθηκε"
+  label_completed: "Λήξη"
   issues_title: "Γραμμές προς έλεγχο"
   issues_title_first: "Πρώτες γραμμές προς έλεγχο"
   more_issues:

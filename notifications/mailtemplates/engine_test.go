@@ -231,4 +231,10 @@ func TestNewSupportData(t *testing.T) {
 	long := NewSupportData("Bug", "Title", strings.Repeat("à", 5000), "a@b.c", "Org")
 	c.Assert(long.Truncated, qt.IsTrue)
 	c.Assert(utf8.RuneCountInString(long.Description), qt.Equals, SupportDescriptionMaxRunes)
+
+	// Type and Title are capped to protect email size.
+	longType := NewSupportData(strings.Repeat("x", 200), "Title", "desc", "a@b.c", "Org")
+	c.Assert(utf8.RuneCountInString(longType.Type), qt.Equals, SupportTypeMaxRunes)
+	longTitle := NewSupportData("Bug", strings.Repeat("à", 500), "desc", "a@b.c", "Org")
+	c.Assert(utf8.RuneCountInString(longTitle.Title), qt.Equals, SupportTitleMaxRunes)
 }

@@ -121,7 +121,7 @@ members_import_done:
   label_processed: "Membros processados"
   label_added: "Adicionados"
   label_errors: "Erros"
-  label_completed: "Concluída"
+  label_completed: "Terminada"
   issues_title: "Linhas para revisar"
   issues_title_first: "Primeiras linhas para revisar"
   more_issues:

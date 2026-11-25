@@ -121,7 +121,7 @@ members_import_done:
   label_processed: "Verarbeitete Mitglieder"
   label_added: "Hinzugefügt"
   label_errors: "Fehler"
-  label_completed: "Abgeschlossen"
+  label_completed: "Beendet"
   issues_title: "Zu überprüfende Zeilen"
   issues_title_first: "Erste zu überprüfende Zeilen"
   more_issues:
