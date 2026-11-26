@@ -98,6 +98,8 @@ var apiKeyAllowlist = map[string]string{
 	// managed organization never opens a top-up, so the top-up branch is never reached with one;
 	// the per-organization role check still gates it.
 	"POST " + processesCensusCheckoutEndpoint: ScopeVotingWrite,
+	// debited from the wallet, never a checkout
+	"POST " + processesSignedCertificateEndpoint: ScopeVotingWrite,
 }
 
 // requiredScopeForRoute returns the scope required to call (method, pattern) with an API key and

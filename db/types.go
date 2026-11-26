@@ -993,7 +993,8 @@ type ManagedOrgSpend struct {
 const (
 	// WalletEntryTopUp is a credit bought through a Stripe checkout (key: session id).
 	WalletEntryTopUp = "topup"
-	// WalletEntryPayment is a debit for a process: its publish or census headroom.
+	// WalletEntryPayment is a debit for a process: its publish, census headroom, or the signed
+	// certificate bought after publish.
 	WalletEntryPayment = "payment"
 	// WalletEntryCreditBack returns a payment to the wallet: a deleted paid draft, a failed publish.
 	WalletEntryCreditBack = "creditBack"
@@ -1030,6 +1031,9 @@ type WalletLedgerEntry struct {
 	Attempt    int           `json:"-" bson:"attempt,omitempty"`
 	// AddOns are the once-per-organization add-ons a payment priced in and stamped.
 	AddOns []OrgAddOn `json:"-" bson:"addOns,omitempty"`
+	// SignedCertificate marks the payment that bought a published process's signed results
+	// certificate (SignedCertificateDebitKey): the record that it is paid.
+	SignedCertificate bool `json:"-" bson:"signedCertificate,omitempty"`
 	// ReleaseAddOns are the add-ons a creditBack gives back to the organization (charged and not
 	// withheld): released by whatever touches the process next until a later payment follows.
 	ReleaseAddOns []OrgAddOn `json:"-" bson:"releaseAddOns,omitempty"`
@@ -1048,6 +1052,9 @@ type ProcessLedgerState struct {
 	// creditBack rows. A credit-back settles what it returned and what it withheld, since a
 	// withheld add-on stays the organization's stamp, not the process's.
 	PaidCents pricing.Cents
+	// SignedCertificateCents is the part of PaidCents that bought the signed results certificate
+	// after publish: the certificate is paid when it is above 0.
+	SignedCertificateCents pricing.Cents
 	// Attempt is the number of publishfail credit-backs: the attempt segment of the next debit key.
 	Attempt int
 	// AddOns are the once-per-organization add-ons the live attempt's payments priced in.

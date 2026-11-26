@@ -1355,6 +1355,16 @@ definitions:
           QuoteRequired: census above 50 000 voters — quote-only: no price (no lines, totalCents 0,
           which is not free) and no self-service payment.
         type: boolean
+      signedCertificateDueCents:
+        description: |-
+          SignedCertificateDueCents is what POST /processes/{processId}/signed-certificate would debit:
+          set only for a published process whose certificate is not paid.
+        type: integer
+      signedCertificatePaid:
+        description: |-
+          SignedCertificatePaid tells whether a published process paid for the signed results
+          certificate, at publish or bought after it; false for a draft.
+        type: boolean
       totalCents:
         type: integer
     type: object
@@ -6468,7 +6478,10 @@ paths:
         payment completes (the add-on is then free) or is cancelled. Above 15 000 voters a custom
         quote is recommended; above 50 000 the process is quote-only: no price (empty
         lines, totalCents 0, quoteRequired true), and publish and checkout answer 422
-        (40176). Requires Manager/Admin of the organization.
+        (40176). For a published process, signedCertificatePaid tells whether the signed results
+        certificate is paid and, when it is not, signedCertificateDueCents is what
+        POST /processes/{processId}/signed-certificate would debit. Requires Manager/Admin of the
+        organization.
 
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
@@ -7020,6 +7033,65 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Get a voter's consumed sign info for a voting process
+      tags:
+      - processes
+  /processes/{processId}/signed-certificate:
+    post:
+      description: |-
+        Debits the signed results certificate add-on (€39, flat: never re-priced from the census)
+        from the payer's wallet for a published process, open or ended, quote-only included, and
+        turns addOns.signedCertificate on. A process that already has it is debited nothing
+        (amountCents 0). A draft selects the add-on with PUT /processes/{processId} instead (400).
+        No checkout is opened: when the wallet falls short a standard organization gets 402 (40178)
+        with the shortfall, tops its wallet up by at least shortfallCents and calls again; a managed
+        organization gets 402 (40175) or, past its spend cap, 402 (40183).
+        GET /processes/{processId}/price tells whether it is paid (signedCertificatePaid).
+        Requires Admin role. Also callable with a scoped API key (scope: `voting:write`).
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessCheckoutResponse'
+        "400":
+          description: The process is a draft
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "402":
+          description: Wallet short (40178, 40175), or spend cap reached (40183)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Open checkout or refunded (40177), or organization being deleted
+            (40901)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Busy (50302), retry after Retry-After
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Buy the signed results certificate of a published process
       tags:
       - processes
   /processes/{processId}/validation:

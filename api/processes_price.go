@@ -420,7 +420,10 @@ func (*API) pricingHandler(w http.ResponseWriter, r *http.Request) {
 //	@Description	payment completes (the add-on is then free) or is cancelled. Above 15 000 voters a custom
 //	@Description	quote is recommended; above 50 000 the process is quote-only: no price (empty
 //	@Description	lines, totalCents 0, quoteRequired true), and publish and checkout answer 422
-//	@Description	(40176). Requires Manager/Admin of the organization.
+//	@Description	(40176). For a published process, signedCertificatePaid tells whether the signed results
+//	@Description	certificate is paid and, when it is not, signedCertificateDueCents is what
+//	@Description	POST /processes/{processId}/signed-certificate would debit. Requires Manager/Admin of the
+//	@Description	organization.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
@@ -467,6 +470,18 @@ func (a *API) processPriceHandler(w http.ResponseWriter, r *http.Request) {
 			resp.AddOnsHeldBy = map[string]string{}
 		}
 		resp.AddOnsHeldBy[string(addOn)] = holder.Hex()
+	}
+	if vp.Published {
+		// read off the ledger: a purchase cut short before its echo is paid all the same
+		paid, err := a.processPaidState(vp.ID, walletPayer(quoted.org))
+		if err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+		resp.SignedCertificatePaid = vp.AddOns.SignedCertificate || paid.SignedCertificateCents > 0
+		if !resp.SignedCertificatePaid {
+			resp.SignedCertificateDueCents = new(pricing.SignedCertCents)
+		}
 	}
 	payment, err := a.db.ProcessPayment(oid)
 	switch {

@@ -26,6 +26,8 @@ func quoteProcessAtCensusSize(p processCensusProjection, size int64) (pricing.Qu
 	input := processQuoteInput(p.vp, &grown, p.org)
 	input.Branding = p.paid.Charged(db.OrgAddOnBranding)
 	input.CustomURL = p.paid.Charged(db.OrgAddOnCustomURL)
+	// a certificate bought after publish is in the ledger before its flag is echoed
+	input.SignedCert = input.SignedCert || p.paid.SignedCertificateCents > 0
 	quote, err := pricing.Compute(input)
 	if err != nil {
 		return pricing.Quote{}, errors.ErrMalformedBody.WithErr(err)
@@ -84,9 +86,13 @@ func (a *API) paidProcessProjection(
 func (a *API) grandfatherProcessPayment(p processCensusProjection) (processPaid, error) {
 	vp, census, org, paid := p.vp, p.census, p.org, p.paid
 	var baseCents pricing.Cents
-	if paid.PaidCents == 0 {
+	// a certificate bought after publish is no payment for the census
+	if paid.PaidCents-paid.SignedCertificateCents == 0 {
+		// its flag echoes that debit: the base never covers a certificate the ledger holds
+		stored := *vp
+		stored.AddOns.SignedCertificate = vp.AddOns.SignedCertificate && paid.SignedCertificateCents == 0
 		quote, err := quoteProcessAtCensusSize(processCensusProjection{
-			vp: vp, census: census, org: org, paid: processPaid{ProcessLedgerState: &db.ProcessLedgerState{}},
+			vp: &stored, census: census, org: org, paid: processPaid{ProcessLedgerState: &db.ProcessLedgerState{}},
 		}, census.Size)
 		if err != nil {
 			return paid, err

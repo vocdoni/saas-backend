@@ -520,3 +520,24 @@ func (ms *MongoStorage) SetVotingProcessEndDate(id bson.ObjectID, endDate time.T
 	}
 	return nil
 }
+
+// SetVotingProcessSignedCertificate turns the signed results certificate add-on on for a published
+// process, once its payment is in the ledger (a display echo of it). It returns ErrNotFound when
+// no published process has that id.
+func (ms *MongoStorage) SetVotingProcessSignedCertificate(id bson.ObjectID) error {
+	if id == bson.NilObjectID {
+		return ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.votingProcesses.UpdateOne(ctx,
+		bson.M{"_id": id, "published": true},
+		bson.M{"$set": bson.M{"addOns.signedCertificate": true, "updatedAt": time.Now()}})
+	if err != nil {
+		return fmt.Errorf("failed to set voting process signed certificate: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}

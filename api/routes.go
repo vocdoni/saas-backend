@@ -178,6 +178,8 @@ const (
 	processesCheckoutEndpoint = "/processes/{processId}/checkout"
 	// POST buys census headroom for an already-paid process from the wallet (raises the paid envelope)
 	processesCensusCheckoutEndpoint = "/processes/{processId}/census/checkout"
+	// POST buys the signed results certificate of a published process from the wallet
+	processesSignedCertificateEndpoint = "/processes/{processId}/signed-certificate"
 	// POST /processes/{processId}/check voter eligibility/status (public CSP)
 	processesCheckEndpoint = "/processes/{processId}/check"
 	// POST /processes/{processId}/publish to publish the process (one election per question)
