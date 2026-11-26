@@ -115,8 +115,7 @@ func electionStateReason(vp *db.VotingProcess, q *db.VotingProcessQuestion, now 
 // The CSP is the only place that can refuse on election state: the signature it issues carries no
 // expiry, so a voter could otherwise bank one against a paused election and spend it the moment the
 // chain opens.
-func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *errors.Error {
-	now := time.Now()
+func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion, now time.Time) *errors.Error {
 	if electionStateReason(vp, q, now) == "" {
 		return nil
 	}
@@ -361,16 +360,18 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 //	@Description	and consumes the per-election signing slot (a question cannot be signed twice).
 //	@Description	Body: authToken, electionId (the question's on-chain election id) and payload (the voter
 //	@Description	address). tokenR is unused.
+//	@Description	data (handlers.SignRefusalData) is present only when the ballot is refused (401, data.ballots)
+//	@Description	or the voter is (401/404 not_in_census, 401 zero_weight, data.reason).
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
 //	@Param			processId	path		string					true	"Process ID"
 //	@Param			request		body		handlers.SignRequest	true	"Sign request (see description for fields)"
 //	@Success		200			{object}	handlers.AuthResponse
-//	@Failure		400			{object}	errors.Error	"Invalid input data"
-//	@Failure		401			{object}	errors.Error	"Unauthorized, unverified token, election not in process, or member not eligible"
-//	@Failure		404			{object}	errors.Error	"Process, census, or user not found"
-//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		400			{object}	errors.Error								"Invalid input data"
+//	@Failure		401			{object}	errors.Error{data=handlers.SignRefusalData}	"Unauthorized, unverified token, or ballot refused"
+//	@Failure		404			{object}	errors.Error{data=handlers.SignRefusalData}	"Process, census, or user not found"
+//	@Failure		500			{object}	errors.Error								"Internal server error"
 //	@Router			/processes/{processId}/sign [post]
 func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request) {
 	oid, _, ok := parseProcessID(w, r)
@@ -389,8 +390,12 @@ func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrMalformedBody.Withf("process uses a blind (anonymous) census; use the blind-point/blind-sign endpoints").Write(w)
 		return
 	}
-	upstreamID, sErr := c.authorizeQuestion(sc, req.ProcessID)
+	upstreamID, reason, sErr := c.authorizeQuestion(sc, req.ProcessID, time.Now())
 	if sErr != nil {
+		if reason != "" {
+			sErr.WithData(SignRefusalData{Ballots: []SignRefusal{{Index: 0, UpstreamID: req.ProcessID, Reason: reason}}}).Write(w)
+			return
+		}
 		sErr.Write(w)
 		return
 	}
@@ -442,14 +447,21 @@ func (c *CSPHandlers) resolveSignContext(
 	// cascade actually revoke.
 	if _, err := c.mainDB.CensusParticipant(vp.CensusID.Hex(), auth.UserID.String()); err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			errors.ErrUnauthorized.Withf("member is no longer part of the census").Write(w)
+			errors.ErrUnauthorized.Withf("member is no longer part of the census").
+				WithData(SignRefusalData{Reason: VoteReasonNotInCensus}).Write(w)
 			return nil, false
 		}
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return nil, false
 	}
-	member, ok := c.orgMemberFromAuth(w, vp.OrgAddress, auth)
-	if !ok {
+	member, err := c.orgMember(vp.OrgAddress, auth)
+	if err != nil {
+		// only a member that is really gone is labelled; a transient lookup failure keeps no reason
+		sErr := errors.ErrUserNotFound.WithErr(err)
+		if errors.Is(err, db.ErrNotFound) || errors.Is(err, db.ErrInvalidData) {
+			sErr = sErr.WithData(SignRefusalData{Reason: VoteReasonNotInCensus})
+		}
+		sErr.Write(w)
 		return nil, false
 	}
 	census, err := c.mainDB.Census(vp.CensusID.Hex())
@@ -460,7 +472,7 @@ func (c *CSPHandlers) resolveSignContext(
 	weight := uint64(1)
 	if census.Weighted {
 		if member.Weight == 0 {
-			errors.ErrZeroWeightVoter.Write(w)
+			errors.ErrZeroWeightVoter.WithData(SignRefusalData{Reason: VoteReasonZeroWeight}).Write(w)
 			return nil, false
 		}
 		weight = member.Weight
@@ -476,44 +488,61 @@ func (c *CSPHandlers) resolveSignContext(
 // authorizeQuestion runs the per-ballot half of a signing request: resolve the target question
 // by its on-chain election id, verify it belongs to this process and authorize the member
 // against the question's eligibility subset. It returns the question's on-chain election id, or
-// the API error to write back, never both. The batch handler resolves against a preloaded map
-// instead (authorizeLoadedQuestion) to avoid one query per ballot.
+// the API error to write back (with its reason when the ballot is refused), never both. The batch
+// handler resolves against a preloaded map instead (authorizeLoadedQuestion) to avoid one query per ballot.
 func (c *CSPHandlers) authorizeQuestion(
-	sc *signContext, electionID internal.HexBytes,
-) (internal.HexBytes, *errors.Error) {
+	sc *signContext, electionID internal.HexBytes, now time.Time,
+) (internal.HexBytes, VoteReason, *errors.Error) {
 	// an empty id cannot name an election, and db.QuestionByUpstreamID reports it as
 	// ErrInvalidData, which the branch below would surface to the client as a 500. The message is
 	// field-neutral because the single-sign endpoint sends this same id as "electionId".
 	if len(electionID) == 0 {
-		return nil, errors.Ptr(errors.ErrMalformedBody.With("missing election id"))
+		return nil, "", errors.Ptr(errors.ErrMalformedBody.With("missing election id"))
 	}
 	question, err := c.mainDB.QuestionByUpstreamID(electionID)
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
-		return nil, errors.Ptr(errors.ErrGenericInternalServerError.WithErr(err))
+		return nil, "", errors.Ptr(errors.ErrGenericInternalServerError.WithErr(err))
 	}
 	if err != nil {
 		question = nil // not found: authorizeLoadedQuestion folds it into the same 401
 	}
-	return authorizeLoadedQuestion(sc, question)
+	return authorizeLoadedQuestion(sc, question, now)
 }
 
 // authorizeLoadedQuestion authorizes one already-loaded question (nil means the election id
 // resolved to nothing): it must belong to this process, currently accept a signature, and the
 // member must be in its eligibility subset. Not-found and wrong-process collapse into the same
 // 401 on purpose — a caller learns nothing about elections outside the process it is signing for.
+// The reason (/check's precedence) and the error (today's message order) are both set or both empty.
 func authorizeLoadedQuestion(
-	sc *signContext, question *db.VotingProcessQuestion,
-) (internal.HexBytes, *errors.Error) {
+	sc *signContext, question *db.VotingProcessQuestion, now time.Time,
+) (internal.HexBytes, VoteReason, *errors.Error) {
+	reason := ballotRefusal(sc, question, now)
+	if reason == "" {
+		return question.UpstreamID, "", nil
+	}
 	if question == nil || question.ProcessID != sc.process.ID {
-		return nil, errors.Ptr(errors.ErrUnauthorized.Withf("election not found in process"))
+		return nil, reason, errors.Ptr(errors.ErrUnauthorized.Withf("election not found in process"))
 	}
-	if sErr := unvotableElection(sc.process, question); sErr != nil {
-		return nil, sErr
+	if sErr := unvotableElection(sc.process, question, now); sErr != nil {
+		return nil, reason, sErr
 	}
-	if !memberEligibleForQuestion(question, sc.memberID) {
-		return nil, errors.Ptr(errors.ErrUnauthorized.Withf("member not eligible for this question"))
+	return nil, reason, errors.Ptr(errors.ErrUnauthorized.Withf("member not eligible for this question"))
+}
+
+// ballotRefusal is why the ballot for question cannot be signed at now, or "" when it can. It
+// reuses /check's precedence, so a refusal names the same reason /check would.
+func ballotRefusal(sc *signContext, question *db.VotingProcessQuestion, now time.Time) VoteReason {
+	if question == nil || question.ProcessID != sc.process.ID {
+		return VoteReasonUnknownElection
 	}
-	return question.UpstreamID, nil
+	return voteReason(voteReasonInput{
+		inCensus:     true,
+		eligible:     memberEligibleForQuestion(question, sc.memberID),
+		processEnded: processEnded(sc.process, now),
+		published:    true,
+		state:        electionStateReason(sc.process, question, now),
+	})
 }
 
 // maxSignBatchBodyBytes bounds a POST /processes/{processId}/sign-batch body. One ballot is an
@@ -557,17 +586,19 @@ type authorizedBallot struct {
 //	@Description	already succeeded, and every signature, re-signs included, counts toward the election's
 //	@Description	limit (MaxCSPSignaturesPerElection, 10 in total) — past it the election is permanently
 //	@Description	locked for the voter.
+//	@Description	data (handlers.SignRefusalData) is present only when ballots are refused (401, data.ballots lists
+//	@Description	every refused one) or the voter is (401/404 not_in_census, 401 zero_weight, data.reason).
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
 //	@Param			processId	path		string						true	"Process ID"
 //	@Param			request		body		handlers.SignBatchRequest	true	"Auth token and one ballot per question"
 //	@Success		200			{object}	handlers.SignBatchResponse
-//	@Failure		400			{object}	errors.Error	"Invalid input data"
-//	@Failure		401			{object}	errors.Error	"Unauthorized, unverified token, election not in process, or member not eligible"
-//	@Failure		404			{object}	errors.Error	"Census or user not found"
-//	@Failure		413			{object}	errors.Error	"Request body too large"
-//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		400			{object}	errors.Error								"Invalid input data"
+//	@Failure		401			{object}	errors.Error{data=handlers.SignRefusalData}	"Unauthorized, unverified token, or ballot refused"
+//	@Failure		404			{object}	errors.Error{data=handlers.SignRefusalData}	"Census or user not found"
+//	@Failure		413			{object}	errors.Error								"Request body too large"
+//	@Failure		500			{object}	errors.Error								"Internal server error"
 //	@Router			/processes/{processId}/sign-batch [post]
 func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Request) {
 	oid, _, ok := parseProcessID(w, r)
@@ -618,10 +649,18 @@ func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Req
 	}
 	ballots := make([]authorizedBallot, len(req.Ballots))
 	seen := make(map[string]int, len(req.Ballots))
+	now := time.Now()
+	// the first failing ballot decides the answer; after a refusal the pass only collects the
+	// other refused ballots, skipping malformed ones.
+	var refusals []SignRefusal
+	var firstErr *errors.Error
 	for i, item := range req.Ballots {
 		// a repeated election would contend with itself on the per-(user, election) signer
 		// lock, and a voter has at most one ballot per question anyway.
 		if first, dup := seen[string(item.UpstreamID)]; dup {
+			if firstErr != nil {
+				continue
+			}
 			errors.ErrMalformedBody.Withf(
 				"the ballot at index %d repeats the election of index %d", i, first,
 			).Write(w)
@@ -631,19 +670,32 @@ func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Req
 		// an empty id cannot name an election; checked before the map so it gets its 400
 		// rather than the map-miss 401.
 		if len(item.UpstreamID) == 0 {
+			if firstErr != nil {
+				continue
+			}
 			errors.ErrMalformedBody.With("missing election id").Withf("at index %d", i).Write(w)
 			return
 		}
-		upstreamID, sErr := authorizeLoadedQuestion(sc, byUpstream[string(item.UpstreamID)])
+		upstreamID, reason, sErr := authorizeLoadedQuestion(sc, byUpstream[string(item.UpstreamID)], now)
 		if sErr != nil {
-			sErr.Withf("at index %d", i).Write(w)
-			return
+			refusals = append(refusals, SignRefusal{Index: i, UpstreamID: item.UpstreamID, Reason: reason})
+			if firstErr == nil {
+				firstErr = errors.Ptr(sErr.Withf("at index %d", i))
+			}
+			continue
 		}
 		if sErr := validateVoterAddress(item.Address); sErr != nil {
+			if firstErr != nil {
+				continue
+			}
 			sErr.Withf("at index %d", i).Write(w)
 			return
 		}
 		ballots[i] = authorizedBallot{upstreamID: upstreamID, address: item.Address}
+	}
+	if firstErr != nil {
+		firstErr.WithData(SignRefusalData{Ballots: refusals}).Write(w)
+		return
 	}
 
 	// ponytail: signed sequentially. db.ConsumeCSPProcess takes the storage write lock, so a
@@ -698,16 +750,20 @@ type blindBallotAuth struct {
 //	@Description	Public endpoint: the verified auth token authenticates the voter. Rejected (400) for a
 //	@Description	non-anonymous process — use the sign endpoints there. Refused (400, "anonymous voting is
 //	@Description	temporarily unavailable") while the service has anonymous voting off.
+//	@Description	data (handlers.SignRefusalData) is present only when elections are refused (401, data.ballots lists
+//	@Description	every refused one), the voter is (401/404 not_in_census, 401 zero_weight) or the switch is off
+//	@Description	(400 unavailable), as data.reason.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
 //	@Param			processId	path		string						true	"Process ID"
 //	@Param			request		body		handlers.BlindPointRequest	true	"Auth token and one election id per question"
 //	@Success		200			{object}	handlers.BlindPointResponse
-//	@Failure		400			{object}	errors.Error	"Invalid input data, non-anonymous process, or anonymous voting temporarily unavailable"
-//	@Failure		401			{object}	errors.Error	"Unauthorized, unverified token, election not in process, or member not eligible"
-//	@Failure		413			{object}	errors.Error	"Request body too large"
-//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		400			{object}	errors.Error{data=handlers.SignRefusalData}	"Invalid input, not anonymous, or anonymous voting off"
+//	@Failure		401			{object}	errors.Error{data=handlers.SignRefusalData}	"Unauthorized, unverified token, or ballot refused"
+//	@Failure		404			{object}	errors.Error{data=handlers.SignRefusalData}	"Census or user not found"
+//	@Failure		413			{object}	errors.Error								"Request body too large"
+//	@Failure		500			{object}	errors.Error								"Internal server error"
 //	@Router			/processes/{processId}/blind-point [post]
 func (c *CSPHandlers) ProcessBlindPointHandler(w http.ResponseWriter, r *http.Request) {
 	if c.blindCSPRefused(w) {
@@ -751,22 +807,39 @@ func (c *CSPHandlers) ProcessBlindPointHandler(w http.ResponseWriter, r *http.Re
 	// out-of-process election fails the request rather than issuing a partial set.
 	upstreamIDs := make([]internal.HexBytes, len(req.Elections))
 	seen := make(map[string]int, len(req.Elections))
+	now := time.Now()
+	// same pass as sign-batch: the first failing election decides, later refusals are collected
+	var refusals []SignRefusal
+	var firstErr *errors.Error
 	for i, electionID := range req.Elections {
 		if first, dup := seen[string(electionID)]; dup {
+			if firstErr != nil {
+				continue
+			}
 			errors.ErrMalformedBody.Withf("the election at index %d repeats index %d", i, first).Write(w)
 			return
 		}
 		seen[string(electionID)] = i
 		if len(electionID) == 0 {
+			if firstErr != nil {
+				continue
+			}
 			errors.ErrMalformedBody.With("missing election id").Withf("at index %d", i).Write(w)
 			return
 		}
-		upstreamID, sErr := authorizeLoadedQuestion(sc, byUpstream[string(electionID)])
+		upstreamID, reason, sErr := authorizeLoadedQuestion(sc, byUpstream[string(electionID)], now)
 		if sErr != nil {
-			sErr.Withf("at index %d", i).Write(w)
-			return
+			refusals = append(refusals, SignRefusal{Index: i, UpstreamID: electionID, Reason: reason})
+			if firstErr == nil {
+				firstErr = errors.Ptr(sErr.Withf("at index %d", i))
+			}
+			continue
 		}
 		upstreamIDs[i] = upstreamID
+	}
+	if firstErr != nil {
+		firstErr.WithData(SignRefusalData{Ballots: refusals}).Write(w)
+		return
 	}
 
 	resp := &BlindPointResponse{Points: make([]BlindPointResult, len(upstreamIDs))}
@@ -806,16 +879,20 @@ func (c *CSPHandlers) ProcessBlindPointHandler(w http.ResponseWriter, r *http.Re
 //	@Description	no round-1 point was issued; the other signing codes as usual). Public endpoint. Rejected
 //	@Description	(400) for a non-anonymous process — use the sign endpoints there. Refused (400, "anonymous
 //	@Description	voting is temporarily unavailable") while the service has anonymous voting off.
+//	@Description	data (handlers.SignRefusalData) is present only when ballots are refused (401, data.ballots lists
+//	@Description	every refused one), the voter is (401/404 not_in_census, 401 zero_weight) or the switch is off
+//	@Description	(400 unavailable), as data.reason.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
 //	@Param			processId	path		string						true	"Process ID"
 //	@Param			request		body		handlers.BlindSignRequest	true	"Auth token and one blinded ballot per question"
 //	@Success		200			{object}	handlers.BlindSignResponse
-//	@Failure		400			{object}	errors.Error	"Invalid input data, non-anonymous process, or anonymous voting temporarily unavailable"
-//	@Failure		401			{object}	errors.Error	"Unauthorized, unverified token, election not in process, or member not eligible"
-//	@Failure		413			{object}	errors.Error	"Request body too large"
-//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		400			{object}	errors.Error{data=handlers.SignRefusalData}	"Invalid input, not anonymous, or anonymous voting off"
+//	@Failure		401			{object}	errors.Error{data=handlers.SignRefusalData}	"Unauthorized, unverified token, or ballot refused"
+//	@Failure		404			{object}	errors.Error{data=handlers.SignRefusalData}	"Census or user not found"
+//	@Failure		413			{object}	errors.Error								"Request body too large"
+//	@Failure		500			{object}	errors.Error								"Internal server error"
 //	@Router			/processes/{processId}/blind-sign [post]
 func (c *CSPHandlers) ProcessBlindSignHandler(w http.ResponseWriter, r *http.Request) {
 	if c.blindCSPRefused(w) {
@@ -857,26 +934,46 @@ func (c *CSPHandlers) ProcessBlindSignHandler(w http.ResponseWriter, r *http.Req
 	}
 	ballots := make([]blindBallotAuth, len(req.Ballots))
 	seen := make(map[string]int, len(req.Ballots))
+	now := time.Now()
+	// same pass as sign-batch: the first failing ballot decides, later refusals are collected
+	var refusals []SignRefusal
+	var firstErr *errors.Error
 	for i, item := range req.Ballots {
 		if first, dup := seen[string(item.UpstreamID)]; dup {
+			if firstErr != nil {
+				continue
+			}
 			errors.ErrMalformedBody.Withf("the ballot at index %d repeats the election of index %d", i, first).Write(w)
 			return
 		}
 		seen[string(item.UpstreamID)] = i
 		if len(item.UpstreamID) == 0 {
+			if firstErr != nil {
+				continue
+			}
 			errors.ErrMalformedBody.With("missing election id").Withf("at index %d", i).Write(w)
 			return
 		}
-		upstreamID, sErr := authorizeLoadedQuestion(sc, byUpstream[string(item.UpstreamID)])
+		upstreamID, reason, sErr := authorizeLoadedQuestion(sc, byUpstream[string(item.UpstreamID)], now)
 		if sErr != nil {
-			sErr.Withf("at index %d", i).Write(w)
-			return
+			refusals = append(refusals, SignRefusal{Index: i, UpstreamID: item.UpstreamID, Reason: reason})
+			if firstErr == nil {
+				firstErr = errors.Ptr(sErr.Withf("at index %d", i))
+			}
+			continue
 		}
 		if len(item.BlindedMessage) == 0 {
+			if firstErr != nil {
+				continue
+			}
 			errors.ErrMalformedBody.With("missing blinded message").Withf("at index %d", i).Write(w)
 			return
 		}
 		ballots[i] = blindBallotAuth{upstreamID: upstreamID, blindedMessage: item.BlindedMessage}
+	}
+	if firstErr != nil {
+		firstErr.WithData(SignRefusalData{Ballots: refusals}).Write(w)
+		return
 	}
 
 	resp := &BlindSignResponse{Signatures: make([]SignBatchResult, len(ballots))}
@@ -910,7 +1007,7 @@ func (c *CSPHandlers) blindCSPRefused(w http.ResponseWriter) bool {
 	if !c.csp.BlindCSPDisabled() {
 		return false
 	}
-	errors.ErrInvalidData.With(csp.AnonymousVotingUnavailable).Write(w)
+	errors.ErrInvalidData.With(csp.AnonymousVotingUnavailable).WithData(SignRefusalData{Reason: VoteReasonUnavailable}).Write(w)
 	return true
 }
 

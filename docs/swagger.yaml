@@ -2666,6 +2666,26 @@ definitions:
         format: hex
         type: string
     type: object
+  handlers.SignRefusal:
+    properties:
+      index:
+        type: integer
+      reason:
+        $ref: '#/definitions/handlers.VoteReason'
+      upstreamId:
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
+  handlers.SignRefusalData:
+    properties:
+      ballots:
+        items:
+          $ref: '#/definitions/handlers.SignRefusal'
+        type: array
+      reason:
+        $ref: '#/definitions/handlers.VoteReason'
+    type: object
   handlers.SignRequest:
     properties:
       authToken:
@@ -2709,6 +2729,7 @@ definitions:
     - not_started
     - paused
     - unavailable
+    - unknown_election
     type: string
     x-enum-varnames:
     - VoteReasonNotInCensus
@@ -2721,6 +2742,7 @@ definitions:
     - VoteReasonNotStarted
     - VoteReasonPaused
     - VoteReasonUnavailable
+    - VoteReasonUnknownElection
   pricing.Breakdown:
     properties:
       balanceCents:
@@ -5715,6 +5737,9 @@ paths:
         Public endpoint: the verified auth token authenticates the voter. Rejected (400) for a
         non-anonymous process — use the sign endpoints there. Refused (400, "anonymous voting is
         temporarily unavailable") while the service has anonymous voting off.
+        data (handlers.SignRefusalData) is present only when elections are refused (401, data.ballots lists
+        every refused one), the voter is (401/404 not_in_census, 401 zero_weight) or the switch is off
+        (400 unavailable), as data.reason.
       parameters:
       - description: Process ID
         in: path
@@ -5735,15 +5760,32 @@ paths:
           schema:
             $ref: '#/definitions/handlers.BlindPointResponse'
         "400":
-          description: Invalid input data, non-anonymous process, or anonymous voting
-            temporarily unavailable
+          description: Invalid input, not anonymous, or anonymous voting off
           schema:
-            $ref: '#/definitions/errors.Error'
+            allOf:
+            - $ref: '#/definitions/errors.Error'
+            - properties:
+                data:
+                  $ref: '#/definitions/handlers.SignRefusalData'
+              type: object
         "401":
-          description: Unauthorized, unverified token, election not in process, or
-            member not eligible
+          description: Unauthorized, unverified token, or ballot refused
           schema:
-            $ref: '#/definitions/errors.Error'
+            allOf:
+            - $ref: '#/definitions/errors.Error'
+            - properties:
+                data:
+                  $ref: '#/definitions/handlers.SignRefusalData'
+              type: object
+        "404":
+          description: Census or user not found
+          schema:
+            allOf:
+            - $ref: '#/definitions/errors.Error'
+            - properties:
+                data:
+                  $ref: '#/definitions/handlers.SignRefusalData'
+              type: object
         "413":
           description: Request body too large
           schema:
@@ -5769,6 +5811,9 @@ paths:
         no round-1 point was issued; the other signing codes as usual). Public endpoint. Rejected
         (400) for a non-anonymous process — use the sign endpoints there. Refused (400, "anonymous
         voting is temporarily unavailable") while the service has anonymous voting off.
+        data (handlers.SignRefusalData) is present only when ballots are refused (401, data.ballots lists
+        every refused one), the voter is (401/404 not_in_census, 401 zero_weight) or the switch is off
+        (400 unavailable), as data.reason.
       parameters:
       - description: Process ID
         in: path
@@ -5789,15 +5834,32 @@ paths:
           schema:
             $ref: '#/definitions/handlers.BlindSignResponse'
         "400":
-          description: Invalid input data, non-anonymous process, or anonymous voting
-            temporarily unavailable
+          description: Invalid input, not anonymous, or anonymous voting off
           schema:
-            $ref: '#/definitions/errors.Error'
+            allOf:
+            - $ref: '#/definitions/errors.Error'
+            - properties:
+                data:
+                  $ref: '#/definitions/handlers.SignRefusalData'
+              type: object
         "401":
-          description: Unauthorized, unverified token, election not in process, or
-            member not eligible
+          description: Unauthorized, unverified token, or ballot refused
           schema:
-            $ref: '#/definitions/errors.Error'
+            allOf:
+            - $ref: '#/definitions/errors.Error'
+            - properties:
+                data:
+                  $ref: '#/definitions/handlers.SignRefusalData'
+              type: object
+        "404":
+          description: Census or user not found
+          schema:
+            allOf:
+            - $ref: '#/definitions/errors.Error'
+            - properties:
+                data:
+                  $ref: '#/definitions/handlers.SignRefusalData'
+              type: object
         "413":
           description: Request body too large
           schema:
@@ -6864,6 +6926,8 @@ paths:
         and consumes the per-election signing slot (a question cannot be signed twice).
         Body: authToken, electionId (the question's on-chain election id) and payload (the voter
         address). tokenR is unused.
+        data (handlers.SignRefusalData) is present only when the ballot is refused (401, data.ballots)
+        or the voter is (401/404 not_in_census, 401 zero_weight, data.reason).
       parameters:
       - description: Process ID
         in: path
@@ -6888,14 +6952,23 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Unauthorized, unverified token, election not in process, or
-            member not eligible
+          description: Unauthorized, unverified token, or ballot refused
           schema:
-            $ref: '#/definitions/errors.Error'
+            allOf:
+            - $ref: '#/definitions/errors.Error'
+            - properties:
+                data:
+                  $ref: '#/definitions/handlers.SignRefusalData'
+              type: object
         "404":
           description: Process, census, or user not found
           schema:
-            $ref: '#/definitions/errors.Error'
+            allOf:
+            - $ref: '#/definitions/errors.Error'
+            - properties:
+                data:
+                  $ref: '#/definitions/handlers.SignRefusalData'
+              type: object
         "500":
           description: Internal server error
           schema:
@@ -6932,6 +7005,8 @@ paths:
         already succeeded, and every signature, re-signs included, counts toward the election's
         limit (MaxCSPSignaturesPerElection, 10 in total) — past it the election is permanently
         locked for the voter.
+        data (handlers.SignRefusalData) is present only when ballots are refused (401, data.ballots lists
+        every refused one) or the voter is (401/404 not_in_census, 401 zero_weight, data.reason).
       parameters:
       - description: Process ID
         in: path
@@ -6956,14 +7031,23 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Unauthorized, unverified token, election not in process, or
-            member not eligible
+          description: Unauthorized, unverified token, or ballot refused
           schema:
-            $ref: '#/definitions/errors.Error'
+            allOf:
+            - $ref: '#/definitions/errors.Error'
+            - properties:
+                data:
+                  $ref: '#/definitions/handlers.SignRefusalData'
+              type: object
         "404":
           description: Census or user not found
           schema:
-            $ref: '#/definitions/errors.Error'
+            allOf:
+            - $ref: '#/definitions/errors.Error'
+            - properties:
+                data:
+                  $ref: '#/definitions/handlers.SignRefusalData'
+              type: object
         "413":
           description: Request body too large
           schema:
