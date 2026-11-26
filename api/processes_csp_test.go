@@ -621,6 +621,22 @@ func TestProcessCSPCheckVotableNow(t *testing.T) {
 		}
 	})
 
+	t.Run("voter removed from the census", func(t *testing.T) {
+		c := qt.New(t)
+		f := setupRelayVoting(t, 2)
+		auth, err := testDB.CSPAuth(f.authToken)
+		c.Assert(err, qt.IsNil)
+		vp, err := testDB.VotingProcess(objectID(c, f.pid))
+		c.Assert(err, qt.IsNil)
+		// only the participant row: a revocation would also drop the auth session (401)
+		c.Assert(testDB.DelCensusParticipant(vp.CensusID.Hex(), auth.UserID.String()), qt.IsNil)
+		got := checkVotable(t, f.pid, f.authToken)
+		c.Assert(got, qt.HasLen, 2)
+		for _, q := range got {
+			assertVotable(c, q, handlers.VoteReasonNotInCensus, false)
+		}
+	})
+
 	t.Run("zero weight on a weighted census", func(t *testing.T) {
 		c := qt.New(t)
 		token := testCreateUser(t, "superpassword123")

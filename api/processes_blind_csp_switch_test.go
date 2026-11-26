@@ -266,6 +266,8 @@ func TestProcessBlindCSPSwitchStopsAuthChallenges(t *testing.T) {
 	check := requestAndParse[handlers.ProcessCheckResponse](t, http.MethodPost, "",
 		&handlers.CheckMembershipRequest{AuthToken: verified}, "processes", anonymousPID, "check")
 	c.Assert(check.BelongsToProcess, qt.IsTrue)
+	c.Assert(check.Questions, qt.HasLen, 1)
+	assertVotable(c, check.Questions[0], handlers.VoteReasonUnavailable, true)
 	requestAndParse[handlers.ProcessSignInfoResponse](t, http.MethodPost, "",
 		&handlers.ConsumedAddressRequest{AuthToken: verified}, "processes", anonymousPID, "sign-info")
 
