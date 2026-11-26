@@ -299,3 +299,66 @@ func TestSignedCertificateEndedAndQuoteOnly(t *testing.T) {
 	c.Assert(payment.BaseCents, qt.DeepEquals, new(pricing.Cents))
 	assertBalance(c, orgAddress, 0)
 }
+
+// processPrice reads GET /processes/{processId}/price.
+func processPrice(t *testing.T, token string, oid bson.ObjectID) apicommon.ProcessPriceResponse {
+	t.Helper()
+	return requestAndParse[apicommon.ProcessPriceResponse](t, http.MethodGet, token, nil, "processes", oid.Hex(), "price")
+}
+
+// TestPriceReadsSignedCertificate: GET /price says whether the certificate of a published process
+// is paid and, until it is, what buying it debits; a draft reads unpaid with nothing due.
+func TestPriceReadsSignedCertificate(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "signedcertprice1")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	draft := objectID(c, newPricedVotingProcess(t, token, orgAddress))
+	price := processPrice(t, token, draft)
+	c.Assert(price.SignedCertificatePaid, qt.IsFalse)
+	c.Assert(price.SignedCertificateDueCents, qt.IsNil)
+
+	oid := newPublishedPaidProcess(t, token, orgAddress)
+	price = processPrice(t, token, oid)
+	c.Assert(price.SignedCertificatePaid, qt.IsFalse)
+	c.Assert(price.SignedCertificateDueCents, qt.DeepEquals, new(pricing.SignedCertCents))
+
+	fundWallet(t, orgAddress, pricing.SignedCertCents)
+	c.Assert(buyCert(t, token, oid), qt.Equals, pricing.SignedCertCents)
+	price = processPrice(t, token, oid)
+	c.Assert(price.SignedCertificatePaid, qt.IsTrue)
+	c.Assert(price.SignedCertificateDueCents, qt.IsNil)
+	kinds := make([]string, 0, len(price.Lines))
+	for _, line := range price.Lines {
+		kinds = append(kinds, line.Kind)
+	}
+	c.Assert(kinds, qt.Contains, pricing.LineSignedCert)
+}
+
+// TestSignedCertificateCutShort: a purchase stopped after its debit, before the echo, is paid all
+// the same: GET /price reads it paid, growth gets no headroom out of it, and the retry debits
+// nothing and writes the echo.
+func TestSignedCertificateCutShort(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "signedcertcrash1")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	oid := newPublishedPaidProcess(t, token, orgAddress)
+	paidCents := growthCents(t, growthBaseVoters)
+
+	fundWallet(t, orgAddress, pricing.SignedCertCents)
+	failMoneyStepOnce(t, moneyStepSignedCert, oid)
+	requestAndAssertCode(http.StatusInternalServerError, t, http.MethodPost, token, nil,
+		"processes", oid.Hex(), "signed-certificate")
+	assertBalance(c, orgAddress, 0)
+	vp, err := testDB.VotingProcess(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(vp.AddOns.SignedCertificate, qt.IsFalse)
+	c.Assert(processPrice(t, token, oid).SignedCertificatePaid, qt.IsTrue)
+	refusal := growthRefusal(c, oid, growthTierEnd)
+	c.Assert(refusal.DueCents, qt.Equals, growthCents(t, growthTierEnd)-paidCents)
+
+	c.Assert(buyCert(t, token, oid), qt.Equals, pricing.Cents(0))
+	vp, err = testDB.VotingProcess(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(vp.AddOns.SignedCertificate, qt.IsTrue)
+	assertBalance(c, orgAddress, 0)
+}

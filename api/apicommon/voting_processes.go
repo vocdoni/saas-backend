@@ -207,6 +207,12 @@ type ProcessPriceResponse struct {
 	// customUrl), the other process of the organization whose payment holds it. It is priced in,
 	// and publish and checkout answer 409 (40177) until that payment completes or is cancelled.
 	AddOnsHeldBy map[string]string `json:"addOnsHeldBy,omitempty"`
+	// SignedCertificatePaid tells whether a published process paid for the signed results
+	// certificate, at publish or bought after it; false for a draft.
+	SignedCertificatePaid bool `json:"signedCertificatePaid"`
+	// SignedCertificateDueCents is what POST /processes/{processId}/signed-certificate would debit:
+	// set only for a published process whose certificate is not paid.
+	SignedCertificateDueCents *pricing.Cents `json:"signedCertificateDueCents,omitempty"`
 }
 
 // ProcessCheckoutRequest starts (or resumes) the wallet top-up checkout of a voting process.
