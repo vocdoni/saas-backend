@@ -6122,6 +6122,7 @@ paths:
         votableNow is true when a sign request made now with this token would pass every
         authorization check; otherwise reason says why. Show a generic message for a reason you do
         not know, and treat an absent votableNow (older backend) as unknown, not false.
+        reason is never unknown_election, which only sign refusals report.
         Sign through sign-batch, or blind-point for an anonymous census. A sign
         attempt can still fail for per-attempt outcomes (already_signing, address_mismatch,
         auth_invalid, blind-round errors).

@@ -485,11 +485,8 @@ func (c *CSPHandlers) resolveSignContext(
 	}, true
 }
 
-// authorizeQuestion runs the per-ballot half of a signing request: resolve the target question
-// by its on-chain election id, verify it belongs to this process and authorize the member
-// against the question's eligibility subset. It returns the question's on-chain election id, or
-// the API error to write back (with its reason when the ballot is refused), never both. The batch
-// handler resolves against a preloaded map instead (authorizeLoadedQuestion) to avoid one query per ballot.
+// authorizeQuestion is authorizeLoadedQuestion for the single-sign endpoint: it loads the question by
+// its on-chain election id first. An empty id is a 400 and a failed lookup a 500, both without a reason.
 func (c *CSPHandlers) authorizeQuestion(
 	sc *signContext, electionID internal.HexBytes, now time.Time,
 ) (internal.HexBytes, VoteReason, *errors.Error) {
@@ -509,11 +506,9 @@ func (c *CSPHandlers) authorizeQuestion(
 	return authorizeLoadedQuestion(sc, question, now)
 }
 
-// authorizeLoadedQuestion authorizes one already-loaded question (nil means the election id
-// resolved to nothing): it must belong to this process, currently accept a signature, and the
-// member must be in its eligibility subset. Not-found and wrong-process collapse into the same
-// 401 on purpose — a caller learns nothing about elections outside the process it is signing for.
-// The reason (/check's precedence) and the error (today's message order) are both set or both empty.
+// authorizeLoadedQuestion authorizes one loaded question (nil: the id named nothing), returning its election
+// id or the refusal reason and error, always set together. Not-found and wrong-process share one 401 so a
+// caller learns nothing outside this process; messages keep the not-found, state, eligibility order.
 func authorizeLoadedQuestion(
 	sc *signContext, question *db.VotingProcessQuestion, now time.Time,
 ) (internal.HexBytes, VoteReason, *errors.Error) {
@@ -1158,6 +1153,7 @@ func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Reques
 //	@Description	votableNow is true when a sign request made now with this token would pass every
 //	@Description	authorization check; otherwise reason says why. Show a generic message for a reason you do
 //	@Description	not know, and treat an absent votableNow (older backend) as unknown, not false.
+//	@Description	reason is never unknown_election, which only sign refusals report.
 //	@Description	Sign through sign-batch, or blind-point for an anonymous census. A sign
 //	@Description	attempt can still fail for per-attempt outcomes (already_signing, address_mismatch,
 //	@Description	auth_invalid, blind-round errors).

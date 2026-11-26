@@ -221,7 +221,7 @@ func TestUnvotableElectionMatchesState(t *testing.T) {
 }
 
 // ballotCase is one ballot of the authorization pass: the reason it is refused for and the
-// message today's code answers with ("" for both when it is signed).
+// message the 401 carries ("" for both when it is signed).
 type ballotCase struct {
 	name   string
 	sc     *signContext
@@ -265,7 +265,7 @@ func ballotCases(now time.Time) []ballotCase {
 			"process ended", sc(db.VotingProcess{EndDate: now.Add(-time.Hour)}), q(db.QuestionStatusReady),
 			VoteReasonClosed, "process has ended",
 		},
-		// the reason follows /check's precedence, the message keeps today's order
+		// the reason follows /check's precedence, the message the state-then-eligibility order
 		{"not eligible and paused", open, q(db.QuestionStatusPaused, "other"), VoteReasonNotEligible, notOpen},
 		{
 			"canceled and process ended", sc(db.VotingProcess{EndDate: now.Add(-time.Hour)}), q(db.QuestionStatusCanceled),
