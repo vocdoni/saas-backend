@@ -481,6 +481,14 @@ func TestBallotPass(t *testing.T) {
 			}},
 		},
 		{
+			name: "first refusal after an authorized ballot", ids: []internal.HexBytes{ready, paused, unknown},
+			code: errors.ErrUnauthorized.Code, msgs: []string{"question is not open for voting", "at index 1"},
+			data: SignRefusalData{Ballots: []SignRefusal{
+				{Index: 1, UpstreamID: paused, Reason: VoteReasonPaused},
+				{Index: 2, UpstreamID: unknown, Reason: VoteReasonUnknownElection},
+			}},
+		},
+		{
 			name: "duplicate after refusal skipped", ids: []internal.HexBytes{paused, ready, ready},
 			code: errors.ErrUnauthorized.Code, data: pausedAt0,
 		},
