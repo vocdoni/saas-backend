@@ -126,15 +126,15 @@ func postRefused(t *testing.T, status int, body any, pid, endpoint string) signR
 }
 
 // assertTwoRefusals checks the 401 for the paused (index 0) and not eligible (index 2) ballots.
-func assertTwoRefusals(c *qt.C, v *refusalVoter, got signRefusalBody, idxPaused, idxNotEligible int) {
+func assertTwoRefusals(c *qt.C, v *refusalVoter, got signRefusalBody) {
 	c.Helper()
 	c.Assert(got.Code, qt.Equals, errors.ErrUnauthorized.Code)
 	c.Assert(got.Error, qt.Contains, "question is not open for voting")
 	c.Assert(got.Error, qt.Contains, "at index 0")
 	c.Assert(got.Data.Reason, qt.Equals, handlers.VoteReason(""))
 	assertBallotRefusals(c, got.Data.Ballots,
-		handlers.SignRefusal{Index: idxPaused, UpstreamID: v.elections[0], Reason: handlers.VoteReasonPaused},
-		handlers.SignRefusal{Index: idxNotEligible, UpstreamID: v.elections[2], Reason: handlers.VoteReasonNotEligible},
+		handlers.SignRefusal{Index: 0, UpstreamID: v.elections[0], Reason: handlers.VoteReasonPaused},
+		handlers.SignRefusal{Index: 2, UpstreamID: v.elections[2], Reason: handlers.VoteReasonNotEligible},
 	)
 }
 
@@ -155,7 +155,7 @@ func TestProcessSignRefusalReasons(t *testing.T) {
 		v := setupRefusalVoter(t, false, false)
 		got := postRefused(t, http.StatusUnauthorized,
 			&handlers.SignBatchRequest{AuthToken: v.authToken, Ballots: v.ballots(0, 1, 2)}, v.pid, "sign-batch")
-		assertTwoRefusals(c, v, got, 0, 2)
+		assertTwoRefusals(c, v, got)
 		consumed := requestAndParse[handlers.ProcessSignInfoResponse](t, http.MethodPost, "",
 			&handlers.ConsumedAddressRequest{AuthToken: v.authToken}, "processes", v.pid, "sign-info").Consumed
 		c.Assert(consumed, qt.HasLen, 0)
@@ -172,7 +172,7 @@ func TestProcessSignRefusalReasons(t *testing.T) {
 		v := setupRefusalVoter(t, true, false)
 		got := postRefused(t, http.StatusUnauthorized,
 			&handlers.BlindPointRequest{AuthToken: v.authToken, Elections: v.elections}, v.pid, "blind-point")
-		assertTwoRefusals(c, v, got, 0, 2)
+		assertTwoRefusals(c, v, got)
 		assertNoBlindRow(c, v.authToken, v.elections[1])
 
 		point := requestBlindPoint(t, v.pid, v.authToken, v.elections[1])
@@ -184,7 +184,7 @@ func TestProcessSignRefusalReasons(t *testing.T) {
 		v := setupRefusalVoter(t, true, false)
 		got := postRefused(t, http.StatusUnauthorized,
 			&handlers.BlindSignRequest{AuthToken: v.authToken, Ballots: v.blindBallots(0, 1, 2)}, v.pid, "blind-sign")
-		assertTwoRefusals(c, v, got, 0, 2)
+		assertTwoRefusals(c, v, got)
 		assertNoBlindRow(c, v.authToken, v.elections[1])
 
 		proof := testBlindSignBallot(t, v.pid, v.authToken, v.elections[1], v.voter.Address().Bytes())
