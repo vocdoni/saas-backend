@@ -173,6 +173,11 @@ func TestElectionStateReason(t *testing.T) {
 			c.Assert(electionStateReason(tc.vp, tc.q, now), qt.Equals, tc.reason)
 		})
 	}
+	// exactly on each grace boundary: the start is already open, the end is already closed
+	c := qt.New(t)
+	ready := &db.VotingProcessQuestion{Status: db.QuestionStatusReady}
+	c.Assert(electionStateReason(&db.VotingProcess{StartDate: now.Add(startGrace)}, ready, now), qt.Equals, VoteReason(""))
+	c.Assert(electionStateReason(&db.VotingProcess{EndDate: now.Add(-endGrace)}, ready, now), qt.Equals, VoteReasonClosed)
 }
 
 func TestUnvotableElectionMatchesState(t *testing.T) {

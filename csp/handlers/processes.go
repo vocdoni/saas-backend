@@ -1140,8 +1140,13 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 	var zeroWeight, anonymous, unavailable bool
 	if memberFound {
 		census, cErr := c.mainDB.Census(vp.CensusID.Hex())
-		if cErr != nil {
+		switch {
+		case errors.Is(cErr, db.ErrNotFound), errors.Is(cErr, db.ErrInvalidData):
 			errors.ErrCensusNotFound.WithErr(cErr).Write(w)
+			return
+		case cErr != nil:
+			// a DB hiccup is not "no census": clients must retry, not give up
+			errors.ErrGenericInternalServerError.WithErr(cErr).Write(w)
 			return
 		}
 		weight := uint64(1)
