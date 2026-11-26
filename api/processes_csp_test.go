@@ -515,3 +515,183 @@ func TestProcessCSPSignRefusedAfterEnd(t *testing.T) {
 	c.Assert(apiErr.Code, qt.Equals, errors.ErrUnauthorized.Code)
 	c.Assert(apiErr.Error(), qt.Contains, "process has ended")
 }
+
+// checkVotable posts /check for the voter and returns the questions keyed by on-chain election id.
+func checkVotable(t *testing.T, pid string, authToken internal.HexBytes) map[string]handlers.ProcessQuestionStatus {
+	t.Helper()
+	check := requestAndParse[handlers.ProcessCheckResponse](t, http.MethodPost, "",
+		&handlers.CheckMembershipRequest{AuthToken: authToken}, "processes", pid, "check")
+	byElection := make(map[string]handlers.ProcessQuestionStatus, len(check.Questions))
+	for _, q := range check.Questions {
+		byElection[q.UpstreamID.String()] = q
+	}
+	return byElection
+}
+
+// assertVotable checks one question's votableNow, reason and canVote; an empty reason means votable.
+func assertVotable(c *qt.C, q handlers.ProcessQuestionStatus, reason handlers.VoteReason, canVote bool) {
+	c.Helper()
+	c.Assert(q.VotableNow, qt.Equals, reason == "")
+	c.Assert(q.Reason, qt.Equals, reason)
+	c.Assert(q.CanVote, qt.Equals, canVote)
+}
+
+// TestProcessCSPCheckVotableNow asserts that /check reports votableNow and reason per question.
+// It edits the stored state the CSP authorizes from through testDB, not on-chain status txs.
+func TestProcessCSPCheckVotableNow(t *testing.T) {
+	t.Run("status, eligibility, start date and sign-batch", func(t *testing.T) {
+		c := qt.New(t)
+		f := setupRelayVoting(t, 2)
+		e0, e1 := f.processIDs[0].String(), f.processIDs[1].String()
+		qids := map[string]bson.ObjectID{}
+		for election, q := range checkVotable(t, f.pid, f.authToken) {
+			qids[election] = objectID(c, q.QuestionID)
+		}
+		setStatus := func(election, status string) {
+			c.Assert(testDB.SetQuestionStatus(qids[election], status), qt.IsNil)
+		}
+		setStatus(e0, db.QuestionStatusReady)
+		setStatus(e1, db.QuestionStatusReady)
+
+		// a paused, canceled or ended question is not votable, yet the voter stays eligible
+		for status, reason := range map[string]handlers.VoteReason{
+			db.QuestionStatusPaused:   handlers.VoteReasonPaused,
+			db.QuestionStatusCanceled: handlers.VoteReasonCanceled,
+			db.QuestionStatusEnded:    handlers.VoteReasonClosed,
+		} {
+			setStatus(e1, status)
+			got := checkVotable(t, f.pid, f.authToken)
+			assertVotable(c, got[e0], "", true)
+			assertVotable(c, got[e1], reason, true)
+		}
+		setStatus(e1, db.QuestionStatusReady)
+
+		// an eligibility list that excludes the voter
+		excluded := []string{bson.NewObjectID().Hex()}
+		ok, err := testDB.SetQuestionEligibleMemberIDs(qids[e1], nil, excluded)
+		c.Assert(err, qt.IsNil)
+		c.Assert(ok, qt.IsTrue)
+		got := checkVotable(t, f.pid, f.authToken)
+		assertVotable(c, got[e0], "", true)
+		assertVotable(c, got[e1], handlers.VoteReasonNotEligible, false)
+		ok, err = testDB.SetQuestionEligibleMemberIDs(qids[e1], excluded, nil)
+		c.Assert(err, qt.IsNil)
+		c.Assert(ok, qt.IsTrue)
+
+		// a start date in the future covers every question, and the voter can still vote later
+		vp, err := testDB.VotingProcess(objectID(c, f.pid))
+		c.Assert(err, qt.IsNil)
+		origStart := vp.StartDate
+		vp.StartDate = time.Now().Add(time.Hour)
+		_, err = testDB.SetVotingProcess(vp)
+		c.Assert(err, qt.IsNil)
+		for _, q := range checkVotable(t, f.pid, f.authToken) {
+			assertVotable(c, q, handlers.VoteReasonNotStarted, true)
+		}
+		vp.StartDate = origStart
+		_, err = testDB.SetVotingProcess(vp)
+		c.Assert(err, qt.IsNil)
+
+		// with q1 paused, signing only q0 succeeds: a pause on one question does not block the other
+		setStatus(e1, db.QuestionStatusPaused)
+		got = checkVotable(t, f.pid, f.authToken)
+		assertVotable(c, got[e0], "", true)
+		assertVotable(c, got[e1], handlers.VoteReasonPaused, true)
+		signed := requestAndParse[handlers.SignBatchResponse](t, http.MethodPost, "",
+			&handlers.SignBatchRequest{AuthToken: f.authToken, Ballots: []handlers.SignBatchBallot{
+				{UpstreamID: f.processIDs[0], Address: f.voter.Address().Bytes()},
+			}}, "processes", f.pid, "sign-batch")
+		c.Assert(signed.Signatures, qt.HasLen, 1)
+		c.Assert(signed.Signatures[0].Code, qt.Equals, "")
+		c.Assert(signed.Signatures[0].Signature, qt.Not(qt.HasLen), 0)
+	})
+
+	t.Run("process ended past the end grace", func(t *testing.T) {
+		c := qt.New(t)
+		f := setupRelayVoting(t, 2)
+		vp, err := testDB.VotingProcess(objectID(c, f.pid))
+		c.Assert(err, qt.IsNil)
+		vp.EndDate = time.Now().Add(-2 * time.Minute)
+		_, err = testDB.SetVotingProcess(vp)
+		c.Assert(err, qt.IsNil)
+		got := checkVotable(t, f.pid, f.authToken)
+		c.Assert(got, qt.HasLen, 2)
+		for _, q := range got {
+			assertVotable(c, q, handlers.VoteReasonClosed, false)
+		}
+	})
+
+	t.Run("voter removed from the census", func(t *testing.T) {
+		c := qt.New(t)
+		f := setupRelayVoting(t, 2)
+		auth, err := testDB.CSPAuth(f.authToken)
+		c.Assert(err, qt.IsNil)
+		vp, err := testDB.VotingProcess(objectID(c, f.pid))
+		c.Assert(err, qt.IsNil)
+		// only the participant row: a revocation would also drop the auth session (401)
+		c.Assert(testDB.DelCensusParticipant(vp.CensusID.Hex(), auth.UserID.String()), qt.IsNil)
+		got := checkVotable(t, f.pid, f.authToken)
+		c.Assert(got, qt.HasLen, 2)
+		for _, q := range got {
+			assertVotable(c, q, handlers.VoteReasonNotInCensus, false)
+		}
+	})
+
+	t.Run("zero weight on a weighted census", func(t *testing.T) {
+		c := qt.New(t)
+		token := testCreateUser(t, "superpassword123")
+		orgAddress := testCreateProvisionedOrganization(t, token)
+		suffix := internal.RandomInt(1000000)
+		members := postOrgMembers(t, token, orgAddress, apicommon.OrgMember{
+			Name:         "Weighted",
+			Surname:      "Voter",
+			MemberNumber: fmt.Sprintf("W%06d", suffix),
+			NationalID:   fmt.Sprintf("WGHT%05dA", suffix),
+			BirthDate:    "1990-01-01",
+			Email:        fmt.Sprintf("weighted.voter.%d@example.com", suffix),
+			Phone:        "+34699000002",
+			Weight:       "1",
+		})
+		pid, _ := publishCensusProcess(t, token, orgAddress, apicommon.CensusSpec{
+			AuthFields: db.OrgMemberAuthFields{
+				db.OrgMemberAuthFieldsName,
+				db.OrgMemberAuthFieldsSurname,
+				db.OrgMemberAuthFieldsMemberNumber,
+			},
+			TwoFaFields: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail},
+			MemberIDs:   memberIDs(members),
+			Weighted:    true,
+		}, 2)
+		authToken := testCSPAuthenticateWithFields(t, pid, &handlers.AuthRequest{
+			Name:         members[0].Name,
+			Surname:      members[0].Surname,
+			MemberNumber: members[0].MemberNumber,
+			Email:        members[0].Email,
+		})
+		for _, q := range checkVotable(t, pid, authToken) {
+			assertVotable(c, q, "", true)
+		}
+
+		// only the API upsert stores a weight of 0; testDB.SetOrgMember drops zero fields
+		requestAndParse[apicommon.OrgMember](t, http.MethodPut, token,
+			apicommon.UpsertOrgMemberRequest{ID: members[0].ID, Weight: new("0")},
+			organizationMembersURL(orgAddress.String()))
+		got := checkVotable(t, pid, authToken)
+		c.Assert(got, qt.HasLen, 2)
+		for _, q := range got {
+			assertVotable(c, q, handlers.VoteReasonZeroWeight, true)
+		}
+	})
+
+	t.Run("signature limit reached", func(t *testing.T) {
+		c := qt.New(t)
+		f := setupRelayVoting(t, 2)
+		address := f.voter.Address().Bytes()
+		for range db.MaxCSPSignaturesPerElection {
+			testCSPSign(t, f.pid, f.authToken, f.processIDs[0], address)
+		}
+		got := checkVotable(t, f.pid, f.authToken)
+		assertVotable(c, got[f.processIDs[0].String()], handlers.VoteReasonSignatureLimitReached, true)
+		assertVotable(c, got[f.processIDs[1].String()], "", true)
+	})
+}
