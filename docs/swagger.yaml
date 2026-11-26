@@ -2572,7 +2572,12 @@ definitions:
       questionId:
         type: string
       reason:
-        $ref: '#/definitions/handlers.VoteReason'
+        allOf:
+        - $ref: '#/definitions/handlers.VoteReason'
+        description: |-
+          Reason is set only when VotableNow is false; the first matching value wins, permanent
+          reasons before temporary ones (not_started, paused, unavailable). paused also covers an
+          unknown question status; closed also covers a process past its end.
       upstreamId:
         example: deadbeef
         format: hex

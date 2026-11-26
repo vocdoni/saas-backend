@@ -197,10 +197,13 @@ type ProcessQuestionStatus struct {
 	CanVote bool `json:"canVote"`
 	// VotableNow is true when a sign request for this question, made now with this token, would
 	// pass every authorization check the CSP runs; Reason says why not otherwise.
-	VotableNow bool       `json:"votableNow"`
-	Reason     VoteReason `json:"reason,omitempty"`
-	HasSigned  bool       `json:"hasSigned"`
-	HasVoted   bool       `json:"hasVoted"`
+	VotableNow bool `json:"votableNow"`
+	// Reason is set only when VotableNow is false; the first matching value wins, permanent
+	// reasons before temporary ones (not_started, paused, unavailable). paused also covers an
+	// unknown question status; closed also covers a process past its end.
+	Reason    VoteReason `json:"reason,omitempty"`
+	HasSigned bool       `json:"hasSigned"`
+	HasVoted  bool       `json:"hasVoted"`
 }
 
 // VoteReason says why a question cannot be voted right now.
