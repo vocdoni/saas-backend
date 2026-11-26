@@ -708,6 +708,25 @@ func TestAuthTokenReusesPendingChallenge(t *testing.T) {
 		c.Assert(ok, qt.IsTrue)
 		c.Assert(remaining, qt.Equals, time.Duration(0))
 
+		// a resend the daily send cap would refuse is not advertised
+		origDaily := csp.maxDailyChallengeSends
+		csp.maxDailyChallengeSends = 1
+		_, ok = csp.ResendCoolDown(first, dest)
+		c.Assert(ok, qt.IsFalse)
+		csp.maxDailyChallengeSends = origDaily
+		// nor one the code's spent resends would
+		setCoolDown(c, time.Millisecond)
+		for range MaxChallengeResends {
+			time.Sleep(10 * time.Millisecond)
+			c.Assert(resendTo(csp, first, email, notifications.EmailChallenge), qt.IsNil)
+			c.Assert(fetchOTPCodeFromEmail(c, email), qt.Equals, code)
+		}
+		time.Sleep(10 * time.Millisecond)
+		for _, token := range []internal.HexBytes{first, second} {
+			_, ok := csp.ResendCoolDown(token, dest)
+			c.Assert(ok, qt.IsFalse)
+		}
+
 		// a solved code has nothing left to resend, through any of its tokens
 		c.Assert(csp.VerifyAuthToken(second, code), qt.IsNil)
 		for _, token := range []internal.HexBytes{first, second} {

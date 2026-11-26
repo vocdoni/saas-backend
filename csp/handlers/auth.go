@@ -62,7 +62,7 @@ func (c *CSPHandlers) handleAuthStep(w http.ResponseWriter, r *http.Request,
 
 // resendCoolDown is AuthResponse.CoolDownTime for the token: the milliseconds until its code can be
 // re-sent to the destination dest (csp.DestinationKey), or nil when there is no destination or no
-// code to resend.
+// resend is possible.
 func (c *CSPHandlers) resendCoolDown(token internal.HexBytes, dest string) *int64 {
 	if dest == "" {
 		return nil
