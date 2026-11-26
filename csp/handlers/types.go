@@ -198,9 +198,9 @@ type ProcessQuestionStatus struct {
 	// VotableNow is true when a sign request for this question, made now with this token, would
 	// pass every authorization check the CSP runs; Reason says why not otherwise.
 	VotableNow bool `json:"votableNow"`
-	// Reason is set only when VotableNow is false; the first matching value wins, permanent
-	// reasons before temporary ones (not_started, paused, unavailable). paused also covers an
-	// unknown question status; closed also covers a process past its end.
+	// Reason is set only when VotableNow is false; the first matching value wins, permanent before temporary.
+	// paused covers an unknown status; closed covers a process past its end. unavailable means anonymous voting
+	// is temporarily off on this server; signature_limit_reached means the voter has no signature left (one for a blind census).
 	Reason    VoteReason `json:"reason,omitempty"`
 	HasSigned bool       `json:"hasSigned"`
 	HasVoted  bool       `json:"hasVoted"`
