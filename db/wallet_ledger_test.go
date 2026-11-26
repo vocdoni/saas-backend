@@ -538,3 +538,51 @@ func TestReleaseOwedOrgAddOns(t *testing.T) {
 		c.Assert(claimant, qt.Equals, repaid)
 	}
 }
+
+// TestSignedCertificateDebit: the certificate bought after publish is one payment per process,
+// folded into what the process paid and, apart, into SignedCertificateCents; it is refused past
+// the balance or a managed organization's spend cap, which it counts.
+func TestSignedCertificateDebit(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	processID, managed := bson.NewObjectID(), common.Address{0x5c}
+	cert := WalletDebit{
+		OrgAddress: testOrgAddress, ProcessID: processID, AmountCents: pricing.SignedCertCents, ManagedOrg: managed,
+	}
+	c.Assert(testDB.DebitWalletForSignedCertificate(WalletDebit{ProcessID: processID, AmountCents: 1}),
+		qt.Equals, ErrInvalidData)
+	c.Assert(testDB.DebitWalletForSignedCertificate(cert), qt.ErrorIs, ErrInsufficientWalletBalance)
+	c.Assert(topUpTestWallet(10_000, "cs_signedcert"), qt.IsNil)
+	capCents := pricing.SignedCertCents - 1
+	c.Assert(testDB.SetManagedOrgSpendCap(testOrgAddress, managed, &capCents), qt.IsNil)
+	c.Assert(testDB.DebitWalletForSignedCertificate(cert), qt.ErrorIs, ErrManagedOrgSpendCapReached)
+	c.Assert(testDB.SetManagedOrgSpendCap(testOrgAddress, managed, nil), qt.IsNil)
+
+	// the publish, then the certificate twice: debited once
+	c.Assert(testDB.DebitWalletForProcess(WalletDebit{
+		OrgAddress: testOrgAddress, ProcessID: processID, AmountCents: 2_000, PriceCents: 2_000,
+	}), qt.IsNil)
+	c.Assert(testDB.DebitWalletForSignedCertificate(cert), qt.IsNil)
+	c.Assert(testDB.DebitWalletForSignedCertificate(cert), qt.IsNil)
+	s := processState(c, testOrgAddress, processID)
+	c.Assert(s.PaidCents, qt.Equals, 2_000+pricing.SignedCertCents)
+	c.Assert(s.SignedCertificateCents, qt.Equals, pricing.SignedCertCents)
+	c.Assert(s.AddOns, qt.HasLen, 0)
+	wallet, err := testDB.Wallet(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.BalanceCents, qt.Equals, 10_000-2_000-pricing.SignedCertCents)
+	c.Assert(wallet.ManagedOrgSpend(managed).SpentCents, qt.Equals, pricing.SignedCertCents)
+	row, err := testDB.WalletEntry(testOrgAddress, SignedCertificateDebitKey(processID))
+	c.Assert(err, qt.IsNil)
+	c.Assert(row.SignedCertificate, qt.IsTrue)
+	c.Assert(row.Kind, qt.Equals, WalletEntryPayment)
+	c.Assert(row.AmountCents, qt.Equals, -pricing.SignedCertCents)
+
+	// the fold over rows as stored: only the marked payment counts as the certificate
+	folded := foldProcessLedger([]WalletLedgerEntry{
+		{Kind: WalletEntryPayment, AmountCents: -2_000},
+		{Kind: WalletEntryPayment, AmountCents: -pricing.SignedCertCents, SignedCertificate: true},
+	})
+	c.Assert(folded.PaidCents, qt.Equals, 2_000+pricing.SignedCertCents)
+	c.Assert(folded.SignedCertificateCents, qt.Equals, pricing.SignedCertCents)
+}

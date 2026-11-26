@@ -628,3 +628,25 @@ func TestSetVotingProcessEndDate(t *testing.T) {
 	c.Assert(testDB.SetVotingProcessEndDate(id, time.Time{}), qt.Equals, ErrInvalidData)
 	c.Assert(JobTypeSetProcessEndDate.IsValid(), qt.IsTrue)
 }
+
+// TestSetVotingProcessSignedCertificate pins that the certificate echo is only written on a
+// published process: a draft selects the add-on through PUT /processes.
+func TestSetVotingProcessSignedCertificate(t *testing.T) {
+	c := qt.New(t)
+	org := common.Address{0x12, 0xe1}
+	setupVotingProcessOrg(c, org)
+	id, err := testDB.SetVotingProcess(&VotingProcess{OrgAddress: org})
+	c.Assert(err, qt.IsNil)
+
+	c.Assert(testDB.SetVotingProcessSignedCertificate(id), qt.Equals, ErrNotFound)
+	got, err := testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.AddOns.SignedCertificate, qt.IsFalse)
+
+	c.Assert(testDB.SetVotingProcessPublished(id, "", time.Now()), qt.IsNil)
+	c.Assert(testDB.SetVotingProcessSignedCertificate(id), qt.IsNil)
+	got, err = testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.AddOns.SignedCertificate, qt.IsTrue)
+	c.Assert(testDB.SetVotingProcessSignedCertificate(bson.NilObjectID), qt.Equals, ErrInvalidData)
+}

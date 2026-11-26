@@ -512,24 +512,54 @@ func (ms *MongoStorage) DebitWalletForProcess(d WalletDebit) error {
 		d.PriceCents < d.AmountCents || d.ProcessID == bson.NilObjectID || d.Attempt < 0 {
 		return ErrInvalidData
 	}
-	orgAddress, amountCents := d.OrgAddress, d.AmountCents
+	return ms.debitWallet(&WalletLedgerEntry{
+		OrgAddress:        d.OrgAddress,
+		AmountCents:       -d.AmountCents,
+		Kind:              WalletEntryPayment,
+		IdempotencyKey:    walletDebitKey(d.ProcessID, d.Attempt, d.PriceCents),
+		ProcessID:         d.ProcessID,
+		ProcessOrgAddress: d.ProcessOrgAddress,
+		PriceCents:        d.PriceCents,
+		Attempt:           d.Attempt,
+		AddOns:            d.AddOns,
+	}, d.ManagedOrg)
+}
+
+// SignedCertificateDebitKey is the idempotency key of the signed results certificate bought for
+// a published process: one per process, whatever its attempt or price.
+func SignedCertificateDebitKey(processID bson.ObjectID) string {
+	return "signedcert:" + processID.Hex()
+}
+
+// DebitWalletForSignedCertificate debits d.AmountCents for the signed results certificate of a
+// published process, at most once per process (SignedCertificateDebitKey), refused as
+// DebitWalletForProcess refuses. d.PriceCents, d.Attempt and d.AddOns are ignored.
+func (ms *MongoStorage) DebitWalletForSignedCertificate(d WalletDebit) error {
+	if (d.OrgAddress.Cmp(common.Address{}) == 0) || d.AmountCents <= 0 || d.ProcessID == bson.NilObjectID {
+		return ErrInvalidData
+	}
+	return ms.debitWallet(&WalletLedgerEntry{
+		OrgAddress:        d.OrgAddress,
+		AmountCents:       -d.AmountCents,
+		Kind:              WalletEntryPayment,
+		IdempotencyKey:    SignedCertificateDebitKey(d.ProcessID),
+		ProcessID:         d.ProcessID,
+		ProcessOrgAddress: d.ProcessOrgAddress,
+		SignedCertificate: true,
+	}, d.ManagedOrg)
+}
+
+// debitWallet applies the payment entry (negative AmountCents) when the balance covers it and, for
+// a non-zero managedOrg, when it stays within that organization's spend cap, which it counts.
+func (ms *MongoStorage) debitWallet(entry *WalletLedgerEntry, managedOrg common.Address) error {
+	orgAddress, amountCents := entry.OrgAddress, -entry.AmountCents
 	m := walletMovement{
-		entry: &WalletLedgerEntry{
-			OrgAddress:        orgAddress,
-			AmountCents:       -amountCents,
-			Kind:              WalletEntryPayment,
-			IdempotencyKey:    walletDebitKey(d.ProcessID, d.Attempt, d.PriceCents),
-			ProcessID:         d.ProcessID,
-			ProcessOrgAddress: d.ProcessOrgAddress,
-			PriceCents:        d.PriceCents,
-			Attempt:           d.Attempt,
-			AddOns:            d.AddOns,
-		},
+		entry:  entry,
 		filter: bson.M{"balanceCents": bson.M{"$gte": amountCents}},
 		refused: func(ctx context.Context) error {
-			if d.ManagedOrg != (common.Address{}) {
+			if managedOrg != (common.Address{}) {
 				over, err := ms.wallets.CountDocuments(ctx, bson.M{
-					"_id": orgAddress, "$expr": bson.M{"$not": bson.A{withinSpendCap(d.ManagedOrg, amountCents)}},
+					"_id": orgAddress, "$expr": bson.M{"$not": bson.A{withinSpendCap(managedOrg, amountCents)}},
 				})
 				if err != nil {
 					return fmt.Errorf("failed to check managed organization spend cap: %w", err)
@@ -541,9 +571,9 @@ func (ms *MongoStorage) DebitWalletForProcess(d WalletDebit) error {
 			return ErrInsufficientWalletBalance
 		},
 	}
-	if d.ManagedOrg != (common.Address{}) {
-		m.filter["$expr"] = withinSpendCap(d.ManagedOrg, amountCents)
-		m.inc = bson.M{orgSpendField(d.ManagedOrg) + ".spentCents": amountCents}
+	if managedOrg != (common.Address{}) {
+		m.filter["$expr"] = withinSpendCap(managedOrg, amountCents)
+		m.inc = bson.M{orgSpendField(managedOrg) + ".spentCents": amountCents}
 	}
 	return ms.applyWalletEntry(m)
 }
@@ -587,6 +617,9 @@ func foldProcessLedger(rows []WalletLedgerEntry) *ProcessLedgerState {
 		switch row.Kind {
 		case WalletEntryPayment:
 			state.PaidCents -= row.AmountCents
+			if row.SignedCertificate {
+				state.SignedCertificateCents -= row.AmountCents
+			}
 			for _, addOn := range row.AddOns {
 				if !slices.Contains(state.AddOns, addOn) {
 					state.AddOns = append(state.AddOns, addOn)

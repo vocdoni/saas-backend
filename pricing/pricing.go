@@ -44,8 +44,10 @@ const (
 const (
 	// email 2FA is free for standard organizations; integrators pay it per eligible voter
 	integratorEmailTwoFAPerVoter = 1 * Cent
-	smsTwoFAPerVoter             = 5 * Cent  // per eligible voter
-	signedCertPrice              = 39 * Euro // per process
+	smsTwoFAPerVoter             = 5 * Cent // per eligible voter
+	// SignedCertCents is the signed results certificate, per process, exported for its purchase
+	// after publish, which is never re-quoted from the census.
+	SignedCertCents = 39 * Euro
 	// BrandingCents and CustomURLCents are the once-per-organization add-ons, exported for
 	// refunds, which withhold them when another process relies on them.
 	BrandingCents  = 149 * Euro
@@ -149,7 +151,7 @@ func Compute(in QuoteInput) (Quote, error) {
 		addLine(LineSMSTwoFA, "SMS 2FA", Cents(in.CensusSize)*smsTwoFAPerVoter)
 	}
 	if in.SignedCert {
-		addLine(LineSignedCert, "signed results certificate", signedCertPrice)
+		addLine(LineSignedCert, "signed results certificate", SignedCertCents)
 	}
 	if in.CustomURL {
 		addLine(LineCustomURL, "custom URL", CustomURLCents)
