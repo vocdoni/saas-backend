@@ -247,7 +247,15 @@ Commit:
 ## Merge and release
 1. Unit suites: `go test -count=1 ./csp/... ./db/...` → ok. `./api` runs in CI.
 2. Gate audit on `1f7d66e1..HEAD`, then the 3-reviewer loop (implementation, user flow, security).
-3. **Owner OK required before:** `gh stack submit` (push + open the PR against `main`),
-   and any later push.
-4. PR description: `Closes #900`, `Refs #899`, the five deviations, docs/SDK follow-ups pending
-   (vocdoni.io `stage` "casting votes"; vocdoni-integrator-sdk `api-types`/react-providers).
+3. Draft the PR description: `Closes #900`, `Refs #899`, the five deviations, docs/SDK follow-ups
+   pending (vocdoni.io `stage` "casting votes"; vocdoni-integrator-sdk `api-types` /
+   react-providers). No client or integrator names.
+4. **Owner OK required before:** `gh stack submit` (push + open the PR against `main`), and any
+   later push.
+5. Read CI on the PR. `TestProcessCSPCheckVotableNow` runs here for the first time: a failure is
+   fixed on the branch, folded into the Task 2 commit, and pushed only with a new owner OK. Check
+   the swag workflow comment shows only the `VoteReason` enum, the two fields and the description.
+6. **Owner OK required before:** merging the PR.
+7. Release is the owner's: promotion `main → stage → lts`. Nothing to deploy or migrate; rollback
+   is a revert. vocdoni.io docs go to its `stage` branch until this reaches `lts`, and the SDK
+   follow-up must not ship before the backend is on `lts`.
