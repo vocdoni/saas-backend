@@ -106,6 +106,12 @@ When several apply, the first in this table wins: permanent reasons before tempo
 
 `votableNow = reason == ""`. `canVote` is computed exactly as today (with the shared `now`).
 
+Amended after #903 (Refs #899): `closed` because `processEnded(vp, now)` moves up to sit right after
+`not_eligible`, ahead of `zero_weight` and `not_published`; `closed` from the question status stays at
+rule 6. `canVote` and `reason` are built from the same inputs, so `canVote: false` always comes with
+`not_in_census`, `not_eligible` or `closed`, and with `canVote: true` the reason explains `votableNow`.
+`canVote` now also needs the org member to exist, like `not_in_census` already did.
+
 ### One source of truth for election state
 
 `electionStateReason(vp, q, now) VoteReason` is a pure function returning `canceled`, `closed`,

@@ -193,7 +193,8 @@ type ProcessQuestionStatus struct {
 	QuestionID string            `json:"questionId"`
 	UpstreamID internal.HexBytes `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	// CanVote means eligible: in the census, in the question's eligibility list, and the process
-	// has not ended. It ignores pause, start date, weight and signature budget.
+	// has not ended. It ignores pause, start date, weight and signature budget. When it is false,
+	// Reason is not_in_census, not_eligible or closed.
 	CanVote bool `json:"canVote"`
 	// VotableNow is true when a sign request for this question, made now with this token, would
 	// pass every authorization check the CSP runs; Reason says why not otherwise.
