@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	stderrors "errors"
-	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -83,6 +83,16 @@ func processNotStarted(vp *db.VotingProcess, now time.Time) bool {
 	return !vp.StartDate.IsZero() && now.Add(startGrace).Before(vp.StartDate)
 }
 
+// knownQuestionStatus reports whether status is one electionStateReason decides on purpose.
+func knownQuestionStatus(status string) bool {
+	switch status {
+	case db.QuestionStatusReady, db.QuestionStatusPaused, db.QuestionStatusEnded,
+		db.QuestionStatusCanceled, db.QuestionStatusResults:
+		return true
+	}
+	return false
+}
+
 // electionStateReason is the single rule for whether a question's election accepts a signature
 // at now, shared by signing and /check. It returns "" when it does.
 func electionStateReason(vp *db.VotingProcess, q *db.VotingProcessQuestion, now time.Time) VoteReason {
@@ -110,7 +120,8 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 	if electionStateReason(vp, q, now) == "" {
 		return nil
 	}
-	// messages keep their historical order (status, start, end), independent of /check's precedence
+	// messages follow status, start, end order, not /check's precedence, so signing
+	// responses stay unchanged
 	switch {
 	case q.Status != db.QuestionStatusReady:
 		return errors.Ptr(errors.ErrUnauthorized.Withf("question is not open for voting"))
@@ -1126,7 +1137,7 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 		errors.ErrGenericInternalServerError.WithErr(mErr).Write(w)
 		return
 	}
-	var zeroWeight, anonymous bool
+	var zeroWeight, anonymous, unavailable bool
 	if memberFound {
 		census, cErr := c.mainDB.Census(vp.CensusID.Hex())
 		if cErr != nil {
@@ -1140,6 +1151,7 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 		resp.Weight = weightBytes(weight)
 		zeroWeight = census.Weighted && member.Weight == 0
 		anonymous = census.Anonymous
+		unavailable = c.anonymousCensusRefused(census)
 	}
 	questions, err := c.mainDB.QuestionsByProcess(oid)
 	if err != nil {
@@ -1172,18 +1184,15 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-	unexpectedStatus := false
+	// an unknown status reads as paused below; warn once per call so it gets noticed
+	if i := slices.IndexFunc(questions, func(q db.VotingProcessQuestion) bool {
+		return len(q.UpstreamID) > 0 && !knownQuestionStatus(q.Status)
+	}); i >= 0 {
+		log.Warnw("unexpected question status", "processId", oid.Hex(),
+			"questionId", questions[i].ID.Hex(), "status", questions[i].Status)
+	}
 	for i := range questions {
 		q := &questions[i]
-		if len(q.UpstreamID) > 0 && !unexpectedStatus {
-			switch q.Status {
-			case db.QuestionStatusReady, db.QuestionStatusPaused, db.QuestionStatusEnded,
-				db.QuestionStatusCanceled, db.QuestionStatusResults:
-			default:
-				unexpectedStatus = true
-				log.Warnw("unexpected question status", "processId", oid.Hex(), "questionId", q.ID.Hex(), "status", q.Status)
-			}
-		}
 		resp.Questions[i].Reason = voteReason(voteReasonInput{
 			inCensus:    resp.BelongsToProcess && memberFound,
 			eligible:    memberEligibleForQuestion(q, memberID),
@@ -1191,7 +1200,7 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 			published:   len(q.UpstreamID) > 0,
 			state:       electionStateReason(vp, q, now),
 			budgetSpent: signatureBudgetSpent(rows[i], anonymous),
-			unavailable: anonymous && c.csp.BlindCSPDisabled(),
+			unavailable: unavailable,
 		})
 		resp.Questions[i].VotableNow = resp.Questions[i].Reason == ""
 	}
@@ -1242,11 +1251,7 @@ func (c *CSPHandlers) orgMemberFromAuth(
 
 // orgMember resolves the org member referenced by an auth token (member ObjectID hex).
 func (c *CSPHandlers) orgMember(orgAddress common.Address, auth *db.CSPAuth) (*db.OrgMember, error) {
-	oid, err := bson.ObjectIDFromHex(auth.UserID.String())
-	if err != nil {
-		return nil, fmt.Errorf("%w: invalid user ID in token: %v", db.ErrInvalidData, err)
-	}
-	return c.mainDB.OrgMember(orgAddress, oid.Hex())
+	return c.mainDB.OrgMember(orgAddress, auth.UserID.String())
 }
 
 // orgNameAndLogo returns the organization display name and logo, falling back to defaults.
