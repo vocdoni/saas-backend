@@ -615,9 +615,10 @@ func TestAuthTokenReusesPendingChallenge(t *testing.T) {
 		MailService:              testMailService,
 		SMSService:               testSMSService,
 		NotificationCoolDownTime: time.Hour,
-		NotificationTTL:          time.Hour,
-		RootKey:                  *testRootKey,
-		SyncDelivery:             true,
+		// a code is reused only while it lives at least one more cooldown
+		NotificationTTL: 2 * time.Hour,
+		RootKey:         *testRootKey,
+		SyncDelivery:    true,
 	})
 	c.Assert(err, qt.IsNil)
 
@@ -959,7 +960,8 @@ func TestAuthTokenReusesPendingChallenge(t *testing.T) {
 		code := fetchOTPCodeFromEmail(c, email)
 		time.Sleep(10 * time.Millisecond)
 		// the cooldown passed but the budget is spent: the voter keeps the code they hold
-		c.Assert(capped.ChallengeSendRefusal(testUserID, testAnchorID), qt.IsNil)
+		dest := DestinationKey(notifications.EmailChallenge, email)
+		c.Assert(capped.ChallengeSendRefusal(testUserID, testAnchorID, dest), qt.IsNil)
 		second, err := request()
 		c.Assert(err, qt.IsNil)
 		c.Assert(second, qt.Not(qt.DeepEquals), first)
@@ -979,7 +981,8 @@ func TestAuthTokenReusesPendingChallenge(t *testing.T) {
 		}
 		// past the cap a new code is needed, which the cooldown still spaces; the peek must say so
 		// too, or a caller would spend a certificate code on a request AuthToken then refuses
-		c.Assert(csp.ChallengeSendRefusal(testUserID, testAnchorID), qt.ErrorIs, errors.ErrAttemptCoolDownTime)
+		dest := DestinationKey(notifications.EmailChallenge, email)
+		c.Assert(csp.ChallengeSendRefusal(testUserID, testAnchorID, dest), qt.ErrorIs, errors.ErrAttemptCoolDownTime)
 		_, err = requestCode(email)
 		c.Assert(err, qt.ErrorIs, errors.ErrAttemptCoolDownTime)
 

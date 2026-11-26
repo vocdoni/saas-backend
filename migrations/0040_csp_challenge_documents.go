@@ -52,7 +52,9 @@ func upCSPChallengeDocuments(ctx context.Context, database *mongo.Database) erro
 }
 
 // downCSPChallengeDocuments drops the token index, which touches no document. It goes through
-// replaceIndex, which tolerates an index already gone.
+// replaceIndex, which tolerates an index already gone. It is not lossless: the documents keep the
+// new shape (random _id, no verified), so the previous code cannot resolve the tokens this code
+// issued until they expire, one OTP TTL later.
 func downCSPChallengeDocuments(ctx context.Context, database *mongo.Database) error {
 	if err := replaceIndex(ctx, database.Collection("cspTokens"), []string{cspTokenIDIndexName}, nil); err != nil {
 		return fmt.Errorf("failed to drop csp token id index: %w", err)

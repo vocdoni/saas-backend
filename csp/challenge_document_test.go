@@ -23,7 +23,8 @@ import (
 )
 
 // newChallengeCSP returns a CSP on a fresh database with synchronous delivery, the given cooldown
-// and mail service (nil: none), an hour-long code TTL and the given daily cap (0: the default).
+// and mail service (nil: none), a code TTL one hour longer than the cooldown, so codes are
+// reusable, and the given daily cap (0: the default).
 func newChallengeCSP(c *qt.C, coolDown time.Duration, mail saasNotifications.NotificationService, daily int) *CSP {
 	c.Helper()
 	testDB, err := db.New(testMongoURI, test.RandomDatabaseName())
@@ -33,7 +34,7 @@ func newChallengeCSP(c *qt.C, coolDown time.Duration, mail saasNotifications.Not
 		MailService:              mail,
 		SMSService:               testSMSService,
 		NotificationCoolDownTime: coolDown,
-		NotificationTTL:          time.Hour,
+		NotificationTTL:          coolDown + time.Hour,
 		MaxDailyChallengeSends:   daily,
 		RootKey:                  *testRootKey,
 		SyncDelivery:             true,
@@ -105,7 +106,7 @@ func newRejectingCSP(c *qt.C, daily int) *CSP {
 		DB:                       testDB,
 		MailService:              rejectingMailService{},
 		NotificationCoolDownTime: time.Hour,
-		NotificationTTL:          time.Hour,
+		NotificationTTL:          2 * time.Hour,
 		NotificationQueueWorkers: 1,
 		MaxDailyChallengeSends:   daily,
 		RootKey:                  *testRootKey,
@@ -397,4 +398,182 @@ func TestMigratedLTSChallenges(t *testing.T) {
 	// verified and auth-only rows sign as they are
 	sign(verified)
 	sign(authOnly)
+}
+
+// TestChallengeUnsentDestination checks that a step 0 naming a destination the pending code was
+// never sent to gets no token when the code cannot be sent there: it waits for a new code instead,
+// while a destination that already got the code keeps getting tokens for it.
+func TestChallengeUnsentDestination(t *testing.T) {
+	c := qt.New(t)
+	const phone = "+34600000088"
+	smsDest := DestinationKey(notifications.SMSChallenge, phone)
+
+	c.Run("resends spent", func(c *qt.C) {
+		csp := newChallengeCSP(c, time.Hour, testMailService, 0)
+		const email = "unsent-resends@example.com"
+		emailDest := DestinationKey(notifications.EmailChallenge, email)
+		first, err := stepZero(csp, email, notifications.EmailChallenge)
+		c.Assert(err, qt.IsNil)
+		code := fetchOTPCodeFromEmail(c, email)
+		csp.notificationCoolDownTime = time.Millisecond
+		for range MaxChallengeResends {
+			time.Sleep(10 * time.Millisecond)
+			c.Assert(resendTo(csp, first, email, notifications.EmailChallenge), qt.IsNil)
+			_ = fetchOTPCodeFromEmail(c, email)
+		}
+		csp.notificationCoolDownTime = time.Hour
+
+		// the email holds the code: a token, nothing sent
+		second, err := stepZero(csp, email, notifications.EmailChallenge)
+		c.Assert(err, qt.IsNil)
+		assertNoEmailTo(c, email)
+		c.Assert(csp.ChallengeSendRefusal(testUserID, testAnchorID, emailDest), qt.IsNil)
+		// the phone never got it and cannot: the new code it needs waits out the cooldown
+		c.Assert(csp.ChallengeSendRefusal(testUserID, testAnchorID, smsDest), qt.ErrorIs, errors.ErrAttemptCoolDownTime)
+		_, err = stepZero(csp, phone, notifications.SMSChallenge)
+		c.Assert(err, qt.ErrorIs, errors.ErrAttemptCoolDownTime)
+		c.Assert(testSMSService.ConsumeSMS(phone), qt.IsNil)
+		data, err := csp.Storage.CSPAuth(first)
+		c.Assert(err, qt.IsNil)
+		c.Assert(data.Tokens, qt.HasLen, 2)
+
+		// once the cooldown has passed, the phone gets a new code
+		csp.notificationCoolDownTime = time.Millisecond
+		time.Sleep(10 * time.Millisecond)
+		third, err := stepZero(csp, phone, notifications.SMSChallenge)
+		c.Assert(err, qt.IsNil)
+		c.Assert(testSMSService.ConsumeSMS(phone), qt.Not(qt.IsNil))
+		thirdData, err := csp.Storage.CSPAuth(third)
+		c.Assert(err, qt.IsNil)
+		c.Assert(thirdData.ID, qt.Not(qt.DeepEquals), data.ID)
+		c.Assert(thirdData.Tokens, qt.HasLen, 1)
+		// the old code still verifies through its own tokens
+		c.Assert(csp.VerifyAuthToken(second, code), qt.IsNil)
+	})
+
+	c.Run("daily cap spent", func(c *qt.C) {
+		csp := newChallengeCSP(c, time.Hour, testMailService, 1)
+		const email = "unsent-daily@example.com"
+		first, err := stepZero(csp, email, notifications.EmailChallenge)
+		c.Assert(err, qt.IsNil)
+		_ = fetchOTPCodeFromEmail(c, email)
+
+		c.Assert(csp.ChallengeSendRefusal(testUserID, testAnchorID, smsDest), qt.ErrorIs, errors.ErrAttemptCoolDownTime)
+		_, err = stepZero(csp, phone, notifications.SMSChallenge)
+		c.Assert(err, qt.ErrorIs, errors.ErrAttemptCoolDownTime)
+		c.Assert(testSMSService.ConsumeSMS(phone), qt.IsNil)
+		data, err := csp.Storage.CSPAuth(first)
+		c.Assert(err, qt.IsNil)
+		c.Assert(data.Tokens, qt.HasLen, 1)
+		c.Assert(data.Sends, qt.HasLen, 1)
+
+		// past the cooldown the new code is refused by the cap itself
+		csp.notificationCoolDownTime = time.Millisecond
+		time.Sleep(10 * time.Millisecond)
+		c.Assert(csp.ChallengeSendRefusal(testUserID, testAnchorID, smsDest), qt.ErrorIs, errors.ErrVerificationMaxAttempts)
+		_, err = stepZero(csp, phone, notifications.SMSChallenge)
+		c.Assert(err, qt.ErrorIs, errors.ErrVerificationMaxAttempts)
+		c.Assert(testSMSService.ConsumeSMS(phone), qt.IsNil)
+		data, err = csp.Storage.CSPAuth(first)
+		c.Assert(err, qt.IsNil)
+		c.Assert(data.Tokens, qt.HasLen, 1)
+	})
+}
+
+// assertNoEmailTo checks nothing was delivered to email; delivery is synchronous.
+func assertNoEmailTo(c *qt.C, email string) {
+	c.Helper()
+	_, err := testMailService.FindEmail(context.Background(), email)
+	c.Assert(err, qt.Not(qt.IsNil))
+}
+
+// TestClaimSendRereadsThroughRequestingToken checks that a refused send claim reports the refusal
+// seen through the requesting token, not through the token the challenge was read through.
+func TestClaimSendRereadsThroughRequestingToken(t *testing.T) {
+	c := qt.New(t)
+	const email = "reread@example.com"
+	dest := DestinationKey(notifications.EmailChallenge, email)
+
+	c.Run("read through a token since removed", func(c *qt.C) {
+		csp := newChallengeCSP(c, time.Hour, testMailService, 0)
+		first, err := stepZero(csp, email, notifications.EmailChallenge)
+		c.Assert(err, qt.IsNil)
+		_ = fetchOTPCodeFromEmail(c, email)
+		second, err := stepZero(csp, email, notifications.EmailChallenge)
+		c.Assert(err, qt.IsNil)
+		challenge, err := csp.Storage.LastCSPAuth(testUserID, testAnchorID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(challenge.Token, qt.DeepEquals, second)
+		c.Assert(csp.Storage.RemoveCSPAuthToken(challenge.ID, second), qt.IsNil)
+
+		_, err = csp.claimSend(challenge, first, dest)
+		c.Assert(err, qt.ErrorIs, errors.ErrAttemptCoolDownTime)
+	})
+
+	c.Run("read through a token that has since verified", func(c *qt.C) {
+		csp := newChallengeCSP(c, time.Hour, testMailService, 0)
+		first, err := stepZero(csp, email, notifications.EmailChallenge)
+		c.Assert(err, qt.IsNil)
+		code := fetchOTPCodeFromEmail(c, email)
+		second, err := stepZero(csp, email, notifications.EmailChallenge)
+		c.Assert(err, qt.IsNil)
+		challenge, err := csp.Storage.LastCSPAuth(testUserID, testAnchorID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(csp.VerifyAuthToken(second, code), qt.IsNil)
+
+		_, err = csp.claimSend(challenge, first, dest)
+		c.Assert(err, qt.ErrorIs, ErrTokenExpired)
+		_, err = csp.claimSend(challenge, second, dest)
+		c.Assert(err, qt.ErrorIs, errors.ErrUserAlreadyVerified)
+	})
+}
+
+// TestChallengeAboutToExpireIsNotReused checks that a code with less than one cooldown left is not
+// handed another token: step 0 takes the new-code path, cooldown first.
+func TestChallengeAboutToExpireIsNotReused(t *testing.T) {
+	c := qt.New(t)
+	ctx := context.Background()
+	dbName := test.RandomDatabaseName()
+	testDB, err := db.New(testMongoURI, dbName)
+	c.Assert(err, qt.IsNil)
+	const coolDown, ttl = time.Hour, 2 * time.Hour
+	csp, err := New(ctx, &Config{
+		DB:                       testDB,
+		MailService:              testMailService,
+		SMSService:               testSMSService,
+		NotificationCoolDownTime: coolDown,
+		NotificationTTL:          ttl,
+		RootKey:                  *testRootKey,
+		SyncDelivery:             true,
+	})
+	c.Assert(err, qt.IsNil)
+	const email = "about-to-expire@example.com"
+	dest := DestinationKey(notifications.EmailChallenge, email)
+	first, err := stepZero(csp, email, notifications.EmailChallenge)
+	c.Assert(err, qt.IsNil)
+	_ = fetchOTPCodeFromEmail(c, email)
+	data, err := csp.Storage.CSPAuth(first)
+	c.Assert(err, qt.IsNil)
+
+	tokens := testDB.DBClient.Database(dbName).Collection("cspTokens")
+	aged := time.Now().Add(-(ttl - coolDown + time.Second))
+	_, err = tokens.UpdateOne(ctx, bson.M{"_id": data.ID}, bson.M{"$set": bson.M{"createdat": aged}})
+	c.Assert(err, qt.IsNil)
+	// still inside the cooldown of its send: refused where reuse would have handed out a token
+	c.Assert(csp.ChallengeSendRefusal(testUserID, testAnchorID, dest), qt.ErrorIs, errors.ErrAttemptCoolDownTime)
+	_, err = stepZero(csp, email, notifications.EmailChallenge)
+	c.Assert(err, qt.ErrorIs, errors.ErrAttemptCoolDownTime)
+
+	// once its send is past the cooldown, a new code replaces it
+	_, err = tokens.UpdateOne(ctx, bson.M{"_id": data.ID}, bson.M{"$set": bson.M{"sends." + dest: aged}})
+	c.Assert(err, qt.IsNil)
+	second, err := stepZero(csp, email, notifications.EmailChallenge)
+	c.Assert(err, qt.IsNil)
+	_ = fetchOTPCodeFromEmail(c, email)
+	secondData, err := csp.Storage.CSPAuth(second)
+	c.Assert(err, qt.IsNil)
+	c.Assert(secondData.ID, qt.Not(qt.DeepEquals), data.ID)
+	firstData, err := csp.Storage.CSPAuth(first)
+	c.Assert(err, qt.IsNil)
+	c.Assert(firstData.Tokens, qt.HasLen, 1)
 }
