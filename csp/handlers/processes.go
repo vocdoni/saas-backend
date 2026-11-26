@@ -146,13 +146,20 @@ func signatureBudgetSpent(row *db.CSPProcess, anonymous bool) bool { //nolint:re
 
 // voteReasonInput is what /check knows about one question for one voter.
 type voteReasonInput struct {
-	inCensus    bool
-	eligible    bool
-	zeroWeight  bool
-	published   bool
-	state       VoteReason // from electionStateReason
-	budgetSpent bool
-	unavailable bool
+	inCensus     bool
+	eligible     bool
+	processEnded bool
+	zeroWeight   bool
+	published    bool
+	state        VoteReason // from electionStateReason
+	budgetSpent  bool
+	unavailable  bool
+}
+
+// canVote is /check's canVote. It shares voteReason's first three rules, so whenever it is
+// false the reason explains it: not_in_census, not_eligible or closed.
+func canVote(in voteReasonInput) bool {
+	return in.inCensus && in.eligible && !in.processEnded
 }
 
 // voteReason applies /check's precedence: permanent reasons before temporary ones.
@@ -162,6 +169,8 @@ func voteReason(in voteReasonInput) VoteReason {
 		return VoteReasonNotInCensus
 	case !in.eligible:
 		return VoteReasonNotEligible
+	case in.processEnded:
+		return VoteReasonClosed
 	case in.zeroWeight:
 		return VoteReasonZeroWeight
 	case !in.published:
@@ -1167,14 +1176,7 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 	rows := make([]*db.CSPProcess, len(questions))
 	for i := range questions {
 		q := &questions[i]
-		resp.Questions[i] = ProcessQuestionStatus{
-			QuestionID: q.ID.Hex(),
-			UpstreamID: q.UpstreamID,
-			// a voter can only vote a question if they are a participant of the process
-			// census AND fall within the question's eligibility subset, and not once the process
-			// has ended (the CSP no longer signs then)
-			CanVote: resp.BelongsToProcess && memberEligibleForQuestion(q, memberID) && !processEnded(vp, now),
-		}
+		resp.Questions[i] = ProcessQuestionStatus{QuestionID: q.ID.Hex(), UpstreamID: q.UpstreamID}
 		if len(q.UpstreamID) == 0 {
 			continue // question not yet on chain
 		}
@@ -1198,15 +1200,18 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 	}
 	for i := range questions {
 		q := &questions[i]
-		resp.Questions[i].Reason = voteReason(voteReasonInput{
-			inCensus:    resp.BelongsToProcess && memberFound,
-			eligible:    memberEligibleForQuestion(q, memberID),
-			zeroWeight:  zeroWeight,
-			published:   len(q.UpstreamID) > 0,
-			state:       electionStateReason(vp, q, now),
-			budgetSpent: signatureBudgetSpent(rows[i], anonymous),
-			unavailable: unavailable,
-		})
+		in := voteReasonInput{
+			inCensus:     resp.BelongsToProcess && memberFound,
+			eligible:     memberEligibleForQuestion(q, memberID),
+			processEnded: processEnded(vp, now),
+			zeroWeight:   zeroWeight,
+			published:    len(q.UpstreamID) > 0,
+			state:        electionStateReason(vp, q, now),
+			budgetSpent:  signatureBudgetSpent(rows[i], anonymous),
+			unavailable:  unavailable,
+		}
+		resp.Questions[i].CanVote = canVote(in)
+		resp.Questions[i].Reason = voteReason(in)
 		resp.Questions[i].VotableNow = resp.Questions[i].Reason == ""
 	}
 	// one goroutine per signed question (at most db.MaxBallotsPerBatch); only uncached,

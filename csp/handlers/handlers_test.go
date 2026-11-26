@@ -280,10 +280,39 @@ func TestVoteReason(t *testing.T) {
 		{"not published beats paused", with(func(i *voteReasonInput) {
 			i.published, i.state = false, VoteReasonPaused
 		}), VoteReasonNotPublished},
+		{"process ended beats zero weight", with(func(i *voteReasonInput) {
+			i.processEnded, i.zeroWeight = true, true
+		}), VoteReasonClosed},
+		{"process ended beats not published", with(func(i *voteReasonInput) {
+			i.processEnded, i.published = true, false
+		}), VoteReasonClosed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			qt.New(t).Assert(voteReason(tc.in), qt.Equals, tc.want)
 		})
+	}
+}
+
+// TestCanVoteReason pins that reason explains canVote: false gives one of the three eligibility
+// reasons, true never does, so clients can read reason against canVote first, votableNow second.
+func TestCanVoteReason(t *testing.T) {
+	c := qt.New(t)
+	states := []VoteReason{"", VoteReasonCanceled, VoteReasonClosed, VoteReasonNotStarted, VoteReasonPaused}
+	for bits := range 1 << 7 {
+		for _, state := range states {
+			in := voteReasonInput{
+				inCensus: bits&1 != 0, eligible: bits&2 != 0, processEnded: bits&4 != 0, zeroWeight: bits&8 != 0,
+				published: bits&16 != 0, budgetSpent: bits&32 != 0, unavailable: bits&64 != 0, state: state,
+			}
+			reason := voteReason(in)
+			if canVote(in) {
+				c.Assert(reason, qt.Not(qt.Equals), VoteReasonNotInCensus, qt.Commentf("%+v", in))
+				c.Assert(reason, qt.Not(qt.Equals), VoteReasonNotEligible, qt.Commentf("%+v", in))
+				continue
+			}
+			c.Assert([]VoteReason{VoteReasonNotInCensus, VoteReasonNotEligible, VoteReasonClosed},
+				qt.Contains, reason, qt.Commentf("%+v", in))
+		}
 	}
 }
 
