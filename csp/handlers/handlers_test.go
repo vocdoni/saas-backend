@@ -1,9 +1,14 @@
 package handlers
 
 import (
+	"bytes"
+	"cmp"
 	"context"
+	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +16,7 @@ import (
 	qt "github.com/frankban/quicktest"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/notifications"
 	"github.com/vocdoni/saas-backend/db"
@@ -185,7 +191,7 @@ func TestUnvotableElectionMatchesState(t *testing.T) {
 	for _, tc := range electionGrid(time.Now(), 5*time.Second) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := qt.New(t)
-			votable := unvotableElection(tc.vp, tc.q) == (*errors.Error)(nil)
+			votable := unvotableElection(tc.vp, tc.q, time.Now()) == (*errors.Error)(nil)
 			c.Assert(votable, qt.Equals, electionStateReason(tc.vp, tc.q, time.Now()) == "")
 		})
 	}
@@ -208,9 +214,344 @@ func TestUnvotableElectionMatchesState(t *testing.T) {
 		},
 		{"ready and ended", &db.VotingProcess{EndDate: past}, ready, "process has ended"},
 	} {
-		err := unvotableElection(tc.vp, tc.q)
+		err := unvotableElection(tc.vp, tc.q, time.Now())
 		c.Assert(err, qt.Not(qt.Equals), (*errors.Error)(nil), qt.Commentf(tc.name))
 		c.Assert(err.Error(), qt.Contains, tc.want, qt.Commentf(tc.name))
+	}
+}
+
+// ballotCase is one ballot of the authorization pass: the reason it is refused for and the
+// message the 401 carries ("" for both when it is signed).
+type ballotCase struct {
+	name   string
+	sc     *signContext
+	q      *db.VotingProcessQuestion
+	reason VoteReason
+	msg    string
+}
+
+func ballotCases(now time.Time) []ballotCase {
+	pid := bson.NewObjectID()
+	member := "member"
+	sc := func(vp db.VotingProcess) *signContext {
+		vp.ID = pid
+		return &signContext{process: &vp, memberID: member}
+	}
+	open := sc(db.VotingProcess{})
+	q := func(status string, eligible ...string) *db.VotingProcessQuestion {
+		return &db.VotingProcessQuestion{
+			ProcessID: pid, Status: status, EligibleMemberIDs: eligible, UpstreamID: internal.HexBytes{0x01},
+		}
+	}
+	notOpen := "question is not open for voting"
+	return []ballotCase{
+		{"nil question", open, nil, VoteReasonUnknownElection, "election not found in process"},
+		{
+			"other process", open,
+			&db.VotingProcessQuestion{ProcessID: bson.NewObjectID(), Status: db.QuestionStatusReady},
+			VoteReasonUnknownElection, "election not found in process",
+		},
+		{"not eligible", open, q(db.QuestionStatusReady, "other"), VoteReasonNotEligible, "member not eligible for this question"},
+		{"eligible", open, q(db.QuestionStatusReady, member), "", ""},
+		{"canceled", open, q(db.QuestionStatusCanceled), VoteReasonCanceled, notOpen},
+		{"ended status", open, q(db.QuestionStatusEnded), VoteReasonClosed, notOpen},
+		{"results", open, q(db.QuestionStatusResults), VoteReasonClosed, notOpen},
+		{"paused", open, q(db.QuestionStatusPaused), VoteReasonPaused, notOpen},
+		{
+			"not started", sc(db.VotingProcess{StartDate: now.Add(time.Hour)}), q(db.QuestionStatusReady),
+			VoteReasonNotStarted, "process has not started yet",
+		},
+		{
+			"process ended", sc(db.VotingProcess{EndDate: now.Add(-time.Hour)}), q(db.QuestionStatusReady),
+			VoteReasonClosed, "process has ended",
+		},
+		// the reason follows /check's precedence, the message the state-then-eligibility order
+		{"not eligible and paused", open, q(db.QuestionStatusPaused, "other"), VoteReasonNotEligible, notOpen},
+		{
+			"canceled and process ended", sc(db.VotingProcess{EndDate: now.Add(-time.Hour)}), q(db.QuestionStatusCanceled),
+			VoteReasonClosed, notOpen,
+		},
+		{
+			"paused and not started", sc(db.VotingProcess{StartDate: now.Add(time.Hour)}), q(db.QuestionStatusPaused),
+			VoteReasonNotStarted, notOpen,
+		},
+		{
+			"not started and not eligible", sc(db.VotingProcess{StartDate: now.Add(time.Hour)}), q(db.QuestionStatusReady, "other"),
+			VoteReasonNotEligible, "process has not started yet",
+		},
+		{"votable", open, q(db.QuestionStatusReady), "", ""},
+	}
+}
+
+func TestBallotRefusal(t *testing.T) {
+	now := time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
+	for _, tc := range ballotCases(now) {
+		t.Run(tc.name, func(t *testing.T) {
+			qt.New(t).Assert(ballotRefusal(tc.sc, tc.q, now), qt.Equals, tc.reason)
+		})
+	}
+}
+
+func TestAuthorizeLoadedQuestionMatchesReason(t *testing.T) {
+	now := time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
+	for _, tc := range ballotCases(now) {
+		t.Run(tc.name, func(t *testing.T) {
+			c := qt.New(t)
+			upstreamID, reason, err := authorizeLoadedQuestion(tc.sc, tc.q, now)
+			c.Assert(reason, qt.Equals, tc.reason)
+			ok := err == (*errors.Error)(nil)
+			c.Assert(ok, qt.Equals, reason == "")
+			if ok {
+				c.Assert(upstreamID, qt.DeepEquals, tc.q.UpstreamID)
+				return
+			}
+			c.Assert(upstreamID, qt.IsNil)
+			c.Assert(err.Error(), qt.Contains, tc.msg)
+		})
+	}
+}
+
+// signRefusalBody is the error body of a refused sign request.
+type signRefusalBody struct {
+	Error string          `json:"error"`
+	Code  int             `json:"code"`
+	Data  SignRefusalData `json:"data"`
+}
+
+// signBatch calls POST /processes/{pid}/sign-batch through a router, as the API mounts it, and
+// decodes the error body (zero on success).
+func signBatch(c *qt.C, pid string, req *SignBatchRequest) (int, signRefusalBody) {
+	h := New(&csp.CSP{Storage: testDB}, testDB, nil)
+	router := chi.NewRouter()
+	router.Post("/processes/{processId}/sign-batch", h.ProcessSignBatchHandler)
+	body, err := json.Marshal(req)
+	c.Assert(err, qt.IsNil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/processes/"+pid+"/sign-batch", bytes.NewReader(body)))
+	var out signRefusalBody
+	c.Assert(json.Unmarshal(rec.Body.Bytes(), &out), qt.IsNil)
+	return rec.Code, out
+}
+
+// signRefusalVoter stores a verified token for memberID on a new process of processOrg whose census
+// is censusID, returning the process id and the token.
+func signRefusalVoter(c *qt.C, processOrg common.Address, censusID, memberID string) (bson.ObjectID, internal.HexBytes) {
+	censusOID, err := bson.ObjectIDFromHex(censusID)
+	c.Assert(err, qt.IsNil)
+	oid, err := testDB.SetVotingProcess(&db.VotingProcess{OrgAddress: processOrg, CensusID: censusOID})
+	c.Assert(err, qt.IsNil)
+	token := internal.HexBytes(internal.RandomBytes(16))
+	c.Assert(testDB.SetCSPAuth(token, internal.HexBytesFromString(memberID), internal.HexBytes(oid[:]), ""), qt.IsNil)
+	c.Assert(testDB.VerifyCSPAuth(token), qt.IsNil)
+	return oid, token
+}
+
+// signRefusalCensus stores an organization with one member in one census, returning their ids.
+func signRefusalCensus(c *qt.C, org common.Address) (censusID, memberID string) {
+	c.Assert(testDB.SetOrganization(&db.Organization{Address: org, CreatedAt: time.Now()}), qt.IsNil)
+	memberID, err := testDB.SetOrgMember("salt", &db.OrgMember{OrgAddress: org, Email: "voter@example.com"})
+	c.Assert(err, qt.IsNil)
+	censusID, err = testDB.SetCensus(&db.Census{OrgAddress: org})
+	c.Assert(err, qt.IsNil)
+	c.Assert(testDB.SetCensusParticipant(&db.CensusParticipant{CensusID: censusID, ParticipantID: memberID}), qt.IsNil)
+	return censusID, memberID
+}
+
+func TestSignRefusedWhenOrgMemberGone(t *testing.T) {
+	c := qt.New(t)
+	// the member is deleted with its participant, so the process points from a second organization at
+	// the first one's census: the participant is found and OrgMember(processOrg, id) is not
+	censusOrg := common.Address{0xa1, byte(time.Now().UnixNano())}
+	processOrg := common.Address{0xa2, byte(time.Now().UnixNano())}
+	c.Assert(testDB.SetOrganization(&db.Organization{Address: processOrg, CreatedAt: time.Now()}), qt.IsNil)
+	censusID, memberID := signRefusalCensus(c, censusOrg)
+	oid, token := signRefusalVoter(c, processOrg, censusID, memberID)
+
+	status, body := signBatch(c, oid.Hex(), &SignBatchRequest{AuthToken: token, Ballots: []SignBatchBallot{
+		{UpstreamID: internal.HexBytes{0x01}, Address: make(internal.HexBytes, common.AddressLength)},
+	}})
+	c.Assert(status, qt.Equals, http.StatusNotFound)
+	c.Assert(body.Code, qt.Equals, errors.ErrUserNotFound.Code)
+	c.Assert(body.Data, qt.DeepEquals, SignRefusalData{Reason: VoteReasonNotInCensus})
+}
+
+func TestSignBatchCollectsRefusals(t *testing.T) {
+	c := qt.New(t)
+	org := common.Address{0xa3, byte(time.Now().UnixNano())}
+	censusID, memberID := signRefusalCensus(c, org)
+	oid, token := signRefusalVoter(c, org, censusID, memberID)
+	paused, ready := internal.HexBytes(internal.RandomBytes(32)), internal.HexBytes(internal.RandomBytes(32))
+	for i, q := range []struct {
+		id     internal.HexBytes
+		status string
+	}{{paused, db.QuestionStatusPaused}, {ready, db.QuestionStatusReady}} {
+		_, err := testDB.SetQuestion(&db.VotingProcessQuestion{
+			ProcessID: oid, OrgAddress: org, Order: i, UpstreamID: q.id, Status: q.status,
+		})
+		c.Assert(err, qt.IsNil)
+	}
+	address := make(internal.HexBytes, common.AddressLength)
+	unknown := internal.HexBytes(internal.RandomBytes(32))
+
+	// a malformed ballot after a refusal is skipped: the first refusal decides, every refusal is listed
+	status, body := signBatch(c, oid.Hex(), &SignBatchRequest{AuthToken: token, Ballots: []SignBatchBallot{
+		{UpstreamID: paused, Address: address},
+		{UpstreamID: unknown, Address: address},
+		{UpstreamID: ready, Address: internal.HexBytes{0x01, 0x02, 0x03}},
+	}})
+	c.Assert(status, qt.Equals, http.StatusUnauthorized)
+	c.Assert(body.Code, qt.Equals, errors.ErrUnauthorized.Code)
+	c.Assert(body.Error, qt.Contains, "question is not open for voting")
+	c.Assert(body.Error, qt.Contains, "at index 0")
+	c.Assert(body.Data, qt.DeepEquals, SignRefusalData{Ballots: []SignRefusal{
+		{Index: 0, UpstreamID: paused, Reason: VoteReasonPaused},
+		{Index: 1, UpstreamID: unknown, Reason: VoteReasonUnknownElection},
+	}})
+
+	// a malformed ballot first answers its 400, with no data
+	status, body = signBatch(c, oid.Hex(), &SignBatchRequest{AuthToken: token, Ballots: []SignBatchBallot{
+		{UpstreamID: ready, Address: internal.HexBytes{0x01, 0x02, 0x03}},
+		{UpstreamID: paused, Address: address},
+	}})
+	c.Assert(status, qt.Equals, http.StatusBadRequest)
+	c.Assert(body.Data, qt.DeepEquals, SignRefusalData{})
+}
+
+func TestAuthorizeQuestion(t *testing.T) {
+	c := qt.New(t)
+	oid := bson.NewObjectID()
+	org := common.Address{0xa4, byte(time.Now().UnixNano())}
+	ready := internal.HexBytes(internal.RandomBytes(32))
+	_, err := testDB.SetQuestion(&db.VotingProcessQuestion{
+		ProcessID: oid, OrgAddress: org, UpstreamID: ready, Status: db.QuestionStatusReady,
+	})
+	c.Assert(err, qt.IsNil)
+	h := New(&csp.CSP{Storage: testDB}, testDB, nil)
+	sc := &signContext{process: &db.VotingProcess{ID: oid}, memberID: "member"}
+	now := time.Now()
+
+	id, reason, sErr := h.authorizeQuestion(sc, nil, now)
+	c.Assert(id, qt.IsNil)
+	c.Assert(reason, qt.Equals, VoteReason(""))
+	c.Assert(sErr.Code, qt.Equals, errors.ErrMalformedBody.Code)
+	c.Assert(sErr.Error(), qt.Contains, "missing election id")
+
+	id, reason, sErr = h.authorizeQuestion(sc, internal.RandomBytes(32), now)
+	c.Assert(id, qt.IsNil)
+	c.Assert(reason, qt.Equals, VoteReasonUnknownElection)
+	c.Assert(sErr.Code, qt.Equals, errors.ErrUnauthorized.Code)
+	c.Assert(sErr.Error(), qt.Contains, "election not found in process")
+
+	id, reason, sErr = h.authorizeQuestion(sc, ready, now)
+	c.Assert(sErr == (*errors.Error)(nil), qt.IsTrue)
+	c.Assert(reason, qt.Equals, VoteReason(""))
+	c.Assert(id, qt.DeepEquals, ready)
+}
+
+func TestBallotPass(t *testing.T) {
+	pid := bson.NewObjectID()
+	sc := &signContext{process: &db.VotingProcess{ID: pid}, memberID: "member"}
+	ready, paused := internal.HexBytes{0x01}, internal.HexBytes{0x02}
+	unknown, ready2 := internal.HexBytes{0x03}, internal.HexBytes{0x04}
+	byUpstream := map[string]*db.VotingProcessQuestion{}
+	for id, status := range map[string]string{
+		string(ready): db.QuestionStatusReady, string(paused): db.QuestionStatusPaused, string(ready2): db.QuestionStatusReady,
+	} {
+		byUpstream[id] = &db.VotingProcessQuestion{ProcessID: pid, UpstreamID: internal.HexBytes(id), Status: status}
+	}
+	ballotRepeats := "the ballot at index %d repeats the election of index %d"
+	pausedAt0 := SignRefusalData{Ballots: []SignRefusal{{Index: 0, UpstreamID: paused, Reason: VoteReasonPaused}}}
+	for _, tc := range []struct {
+		name    string
+		ids     []internal.HexBytes
+		bad     map[int]bool // indexes whose own check fails
+		noCheck bool         // blind-point: no per-ballot check
+		repeats string       // "" means ballotRepeats
+		code    int          // 0: authorized
+		msgs    []string
+		data    any
+	}{
+		{name: "all authorized, request order", ids: []internal.HexBytes{ready2, ready}},
+		{
+			name: "refusals listed, first decides", ids: []internal.HexBytes{paused, unknown, ready},
+			code: errors.ErrUnauthorized.Code, msgs: []string{"question is not open for voting", "at index 0"},
+			data: SignRefusalData{Ballots: []SignRefusal{
+				{Index: 0, UpstreamID: paused, Reason: VoteReasonPaused},
+				{Index: 1, UpstreamID: unknown, Reason: VoteReasonUnknownElection},
+			}},
+		},
+		{
+			name: "first refusal after an authorized ballot", ids: []internal.HexBytes{ready, paused, unknown},
+			code: errors.ErrUnauthorized.Code, msgs: []string{"question is not open for voting", "at index 1"},
+			data: SignRefusalData{Ballots: []SignRefusal{
+				{Index: 1, UpstreamID: paused, Reason: VoteReasonPaused},
+				{Index: 2, UpstreamID: unknown, Reason: VoteReasonUnknownElection},
+			}},
+		},
+		{
+			name: "duplicate after refusal skipped", ids: []internal.HexBytes{paused, ready, ready},
+			code: errors.ErrUnauthorized.Code, data: pausedAt0,
+		},
+		{
+			name: "empty id after refusal skipped", ids: []internal.HexBytes{paused, {}},
+			code: errors.ErrUnauthorized.Code, data: pausedAt0,
+		},
+		{
+			name: "failing check after refusal skipped", ids: []internal.HexBytes{paused, ready}, bad: map[int]bool{1: true},
+			code: errors.ErrUnauthorized.Code, data: pausedAt0,
+		},
+		{
+			name: "refused ballot's check skipped", ids: []internal.HexBytes{paused}, bad: map[int]bool{0: true},
+			code: errors.ErrUnauthorized.Code, data: pausedAt0,
+		},
+		{
+			name: "duplicate first", ids: []internal.HexBytes{ready, ready, paused},
+			code: errors.ErrMalformedBody.Code, msgs: []string{"the ballot at index 1 repeats the election of index 0"},
+		},
+		{
+			name: "empty id first", ids: []internal.HexBytes{{}, paused},
+			code: errors.ErrMalformedBody.Code, msgs: []string{"missing election id", "at index 0"},
+		},
+		{
+			name: "failing check first", ids: []internal.HexBytes{ready, paused}, bad: map[int]bool{0: true},
+			code: errors.ErrMalformedBody.Code, msgs: []string{"bad item", "at index 0"},
+		},
+		{
+			name: "repeated refused election listed once", ids: []internal.HexBytes{paused, paused},
+			code: errors.ErrUnauthorized.Code, data: pausedAt0,
+		},
+		{name: "no check", ids: []internal.HexBytes{ready, ready2}, noCheck: true},
+		{
+			name: "blind-point duplicate message", ids: []internal.HexBytes{ready, ready}, noCheck: true,
+			repeats: "the election at index %d repeats index %d",
+			code:    errors.ErrMalformedBody.Code, msgs: []string{"the election at index 1 repeats index 0"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := qt.New(t)
+			pass := ballotPass{sc: sc, byUpstream: byUpstream, now: time.Now(), repeats: cmp.Or(tc.repeats, ballotRepeats)}
+			if !tc.noCheck {
+				pass.check = func(i int) *errors.Error {
+					if tc.bad[i] {
+						return errors.Ptr(errors.ErrMalformedBody.With("bad item"))
+					}
+					return nil
+				}
+			}
+			got, err := pass.authorize(tc.ids)
+			if tc.code == 0 {
+				c.Assert(err == (*errors.Error)(nil), qt.IsTrue)
+				c.Assert(got, qt.DeepEquals, tc.ids)
+				return
+			}
+			c.Assert(got, qt.IsNil)
+			c.Assert(err == (*errors.Error)(nil), qt.IsFalse)
+			c.Assert(err.Code, qt.Equals, tc.code)
+			for _, msg := range tc.msgs {
+				c.Assert(err.Error(), qt.Contains, msg)
+			}
+			c.Assert(err.Data, qt.DeepEquals, tc.data)
+		})
 	}
 }
 

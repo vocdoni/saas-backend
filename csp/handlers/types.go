@@ -231,7 +231,23 @@ const (
 	VoteReasonPaused VoteReason = "paused"
 	// VoteReasonUnavailable means anonymous voting is temporarily switched off on this server.
 	VoteReasonUnavailable VoteReason = "unavailable"
+	// VoteReasonUnknownElection means the ballot names no election of this process. Sign refusals only; /check never returns it.
+	VoteReasonUnknownElection VoteReason = "unknown_election"
 )
+
+// SignRefusal is one ballot refused by a sign request's authorization pass.
+type SignRefusal struct {
+	Index      int               `json:"index"`
+	UpstreamID internal.HexBytes `json:"upstreamId" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Reason     VoteReason        `json:"reason"`
+}
+
+// SignRefusalData is the data of a refused sign request: Reason for a whole-request refusal,
+// Ballots for refused ballots, never both.
+type SignRefusalData struct {
+	Reason  VoteReason    `json:"reason,omitempty"`
+	Ballots []SignRefusal `json:"ballots,omitempty"`
+}
 
 // ConsumedAddressRequest defines the payload for the request to get the
 // if a token was used and which address was used. It includes the
