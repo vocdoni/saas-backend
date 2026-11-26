@@ -545,6 +545,61 @@ func ballotRefusal(sc *signContext, question *db.VotingProcessQuestion, now time
 	})
 }
 
+// ballotPass is the authorization pass of sign-batch, blind-point and blind-sign: the first failing
+// ballot decides the answer and nothing is signed; after a refusal it only collects the other
+// refused ballots, skipping malformed ones so a 400 never hides an earlier refusal.
+type ballotPass struct {
+	sc         *signContext
+	byUpstream map[string]*db.VotingProcessQuestion
+	now        time.Time
+	repeats    string                    // duplicate-election message, formatted with (index, first index)
+	check      func(i int) *errors.Error // ballot i's own fields once authorized; nil when there are none
+}
+
+// authorize returns the authorized election ids in request order, or the error to write: a
+// malformed ballot's 400, or the first refusal with every refused ballot in data.ballots.
+func (p ballotPass) authorize(ids []internal.HexBytes) ([]internal.HexBytes, *errors.Error) {
+	upstreamIDs := make([]internal.HexBytes, len(ids))
+	seen := make(map[string]int, len(ids))
+	var refusals []SignRefusal
+	var firstErr *errors.Error
+	for i, id := range ids {
+		// a repeated election would contend with itself on the per-(user, election) signer lock
+		if first, dup := seen[string(id)]; dup {
+			if firstErr == nil {
+				return nil, errors.Ptr(errors.ErrMalformedBody.Withf(p.repeats, i, first))
+			}
+			continue
+		}
+		seen[string(id)] = i
+		// checked before the map so an empty id gets its 400 rather than the map-miss 401
+		if len(id) == 0 {
+			if firstErr == nil {
+				return nil, errors.Ptr(errors.ErrMalformedBody.With("missing election id").Withf("at index %d", i))
+			}
+			continue
+		}
+		upstreamID, reason, sErr := authorizeLoadedQuestion(p.sc, p.byUpstream[string(id)], p.now)
+		if sErr != nil {
+			refusals = append(refusals, SignRefusal{Index: i, UpstreamID: id, Reason: reason})
+			if firstErr == nil {
+				firstErr = errors.Ptr(sErr.Withf("at index %d", i))
+			}
+			continue
+		}
+		if firstErr == nil && p.check != nil {
+			if sErr := p.check(i); sErr != nil {
+				return nil, errors.Ptr(sErr.Withf("at index %d", i))
+			}
+		}
+		upstreamIDs[i] = upstreamID
+	}
+	if firstErr != nil {
+		return nil, errors.Ptr(firstErr.WithData(SignRefusalData{Ballots: refusals}))
+	}
+	return upstreamIDs, nil
+}
+
 // maxSignBatchBodyBytes bounds a POST /processes/{processId}/sign-batch body. One ballot is an
 // election id plus a voter address, ~200 characters of JSON once hex-encoded and quoted, so 512
 // bytes each leaves ample headroom. The cap tracks db.MaxBallotsPerBatch (a voter holds at
@@ -647,55 +702,22 @@ func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Req
 	for i := range questions {
 		byUpstream[string(questions[i].UpstreamID)] = &questions[i]
 	}
-	ballots := make([]authorizedBallot, len(req.Ballots))
-	seen := make(map[string]int, len(req.Ballots))
-	now := time.Now()
-	// the first failing ballot decides the answer; after a refusal the pass only collects the
-	// other refused ballots, skipping malformed ones.
-	var refusals []SignRefusal
-	var firstErr *errors.Error
+	ids := make([]internal.HexBytes, len(req.Ballots))
 	for i, item := range req.Ballots {
-		// a repeated election would contend with itself on the per-(user, election) signer
-		// lock, and a voter has at most one ballot per question anyway.
-		if first, dup := seen[string(item.UpstreamID)]; dup {
-			if firstErr != nil {
-				continue
-			}
-			errors.ErrMalformedBody.Withf(
-				"the ballot at index %d repeats the election of index %d", i, first,
-			).Write(w)
-			return
-		}
-		seen[string(item.UpstreamID)] = i
-		// an empty id cannot name an election; checked before the map so it gets its 400
-		// rather than the map-miss 401.
-		if len(item.UpstreamID) == 0 {
-			if firstErr != nil {
-				continue
-			}
-			errors.ErrMalformedBody.With("missing election id").Withf("at index %d", i).Write(w)
-			return
-		}
-		upstreamID, reason, sErr := authorizeLoadedQuestion(sc, byUpstream[string(item.UpstreamID)], now)
-		if sErr != nil {
-			refusals = append(refusals, SignRefusal{Index: i, UpstreamID: item.UpstreamID, Reason: reason})
-			if firstErr == nil {
-				firstErr = errors.Ptr(sErr.Withf("at index %d", i))
-			}
-			continue
-		}
-		if sErr := validateVoterAddress(item.Address); sErr != nil {
-			if firstErr != nil {
-				continue
-			}
-			sErr.Withf("at index %d", i).Write(w)
-			return
-		}
-		ballots[i] = authorizedBallot{upstreamID: upstreamID, address: item.Address}
+		ids[i] = item.UpstreamID
 	}
-	if firstErr != nil {
-		firstErr.WithData(SignRefusalData{Ballots: refusals}).Write(w)
+	upstreamIDs, sErr := ballotPass{
+		sc: sc, byUpstream: byUpstream, now: time.Now(),
+		repeats: "the ballot at index %d repeats the election of index %d",
+		check:   func(i int) *errors.Error { return validateVoterAddress(req.Ballots[i].Address) },
+	}.authorize(ids)
+	if sErr != nil {
+		sErr.Write(w)
 		return
+	}
+	ballots := make([]authorizedBallot, len(req.Ballots))
+	for i, upstreamID := range upstreamIDs {
+		ballots[i] = authorizedBallot{upstreamID: upstreamID, address: req.Ballots[i].Address}
 	}
 
 	// ponytail: signed sequentially. db.ConsumeCSPProcess takes the storage write lock, so a
@@ -805,40 +827,11 @@ func (c *CSPHandlers) ProcessBlindPointHandler(w http.ResponseWriter, r *http.Re
 	}
 	// authorize the whole batch before issuing any point, mirroring sign-batch: an ineligible or
 	// out-of-process election fails the request rather than issuing a partial set.
-	upstreamIDs := make([]internal.HexBytes, len(req.Elections))
-	seen := make(map[string]int, len(req.Elections))
-	now := time.Now()
-	// same pass as sign-batch: the first failing election decides, later refusals are collected
-	var refusals []SignRefusal
-	var firstErr *errors.Error
-	for i, electionID := range req.Elections {
-		if first, dup := seen[string(electionID)]; dup {
-			if firstErr != nil {
-				continue
-			}
-			errors.ErrMalformedBody.Withf("the election at index %d repeats index %d", i, first).Write(w)
-			return
-		}
-		seen[string(electionID)] = i
-		if len(electionID) == 0 {
-			if firstErr != nil {
-				continue
-			}
-			errors.ErrMalformedBody.With("missing election id").Withf("at index %d", i).Write(w)
-			return
-		}
-		upstreamID, reason, sErr := authorizeLoadedQuestion(sc, byUpstream[string(electionID)], now)
-		if sErr != nil {
-			refusals = append(refusals, SignRefusal{Index: i, UpstreamID: electionID, Reason: reason})
-			if firstErr == nil {
-				firstErr = errors.Ptr(sErr.Withf("at index %d", i))
-			}
-			continue
-		}
-		upstreamIDs[i] = upstreamID
-	}
-	if firstErr != nil {
-		firstErr.WithData(SignRefusalData{Ballots: refusals}).Write(w)
+	upstreamIDs, sErr := ballotPass{
+		sc: sc, byUpstream: byUpstream, now: time.Now(), repeats: "the election at index %d repeats index %d",
+	}.authorize(req.Elections)
+	if sErr != nil {
+		sErr.Write(w)
 		return
 	}
 
@@ -932,48 +925,27 @@ func (c *CSPHandlers) ProcessBlindSignHandler(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	ballots := make([]blindBallotAuth, len(req.Ballots))
-	seen := make(map[string]int, len(req.Ballots))
-	now := time.Now()
-	// same pass as sign-batch: the first failing ballot decides, later refusals are collected
-	var refusals []SignRefusal
-	var firstErr *errors.Error
+	ids := make([]internal.HexBytes, len(req.Ballots))
 	for i, item := range req.Ballots {
-		if first, dup := seen[string(item.UpstreamID)]; dup {
-			if firstErr != nil {
-				continue
-			}
-			errors.ErrMalformedBody.Withf("the ballot at index %d repeats the election of index %d", i, first).Write(w)
-			return
-		}
-		seen[string(item.UpstreamID)] = i
-		if len(item.UpstreamID) == 0 {
-			if firstErr != nil {
-				continue
-			}
-			errors.ErrMalformedBody.With("missing election id").Withf("at index %d", i).Write(w)
-			return
-		}
-		upstreamID, reason, sErr := authorizeLoadedQuestion(sc, byUpstream[string(item.UpstreamID)], now)
-		if sErr != nil {
-			refusals = append(refusals, SignRefusal{Index: i, UpstreamID: item.UpstreamID, Reason: reason})
-			if firstErr == nil {
-				firstErr = errors.Ptr(sErr.Withf("at index %d", i))
-			}
-			continue
-		}
-		if len(item.BlindedMessage) == 0 {
-			if firstErr != nil {
-				continue
-			}
-			errors.ErrMalformedBody.With("missing blinded message").Withf("at index %d", i).Write(w)
-			return
-		}
-		ballots[i] = blindBallotAuth{upstreamID: upstreamID, blindedMessage: item.BlindedMessage}
+		ids[i] = item.UpstreamID
 	}
-	if firstErr != nil {
-		firstErr.WithData(SignRefusalData{Ballots: refusals}).Write(w)
+	upstreamIDs, sErr := ballotPass{
+		sc: sc, byUpstream: byUpstream, now: time.Now(),
+		repeats: "the ballot at index %d repeats the election of index %d",
+		check: func(i int) *errors.Error {
+			if len(req.Ballots[i].BlindedMessage) == 0 {
+				return errors.Ptr(errors.ErrMalformedBody.With("missing blinded message"))
+			}
+			return nil
+		},
+	}.authorize(ids)
+	if sErr != nil {
+		sErr.Write(w)
 		return
+	}
+	ballots := make([]blindBallotAuth, len(req.Ballots))
+	for i, upstreamID := range upstreamIDs {
+		ballots[i] = blindBallotAuth{upstreamID: upstreamID, blindedMessage: req.Ballots[i].BlindedMessage}
 	}
 
 	resp := &BlindSignResponse{Signatures: make([]SignBatchResult, len(ballots))}

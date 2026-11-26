@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	stderrors "errors"
@@ -406,6 +407,105 @@ func TestSignBatchCollectsRefusals(t *testing.T) {
 	}})
 	c.Assert(status, qt.Equals, http.StatusBadRequest)
 	c.Assert(body.Data, qt.DeepEquals, SignRefusalData{})
+}
+
+func TestBallotPass(t *testing.T) {
+	pid := bson.NewObjectID()
+	sc := &signContext{process: &db.VotingProcess{ID: pid}, memberID: "member"}
+	ready, paused := internal.HexBytes{0x01}, internal.HexBytes{0x02}
+	unknown, ready2 := internal.HexBytes{0x03}, internal.HexBytes{0x04}
+	byUpstream := map[string]*db.VotingProcessQuestion{}
+	for id, status := range map[string]string{
+		string(ready): db.QuestionStatusReady, string(paused): db.QuestionStatusPaused, string(ready2): db.QuestionStatusReady,
+	} {
+		byUpstream[id] = &db.VotingProcessQuestion{ProcessID: pid, UpstreamID: internal.HexBytes(id), Status: status}
+	}
+	ballotRepeats := "the ballot at index %d repeats the election of index %d"
+	pausedAt0 := SignRefusalData{Ballots: []SignRefusal{{Index: 0, UpstreamID: paused, Reason: VoteReasonPaused}}}
+	for _, tc := range []struct {
+		name    string
+		ids     []internal.HexBytes
+		bad     map[int]bool // indexes whose own check fails
+		noCheck bool         // blind-point: no per-ballot check
+		repeats string       // "" means ballotRepeats
+		code    int          // 0: authorized
+		msgs    []string
+		data    any
+	}{
+		{name: "all authorized, request order", ids: []internal.HexBytes{ready2, ready}},
+		{
+			name: "refusals listed, first decides", ids: []internal.HexBytes{paused, unknown, ready},
+			code: errors.ErrUnauthorized.Code, msgs: []string{"question is not open for voting", "at index 0"},
+			data: SignRefusalData{Ballots: []SignRefusal{
+				{Index: 0, UpstreamID: paused, Reason: VoteReasonPaused},
+				{Index: 1, UpstreamID: unknown, Reason: VoteReasonUnknownElection},
+			}},
+		},
+		{
+			name: "duplicate after refusal skipped", ids: []internal.HexBytes{paused, ready, ready},
+			code: errors.ErrUnauthorized.Code, data: pausedAt0,
+		},
+		{
+			name: "empty id after refusal skipped", ids: []internal.HexBytes{paused, {}},
+			code: errors.ErrUnauthorized.Code, data: pausedAt0,
+		},
+		{
+			name: "failing check after refusal skipped", ids: []internal.HexBytes{paused, ready}, bad: map[int]bool{1: true},
+			code: errors.ErrUnauthorized.Code, data: pausedAt0,
+		},
+		{
+			name: "refused ballot's check skipped", ids: []internal.HexBytes{paused}, bad: map[int]bool{0: true},
+			code: errors.ErrUnauthorized.Code, data: pausedAt0,
+		},
+		{
+			name: "duplicate first", ids: []internal.HexBytes{ready, ready, paused},
+			code: errors.ErrMalformedBody.Code, msgs: []string{"the ballot at index 1 repeats the election of index 0"},
+		},
+		{
+			name: "empty id first", ids: []internal.HexBytes{{}, paused},
+			code: errors.ErrMalformedBody.Code, msgs: []string{"missing election id", "at index 0"},
+		},
+		{
+			name: "failing check first", ids: []internal.HexBytes{ready, paused}, bad: map[int]bool{0: true},
+			code: errors.ErrMalformedBody.Code, msgs: []string{"bad item", "at index 0"},
+		},
+		{
+			name: "repeated refused election listed once", ids: []internal.HexBytes{paused, paused},
+			code: errors.ErrUnauthorized.Code, data: pausedAt0,
+		},
+		{name: "no check", ids: []internal.HexBytes{ready, ready2}, noCheck: true},
+		{
+			name: "blind-point duplicate message", ids: []internal.HexBytes{ready, ready}, noCheck: true,
+			repeats: "the election at index %d repeats index %d",
+			code:    errors.ErrMalformedBody.Code, msgs: []string{"the election at index 1 repeats index 0"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := qt.New(t)
+			pass := ballotPass{sc: sc, byUpstream: byUpstream, now: time.Now(), repeats: cmp.Or(tc.repeats, ballotRepeats)}
+			if !tc.noCheck {
+				pass.check = func(i int) *errors.Error {
+					if tc.bad[i] {
+						return errors.Ptr(errors.ErrMalformedBody.With("bad item"))
+					}
+					return nil
+				}
+			}
+			got, err := pass.authorize(tc.ids)
+			if tc.code == 0 {
+				c.Assert(err == (*errors.Error)(nil), qt.IsTrue)
+				c.Assert(got, qt.DeepEquals, tc.ids)
+				return
+			}
+			c.Assert(got, qt.IsNil)
+			c.Assert(err == (*errors.Error)(nil), qt.IsFalse)
+			c.Assert(err.Code, qt.Equals, tc.code)
+			for _, msg := range tc.msgs {
+				c.Assert(err.Error(), qt.Contains, msg)
+			}
+			c.Assert(err.Data, qt.DeepEquals, tc.data)
+		})
+	}
 }
 
 func TestSignatureBudgetSpent(t *testing.T) {
