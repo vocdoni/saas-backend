@@ -271,6 +271,14 @@ func ballotCases(now time.Time) []ballotCase {
 			"canceled and process ended", sc(db.VotingProcess{EndDate: now.Add(-time.Hour)}), q(db.QuestionStatusCanceled),
 			VoteReasonClosed, notOpen,
 		},
+		{
+			"paused and not started", sc(db.VotingProcess{StartDate: now.Add(time.Hour)}), q(db.QuestionStatusPaused),
+			VoteReasonNotStarted, notOpen,
+		},
+		{
+			"not started and not eligible", sc(db.VotingProcess{StartDate: now.Add(time.Hour)}), q(db.QuestionStatusReady, "other"),
+			VoteReasonNotEligible, "process has not started yet",
+		},
 		{"votable", open, q(db.QuestionStatusReady), "", ""},
 	}
 }
@@ -407,6 +415,37 @@ func TestSignBatchCollectsRefusals(t *testing.T) {
 	}})
 	c.Assert(status, qt.Equals, http.StatusBadRequest)
 	c.Assert(body.Data, qt.DeepEquals, SignRefusalData{})
+}
+
+func TestAuthorizeQuestion(t *testing.T) {
+	c := qt.New(t)
+	oid := bson.NewObjectID()
+	org := common.Address{0xa4, byte(time.Now().UnixNano())}
+	ready := internal.HexBytes(internal.RandomBytes(32))
+	_, err := testDB.SetQuestion(&db.VotingProcessQuestion{
+		ProcessID: oid, OrgAddress: org, UpstreamID: ready, Status: db.QuestionStatusReady,
+	})
+	c.Assert(err, qt.IsNil)
+	h := New(&csp.CSP{Storage: testDB}, testDB, nil)
+	sc := &signContext{process: &db.VotingProcess{ID: oid}, memberID: "member"}
+	now := time.Now()
+
+	id, reason, sErr := h.authorizeQuestion(sc, nil, now)
+	c.Assert(id, qt.IsNil)
+	c.Assert(reason, qt.Equals, VoteReason(""))
+	c.Assert(sErr.Code, qt.Equals, errors.ErrMalformedBody.Code)
+	c.Assert(sErr.Error(), qt.Contains, "missing election id")
+
+	id, reason, sErr = h.authorizeQuestion(sc, internal.RandomBytes(32), now)
+	c.Assert(id, qt.IsNil)
+	c.Assert(reason, qt.Equals, VoteReasonUnknownElection)
+	c.Assert(sErr.Code, qt.Equals, errors.ErrUnauthorized.Code)
+	c.Assert(sErr.Error(), qt.Contains, "election not found in process")
+
+	id, reason, sErr = h.authorizeQuestion(sc, ready, now)
+	c.Assert(sErr == (*errors.Error)(nil), qt.IsTrue)
+	c.Assert(reason, qt.Equals, VoteReason(""))
+	c.Assert(id, qt.DeepEquals, ready)
 }
 
 func TestBallotPass(t *testing.T) {
