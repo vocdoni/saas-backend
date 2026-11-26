@@ -1,18 +1,19 @@
 # Sign refusals carry a reason: design
 
-Status: draft   Class: architectural (additive public API change on the voting path)
+Status: audited   Class: architectural (additive public API change on the voting path)
 Owner decisions so far (2026-11-26):
 - A refused batch reports every refused ballot, not only the first.
 - Whole-request refusals carry `data.reason` too (`not_in_census`, `zero_weight`, `unavailable`).
 - A ballot naming an election outside the process gets a new reason value, `unknown_election`.
+- No status, error code, message or signing decision changes.
 
 Source: epic vocdoni/saas-backend#899, section 2, second item. Builds on #903 (`/check` `votableNow` /
-`reason`) and #904 (reason explains `canVote` first), stacked on #904.
+`reason`) and #904 (reason explains `canVote` first); stacked on #904.
 
 ## Problem
 
 The signing endpoints refuse with a bare error and no machine-readable cause. A batch
-(`sign-batch`, `blind-point`, `blind-sign`) stops at the first unauthorized ballot with
+(`sign-batch`, `blind-point`, `blind-sign`) stops at the first failing ballot with
 `401 40001 "... at index i"` (`csp/handlers/processes.go`, `authorizeLoadedQuestion` callers at
 `:637`, `:764`, `:870`); single `sign` does the same (`:392`). An app acting on a stale `/check`
 (a question closed between the poll and the click) cannot tell the voter what happened, and has to
@@ -20,17 +21,19 @@ retry once per refused ballot to discover the rest.
 
 ## Goals
 
-1. Every authorization refusal of `sign`, `sign-batch`, `blind-point` and `blind-sign` carries the
-   `VoteReason` values that `/check` uses, so the app shows the same message whichever endpoint refused.
-2. A refused batch reports all refused ballots at once.
-3. No status code, error code, message or signing decision changes.
+1. Every refusal of the authorization pass of `sign`, `sign-batch`, `blind-point` and `blind-sign`
+   (before any signing is attempted) carries a `VoteReason`, using `/check`'s values and precedence.
+2. A refused batch reports all its refused ballots at once.
+3. No status code, error code, message or signing decision changes, for any request.
 
 ## Non-goals
 
-- Per-attempt outcomes inside a 200 batch response (`already_consumed`, `already_signing`,
-  `address_mismatch`, `auth_invalid`, `sign_failed`, blind-round codes): unchanged.
-- Malformed-input refusals (400: repeated election, missing id, bad address, missing blinded
-  message): no reason; they are client bugs.
+- Per-attempt signing outcomes (`already_consumed`, `already_signing`, `address_mismatch`,
+  `auth_invalid`, `sign_failed`, blind-round codes): unchanged. That is the per-item `code` of a 200
+  batch response and, on single `sign`, the 401/500 that `signAndRespond` writes after authorization
+  (`csp/handlers/sign.go:86-98`), which carries no `data`.
+- Malformed-input refusals (400: repeated election, missing id, bad address, missing blinded message,
+  wrong endpoint for the census mode, empty or oversized batch, unknown process id 400 40010): no reason.
 - Token errors (`/check` already answers them), census-not-found 404, `maintenance` (#872).
 - SDK, app and docs follow-ups.
 
@@ -38,12 +41,22 @@ retry once per refused ballot to discover the rest.
 
 ### Reason values
 
-Add one value to `handlers.VoteReason`: `VoteReasonUnknownElection = "unknown_election"`, used only in
-refusals: the ballot names an election id that does not resolve to a question of this process
-(unknown, unpublished, or another process's). Not-found and wrong-process stay indistinguishable, as
-today. `/check` never returns it (its questions are by construction in the process).
+Add `VoteReasonUnknownElection = "unknown_election"` to `handlers.VoteReason`, used only in refusals:
+the ballot names an election id that resolves to no question of this process (unknown, unpublished, or
+another process's). Not-found and wrong-process stay indistinguishable, as today. Constant comment:
+`// VoteReasonUnknownElection means the ballot names no election of this process. Sign refusals only; /check never returns it.`
 
-### Wire shape (in the existing `data` field of the error body)
+### Wire shape (the existing `data` field of the error body)
+
+Types (`csp/handlers/types.go`): `SignRefusal{Index int; UpstreamID internal.HexBytes; Reason VoteReason}`
+(json `index`, `upstreamId`, `reason`, none `omitempty`: index 0 must be present) and one data type,
+`SignRefusalData{Reason VoteReason `json:"reason,omitempty"`; Ballots []SignRefusal `json:"ballots,omitempty"`}`:
+`reason` is set on a whole-request refusal, `ballots` on a per-ballot one, never both. `index` is the
+position in the request array (`ballots`, or `elections` on blind-point); single `sign` uses 0.
+Swag: `@Failure 401 {object} errors.Error{data=handlers.SignRefusalData}` on the four endpoints, the same
+on `@Failure 404` of the four (add the missing 404 line to blind-point and blind-sign) and on
+`@Failure 400` of blind-point and blind-sign; each description says `data` is present only on the
+refusals listed here.
 
 Per-ballot refusal (401 40001, nothing signed):
 ```json
@@ -52,64 +65,95 @@ Per-ballot refusal (401 40001, nothing signed):
                     {"index":2,"upstreamId":"cd..","reason":"not_eligible"}]}}
 ```
 `ballots` lists every refused ballot in request order; `error` keeps today's text for the first one.
-Single `sign` uses the same shape with one entry, index 0.
+`upstreamId` echoes the id as sent; the response is bounded by the request caps (the batch cap, and the
+router-wide body limit for single `sign`), and it is hex in JSON, so nothing is reflected unescaped.
 
-Whole-request refusal: `data: {"reason": "<value>"}` on the existing error:
+Whole-request refusal, `data: {"reason": "<value>"}` on the existing error:
 | Refusal (today) | `reason` |
 |---|---|
 | 401 "member is no longer part of the census" (`resolveSignContext`) | `not_in_census` |
-| 404 `ErrUserNotFound` from the org-member lookup (`orgMemberFromAuth`) | `not_in_census` |
+| 404 `ErrUserNotFound` in `resolveSignContext`, only when the org-member lookup fails with `db.ErrNotFound` or `db.ErrInvalidData` | `not_in_census` |
 | 401 40801 `ErrZeroWeightVoter` | `zero_weight` |
 | 400 "anonymous voting is temporarily unavailable" (`blindCSPRefused`, blind-point / blind-sign) | `unavailable` |
 
-Types (`csp/handlers/types.go`): `SignRefusal{Index int; UpstreamID internal.HexBytes; Reason VoteReason}`
-(json `index`, `upstreamId`, `reason`), `SignRefusalData{Ballots []SignRefusal}` and
-`RequestRefusalData{Reason VoteReason}`, documented in swag on each endpoint's 401/400.
+`resolveSignContext` attaches the data itself: it calls `c.orgMember` and writes
+`ErrUserNotFound.WithErr(err)`, adding `.WithData(...)` only for `db.ErrNotFound` / `db.ErrInvalidData`.
+Any other lookup error keeps today's 404 with no data. `orgMemberFromAuth` and its other callers (auth
+resend, weight) are not touched.
+
+A whole-request refusal is decided before any ballot is looked at, so when several causes apply its
+reason can differ from `/check`'s for the same voter (`/check` reports the most permanent cause first).
+`unavailable` is answered before the token is read, as the refusal is today: it describes the server,
+not the caller.
 
 ### Per-ballot reason
 
-`ballotRefusal(sc, question) VoteReason` returns `""` when the ballot is authorized, else, in this
-order (the same as `/check`'s rules 2 onward for what a ballot can hit):
-1. `unknown_election`: `question == nil || question.ProcessID != sc.process.ID`;
-2. `not_eligible`: `!memberEligibleForQuestion(question, sc.memberID)`;
-3. `electionStateReason(sc.process, question, now)` (`canceled`, `closed`, `not_started`, `paused`).
+`now` is read once per request, in the handler (as `/check` does), and passed down.
 
-`authorizeLoadedQuestion` keeps its return values and its 401 messages in today's order (state before
-eligibility); it decides through `ballotRefusal` so the two cannot disagree on *whether* a ballot is
-refused. The reason may name eligibility while the message names state when both apply; the reason
-is the contract, the message is for humans.
+`ballotRefusal(sc, question, now) VoteReason` returns `""` when the ballot is authorized, else:
+1. `unknown_election`: `question == nil || question.ProcessID != sc.process.ID`;
+2. otherwise `voteReason(voteReasonInput{inCensus: true, eligible: memberEligibleForQuestion(question,
+   sc.memberID), processEnded: processEnded(sc.process, now), published: true,
+   state: electionStateReason(sc.process, question, now)})`.
+
+`voteReason` is `/check`'s own precedence function, so the two endpoints cannot drift. It is `""` exactly
+when the member is eligible and `electionStateReason` is `""` (a process past its end always has a
+non-empty state), which is today's signing decision.
+
+`authorizeLoadedQuestion(sc, question, now) (internal.HexBytes, VoteReason, *errors.Error)` and
+`unvotableElection(vp, q, now)`: `authorizeLoadedQuestion` first computes `reason := ballotRefusal(sc,
+question, now)`; `reason == ""` returns the upstream id; otherwise it returns the reason plus today's
+message, chosen in today's order (not found, then state via `unvotableElection`, then eligibility).
+The reason and the error are both set or both empty. `authorizeQuestion` returns the same three values.
+`TestUnvotableElectionMatchesState` is updated for the new `unvotableElection` signature. The reason
+may name eligibility while the message names state when both apply; the reason is the contract.
 
 ### Batch flow
 
-One pass over the ballots, as today, with one change: a malformed ballot still answers its 400 at
-once; an unauthorized ballot is recorded (index, upstream id as sent, reason) and the pass continues.
+One pass over the ballots, as today. The first failing ballot still decides the response:
+- if it is malformed, answer its 400 at once (unchanged);
+- if it is unauthorized, record it (index, upstream id as sent, reason) and keep going only to collect
+  the other unauthorized ballots: from then on a malformed ballot (repeated election, empty id, bad
+  address, missing blinded message) is skipped, neither answered nor listed.
+A refused ballot's own later checks (address, blinded message) are skipped too, as today.
 After the pass, if any ballot was refused, answer the first one's 401 (today's message, `at index i`)
-with `data.ballots`. A batch with both a refused and a later malformed ballot therefore answers the
-400 (today it answered the 401): malformed input is a client bug and nothing is signed either way.
+with `data.ballots`. Status, code and message are therefore the same as today for every request.
 
 ## Compatibility
 
-Additive: same status, code and message; `data` is new on these errors. Clients that ignore `data`
-see no change except the 400-over-401 precedence above. `unknown_election` is a new enum value;
-clients already treat unknown reasons generically (documented in #903). Rollback is a revert.
+Additive: same status, code and message for every request; `data` is new on these errors.
+`unknown_election` is a new enum value; clients already treat unknown reasons generically (documented
+in #903). Rollback is a revert.
 
 ## Failure modes and security
 
 - No new information leaks: `unknown_election` covers not-found and other-process alike; the other
   reasons describe only the caller's own ballots, after the same token checks as today.
+- A transient org-member lookup failure is never labelled `not_in_census` (404 without data).
 - The batch is still authorized as a unit before anything is signed; collecting all refusals adds no
-  DB query (questions are already loaded into a map).
-- Body size and ballot count caps unchanged.
+  DB query (questions are already loaded into a map). Body and ballot caps unchanged.
 
 ## Acceptance criteria
 
-- [ ] AC1: unit tests for `ballotRefusal` (every reason, precedence, nil/other-process question) and
-  that `authorizeLoadedQuestion` refuses exactly when `ballotRefusal != ""`, with unchanged messages.
-- [ ] AC2: integration (`api/`, runs in CI): sign-batch with a paused and a non-eligible ballot answers
-  401 40001 with both in `data.ballots` and signs nothing; single sign of a paused question carries one
-  entry; an unknown election id gives `unknown_election`; a removed member gets `data.reason:
-  not_in_census`; zero weight `zero_weight`; blind-point with the switch off `unavailable`.
-- [ ] AC3: `docs/swagger.yaml` regenerated with the types and the new enum value.
+- [ ] AC1: unit tests for `ballotRefusal` (every reason, precedence matching `voteReason`, nil and
+  other-process question) and that `authorizeLoadedQuestion` refuses exactly when its reason is set,
+  with unchanged messages; one fixed `now`.
+- [ ] AC2: integration (`api/`, runs in CI), reading the body with
+  `requestAndParseWithAssertCode[struct{Code int; Data handlers.SignRefusalData}]`:
+  - sign-batch with a paused and a non-eligible ballot (and a votable one between them): 401 40001,
+    `data.ballots` has exactly the two, with their request indexes and upstream ids; a following
+    sign-batch of the votable ballot alone succeeds (nothing was consumed);
+  - the same for blind-point and blind-sign (`data.ballots`, no point issued / no slot consumed);
+  - single sign of a paused question: one entry, index 0;
+  - an election id of another process and a random id both give `unknown_election`;
+  - a member removed from the census: 401 40001, `data.reason: not_in_census`; zero weight: 401 40801,
+    `zero_weight`; blind-point and blind-sign with the switch off: 400, `unavailable`;
+  - a refused ballot followed by a malformed one answers the 401; a malformed ballot first answers
+    its 400 with no `data`.
+- [ ] AC2b: `csp/handlers` test: a token whose org member is gone while the census participant remains
+  answers 404 40018 with `data.reason: not_in_census`.
+- [ ] AC3: `docs/swagger.yaml` regenerated with `handlers.SignRefusalData`, `handlers.SignRefusal` and
+  the new enum value.
 - [ ] AC4: lint, qt-patterns, gofumpt clean; `go test ./csp/...` passes.
 
 ## Constraints
