@@ -41,6 +41,11 @@ func walletShortError(s walletShort) error {
 		BalanceCents:   s.balanceCents,
 		ShortfallCents: s.dueCents - s.balanceCents,
 	}}
+	if s.message != "" {
+		// a top-up credited after the refused debit can leave it below zero: nothing left to top up
+		required.ShortfallCents = max(required.ShortfallCents, 0)
+		return errors.ErrPaymentRequired.Withf("%s", s.message).WithData(required)
+	}
 	if s.paidCents > 0 {
 		// a paid draft that outgrew its price has no process checkout to open (409): it buys the
 		// difference for the census it has now
@@ -63,6 +68,32 @@ type walletShort struct {
 	// is priced at, which census/checkout takes
 	paidCents  pricing.Cents
 	censusSize int64
+	// message, when set, replaces the default message of the 40178
+	message string
+}
+
+// walletDebitError maps a refused debit of s.dueCents from s.org's payer's wallet to the answer
+// the client acts on: spendCapError (402, 40183) or walletShortError at the balance it reads now.
+func (a *API) walletDebitError(err error, s walletShort) error {
+	payer := walletPayer(s.org)
+	switch {
+	case errors.Is(err, db.ErrManagedOrgSpendCapReached):
+		if wallet, werr := a.db.Wallet(payer); werr == nil {
+			if capErr := spendCapError(wallet.ManagedOrgSpend(s.org.Address), s.dueCents); capErr != nil {
+				return capErr
+			}
+		}
+		return errors.ErrManagedOrgSpendCapReached
+	case errors.Is(err, db.ErrInsufficientWalletBalance):
+		wallet, werr := a.db.Wallet(payer)
+		if werr != nil {
+			return fmt.Errorf("wallet short, and its balance could not be read: %w", werr)
+		}
+		s.balanceCents = wallet.BalanceCents
+		return walletShortError(s)
+	default:
+		return fmt.Errorf("failed to debit wallet: %w", err)
+	}
 }
 
 // processPaid is what a process has paid (ProcessLedgerState, its payer's wallet ledger folded)
@@ -441,24 +472,7 @@ func (a *API) chargeProcessWallet(c processCharge) (pricing.Cents, error) {
 		AddOns:            addOns,
 		ManagedOrg:        managedOrg,
 	}); err != nil {
-		if errors.Is(err, db.ErrManagedOrgSpendCapReached) {
-			if wallet, werr := a.db.Wallet(payer); werr == nil {
-				if capErr := spendCapError(wallet.ManagedOrgSpend(c.vp.OrgAddress), dueCents); capErr != nil {
-					return 0, capErr
-				}
-			}
-			return 0, errors.ErrManagedOrgSpendCapReached
-		}
-		if errors.Is(err, db.ErrInsufficientWalletBalance) {
-			wallet, werr := a.db.Wallet(payer)
-			if werr != nil {
-				return 0, fmt.Errorf("wallet short, and its balance could not be read: %w", werr)
-			}
-			return 0, walletShortError(walletShort{
-				org: c.org, quote: c.quote, dueCents: dueCents, balanceCents: wallet.BalanceCents,
-			})
-		}
-		return 0, fmt.Errorf("failed to debit wallet: %w", err)
+		return 0, a.walletDebitError(err, walletShort{org: c.org, quote: c.quote, dueCents: dueCents})
 	}
 	// the add-ons the process paid before are stamped again too (idempotent)
 	return dueCents, a.completeProcessCharge(c.vp, slices.Concat(paid.AddOns, addOns), alreadyCents+dueCents)
@@ -512,6 +526,8 @@ const (
 	moneyStepPaymentDrop
 	// moneyStepDraftDelete: a delete drops the draft.
 	moneyStepDraftDelete
+	// moneyStepSignedCert: a certificate purchase echoes the add-on on the process.
+	moneyStepSignedCert
 )
 
 // moneyStepHook, when set (tests only), runs before each step of a money path that follows its
