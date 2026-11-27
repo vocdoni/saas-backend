@@ -224,7 +224,7 @@ func voteReason(in voteReasonInput) VoteReason {
 //	@Param			step		path		string					true	"Authentication step (0 or 1)"
 //	@Param			request		body		handlers.AuthRequest	true	"Step 0 body; step 1 uses AuthChallengeRequest (see description)"
 //	@Success		200			{object}	handlers.AuthResponse
-//	@Failure		400			{object}	errors.Error	"Invalid input data, attempt or send limit (40017), or anonymous voting unavailable"
+//	@Failure		400			{object}	errors.Error	"Bad input, send limit (40017), no anonymous voting, or no SMS/email provider (40025)"
 //	@Failure		401			{object}	errors.Error	"Invalid authentication data, cooldown not reached, or invalid challenge"
 //	@Failure		404			{object}	errors.Error	"Process, census, or organization not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
@@ -267,7 +267,7 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 //	@Param			processId	path		string						true	"Process ID"
 //	@Param			request		body		handlers.AuthResendRequest	true	"Resend request with auth token and contact data"
 //	@Success		200			{object}	handlers.AuthResponse
-//	@Failure		400			{object}	errors.Error	"Malformed body, missing token, invalid contact, verified token, or resend limit (40017)"
+//	@Failure		400			{object}	errors.Error	"Bad body/token/contact, verified token, limit (40017), or no SMS/email provider (40025)"
 //	@Failure		401			{object}	errors.Error	"Invalid/expired token, token not belonging to the process, or contact mismatch"
 //	@Failure		404			{object}	errors.Error	"Census or organization not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"

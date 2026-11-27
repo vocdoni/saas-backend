@@ -11,9 +11,11 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp/notifications"
+	"github.com/vocdoni/saas-backend/csp/testutil"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	saasNotifications "github.com/vocdoni/saas-backend/notifications" //revive:disable:import-alias-naming
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"github.com/vocdoni/saas-backend/test"
 	"github.com/xlzd/gotp"
@@ -630,6 +632,149 @@ func TestVerifySolution(t *testing.T) {
 
 	ok = new(CSP).verifySolution(secret, "invalid")
 	c.Assert(ok, qt.IsFalse)
+}
+
+func TestVerifySolutionFixedSecret(t *testing.T) {
+	c := qt.New(t)
+	c.Run("correct code matches", func(c *qt.C) {
+		ok := new(CSP).verifySolution(fixedSecretPrefix+"123456", "123456")
+		c.Assert(ok, qt.IsTrue)
+	})
+	c.Run("wrong code does not match", func(c *qt.C) {
+		ok := new(CSP).verifySolution(fixedSecretPrefix+"123456", "000000")
+		c.Assert(ok, qt.IsFalse)
+	})
+}
+
+func TestRegenerateTokenCodeFixedSecret(t *testing.T) {
+	c := qt.New(t)
+	code, err := new(CSP).regenerateTokenCode(fixedSecretPrefix + "654321")
+	c.Assert(err, qt.IsNil)
+	c.Assert(code, qt.Equals, "654321")
+}
+
+// testPhone is a number in Ofcom's fictional fixed-line range +44 20 7946 0xxx,
+// never assigned to real subscribers. +442079460123 → last-6 "460123".
+const testPhone = "+442079460123"
+
+// testFixedCode is the OTP derived from testPhone (last 6 digits of the number after "+").
+const testFixedCode = "460123"
+
+// testPrefix matches testPhone and the whole +442079460xxx range.
+const testPrefix = "+442079460"
+
+func TestSMSTestPrefixes(t *testing.T) {
+	c := qt.New(t)
+
+	testDB, err := db.New(testMongoURI, test.RandomDatabaseName())
+	c.Assert(err, qt.IsNil)
+
+	next := new(testutil.MockSMS)
+	ctx := context.Background()
+
+	saasNotificationsTestPrefixes, err := saasNotifications.ParseSMSTestPrefixes(testPrefix)
+	c.Assert(err, qt.IsNil)
+
+	// wrap next with the test-prefix interceptor, the same way main.go does it
+	wrappedSMS := &saasNotifications.SMSTestPrefixService{
+		Prefixes: saasNotificationsTestPrefixes,
+		Next:     next,
+	}
+	csp, err := New(ctx, &Config{
+		DB:                       testDB,
+		SMSService:               wrappedSMS,
+		MailService:              testMailService,
+		NotificationCoolDownTime: time.Second * 5,
+		NotificationTTL:          time.Second * 30,
+		RootKey:                  *testRootKey,
+		SMSTestPrefixes:          saasNotificationsTestPrefixes,
+		SyncDelivery:             true,
+	})
+	c.Assert(err, qt.IsNil)
+
+	c.Run("test number uses fixed code and next receives nothing", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		token, err := csp.AuthToken(
+			testAnchorID, testUserID, testPhone,
+			notifications.SMSChallenge, "en", testOrgName, testOrgLogo, testAddress.Address(),
+		)
+		c.Assert(err, qt.IsNil)
+		c.Assert(token, qt.Not(qt.IsNil))
+		// next (MockSMS) must have received nothing
+		c.Assert(next.ConsumeSMS(testPhone), qt.IsNil)
+		// fixed code (last 6 digits of number) verifies
+		c.Assert(csp.VerifyAuthToken(token, testFixedCode), qt.IsNil)
+	})
+
+	c.Run("wrong code returns ErrChallengeCodeFailure", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		token, err := csp.AuthToken(
+			testAnchorID, testUserID, testPhone,
+			notifications.SMSChallenge, "en", testOrgName, testOrgLogo, testAddress.Address(),
+		)
+		c.Assert(err, qt.IsNil)
+		c.Assert(csp.VerifyAuthToken(token, "000000"), qt.ErrorIs, ErrChallengeCodeFailure)
+	})
+
+	c.Run("resend still works with fixed code", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		token, err := csp.AuthToken(
+			testAnchorID, testUserID, testPhone,
+			notifications.SMSChallenge, "en", testOrgName, testOrgLogo, testAddress.Address(),
+		)
+		c.Assert(err, qt.IsNil)
+		err = csp.ResendChallenge(
+			token, testPhone, notifications.SMSChallenge, "en",
+			testOrgName, testOrgLogo, testAddress.Address(),
+		)
+		c.Assert(err, qt.IsNil)
+		c.Assert(next.ConsumeSMS(testPhone), qt.IsNil) // still nothing to next
+		c.Assert(csp.VerifyAuthToken(token, testFixedCode), qt.IsNil)
+	})
+
+	c.Run("non-test number still reaches next", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		otherPhone := "+34612345678"
+		_, err := csp.AuthToken(
+			testAnchorID, testUserID, otherPhone,
+			notifications.SMSChallenge, "en", testOrgName, testOrgLogo, testAddress.Address(),
+		)
+		c.Assert(err, qt.IsNil)
+		smsMsg := next.ConsumeSMS(otherPhone)
+		c.Assert(smsMsg, qt.Not(qt.IsNil))
+	})
+}
+
+func TestSMSNoServiceSyncError(t *testing.T) {
+	c := qt.New(t)
+
+	testDB, err := db.New(testMongoURI, test.RandomDatabaseName())
+	c.Assert(err, qt.IsNil)
+
+	ctx := context.Background()
+	// no SMSService configured; MailService is set so email still works
+	csp, err := New(ctx, &Config{
+		DB:                       testDB,
+		MailService:              testMailService,
+		NotificationCoolDownTime: time.Second * 5,
+		RootKey:                  *testRootKey,
+	})
+	c.Assert(err, qt.IsNil)
+
+	c.Run("AuthToken returns sync error without spending cooldown", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		_, err := csp.AuthToken(
+			testAnchorID, testUserID, testPhone,
+			notifications.SMSChallenge, "en", testOrgName, testOrgLogo, testAddress.Address(),
+		)
+		c.Assert(errors.Is(err, errors.ErrNotSupported), qt.IsTrue)
+		// cooldown is not spent: a second call returns the same error, not ErrAttemptCoolDownTime
+		_, err = csp.AuthToken(
+			testAnchorID, testUserID, testPhone,
+			notifications.SMSChallenge, "en", testOrgName, testOrgLogo, testAddress.Address(),
+		)
+		c.Assert(errors.Is(err, errors.ErrNotSupported), qt.IsTrue)
+	})
 }
 
 func fetchOTPCodeFromEmail(c *qt.C, email string) string {
