@@ -259,7 +259,8 @@ func TestSubmitVoteInCacheIsAccepted(t *testing.T) {
 }
 
 // AC3c: a 503 has already been retried by dvote's client (apiclient.DefaultRetries sends, one
-// block apart); the outer loop does not add more, and the failure goes to the nullifier lookup.
+// block apart); the outer loop does not add more, but waits for mining (the tx may be stored on
+// voconed as 5040), and the failure falls through to the nullifier lookup.
 func TestSubmitVoteServiceUnavailableNotRetried(t *testing.T) {
 	c := qt.New(t)
 	node := &fakeVoteNode{sends: []sendAnswer{answerStatus(503, "mempool is full")}}
@@ -269,7 +270,58 @@ func TestSubmitVoteServiceUnavailableNotRetried(t *testing.T) {
 	c.Assert(err, qt.ErrorMatches, `could not submit vote tx: .*read on closed response body`)
 	sends, polls, lookups := node.counts()
 	c.Assert(sends, qt.Equals, apiclient.DefaultRetries)
-	c.Assert(polls, qt.Equals, 0, qt.Commentf("a full mempool did not take the tx"))
+	c.Assert(polls > 0, qt.IsTrue, qt.Commentf("exhausted-503 must be waited for by hash (5040 may be stored)"))
+	c.Assert(lookups, qt.Equals, 1)
+}
+
+// AC3d: a 503 exhausted by dvote (5040 voconed standby case) but the tx lands: relay succeeds.
+func TestSubmitVoteMempoolFullMaybeAccepted(t *testing.T) {
+	c := qt.New(t)
+	node := &fakeVoteNode{
+		sends:       []sendAnswer{answerStatus(503, "mempool is full")},
+		minedOnPoll: 1,
+	}
+	a := newFakeVoteNode(c, node)
+
+	voteID, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)
+	c.Assert(err, qt.IsNil)
+	c.Assert(voteID, qt.DeepEquals, testVoteNullifier)
+	sends, polls, lookups := node.counts()
+	c.Assert(sends, qt.Equals, apiclient.DefaultRetries)
+	c.Assert(polls > 0, qt.IsTrue, qt.Commentf("polls: %d", polls))
+	c.Assert(lookups, qt.Equals, 0)
+}
+
+// AC3e: a 429 throttle reply is treated as transient and the send is retried; the retry succeeds.
+func TestSubmitVote429Retried(t *testing.T) {
+	c := qt.New(t)
+	node := &fakeVoteNode{
+		sends:       []sendAnswer{answerStatus(429, "Too Many Requests"), answerOK},
+		minedOnPoll: 1,
+	}
+	a := newFakeVoteNode(c, node)
+
+	voteID, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)
+	c.Assert(err, qt.IsNil)
+	c.Assert(string(voteID), qt.Equals, "vote-id-from-node")
+	sends, _, lookups := node.counts()
+	c.Assert(sends, qt.Equals, 2)
+	c.Assert(lookups, qt.Equals, 0)
+}
+
+// A relay that only ever gets 429 fails without waiting for the tx by hash: the throttle
+// answered before the node read it.
+func TestSubmitVote429BudgetExhaustedNotWaited(t *testing.T) {
+	c := qt.New(t)
+	node := &fakeVoteNode{sends: []sendAnswer{answerStatus(429, "Too Many Requests")}}
+	a := newFakeVoteNode(c, node)
+	c.Patch(&voteRetryBudget, 150*time.Millisecond)
+
+	_, err := a.SubmitVote(context.Background(), testVoteTx, testVoteNullifier)
+	c.Assert(err, qt.ErrorMatches, `(?s)could not submit vote tx: API error: 429.*`)
+	sends, polls, lookups := node.counts()
+	c.Assert(sends > 1, qt.IsTrue, qt.Commentf("sends: %d", sends))
+	c.Assert(polls, qt.Equals, 0)
 	c.Assert(lookups, qt.Equals, 1)
 }
 
@@ -311,6 +363,7 @@ func TestSendNeverLeft(t *testing.T) {
 func TestSendTxStatus(t *testing.T) {
 	c := qt.New(t)
 	for msg, want := range map[string]int{
+		"API error: 429 (Too Many Requests\n)":        429,
 		"API error: 502 ()":                           502,
 		"API error: 500 (tx already exists in cache)": 500,
 		`Post "http://node/chain/transactions": EOF`:  0,

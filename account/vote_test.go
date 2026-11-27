@@ -14,6 +14,30 @@ import (
 	"go.vocdoni.io/dvote/apiclient"
 )
 
+// TestTransientSendErr verifies the error classification used by the retry loop:
+// 0/429/502/504 are transient, 500/503 are definitive, and mempoolFullMsg is not retried
+// (the loop handles it separately to set maybeAccepted).
+func TestTransientSendErr(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		err       string
+		transient bool
+	}{
+		{"transport failure", "connection reset by peer", true},
+		{"429 throttle", "API error: 429 (Too Many Requests\n)", true},
+		{"502 bad gateway", "API error: 502 (bad gateway\n)", true},
+		{"504 gateway timeout", "API error: 504 (gateway timeout\n)", true},
+		{"500 vochain error", "API error: 500 (invalid signature\n)", false},
+		{"503 mempool full", "API error: 503 (mempool full\n)", false},
+		{"mempool full closed body", mempoolFullMsg, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := qt.New(t)
+			c.Assert(transientSendErr(fmt.Errorf("%s", tc.err)), qt.Equals, tc.transient)
+		})
+	}
+}
+
 // TestVoteByNullifier exercises the three answers a node can give — a vote, a 404, and any
 // other status — against a fake node, since the containerized chain cannot be made to fail
 // on demand. The failure case uses 500, not 503: apiclient retries 503 waiting for a block.
