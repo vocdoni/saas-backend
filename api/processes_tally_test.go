@@ -65,7 +65,7 @@ func TestVotingProcessMultichoiceTally(t *testing.T) {
 	election := got.Questions[0].UpstreamID
 	c.Assert(election, qt.Not(qt.HasLen), 0)
 	c.Assert(*got.Questions[0].BallotProtocol, qt.Equals, db.BallotProtocol{
-		MaxCount: 4, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2,
+		MaxCount: 4, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2, MinTotalCost: 1,
 	})
 
 	// what actually reached the chain: four 0/1 fields, and uniqueValues off. This is the #619

@@ -66,9 +66,12 @@ func parseProcessDates(req *apicommon.CreateVotingProcessRequest) (start, end ti
 //	@Description	While the service has anonymous voting temporarily off, a census with `anonymous: true` is
 //	@Description	a 400 (40037) "anonymous voting is temporarily unavailable".
 //	@Description
-//	@Description	`typeSetup.minChoices` has no on-chain counterpart and is a validation hint for
-//	@Description	clients. It is stored as sent for multichoice, and is always `1` for singlechoice,
-//	@Description	whose ballot is the single field a voter fills.
+//	@Description	`typeSetup.minChoices` is enforced on chain as `ballotProtocol.minTotalCost`: for
+//	@Description	multichoice it is the least number of selections (at most `maxChoices`); for
+//	@Description	singlechoice it is always `1`, so the empty ballot is not counted. A singlechoice that
+//	@Description	accepts the empty ballot needs a `ballotProtocol` with `minTotalCost: 0`. A supplied
+//	@Description	`ballotProtocol` with no minimums takes them from `typeSetup`. `minValue` and
+//	@Description	`minTotalCost` must not exceed `maxValue` / `maxTotalCost` when those are set.
 //	@Description
 //	@Description	`typeSetup.uniqueChoices` is rejected for multichoice: every choice is an independent
 //	@Description	yes/no field, so a unique-values ballot admits no vote and the election would tally
