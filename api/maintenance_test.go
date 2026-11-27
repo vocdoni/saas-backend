@@ -191,7 +191,7 @@ func TestMaintenanceRouter(t *testing.T) {
 	}
 	router := a.initRouter()
 
-	// every write route is refused unless listed here, so a new handleExempt route fails until added
+	// every write route is refused unless it is a POST listed here, so a new handleExempt route fails until added
 	exemptWriteRoutes := map[string]bool{
 		authRefresTokenEndpoint:          true,
 		organizationCreateTicketEndpoint: true,
@@ -213,7 +213,7 @@ func TestMaintenanceRouter(t *testing.T) {
 		if method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions {
 			return nil
 		}
-		if exemptWriteRoutes[route] {
+		if method == http.MethodPost && exemptWriteRoutes[route] {
 			seen[route] = true
 			return nil
 		}
