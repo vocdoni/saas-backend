@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
+	"time"
 
 	t "github.com/twilio/twilio-go"
 	"github.com/twilio/twilio-go/client"
 	api "github.com/twilio/twilio-go/rest/api/v2010"
+	verify "github.com/twilio/twilio-go/rest/verify/v2"
 	"github.com/vocdoni/saas-backend/notifications"
 	"go.vocdoni.io/dvote/log"
 )
@@ -38,8 +41,17 @@ type Config struct {
 	// Twilio refused with 21612 for FromNumber: an alphanumeric sender ID is not
 	// accepted in every country (some require it to be registered first).
 	FallbackFromNumber string
+	// VerifyServiceSID, when set, names a Twilio Verify service (with custom codes
+	// enabled) that delivers one-time codes: Verify picks a sender each country
+	// accepts. A code it fails to deliver is sent as a direct message instead.
+	VerifyServiceSID string
+	// DirectPrefixes are the number prefixes ("+34") known to take direct messages,
+	// which cost less than Verify's per-code fee: their codes go out as direct
+	// messages, and through Verify only when every sender is refused (21612).
+	DirectPrefixes []string
 	// Label, when set, names a non-production environment ("DEV", "STG"): voter
-	// messages start with "[Label] " and the canary names it.
+	// messages start with "[Label] " and the canary names it. Verify writes its own
+	// text from the service name, so give each environment its own Verify service.
 	Label string
 }
 
@@ -48,11 +60,17 @@ type messageCreator interface {
 	CreateMessage(params *api.CreateMessageParams) (*api.ApiV2010Message, error)
 }
 
+// verificationCreator is the part of the Twilio Verify API the service uses.
+type verificationCreator interface {
+	CreateVerification(serviceSid string, params *verify.CreateVerificationParams) (*verify.VerifyV2Verification, error)
+}
+
 // SMS is the implementation of the NotificationService interface for the
 // Twilio SMS service. It contains the configuration and the Twilio REST client.
 type SMS struct {
-	config   *Config
-	messages messageCreator
+	config        *Config
+	messages      messageCreator
+	verifications verificationCreator
 }
 
 var _ notifications.NotificationService = &SMS{}
@@ -77,8 +95,11 @@ func (tsms *SMS) New(rawConfig any) error {
 	if err := os.Setenv(AuthTokenEnv, tsms.config.AuthToken); err != nil {
 		return err
 	}
+	config.DirectPrefixes = validPrefixes(config.DirectPrefixes)
 	// init Twilio REST client
-	tsms.messages = t.NewRestClient().Api
+	rest := t.NewRestClient()
+	tsms.messages = rest.Api
+	tsms.verifications = rest.VerifyV2
 	// a fresh start counts as a delivery, or the no-delivery alert would fire on
 	// every restart until the first one
 	smsLastDelivered.SetToCurrentTime()
@@ -90,7 +111,55 @@ func (tsms *SMS) New(rawConfig any) error {
 // returns an error if the notification could not be sent or if the context is
 // done.
 func (tsms *SMS) SendNotification(ctx context.Context, notification *notifications.Notification) error {
+	switch {
+	case tsms.config.VerifyServiceSID == "" || notification.OTPCode == "":
+		return tsms.deliver(ctx, notification, sourceVoter)
+	case tsms.verifiesAfterDirect(notification):
+		// a 21612 is Twilio's synchronous refusal, so Verify cannot duplicate a sent code
+		err := tsms.deliver(ctx, notification, sourceVoter)
+		if twilioErrorCode(err) != codeSenderRecipientMismatch || ctx.Err() != nil {
+			return err
+		}
+		log.Warnw("every sms sender refused for a direct-prefix recipient, sending the code through twilio verify")
+		return classifySendError(tsms.verify(ctx, notification))
+	}
+	err := tsms.verify(ctx, notification)
+	if err == nil || ctx.Err() != nil {
+		// on a timeout Verify may still deliver the code: a direct resend could duplicate it
+		return err
+	}
+	log.Warnw("twilio verify failed, sending the code as a direct message", "error", err)
 	return tsms.deliver(ctx, notification, sourceVoter)
+}
+
+// verifiesAfterDirect reports whether the notification is a one-time code for a
+// DirectPrefixes number, sent as a direct message with Verify as the last resort.
+func (tsms *SMS) verifiesAfterDirect(notification *notifications.Notification) bool {
+	if tsms.config.VerifyServiceSID == "" || notification.OTPCode == "" {
+		return false
+	}
+	for _, prefix := range tsms.config.DirectPrefixes {
+		if strings.HasPrefix(notification.ToNumber, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// validPrefixes returns the well-formed prefixes ("+34", "34"), with their "+".
+// A malformed one is dropped with a warning: its numbers then go through Verify,
+// which costs more but still delivers.
+func validPrefixes(prefixes []string) []string {
+	valid := make([]string, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		digits := strings.TrimPrefix(prefix, "+")
+		if digits == "" || len(digits) > 6 || strings.Trim(digits, "0123456789") != "" {
+			log.Warnw("ignoring malformed sms direct prefix", "prefix", prefix)
+			continue
+		}
+		valid = append(valid, "+"+digits)
+	}
+	return valid
 }
 
 // deliver sends the notification from FromNumber, resending it from the fallback
@@ -143,23 +212,88 @@ func (tsms *SMS) send(ctx context.Context, from string, notification *notificati
 	if callback := tsms.statusCallbackURL(source); callback != "" {
 		params.SetStatusCallback(callback)
 	}
-	errCh := make(chan error, 1)
-	go func() {
+	return await(ctx, func() error {
 		_, err := tsms.messages.CreateMessage(params)
+		// a refusal is rerouted when another sender or Verify takes the message over
 		refusal := sendRejected
-		if _, ok := tsms.fallbackFor(from, err); ok {
+		_, fallback := tsms.fallbackFor(from, err)
+		verifyNext := source == sourceVoter && twilioErrorCode(err) == codeSenderRecipientMismatch &&
+			tsms.verifiesAfterDirect(notification)
+		if fallback || verifyNext {
 			refusal = sendRerouted
 		}
 		recordSend(source, err, refusal)
-		errCh <- err
-		close(errCh)
-	}()
+		return err
+	})
+}
+
+// verify delivers the notification's one-time code through the Verify service.
+// Verify sends no per-message status callback, so these codes only show up in
+// the sends counter.
+func (tsms *SMS) verify(ctx context.Context, notification *notifications.Notification) error {
+	params := &verify.CreateVerificationParams{}
+	params.SetTo(notification.ToNumber)
+	params.SetChannel("sms")
+	params.SetCustomCode(notification.OTPCode)
+	if locale := verifyLocale(notification.Lang); locale != "" {
+		params.SetLocale(locale)
+	}
+	if ttl := verifyTTL(notification.OTPTTL); ttl != "" {
+		params.SetTemplateCustomSubstitutions(ttl)
+	}
+	return await(ctx, func() error {
+		_, err := tsms.verifications.CreateVerification(tsms.config.VerifyServiceSID, params)
+		// a refusal is resent as a direct message, unless that was tried first or the
+		// caller gave up by then
+		refusal := sendRerouted
+		if tsms.verifiesAfterDirect(notification) || ctx.Err() != nil {
+			refusal = sendRejected
+		}
+		recordSend(sourceVoter, err, refusal)
+		return err
+	})
+}
+
+// await runs call in a goroutine and returns its error, or ctx's once ctx is
+// done. call runs to completion either way, so it can count its own outcome.
+func await(ctx context.Context, call func() error) error {
+	errCh := make(chan error, 1)
+	go func() { errCh <- call() }()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case err := <-errCh:
 		return err
 	}
+}
+
+// verifyLocales are the Twilio Verify message languages, by base language code.
+var verifyLocales = map[string]struct{}{
+	"ar": {}, "ca": {}, "cs": {}, "da": {}, "de": {}, "el": {}, "en": {}, "es": {}, "fi": {}, "fr": {},
+	"he": {}, "hi": {}, "hr": {}, "hu": {}, "id": {}, "it": {}, "ja": {}, "ko": {}, "ms": {}, "nb": {},
+	"nl": {}, "pl": {}, "pt": {}, "ro": {}, "ru": {}, "sv": {}, "th": {}, "tr": {}, "vi": {}, "zh": {},
+}
+
+// verifyLocale maps a language tag ("es", "pt-BR") to a Verify locale, or "" to let
+// Verify pick the language from the recipient's country.
+func verifyLocale(lang string) string {
+	base, _, _ := strings.Cut(strings.ToLower(lang), "-")
+	base, _, _ = strings.Cut(base, "_")
+	if _, ok := verifyLocales[base]; ok {
+		return base
+	}
+	return ""
+}
+
+// verifyTTL is the template substitution that makes Verify's "expires in N minutes"
+// state the code's real lifetime instead of Verify's own 10 minutes, or "" when the
+// lifetime is unknown. Minutes round down, so the text never promises more time.
+func verifyTTL(ttl time.Duration) string {
+	if ttl <= 0 {
+		return ""
+	}
+	minutes := max(int(ttl/time.Minute), 1)
+	return fmt.Sprintf(`{"ttl":"%d"}`, minutes)
 }
 
 // codeSenderRecipientMismatch is Twilio's 21612: the message cannot be sent with

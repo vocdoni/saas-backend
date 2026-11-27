@@ -2,7 +2,10 @@
 // such as email and SMS, with support for various notification services.
 package notifications
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // NotificationType represents the type of notification to be sent (email or SMS).
 type NotificationType string
@@ -30,6 +33,13 @@ type Notification struct {
 	PlainBody      string `json:"plainBody"`
 	EnableTracking bool   `json:"enableTracking"`
 	ReplyTo        string `json:"replyTo"`
+	// OTPCode is the bare one-time code in the message, for a service that delivers
+	// the code itself (Twilio Verify) instead of sending PlainBody. Never serialized.
+	OTPCode string `json:"-"`
+	// Lang is the recipient's language, for a service that writes the message itself.
+	Lang string `json:"-"`
+	// OTPTTL is how long OTPCode stays valid, for a service that states it in its own text.
+	OTPTTL time.Duration `json:"-"`
 }
 
 // NotificationService is the interface that must be implemented by any

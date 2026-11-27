@@ -125,6 +125,11 @@ func NewNotificationChallenge(
 		n.ToAddress = to
 	case SMSChallenge:
 		n.ToNumber = to
+		n.OTPCode = code
+		n.Lang = lang
+		if ttl, err := time.ParseDuration(remainingTime); err == nil {
+			n.OTPTTL = ttl
+		}
 	default:
 		return nil, ErrInvalidNotificationType
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
@@ -269,6 +270,7 @@ func TestNewSMSChallengeSent(t *testing.T) {
 	c.Assert(ch.Notification, qt.Not(qt.IsNil))
 	c.Assert(ch.Notification.ToAddress, qt.Equals, "")
 	c.Assert(ch.Notification.ToNumber, qt.Equals, testUserPhone)
+	c.Assert(ch.Notification.OTPTTL, qt.Equals, 5*time.Minute+30*time.Second)
 	c.Assert(ch.Notification.PlainBody, qt.Contains, "123456")
 	c.Assert(ch.Notification.Subject, qt.Contains, testOrgName)
 	// send the notification and check the result
