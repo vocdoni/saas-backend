@@ -209,15 +209,27 @@ func voteReason(in voteReasonInput) VoteReason {
 //	@Description	milliseconds left.
 //	@Description	- Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
 //	@Description	If valid the token is marked verified and returned. Auth-only censuses may not require
-//	@Description	a challenge solution.
+//	@Description	a challenge solution. A wrong code answers 40104 and may be retried with the same token
+//	@Description	until the code's 5 attempts are spent; then the code answers 40105 (locked). A code past
+//	@Description	its lifetime, or one already solved through this or another token, answers 40106
+//	@Description	(expired), and so does a token that is unknown or gone with its expired code; after
+//	@Description	40105 or 40106 restart at step 0. All three are 401.
 //	@Description	Step 0 returns the same error (40802) whether the login data matches no census participant
 //	@Description	or the contact data does not match an existing one. Failed attempts are capped per UTC hour
 //	@Description	on the process for each submitted set of login and contact fields, and, ten times higher,
 //	@Description	for each set of login fields across all contacts tried. Once either is exhausted, step 0
 //	@Description	answers 40017 until the hour ends (the voter cap even with the right contact data);
 //	@Description	data.retryAfter gives the seconds left.
-//	@Description	A member's challenge sends (new tokens + resends) are capped per UTC day, also answering
-//	@Description	40017 with data.retryAfter.
+//	@Description	A member's challenge sends (new tokens + resends) on a process are also spaced by a
+//	@Description	growing wait: none after the first 3 sends, then twice the cooldown, doubling with each
+//	@Description	further send and with every 5 failed code attempts (counted across codes), up to a
+//	@Description	maximum (1 h by default). It resets after a quiet period without sends (the maximum by
+//	@Description	default) and on a successful step 1. While it runs, a send answers 40103 with
+//	@Description	data.coolDownTime the milliseconds left (the longer of this wait and the contact's
+//	@Description	cooldown), so clients must read it rather than assume the cooldown. The sends are also
+//	@Description	capped per rolling 24 h (15 by default): past it, 40017 with data.retryAfter the seconds
+//	@Description	until the oldest send leaves the window. A repeated step 0 for a contact that already
+//	@Description	got the pending code still returns a token when either refuses the re-send.
 //	@Description	Step 0 for an anonymous census is refused (400, 40037, "anonymous voting is temporarily
 //	@Description	unavailable") while the service has anonymous voting off.
 //	@Description	For a census with certAuth, step 0 takes certCode and codeVerifier (plus the email or phone when
@@ -233,9 +245,9 @@ func voteReason(in voteReasonInput) VoteReason {
 //	@Param			request		body		handlers.AuthRequest	true	"Step 0 body; step 1 uses AuthChallengeRequest (see description)"
 //	@Success		200			{object}	handlers.AuthResponse
 //	@Failure		400			{object}	errors.Error	"Invalid input data, attempt or send limit (40017), or anonymous voting unavailable"
-//	@Failure		401			{object}	errors.Error	"Invalid authentication data, cooldown not reached, or invalid challenge"
+//	@Failure		401			{object}	errors.Error	"Invalid auth data, cooldown (40103), or challenge code failure (40104-40106)"
 //	@Failure		404			{object}	errors.Error	"Process, census, or organization not found"
-//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		500			{object}	errors.Error	"Internal error, e.g. storage (50006) or challenge delivery (50002) failure"
 //	@Failure		503			{object}	errors.Error	"Password- or phone-hashing capacity exhausted, retry later (50302)"
 //	@Router			/processes/{processId}/auth/{step} [post]
 func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request) {
@@ -272,7 +284,14 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 //	@Description	it and including the re-sends of a repeated step 0. A contact that does not match the
 //	@Description	member spends one of them too, and starts that contact's cooldown. A send the service
 //	@Description	gives up on before handing it to the email or SMS provider gives back its resend, its
-//	@Description	cooldown and its daily send; one the provider fails keeps them spent.
+//	@Description	cooldown and its place in the member's send backoff; one the provider fails keeps them
+//	@Description	spent. The member's growing wait between sends and the cap per rolling 24 h of step 0
+//	@Description	apply here too: 40103 with data.coolDownTime while the wait runs, 40017 with
+//	@Description	data.retryAfter past the cap.
+//	@Description	A code that can no longer be sent (expired, locked or solved through another token), or a
+//	@Description	token that is unknown or gone with its expired code, answers 40106: restart at step 0. A
+//	@Description	verified token answers 40015, whose data.coolDownTime holds the
+//	@Description	milliseconds the code still lives.
 //	@Description	For an anonymous census it is refused (400, 40037, "anonymous voting is temporarily unavailable") while the
 //	@Description	service has anonymous voting off.
 //	@Tags			processes
@@ -282,9 +301,9 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 //	@Param			request		body		handlers.AuthResendRequest	true	"Resend request with auth token and contact data"
 //	@Success		200			{object}	handlers.AuthResponse
 //	@Failure		400			{object}	errors.Error	"Malformed body, missing token, invalid contact, verified token, or resend limit (40017)"
-//	@Failure		401			{object}	errors.Error	"Invalid/expired/locked token, cooldown not reached, foreign token, or contact mismatch"
+//	@Failure		401			{object}	errors.Error	"Invalid or foreign token, unsendable code (40106), cooldown (40103), contact mismatch"
 //	@Failure		404			{object}	errors.Error	"Census or organization not found"
-//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		500			{object}	errors.Error	"Internal error, e.g. storage (50006) or challenge delivery (50002) failure"
 //	@Failure		503			{object}	errors.Error	"Phone-hashing capacity exhausted, retry later (50302)"
 //	@Router			/processes/{processId}/auth/resend [post]
 func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Request) {
@@ -305,7 +324,8 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrInvalidData.Withf("missing auth token").Write(w)
 		return
 	}
-	auth, ok := c.getAuthInfo(w, req.AuthToken)
+	// a token gone with its expired code, or never issued, answers like an expired one
+	auth, ok := c.lookupAuth(w, req.AuthToken, errors.ErrChallengeExpired)
 	if !ok {
 		return
 	}
@@ -344,7 +364,7 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 	// the destination the request names, normalized but not yet matched against the member
 	to, challengeType, err := submittedContact(census, &req, phone)
 	if err != nil {
-		writeResendError(w, err)
+		voterAuthError(err).Write(w)
 		return
 	}
 	// claim the resend for that destination before checking the contact, so that guessing a
@@ -352,19 +372,19 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 	// keeps its claim spent
 	claim, err := c.csp.ClaimChallengeResend(req.AuthToken, to, challengeType)
 	if err != nil {
-		writeResendError(w, err)
+		voterAuthError(err).Write(w)
 		return
 	}
 	if _, _, err := determineContactMethod(
 		census, &AuthRequest{Email: req.Email, Phone: req.Phone}, phone, member,
 	); err != nil {
-		writeResendError(w, err)
+		voterAuthError(err).Write(w)
 		return
 	}
 	name, logo := orgNameAndLogo(org)
 	orgInfo := notifications.OrganizationInfo{Address: org.Address, Name: name, Logo: logo}
 	if err := c.csp.ResendChallenge(claim, lang, orgInfo); err != nil {
-		writeResendError(w, err)
+		voterAuthError(err).Write(w)
 		return
 	}
 	apicommon.HTTPWriteJSON(w, &AuthResponse{
@@ -1294,23 +1314,6 @@ func orgNameAndLogo(org *db.Organization) (name, logo string) {
 		}
 	}
 	return name, logo
-}
-
-// writeResendError maps a ResendChallenge error to the proper HTTP error.
-func writeResendError(w http.ResponseWriter, err error) {
-	var apiErr errors.Error
-	if errors.As(err, &apiErr) {
-		apiErr.Write(w)
-		return
-	}
-	switch err {
-	case csp.ErrInvalidAuthToken, csp.ErrTokenExpired:
-		errors.ErrUnauthorized.WithErr(err).Write(w)
-	case csp.ErrStorageFailure:
-		errors.ErrInternalStorageError.WithErr(err).Write(w)
-	default:
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-	}
 }
 
 // ProcessSignInfoHandler godoc

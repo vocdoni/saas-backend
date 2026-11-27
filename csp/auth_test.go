@@ -210,7 +210,7 @@ func TestVerifyAuthToken(t *testing.T) {
 
 	c.Run("token not found", func(c *qt.C) {
 		err := csp.VerifyAuthToken([]byte("invalid"), "invalid")
-		c.Assert(err, qt.ErrorIs, ErrInvalidAuthToken)
+		c.Assert(err, qt.ErrorIs, ErrTokenExpired)
 	})
 
 	c.Run("expired OTP", func(c *qt.C) {
@@ -413,7 +413,7 @@ func TestResendChallenge(t *testing.T) {
 
 	c.Run("token not found", func(c *qt.C) {
 		err := resendTo(csp, testToken, testUserEmail, notifications.EmailChallenge)
-		c.Assert(err, qt.ErrorIs, ErrInvalidAuthToken)
+		c.Assert(err, qt.ErrorIs, ErrTokenExpired)
 	})
 
 	c.Run("token already verified", func(c *qt.C) {
@@ -708,12 +708,12 @@ func TestAuthTokenReusesPendingChallenge(t *testing.T) {
 		c.Assert(ok, qt.IsTrue)
 		c.Assert(remaining, qt.Equals, time.Duration(0))
 
-		// a resend the daily send cap would refuse is not advertised
-		origDaily := csp.maxDailyChallengeSends
-		csp.maxDailyChallengeSends = 1
+		// a resend the send ceiling would refuse is not advertised
+		origCeiling := csp.sendCeiling
+		csp.sendCeiling = 1
 		_, ok = csp.ResendCoolDown(first, dest)
 		c.Assert(ok, qt.IsFalse)
-		csp.maxDailyChallengeSends = origDaily
+		csp.sendCeiling = origCeiling
 		// nor one the code's spent resends would
 		setCoolDown(c, time.Millisecond)
 		for range MaxChallengeResends {
@@ -751,7 +751,7 @@ func TestAuthTokenReusesPendingChallenge(t *testing.T) {
 		otherData, err := csp.Storage.CSPAuth(other)
 		c.Assert(err, qt.IsNil)
 		c.Assert(otherData.Verified, qt.IsFalse)
-		c.Assert(csp.VerifyAuthToken(other, code), qt.ErrorIs, ErrTokenExpired)
+		c.Assert(csp.VerifyAuthToken(other, code), qt.ErrorIs, ErrChallengeConsumed)
 	})
 
 	c.Run("attempts are shared by the tokens of a challenge", func(c *qt.C) {
@@ -932,12 +932,12 @@ func TestAuthTokenReusesPendingChallenge(t *testing.T) {
 		c.Assert(resend(first, email), qt.ErrorIs, errors.ErrVerificationMaxAttempts)
 	})
 
-	c.Run("resend inside cooldown spends no resend and no daily send", func(c *qt.C) {
+	c.Run("resend inside cooldown spends no resend and no send of the ceiling", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		const email = "reuse-resend-free@example.com"
-		origDaily := csp.maxDailyChallengeSends
-		csp.maxDailyChallengeSends = 2
-		c.Cleanup(func() { csp.maxDailyChallengeSends = origDaily })
+		origCeiling := csp.sendCeiling
+		csp.sendCeiling = 2
+		c.Cleanup(func() { csp.sendCeiling = origCeiling })
 
 		token, err := requestCode(email)
 		c.Assert(err, qt.IsNil)
@@ -948,7 +948,7 @@ func TestAuthTokenReusesPendingChallenge(t *testing.T) {
 		assertResends(c, token, 0)
 		assertNoEmail(c, email)
 
-		// once the cooldown passes, the second send of the day still goes out
+		// once the cooldown passes, the second send under the ceiling still goes out
 		setCoolDown(c, time.Millisecond)
 		time.Sleep(10 * time.Millisecond)
 		c.Assert(resend(token, email), qt.IsNil)
@@ -956,7 +956,7 @@ func TestAuthTokenReusesPendingChallenge(t *testing.T) {
 		assertResends(c, token, 1)
 	})
 
-	c.Run("a spent daily send budget still returns a token for the pending code", func(c *qt.C) {
+	c.Run("a reached send ceiling still returns a token for the pending code", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		capped, err := New(context.Background(), &Config{
 			DB:                       testDB,
@@ -969,7 +969,7 @@ func TestAuthTokenReusesPendingChallenge(t *testing.T) {
 			SyncDelivery:             true,
 		})
 		c.Assert(err, qt.IsNil)
-		const email = "reuse-daily-cap@example.com"
+		const email = "reuse-ceiling@example.com"
 		request := func() (internal.HexBytes, error) {
 			return capped.AuthToken(testAnchorID, testUserID, email, notifications.EmailChallenge,
 				apicommon.DefaultLang, testOrgName, testOrgLogo, testAddress.Address())

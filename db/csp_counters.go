@@ -13,11 +13,8 @@ import (
 )
 
 // CSP counter kinds. Each kind namespaces its keys, so the same key bytes never collide across
-// kinds, and sets the length of the window its counters reset after (see CSPCounterWindow).
+// kinds. The OTP challenge sends are bounded by the send backoff (CSPSendBackoff), not a counter.
 const (
-	// CSPCounterChallengeSends counts the OTP challenges sent (new tokens + resends) for one
-	// member on one voting process, per UTC day.
-	CSPCounterChallengeSends = "challengeSends"
 	// CSPCounterAuthFailures counts failed step-0 authentications for one submission (the login
 	// and contact fields a request submits, whether or not they match a census participant) on one
 	// voting process, per UTC hour.
@@ -31,15 +28,11 @@ const (
 	CSPCounterCertAssertions = "certAssertions"
 )
 
-// CSPCounterWindow returns the length of the window a counter kind resets after. Failed
-// authentications use short hourly windows: anyone who knows a voter's login fields can spend
-// that voter's coarse budget, and an hour bounds such a lockout while still capping contact
-// guessing at 24 windows a day. Challenge sends cost money per unit, so their budget is daily.
-func CSPCounterWindow(kind string) time.Duration {
-	if kind == CSPCounterAuthFailures || kind == CSPCounterVoterAuthFailures || kind == CSPCounterCertAssertions {
-		return time.Hour
-	}
-	return 24 * time.Hour
+// CSPCounterWindow returns the length of the window a counter kind resets after: an hour for every
+// kind. Anyone who knows a voter's login fields can spend that voter's coarse budget, and an hour
+// bounds such a lockout while still capping contact guessing at 24 windows a day.
+func CSPCounterWindow(string) time.Duration {
+	return time.Hour
 }
 
 // cspCounter is one counter document. The _id derives from (kind, key, window start), so every
@@ -74,8 +67,8 @@ type cspCounterBucket struct {
 }
 
 // currentCSPCounterBucket returns the bucket of (kind, key) for the current window. Windows are
-// aligned to UTC (time.Truncate counts from the zero time, a UTC midnight), so the daily ones
-// reset at midnight UTC and the hourly ones on the hour.
+// aligned to UTC (time.Truncate counts from the zero time, a UTC midnight), so they reset on the
+// hour.
 func currentCSPCounterBucket(kind string, key []byte, now time.Time) cspCounterBucket {
 	window := CSPCounterWindow(kind)
 	start := now.UTC().Truncate(window)

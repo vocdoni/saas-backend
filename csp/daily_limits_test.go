@@ -13,11 +13,13 @@ import (
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/test"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-func TestDailyChallengeSendCap(t *testing.T) {
+func TestChallengeSendCeiling(t *testing.T) {
 	c := qt.New(t)
-	testDB, err := db.New(testMongoURI, test.RandomDatabaseName())
+	dbName := test.RandomDatabaseName()
+	testDB, err := db.New(testMongoURI, dbName)
 	c.Assert(err, qt.IsNil)
 
 	cooldown := 10 * time.Millisecond
@@ -33,29 +35,30 @@ func TestDailyChallengeSendCap(t *testing.T) {
 
 	// a dedicated inbox: these challenges are delivered asynchronously, so sending
 	// them to the shared address would pollute the other tests' OTP fetches
-	dailyCapEmail := "daily-cap@test.com"
+	ceilingEmail := "send-ceiling@test.com"
 	otherAnchorID := internal.HexBytes("otherAnchorID")
 	newToken := func(anchorID internal.HexBytes) (internal.HexBytes, error) {
-		return csp.AuthToken(anchorID, testUserID, dailyCapEmail,
+		return csp.AuthToken(anchorID, testUserID, ceilingEmail,
 			notifications.EmailChallenge, apicommon.DefaultLang, "", "", testAddress.Address())
 	}
 
-	// first send of the day: a new token
+	// first send of the window: a new token
 	token, err := newToken(testAnchorID)
 	c.Assert(err, qt.IsNil)
 
 	// second send: a resend of the same token once the cooldown has passed, counting against the
-	// same daily budget
+	// same ceiling
 	time.Sleep(2 * cooldown)
-	c.Assert(resendTo(csp, token, dailyCapEmail, notifications.EmailChallenge), qt.IsNil)
+	c.Assert(resendTo(csp, token, ceilingEmail, notifications.EmailChallenge), qt.IsNil)
 
-	// the daily budget (2) is spent: further resends are refused even though the
-	// per-code resend cap (3) is not reached
+	// the ceiling (2) is reached: further resends are refused even though the per-code resend
+	// cap (3) is not reached
 	time.Sleep(2 * cooldown)
-	err = resendTo(csp, token, dailyCapEmail, notifications.EmailChallenge)
+	err = resendTo(csp, token, ceilingEmail, notifications.EmailChallenge)
 	c.Assert(err, qt.ErrorIs, errors.ErrVerificationMaxAttempts)
-	// the refusal tells when the daily window resets
+	// the refusal tells when the oldest send of the rolling window ages out: about 24 h from now
 	assertRetryAfter(c, err, 24*time.Hour)
+	assertRetryAfterAtLeast(c, err, 24*time.Hour-time.Minute)
 
 	// step 0 still hands out a token for the pending code, as the voter already holds it
 	time.Sleep(2 * cooldown)
@@ -71,12 +74,22 @@ func TestDailyChallengeSendCap(t *testing.T) {
 	_, err = newToken(testAnchorID)
 	c.Assert(err, qt.ErrorIs, errors.ErrVerificationMaxAttempts)
 
-	// the budget is per member and process: another process is unaffected
+	// once the oldest send is 24 h old it leaves the window, freeing one send
+	backoffs := testDB.DBClient.Database(dbName).Collection("cspSendBackoff")
+	_, err = backoffs.UpdateOne(context.Background(), bson.M{},
+		bson.M{"$set": bson.M{"sends.0": time.Now().Add(-24*time.Hour - time.Second)}})
+	c.Assert(err, qt.IsNil)
+	fresh, err := newToken(testAnchorID)
+	c.Assert(err, qt.IsNil)
+	time.Sleep(2 * cooldown)
+	c.Assert(resendTo(csp, fresh, ceilingEmail, notifications.EmailChallenge), qt.ErrorIs, errors.ErrVerificationMaxAttempts)
+
+	// the ceiling is per member and process: another process is unaffected
 	_, err = newToken(otherAnchorID)
 	c.Assert(err, qt.IsNil)
 }
 
-func TestDailyChallengeSendReleasedWhenNothingIsSent(t *testing.T) {
+func TestChallengeSendReleasedWhenNothingIsSent(t *testing.T) {
 	c := qt.New(t)
 	testDB, err := db.New(testMongoURI, test.RandomDatabaseName())
 	c.Assert(err, qt.IsNil)
@@ -92,14 +105,14 @@ func TestDailyChallengeSendReleasedWhenNothingIsSent(t *testing.T) {
 	})
 	c.Assert(err, qt.IsNil)
 
-	email := "daily-release@test.com"
+	email := "ceiling-release@test.com"
 	newToken := func(ctype notifications.ChallengeType) error {
 		_, err := csp.AuthToken(testAnchorID, testUserID, email, ctype, apicommon.DefaultLang, "", "", testAddress.Address())
 		return err
 	}
 	// a challenge that cannot be composed (unknown type) is never queued...
 	c.Assert(newToken("bogus"), qt.ErrorIs, ErrNotificationFailure)
-	// ... so it neither spends the only send of the day nor stays behind as a pending code
+	// ... so it neither spends the only send of the window nor stays behind as a pending code
 	_, err = csp.Storage.LastCSPAuth(testUserID, testAnchorID)
 	c.Assert(err, qt.ErrorIs, db.ErrTokenNotFound)
 	time.Sleep(2 * cooldown)
@@ -192,4 +205,16 @@ func assertRetryAfter(c *qt.C, err error, window time.Duration) {
 	c.Assert(ok, qt.IsTrue, qt.Commentf("error data: %#v", apiErr.Data))
 	c.Assert(retryAfter >= 1, qt.IsTrue)
 	c.Assert(retryAfter <= int64(window.Seconds()), qt.IsTrue)
+}
+
+// assertRetryAfterAtLeast checks that err is an API error carrying a retryAfter of at least least.
+func assertRetryAfterAtLeast(c *qt.C, err error, least time.Duration) {
+	c.Helper()
+	var apiErr errors.Error
+	c.Assert(errors.As(err, &apiErr), qt.IsTrue)
+	data, ok := apiErr.Data.(map[string]any)
+	c.Assert(ok, qt.IsTrue, qt.Commentf("error data: %#v", apiErr.Data))
+	retryAfter, ok := data["retryAfter"].(int64)
+	c.Assert(ok, qt.IsTrue, qt.Commentf("error data: %#v", apiErr.Data))
+	c.Assert(retryAfter >= int64(least.Seconds()), qt.IsTrue, qt.Commentf("retryAfter %d", retryAfter))
 }

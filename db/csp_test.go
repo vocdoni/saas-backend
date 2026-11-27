@@ -379,13 +379,17 @@ func TestIncrementCSPAuthAttempts(t *testing.T) {
 	c.Run("conditional increment caps at max", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		c.Assert(testDB.SetCSPAuth(testAuthToken, testUserID, testCSPBundleID, "secret"), qt.IsNil)
-		// the first maxAttempts increments are recorded
-		for range maxAttempts {
+		// the first maxAttempts increments are recorded, and the code keeps its secret until the last
+		for i := range maxAttempts {
 			recorded, err := testDB.IncrementCSPAuthAttempts(testAuthToken, maxAttempts)
 			c.Assert(err, qt.IsNil)
 			c.Assert(recorded, qt.IsTrue)
+			token, err := testDB.CSPAuth(testAuthToken)
+			c.Assert(err, qt.IsNil)
+			c.Assert(token.Secret == "", qt.Equals, i == maxAttempts-1)
 		}
-		// once the cap is reached, further increments are not recorded
+		// once the cap is reached, further increments are not recorded, and the locked code is not
+		// reported as solved
 		recorded, err := testDB.IncrementCSPAuthAttempts(testAuthToken, maxAttempts)
 		c.Assert(err, qt.IsNil)
 		c.Assert(recorded, qt.IsFalse)
@@ -393,6 +397,13 @@ func TestIncrementCSPAuthAttempts(t *testing.T) {
 		token, err := testDB.CSPAuth(testAuthToken)
 		c.Assert(err, qt.IsNil)
 		c.Assert(token.Attempts, qt.Equals, maxAttempts)
+	})
+	c.Run("solved code reports consumed", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		c.Assert(testDB.SetCSPAuth(testAuthToken, testUserID, testCSPBundleID, "secret"), qt.IsNil)
+		c.Assert(testDB.VerifyCSPAuth(testAuthToken), qt.IsNil)
+		_, err := testDB.IncrementCSPAuthAttempts(testAuthToken, maxAttempts)
+		c.Assert(err, qt.ErrorIs, ErrChallengeConsumed)
 	})
 }
 

@@ -31,11 +31,23 @@ func parseSignRequest(w http.ResponseWriter, r *http.Request) (*SignRequest, boo
 	return &req, true
 }
 
-// getAuthInfo retrieves the authentication information from the token
+// getAuthInfo retrieves the authentication information from the token: an unknown token answers
+// 401 (40001), a storage failure a 5xx.
 func (c *CSPHandlers) getAuthInfo(w http.ResponseWriter, authToken internal.HexBytes) (*db.CSPAuth, bool) {
+	return c.lookupAuth(w, authToken, errors.ErrUnauthorized)
+}
+
+// lookupAuth retrieves the authentication information from the token, writing notFound for an
+// unknown token and a 5xx for a storage failure.
+func (c *CSPHandlers) lookupAuth(w http.ResponseWriter, authToken internal.HexBytes, notFound errors.Error,
+) (*db.CSPAuth, bool) {
 	auth, err := c.csp.Storage.CSPAuth(authToken)
+	if errors.Is(err, db.ErrTokenNotFound) {
+		notFound.Write(w)
+		return nil, false
+	}
 	if err != nil {
-		errors.ErrUnauthorized.WithErr(err).Write(w)
+		errors.ErrInternalStorageError.WithErr(err).Write(w)
 		return nil, false
 	}
 	return auth, true

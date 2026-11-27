@@ -43,6 +43,12 @@ var (
 	ErrProviderAlreadyLinkedToAnotherAccount = Error{Code: 40044, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("OAuth provider already linked to another account"), LogLevel: "info"}
 	ErrUserAlreadyHasPassword                = Error{Code: 40045, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("user already has a password"), LogLevel: "info"}
 
+	// The CSP challenge code errors (40104-40106): only a mismatch may be retried with the same
+	// token; the others need a new code from auth step 0.
+	ErrChallengeCodeMismatch = Error{Code: 40104, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("challenge code does not match"), LogLevel: "info"}
+	ErrChallengeLocked       = Error{Code: 40105, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("too many failed attempts on this challenge code, request a new one"), LogLevel: "info"}
+	ErrChallengeExpired      = Error{Code: 40106, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("challenge code or auth token expired, request a new one"), LogLevel: "info"}
+
 	// Validation errors (400)
 	ErrEmailMalformed          = Error{Code: 40002, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid email format")}
 	ErrPasswordTooShort        = Error{Code: 40003, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("password must be at least 8 characters")}

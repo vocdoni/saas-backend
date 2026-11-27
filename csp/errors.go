@@ -35,6 +35,9 @@ var (
 	// ErrChallengeCodeFailure is returned when the challenge code does not
 	// match.
 	ErrChallengeCodeFailure = fmt.Errorf("challenge code do not match")
+	// ErrChallengeConsumed is returned when the challenge code was already solved through another
+	// token, or by a concurrent verification.
+	ErrChallengeConsumed = fmt.Errorf("challenge code was already used")
 	// ErrStorageFailure is returned when the storage service fails.
 	ErrStorageFailure = fmt.Errorf("storage service failure")
 	// ErrNotificationFailure is returned when the notification service fails.

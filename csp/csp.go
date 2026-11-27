@@ -22,8 +22,9 @@ import (
 // across every authentication token answering it, before it is locked. Attempts, like resends
 // (which repeated auth requests also spend), are per code rather than per token, since per-token
 // budgets would give 5 fresh guesses with every auth request. So whoever holds a voter's login
-// data can lock the voter's pending code or spend its resends, which no per-voter limit prevents
-// (they could already spend the daily send cap); #893 mitigates it.
+// data can lock the voter's pending code or spend its resends, which no per-voter limit prevents.
+// Failed attempts also accumulate per member and process across codes and lengthen the send
+// backoff (see Config.MaxSendBackoff), so a new code hands out no fresh free guesses.
 const MaxChallengeAttempts = 5
 
 // MaxChallengeResends is the number of times one challenge code can be sent again after its first
@@ -34,14 +35,22 @@ const MaxChallengeResends = 3
 
 // MaxChallengeTokens is the number of authentication tokens one challenge code can be issued, its
 // first included. Past it, a request gets a new code instead, subject to the notification cooldown
-// and the daily send cap, so the tokens sharing a code stay bounded.
+// and the send backoff, so the tokens sharing a code stay bounded.
 const MaxChallengeTokens = 10
 
-// DefaultMaxDailyChallengeSends is the default cap on the OTP challenges (new tokens and resends
-// together) one member can be sent for one voting process per UTC day. The cooldown only spaces
-// sends out; this bounds their total, so a voter's contact cannot be flooded all day at the
-// platform's expense. Stored in Mongo, so it survives restarts.
-const DefaultMaxDailyChallengeSends = 10
+// DefaultMaxDailyChallengeSends is the default ceiling on the OTP challenges (new tokens and
+// resends together) one member can be sent for one voting process per rolling 24 h. The send
+// backoff only spaces sends out; this bounds their total, so a voter's contact cannot be flooded at
+// the platform's expense. Reaching it takes hours of sends under the backoff. Stored in Mongo, so it
+// survives restarts.
+const DefaultMaxDailyChallengeSends = 15
+
+// DefaultMaxSendBackoff is the default cap on the voter-level wait between challenge sends. A
+// member's first three sends since the last reset wait only for the per-destination cooldown; each
+// further send, and each MaxChallengeAttempts failed attempts, doubles the wait from twice the
+// cooldown up to this cap. So whoever knows a voter's login data can leave the voter at most this
+// long without a code, rather than until the ceiling frees a send.
+const DefaultMaxSendBackoff = time.Hour
 
 // DefaultMaxHourlyAuthFailures is the default cap on failed step-0 authentications for one
 // submission (the submitted login and contact fields) on one voting process per UTC hour. Once
@@ -74,9 +83,16 @@ type Config struct {
 	// notification stuff
 	NotificationCoolDownTime time.Duration
 	// MaxDailyChallengeSends caps the challenges (new tokens + resends) one member can be sent for
-	// one voting process per UTC day. Zero uses DefaultMaxDailyChallengeSends; a negative value
+	// one voting process per rolling 24 h. Zero uses DefaultMaxDailyChallengeSends; a negative value
 	// disables the cap.
 	MaxDailyChallengeSends int
+	// MaxSendBackoff caps the voter-level wait between one member's challenge sends on one voting
+	// process (see DefaultMaxSendBackoff). Zero uses DefaultMaxSendBackoff; a negative value
+	// disables the voter-level wait, leaving the per-destination cooldown.
+	MaxSendBackoff time.Duration
+	// SendQuietPeriod is how long a member must go without sends on a voting process for the next
+	// send to reset the backoff. Zero or negative uses the effective MaxSendBackoff.
+	SendQuietPeriod time.Duration
 	// MaxHourlyAuthFailures caps the failed step-0 authentications of one submission (login plus
 	// contact fields) on one voting process per UTC hour; one claimed voter gets
 	// VoterAuthFailuresFactor times it. Zero uses DefaultMaxHourlyAuthFailures; a negative value
@@ -130,7 +146,9 @@ type CSP struct {
 
 	notificationCoolDownTime time.Duration
 	notificationTTL          time.Duration
-	maxDailyChallengeSends   int
+	sendCeiling              int
+	maxSendBackoff           time.Duration
+	sendQuietPeriod          time.Duration
 	maxHourlyAuthFailures    int
 	notifySync               bool
 	blindCSPDisabled         atomic.Bool
@@ -247,9 +265,17 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 	if notificationTTL <= 0 {
 		notificationTTL = saasNotifications.DefaultOTPExpiry
 	}
-	maxDailyChallengeSends := config.MaxDailyChallengeSends
-	if maxDailyChallengeSends == 0 {
-		maxDailyChallengeSends = DefaultMaxDailyChallengeSends
+	sendCeiling := config.MaxDailyChallengeSends
+	if sendCeiling == 0 {
+		sendCeiling = DefaultMaxDailyChallengeSends
+	}
+	maxSendBackoff := config.MaxSendBackoff
+	if maxSendBackoff == 0 {
+		maxSendBackoff = DefaultMaxSendBackoff
+	}
+	sendQuietPeriod := config.SendQuietPeriod
+	if sendQuietPeriod <= 0 {
+		sendQuietPeriod = max(maxSendBackoff, 0)
 	}
 	maxHourlyAuthFailures := config.MaxHourlyAuthFailures
 	if maxHourlyAuthFailures == 0 {
@@ -262,7 +288,9 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 		ctx:                      ctx,
 		notificationCoolDownTime: notificationCoolDownTime,
 		notificationTTL:          notificationTTL,
-		maxDailyChallengeSends:   maxDailyChallengeSends,
+		sendCeiling:              sendCeiling,
+		maxSendBackoff:           maxSendBackoff,
+		sendQuietPeriod:          sendQuietPeriod,
 		maxHourlyAuthFailures:    maxHourlyAuthFailures,
 		notifySync:               config.SyncDelivery,
 		voterRefKey:              voterRefKey(config.VoterRefSecret),

@@ -53,10 +53,11 @@ type AuthResponse struct {
 	// "vocdoni-voter-ref:" + process id + ":" + member id. Step 0 only.
 	VoterRef string `json:"voterRef,omitempty"`
 	// CoolDownTime is the milliseconds until the code can be re-sent to the contact this request
-	// named, on a step 0 or resend that left a code pending; absent when no resend is possible
-	// (no code, its resends or the daily send cap spent), zero when it can be re-sent now. Other
-	// contacts of the voter may be due sooner. Clients count down from it rather than from a fixed
-	// value: the server sets the wait.
+	// named, on a step 0 or resend that left a code pending: the longer of the contact's cooldown
+	// and the voter's growing wait between sends. Absent when no resend is possible (no code, its
+	// resends spent, or the cap of sends per rolling 24 h reached), zero when it can be re-sent now.
+	// Other contacts of the voter may be due sooner. Clients count down from it rather than from a
+	// fixed value: the server sets the wait.
 	CoolDownTime *int64 `json:"coolDownTime,omitempty" example:"60000"`
 }
 

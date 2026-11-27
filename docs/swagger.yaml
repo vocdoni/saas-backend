@@ -2404,10 +2404,11 @@ definitions:
       coolDownTime:
         description: |-
           CoolDownTime is the milliseconds until the code can be re-sent to the contact this request
-          named, on a step 0 or resend that left a code pending; absent when no resend is possible
-          (no code, its resends or the daily send cap spent), zero when it can be re-sent now. Other
-          contacts of the voter may be due sooner. Clients count down from it rather than from a fixed
-          value: the server sets the wait.
+          named, on a step 0 or resend that left a code pending: the longer of the contact's cooldown
+          and the voter's growing wait between sends. Absent when no resend is possible (no code, its
+          resends spent, or the cap of sends per rolling 24 h reached), zero when it can be re-sent now.
+          Other contacts of the voter may be due sooner. Clients count down from it rather than from a
+          fixed value: the server sets the wait.
         example: 60000
         type: integer
       signature:
@@ -5596,15 +5597,27 @@ paths:
         milliseconds left.
         - Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
         If valid the token is marked verified and returned. Auth-only censuses may not require
-        a challenge solution.
+        a challenge solution. A wrong code answers 40104 and may be retried with the same token
+        until the code's 5 attempts are spent; then the code answers 40105 (locked). A code past
+        its lifetime, or one already solved through this or another token, answers 40106
+        (expired), and so does a token that is unknown or gone with its expired code; after
+        40105 or 40106 restart at step 0. All three are 401.
         Step 0 returns the same error (40802) whether the login data matches no census participant
         or the contact data does not match an existing one. Failed attempts are capped per UTC hour
         on the process for each submitted set of login and contact fields, and, ten times higher,
         for each set of login fields across all contacts tried. Once either is exhausted, step 0
         answers 40017 until the hour ends (the voter cap even with the right contact data);
         data.retryAfter gives the seconds left.
-        A member's challenge sends (new tokens + resends) are capped per UTC day, also answering
-        40017 with data.retryAfter.
+        A member's challenge sends (new tokens + resends) on a process are also spaced by a
+        growing wait: none after the first 3 sends, then twice the cooldown, doubling with each
+        further send and with every 5 failed code attempts (counted across codes), up to a
+        maximum (1 h by default). It resets after a quiet period without sends (the maximum by
+        default) and on a successful step 1. While it runs, a send answers 40103 with
+        data.coolDownTime the milliseconds left (the longer of this wait and the contact's
+        cooldown), so clients must read it rather than assume the cooldown. The sends are also
+        capped per rolling 24 h (15 by default): past it, 40017 with data.retryAfter the seconds
+        until the oldest send leaves the window. A repeated step 0 for a contact that already
+        got the pending code still returns a token when either refuses the re-send.
         Step 0 for an anonymous census is refused (400, 40037, "anonymous voting is temporarily
         unavailable") while the service has anonymous voting off.
         For a census with certAuth, step 0 takes certCode and codeVerifier (plus the email or phone when
@@ -5642,8 +5655,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Invalid authentication data, cooldown not reached, or invalid
-            challenge
+          description: Invalid auth data, cooldown (40103), or challenge code failure
+            (40104-40106)
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
@@ -5651,7 +5664,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
-          description: Internal server error
+          description: Internal error, e.g. storage (50006) or challenge delivery
+            (50002) failure
           schema:
             $ref: '#/definitions/errors.Error'
         "503":
@@ -5676,7 +5690,14 @@ paths:
         it and including the re-sends of a repeated step 0. A contact that does not match the
         member spends one of them too, and starts that contact's cooldown. A send the service
         gives up on before handing it to the email or SMS provider gives back its resend, its
-        cooldown and its daily send; one the provider fails keeps them spent.
+        cooldown and its place in the member's send backoff; one the provider fails keeps them
+        spent. The member's growing wait between sends and the cap per rolling 24 h of step 0
+        apply here too: 40103 with data.coolDownTime while the wait runs, 40017 with
+        data.retryAfter past the cap.
+        A code that can no longer be sent (expired, locked or solved through another token), or a
+        token that is unknown or gone with its expired code, answers 40106: restart at step 0. A
+        verified token answers 40015, whose data.coolDownTime holds the
+        milliseconds the code still lives.
         For an anonymous census it is refused (400, 40037, "anonymous voting is temporarily unavailable") while the
         service has anonymous voting off.
       parameters:
@@ -5704,8 +5725,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Invalid/expired/locked token, cooldown not reached, foreign
-            token, or contact mismatch
+          description: Invalid or foreign token, unsendable code (40106), cooldown
+            (40103), contact mismatch
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
@@ -5713,7 +5734,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
-          description: Internal server error
+          description: Internal error, e.g. storage (50006) or challenge delivery
+            (50002) failure
           schema:
             $ref: '#/definitions/errors.Error'
         "503":
