@@ -8,6 +8,11 @@ if ! (swag --version | grep -q "^swag version ${SWAG_VERSION}$") ; then
     echo "swag installed successfully."
 fi
 
+# Generate error codes catalog used as the swagger API description
+echo "Generating error codes catalog..."
+go run ./scripts/gen-error-codes
+[ $? -ne 0 ] && echo "Error: error codes catalog generation failed." && exit 1
+
 # Create docs package directory if it doesn't exist
 mkdir -p docs
 rm -f docs/swagger.yaml
@@ -16,7 +21,7 @@ rm -f docs/swagger.yaml
 echo "Running swag..."
 swag fmt -d ./
 go mod download
-swag init -g api/api.go -o docs --outputTypes yaml --parseDependency --parseInternal --parseDepth=4
+swag init -g api/api.go -o docs --outputTypes yaml --parseDependency --parseInternal --parseDepth=4 --markdownFiles docs
 
 # Check if the swagger.yaml file was generated
 if [ -f docs/swagger.yaml ]; then

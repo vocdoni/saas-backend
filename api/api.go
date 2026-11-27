@@ -1,8 +1,8 @@
 // Package api provides the HTTP API for the Vocdoni SaaS Backend
 //
-//	@title						Vocdoni SaaS API
-//	@version					1.0
-//	@description				API for Vocdoni SaaS Backend
+//	@title		Vocdoni SaaS API
+//	@version	1.0
+//	@description.markdown
 //	@termsOfService				http://swagger.io/terms/
 //
 //	@contact.name				API Support
