@@ -53,7 +53,26 @@ func (c *CSPHandlers) handleAuthStep(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	apicommon.HTTPWriteJSON(w, &AuthResponse{AuthToken: res.token, VoterRef: res.voterRef})
+	resp := &AuthResponse{AuthToken: res.token, VoterRef: res.voterRef}
+	if step == 0 {
+		resp.CoolDownTime = c.resendCoolDown(res.token, res.dest)
+	}
+	apicommon.HTTPWriteJSON(w, resp)
+}
+
+// resendCoolDown is AuthResponse.CoolDownTime for the token: the milliseconds until its code can be
+// re-sent to the destination dest (csp.DestinationKey), or nil when there is no destination or no
+// resend is possible.
+func (c *CSPHandlers) resendCoolDown(token internal.HexBytes, dest string) *int64 {
+	if dest == "" {
+		return nil
+	}
+	remaining, ok := c.csp.ResendCoolDown(token, dest)
+	if !ok {
+		return nil
+	}
+	ms := remaining.Milliseconds()
+	return &ms
 }
 
 // validateContactInfo checks if at least one contact method is provided
@@ -309,8 +328,7 @@ func (c *CSPHandlers) authFirstStep(
 	if req.CertCode != "" {
 		return firstStepResult{}, errors.ErrInvalidUserData.Withf("this census does not use certificate authentication")
 	}
-	token, err := c.typedAuthFirstStep(in)
-	return firstStepResult{token: token}, err
+	return c.typedAuthFirstStep(in)
 }
 
 // firstStepRequest is a step-0 request with the census, organization and anchor (process) it
@@ -323,14 +341,16 @@ type firstStepRequest struct {
 	anchorID internal.HexBytes
 }
 
-// firstStepResult is what step 0 answers: the token, and the voterRef of a certificate census.
+// firstStepResult is what step 0 answers: the token, the voterRef of a certificate census, and the
+// destination key the code was sent to (empty for an auth-only census), for the cooldown hint.
 type firstStepResult struct {
 	token    internal.HexBytes
 	voterRef string
+	dest     string
 }
 
 // typedAuthFirstStep is step 0 of a census whose voters type their login fields (see authFirstStep).
-func (c *CSPHandlers) typedAuthFirstStep(in firstStepRequest) (token internal.HexBytes, err error) {
+func (c *CSPHandlers) typedAuthFirstStep(in firstStepRequest) (res firstStepResult, err error) {
 	r, census, org, anchorID := in.r, in.census, in.org, in.anchorID
 	req := *in.req
 
@@ -338,7 +358,7 @@ func (c *CSPHandlers) typedAuthFirstStep(in firstStepRequest) (token internal.He
 
 	// Validate request with census information
 	if err := validateAuthRequest(&req, census); err != nil {
-		return nil, err
+		return firstStepResult{}, err
 	}
 
 	// the phone only takes part in the login hash and the contact check when it is a 2FA field (a
@@ -350,7 +370,7 @@ func (c *CSPHandlers) typedAuthFirstStep(in firstStepRequest) (token internal.He
 	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone) {
 		// hashed before the failed-attempt budget is claimed, so a busy answer spends none of it
 		if phone, err = parseVoterPhone(r.Context(), req.Phone, org); err != nil {
-			return nil, phoneParseFailed(err)
+			return firstStepResult{}, phoneParseFailed(err)
 		}
 		if phone != nil {
 			hashedPhone = phone.hashed
@@ -364,7 +384,7 @@ func (c *CSPHandlers) typedAuthFirstStep(in firstStepRequest) (token internal.He
 	if usesPassword {
 		password = req.Password
 		if password != "" && !internal.ValidMemberPasswordHash(password) {
-			return nil, errors.ErrInvalidUserData.Withf("invalid password format")
+			return firstStepResult{}, errors.ErrInvalidUserData.Withf("invalid password format")
 		}
 	}
 
@@ -391,7 +411,7 @@ func (c *CSPHandlers) typedAuthFirstStep(in firstStepRequest) (token internal.He
 		return f == db.OrgMemberAuthFieldsPassword
 	})
 	if inputMember.MissingLoginData(lookupFields, census.TwoFaFields) || (usesPassword && password == "") {
-		return nil, errors.ErrInvalidUserData.Withf("missing required auth data")
+		return firstStepResult{}, errors.ErrInvalidUserData.Withf("missing required auth data")
 	}
 
 	// reserve one unit of the hourly failed-attempt budgets before checking the submission, so
@@ -402,7 +422,7 @@ func (c *CSPHandlers) typedAuthFirstStep(in firstStepRequest) (token internal.He
 	submissionKey, voterKey := authAttemptKeys(census, inputMember)
 	claim, err := c.csp.ClaimAuthAttempt(anchorID, submissionKey, voterKey)
 	if err != nil {
-		return nil, err
+		return firstStepResult{}, err
 	}
 	defer func() {
 		if !errors.Is(err, errors.ErrCSPAuthFailed) {
@@ -414,9 +434,9 @@ func (c *CSPHandlers) typedAuthFirstStep(in firstStepRequest) (token internal.He
 	censusParticipant, err := c.mainDB.CensusParticipantByLoginHash(*census, *inputMember)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			return nil, c.unknownParticipant(r.Context(), password, errors.ErrCSPAuthFailed)
+			return firstStepResult{}, c.unknownParticipant(r.Context(), password, errors.ErrCSPAuthFailed)
 		}
-		return nil, errors.ErrGenericInternalServerError.WithErr(err)
+		return firstStepResult{}, errors.ErrGenericInternalServerError.WithErr(err)
 	}
 
 	// Fetch the corresponding org member using the participant ID (which is the ObjectID hex string)
@@ -425,9 +445,9 @@ func (c *CSPHandlers) typedAuthFirstStep(in firstStepRequest) (token internal.He
 		if errors.Is(err, db.ErrNotFound) {
 			// logged rather than put in the body, which must match the unknown-participant answer exactly
 			log.Warnw("census participant without org member", "participantID", censusParticipant.ParticipantID, "error", err)
-			return nil, c.unknownParticipant(r.Context(), password, errors.ErrCSPAuthFailed)
+			return firstStepResult{}, c.unknownParticipant(r.Context(), password, errors.ErrCSPAuthFailed)
 		}
-		return nil, errors.ErrGenericInternalServerError.WithErr(err)
+		return firstStepResult{}, errors.ErrGenericInternalServerError.WithErr(err)
 	}
 
 	// the password goes first: the weight and contact checks below answer differently, so running
@@ -436,10 +456,10 @@ func (c *CSPHandlers) typedAuthFirstStep(in firstStepRequest) (token internal.He
 	if usesPassword {
 		matches, err := c.memberPasswordMatches(r.Context(), password, orgMember)
 		if err != nil {
-			return nil, passwordCheckFailed(err)
+			return firstStepResult{}, passwordCheckFailed(err)
 		}
 		if !matches {
-			return nil, errors.ErrCSPAuthFailed
+			return firstStepResult{}, errors.ErrCSPAuthFailed
 		}
 	}
 	uID := internal.HexBytesFromString(orgMember.ID.Hex())
@@ -448,19 +468,19 @@ func (c *CSPHandlers) typedAuthFirstStep(in firstStepRequest) (token internal.He
 	// the reserved failed-attempt unit spent.
 	toDestinations, challengeType, err := determineContactMethod(census, &req, phone, orgMember)
 	if err != nil {
-		return nil, err
+		return firstStepResult{}, err
 	}
 
 	// only now that the contact matched: a distinct error before it would tell whoever merely
 	// knows a member's login fields that they name a (zero-weight) participant
 	if census.Weighted && orgMember.Weight == 0 {
-		return nil, errors.ErrZeroWeightVoter
+		return firstStepResult{}, errors.ErrZeroWeightVoter
 	}
 
 	name, logo := orgNameAndLogo(org)
 
 	// Generate the token
-	return c.csp.AuthToken(
+	token, err := c.csp.AuthToken(
 		anchorID,
 		uID,
 		toDestinations,
@@ -470,6 +490,51 @@ func (c *CSPHandlers) typedAuthFirstStep(in firstStepRequest) (token internal.He
 		logo,
 		org.Address,
 	)
+	if err != nil {
+		return firstStepResult{}, err
+	}
+	res = firstStepResult{token: token}
+	if toDestinations != "" {
+		res.dest = csp.DestinationKey(challengeType, toDestinations)
+	}
+	return res, nil
+}
+
+// submittedContact is the destination a resend request names, before it is checked against the
+// member: the destination determineContactMethod answers when the contact matches. A missing
+// contact answers like a wrong one; an auth-only census names none.
+func submittedContact(census *db.Census, req *AuthResendRequest, phone *voterPhone,
+) (string, notifications.ChallengeType, error) {
+	email := func() (string, notifications.ChallengeType, error) {
+		if req.Email == "" {
+			return "", "", errors.ErrCSPAuthFailed
+		}
+		return req.Email, notifications.EmailChallenge, nil
+	}
+	sms := func() (string, notifications.ChallengeType, error) {
+		if phone == nil {
+			return "", "", errors.ErrCSPAuthFailed
+		}
+		return phone.normalized, notifications.SMSChallenge, nil
+	}
+	switch census.Type {
+	case db.CensusTypeMail:
+		return email()
+	case db.CensusTypeSMS:
+		return sms()
+	case db.CensusTypeSMSorMail:
+		if req.Email != "" {
+			return email()
+		}
+		if req.Phone != "" {
+			return sms()
+		}
+		return "", "", errors.ErrInvalidUserData.Withf("no valid contact method provided")
+	case db.CensusTypeAuthOnly:
+		return "", "", nil
+	default:
+		return "", "", errors.ErrNotSupported.Withf("invalid census type")
+	}
 }
 
 // authSecondStep is the second step of the authentication process. It

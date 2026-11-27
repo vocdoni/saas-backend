@@ -19,6 +19,17 @@ import (
 	"github.com/xlzd/gotp"
 )
 
+// resendTo runs the resend handler's sequence for a contact that matches the member: claim the
+// resend for the destination, then send it.
+func resendTo(c *CSP, token internal.HexBytes, to string, ctype notifications.ChallengeType) error {
+	claim, err := c.ClaimChallengeResend(token, to, ctype)
+	if err != nil {
+		return err
+	}
+	return c.ResendChallenge(claim, apicommon.DefaultLang,
+		notifications.OrganizationInfo{Address: testAddress.Address(), Name: testOrgName, Logo: testOrgLogo})
+}
+
 func TestAuthToken(t *testing.T) {
 	c := qt.New(t)
 	testDB, err := db.New(testMongoURI, test.RandomDatabaseName())
@@ -64,12 +75,17 @@ func TestAuthToken(t *testing.T) {
 
 	c.Run("notification cooldown reached", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
-		// generate a valid token
-		_, err := csp.AuthToken(testAnchorID, testUserID, "",
+		// a dedicated inbox: delivery is asynchronous here, so the shared one would pollute other tests
+		const email = "cooldown-reached@test.com"
+		// generate a token whose code cannot be reused, locked by failed attempts
+		token, err := csp.AuthToken(testAnchorID, testUserID, email,
 			notifications.EmailChallenge, apicommon.DefaultLang, "", "", testAddress.Address())
-		c.Assert(err, qt.ErrorIs, ErrNotificationFailure)
+		c.Assert(err, qt.IsNil)
+		for range MaxChallengeAttempts {
+			c.Assert(csp.VerifyAuthToken(token, "000000x"), qt.ErrorIs, ErrChallengeCodeFailure)
+		}
 		// try to generate a new token before the cooldown time
-		_, err = csp.AuthToken(testAnchorID, testUserID, "",
+		_, err = csp.AuthToken(testAnchorID, testUserID, email,
 			notifications.EmailChallenge, apicommon.DefaultLang, "", "", testAddress.Address())
 		c.Assert(err, qt.ErrorIs, errors.ErrAttemptCoolDownTime)
 
@@ -376,67 +392,27 @@ func TestResendChallenge(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 
 	c.Run("empty token", func(c *qt.C) {
-		err := csp.ResendChallenge(
-			nil,
-			testUserEmail,
-			notifications.EmailChallenge,
-			apicommon.DefaultLang,
-			testOrgName,
-			testOrgLogo,
-			testAddress.Address(),
-		)
+		err := resendTo(csp, nil, testUserEmail, notifications.EmailChallenge)
 		c.Assert(err, qt.ErrorIs, ErrInvalidAuthToken)
 	})
 
 	c.Run("empty destination and type", func(c *qt.C) {
-		err := csp.ResendChallenge(
-			testToken,
-			"",
-			"",
-			apicommon.DefaultLang,
-			testOrgName,
-			testOrgLogo,
-			testAddress.Address(),
-		)
+		err := resendTo(csp, testToken, "", "")
 		c.Assert(err, qt.ErrorIs, errors.ErrInvalidData)
 	})
 
 	c.Run("empty destination", func(c *qt.C) {
-		err := csp.ResendChallenge(
-			testToken,
-			"",
-			notifications.EmailChallenge,
-			apicommon.DefaultLang,
-			testOrgName,
-			testOrgLogo,
-			testAddress.Address(),
-		)
+		err := resendTo(csp, testToken, "", notifications.EmailChallenge)
 		c.Assert(err, qt.ErrorIs, errors.ErrInvalidData)
 	})
 
 	c.Run("empty challenge type", func(c *qt.C) {
-		err := csp.ResendChallenge(
-			testToken,
-			testUserEmail,
-			"",
-			apicommon.DefaultLang,
-			testOrgName,
-			testOrgLogo,
-			testAddress.Address(),
-		)
+		err := resendTo(csp, testToken, testUserEmail, "")
 		c.Assert(err, qt.ErrorIs, errors.ErrInvalidData)
 	})
 
 	c.Run("token not found", func(c *qt.C) {
-		err := csp.ResendChallenge(
-			testToken,
-			testUserEmail,
-			notifications.EmailChallenge,
-			apicommon.DefaultLang,
-			testOrgName,
-			testOrgLogo,
-			testAddress.Address(),
-		)
+		err := resendTo(csp, testToken, testUserEmail, notifications.EmailChallenge)
 		c.Assert(err, qt.ErrorIs, ErrInvalidAuthToken)
 	})
 
@@ -445,15 +421,7 @@ func TestResendChallenge(t *testing.T) {
 		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testAnchorID, gotp.RandomSecret(16)), qt.IsNil)
 		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
 
-		err := csp.ResendChallenge(
-			testToken,
-			testUserEmail,
-			notifications.EmailChallenge,
-			apicommon.DefaultLang,
-			testOrgName,
-			testOrgLogo,
-			testAddress.Address(),
-		)
+		err := resendTo(csp, testToken, testUserEmail, notifications.EmailChallenge)
 		c.Assert(err, qt.ErrorIs, errors.ErrUserAlreadyVerified)
 	})
 
@@ -462,15 +430,7 @@ func TestResendChallenge(t *testing.T) {
 		// an unverified token with no stored secret (legacy/auth-only) must not
 		// have a code resent; it is reported expired so the client restarts.
 		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testAnchorID, ""), qt.IsNil)
-		err := csp.ResendChallenge(
-			testToken,
-			testUserEmail,
-			notifications.EmailChallenge,
-			apicommon.DefaultLang,
-			testOrgName,
-			testOrgLogo,
-			testAddress.Address(),
-		)
+		err := resendTo(csp, testToken, testUserEmail, notifications.EmailChallenge)
 		c.Assert(err, qt.ErrorIs, ErrTokenExpired)
 	})
 
@@ -480,16 +440,12 @@ func TestResendChallenge(t *testing.T) {
 		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testAnchorID, secret), qt.IsNil)
 
 		expectedCode := gotp.NewDefaultHOTP(secret).At(0)
+		// the token was just created, which counts as the first send
+		origCoolDown := csp.notificationCoolDownTime
+		csp.notificationCoolDownTime = 0
+		c.Cleanup(func() { csp.notificationCoolDownTime = origCoolDown })
 
-		err = csp.ResendChallenge(
-			testToken,
-			testUserEmail,
-			notifications.EmailChallenge,
-			apicommon.DefaultLang,
-			testOrgName,
-			testOrgLogo,
-			testAddress.Address(),
-		)
+		err = resendTo(csp, testToken, testUserEmail, notifications.EmailChallenge)
 		c.Assert(err, qt.IsNil)
 
 		time.Sleep(time.Second * 3)
@@ -499,23 +455,16 @@ func TestResendChallenge(t *testing.T) {
 
 	c.Run("resend limit", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		// no cooldown, so every resend sends and spends one of the code's resends
+		origCoolDown := csp.notificationCoolDownTime
+		csp.notificationCoolDownTime = 0
+		c.Cleanup(func() { csp.notificationCoolDownTime = origCoolDown })
 		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testAnchorID, gotp.RandomSecret(16)), qt.IsNil)
 		// as the resend handler does: claim one of the token's resends, then resend. A dedicated
 		// inbox: these challenges are delivered asynchronously, so sending them to the shared
 		// address would leave stale codes for the next test's OTP fetch
 		resend := func() error {
-			if err := csp.ClaimChallengeResend(testToken); err != nil {
-				return err
-			}
-			return csp.ResendChallenge(
-				testToken,
-				"resend-limit@test.com",
-				notifications.EmailChallenge,
-				apicommon.DefaultLang,
-				testOrgName,
-				testOrgLogo,
-				testAddress.Address(),
-			)
+			return resendTo(csp, testToken, "resend-limit@test.com", notifications.EmailChallenge)
 		}
 		for range MaxChallengeResends {
 			c.Assert(resend(), qt.IsNil)
@@ -536,7 +485,7 @@ func TestAuthTokenResendAndVerifyFlow(t *testing.T) {
 		DB:                       testDB,
 		MailService:              testMailService,
 		SMSService:               testSMSService,
-		NotificationCoolDownTime: time.Second * 5,
+		NotificationCoolDownTime: time.Millisecond,
 		NotificationTTL:          time.Second * 30,
 		RootKey:                  *testRootKey,
 	})
@@ -563,15 +512,7 @@ func TestAuthTokenResendAndVerifyFlow(t *testing.T) {
 	firstCode := fetchOTPCodeFromEmail(c, testUserEmail)
 	c.Assert(firstCode, qt.Equals, expectedFirstCode)
 
-	err = csp.ResendChallenge(
-		token,
-		testUserEmail,
-		notifications.EmailChallenge,
-		apicommon.DefaultLang,
-		testOrgName,
-		testOrgLogo,
-		testAddress.Address(),
-	)
+	err = resendTo(csp, token, testUserEmail, notifications.EmailChallenge)
 	c.Assert(err, qt.IsNil)
 	resendCode := fetchOTPCodeFromEmail(c, testUserEmail)
 	c.Assert(resendCode, qt.Equals, expectedFirstCode)
@@ -661,4 +602,418 @@ func fetchOTPCodeFromEmail(c *qt.C, email string) string {
 	mailCode := rgxNotification.FindStringSubmatch(mailBody)
 	c.Assert(mailCode, qt.HasLen, 2)
 	return mailCode[1]
+}
+
+func TestAuthTokenReusesPendingChallenge(t *testing.T) {
+	c := qt.New(t)
+
+	testDB, err := db.New(testMongoURI, test.RandomDatabaseName())
+	c.Assert(err, qt.IsNil)
+
+	csp, err := New(context.Background(), &Config{
+		DB:                       testDB,
+		MailService:              testMailService,
+		SMSService:               testSMSService,
+		NotificationCoolDownTime: time.Hour,
+		// a code is reused only while it lives at least one more cooldown
+		NotificationTTL: 2 * time.Hour,
+		RootKey:         *testRootKey,
+		SyncDelivery:    true,
+	})
+	c.Assert(err, qt.IsNil)
+
+	// requestCode runs the first auth step for the test user, delivering to email
+	requestCode := func(email string) (internal.HexBytes, error) {
+		return csp.AuthToken(testAnchorID, testUserID, email, notifications.EmailChallenge,
+			apicommon.DefaultLang, testOrgName, testOrgLogo, testAddress.Address())
+	}
+	// setCoolDown overrides the notification cooldown for one subtest
+	setCoolDown := func(c *qt.C, d time.Duration) {
+		orig := csp.notificationCoolDownTime
+		csp.notificationCoolDownTime = d
+		c.Cleanup(func() { csp.notificationCoolDownTime = orig })
+	}
+	// assertNoEmail checks nothing was delivered to email; delivery is synchronous
+	assertNoEmail := func(c *qt.C, email string) {
+		_, err := testMailService.FindEmail(context.Background(), email)
+		c.Assert(err, qt.ErrorIs, io.EOF)
+	}
+
+	c.Run("inside cooldown returns a new token for the same code without sending", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		const email = "reuse-cooldown@example.com"
+		first, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		code := fetchOTPCodeFromEmail(c, email)
+
+		second, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		c.Assert(second, qt.Not(qt.DeepEquals), first)
+		assertNoEmail(c, email)
+
+		secondData, err := csp.Storage.CSPAuth(second)
+		c.Assert(err, qt.IsNil)
+		firstData, err := csp.Storage.CSPAuth(first)
+		c.Assert(err, qt.IsNil)
+		c.Assert(secondData.ID, qt.DeepEquals, firstData.ID)
+		c.Assert(secondData.Tokens, qt.HasLen, 2)
+		c.Assert(csp.VerifyAuthToken(second, code), qt.IsNil)
+	})
+
+	c.Run("after cooldown re-sends the same code", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		const email = "reuse-resend@example.com"
+		first, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		code := fetchOTPCodeFromEmail(c, email)
+
+		setCoolDown(c, time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
+		second, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		c.Assert(fetchOTPCodeFromEmail(c, email), qt.Equals, code)
+
+		challenge, err := csp.Storage.CSPAuth(first)
+		c.Assert(err, qt.IsNil)
+		c.Assert(challenge.Resends, qt.Equals, 1)
+		c.Assert(csp.VerifyAuthToken(second, code), qt.IsNil)
+	})
+
+	c.Run("ResendCoolDown reports the wait until the pending code can be re-sent", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		const email = "reuse-hint@example.com"
+		first, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		code := fetchOTPCodeFromEmail(c, email)
+		second, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		dest := DestinationKey(notifications.EmailChallenge, email)
+
+		// every token of the code shares its wait, counted from the last send
+		for _, token := range []internal.HexBytes{first, second} {
+			remaining, ok := csp.ResendCoolDown(token, dest)
+			c.Assert(ok, qt.IsTrue)
+			c.Assert(remaining > 59*time.Minute, qt.IsTrue)
+			c.Assert(remaining <= time.Hour, qt.IsTrue)
+		}
+		// once the cooldown has passed it can be re-sent now
+		setCoolDown(c, time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
+		remaining, ok := csp.ResendCoolDown(first, dest)
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(remaining, qt.Equals, time.Duration(0))
+		// a destination never sent to is due at once
+		setCoolDown(c, time.Hour)
+		remaining, ok = csp.ResendCoolDown(first, DestinationKey(notifications.SMSChallenge, "+34600000000"))
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(remaining, qt.Equals, time.Duration(0))
+
+		// a resend the daily send cap would refuse is not advertised
+		origDaily := csp.maxDailyChallengeSends
+		csp.maxDailyChallengeSends = 1
+		_, ok = csp.ResendCoolDown(first, dest)
+		c.Assert(ok, qt.IsFalse)
+		csp.maxDailyChallengeSends = origDaily
+		// nor one the code's spent resends would
+		setCoolDown(c, time.Millisecond)
+		for range MaxChallengeResends {
+			time.Sleep(10 * time.Millisecond)
+			c.Assert(resendTo(csp, first, email, notifications.EmailChallenge), qt.IsNil)
+			c.Assert(fetchOTPCodeFromEmail(c, email), qt.Equals, code)
+		}
+		time.Sleep(10 * time.Millisecond)
+		for _, token := range []internal.HexBytes{first, second} {
+			_, ok := csp.ResendCoolDown(token, dest)
+			c.Assert(ok, qt.IsFalse)
+		}
+
+		// a solved code has nothing left to resend, through any of its tokens
+		c.Assert(csp.VerifyAuthToken(second, code), qt.IsNil)
+		for _, token := range []internal.HexBytes{first, second} {
+			_, ok := csp.ResendCoolDown(token, dest)
+			c.Assert(ok, qt.IsFalse)
+		}
+		_, ok = csp.ResendCoolDown(internal.HexBytes("unknown-token"), dest)
+		c.Assert(ok, qt.IsFalse)
+	})
+
+	c.Run("verifying one token kills the code for the others", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		const email = "reuse-sibling@example.com"
+		// whoever requested first never holds the token the voter verifies
+		other, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		code := fetchOTPCodeFromEmail(c, email)
+		voter, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+
+		c.Assert(csp.VerifyAuthToken(voter, code), qt.IsNil)
+		otherData, err := csp.Storage.CSPAuth(other)
+		c.Assert(err, qt.IsNil)
+		c.Assert(otherData.Verified, qt.IsFalse)
+		c.Assert(csp.VerifyAuthToken(other, code), qt.ErrorIs, ErrTokenExpired)
+	})
+
+	c.Run("attempts are shared by the tokens of a challenge", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		const email = "reuse-attempts@example.com"
+		first, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		code := fetchOTPCodeFromEmail(c, email)
+		second, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+
+		for i := range MaxChallengeAttempts {
+			token := first
+			if i%2 == 1 {
+				token = second
+			}
+			c.Assert(csp.VerifyAuthToken(token, "000000"), qt.ErrorIs, ErrChallengeCodeFailure)
+		}
+		c.Assert(csp.VerifyAuthToken(first, code), qt.ErrorIs, ErrTooManyAttempts)
+		c.Assert(csp.VerifyAuthToken(second, code), qt.ErrorIs, ErrTooManyAttempts)
+		// the locked code cannot be re-sent either
+		err = resendTo(csp, second, email, notifications.EmailChallenge)
+		c.Assert(err, qt.ErrorIs, ErrTokenExpired)
+	})
+
+	c.Run("a locked code is replaced, after the cooldown", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		const email = "reuse-locked@example.com"
+		first, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		code := fetchOTPCodeFromEmail(c, email)
+		for range MaxChallengeAttempts {
+			c.Assert(csp.VerifyAuthToken(first, "000000"), qt.ErrorIs, ErrChallengeCodeFailure)
+		}
+
+		_, err = requestCode(email)
+		c.Assert(err, qt.ErrorIs, errors.ErrAttemptCoolDownTime)
+
+		setCoolDown(c, time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
+		second, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		newCode := fetchOTPCodeFromEmail(c, email)
+		c.Assert(newCode, qt.Not(qt.Equals), code)
+		secondData, err := csp.Storage.CSPAuth(second)
+		c.Assert(err, qt.IsNil)
+		c.Assert(secondData.Tokens, qt.HasLen, 1)
+		c.Assert(csp.VerifyAuthToken(second, newCode), qt.IsNil)
+	})
+
+	c.Run("a verified code is replaced", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		const email = "reuse-verified@example.com"
+		setCoolDown(c, time.Millisecond)
+		first, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		code := fetchOTPCodeFromEmail(c, email)
+		c.Assert(csp.VerifyAuthToken(first, code), qt.IsNil)
+
+		time.Sleep(10 * time.Millisecond)
+		second, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		secondData, err := csp.Storage.CSPAuth(second)
+		c.Assert(err, qt.IsNil)
+		c.Assert(secondData.Tokens, qt.HasLen, 1)
+		c.Assert(fetchOTPCodeFromEmail(c, email), qt.Not(qt.Equals), code)
+	})
+
+	c.Run("an expired code is replaced, after the cooldown", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		const email = "reuse-expired@example.com"
+		origTTL := csp.notificationTTL
+		csp.notificationTTL = 20 * time.Millisecond
+		c.Cleanup(func() { csp.notificationTTL = origTTL })
+		_, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		_ = fetchOTPCodeFromEmail(c, email)
+		time.Sleep(50 * time.Millisecond)
+
+		_, err = requestCode(email)
+		c.Assert(err, qt.ErrorIs, errors.ErrAttemptCoolDownTime)
+
+		setCoolDown(c, time.Millisecond)
+		second, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		secondData, err := csp.Storage.CSPAuth(second)
+		c.Assert(err, qt.IsNil)
+		c.Assert(secondData.Tokens, qt.HasLen, 1)
+	})
+
+	c.Run("resend inside cooldown reports the time left", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		const email = "reuse-resend-cooldown@example.com"
+		first, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		_ = fetchOTPCodeFromEmail(c, email)
+		second, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+
+		for _, token := range []internal.HexBytes{first, second} {
+			err = resendTo(csp, token, email, notifications.EmailChallenge)
+			c.Assert(err, qt.ErrorIs, errors.ErrAttemptCoolDownTime)
+			var apiErr errors.Error
+			c.Assert(errors.As(err, &apiErr), qt.IsTrue)
+			data, ok := apiErr.Data.(map[string]any)
+			c.Assert(ok, qt.IsTrue)
+			coolDown, ok := data["coolDownTime"].(int64)
+			c.Assert(ok, qt.IsTrue)
+			c.Assert(coolDown > 0 && coolDown <= time.Hour.Milliseconds(), qt.IsTrue)
+		}
+		assertNoEmail(c, email)
+	})
+	// assertResends checks how many resends the challenge held by token has spent
+	assertResends := func(c *qt.C, token internal.HexBytes, want int) {
+		challenge, err := csp.Storage.CSPAuth(token)
+		c.Assert(err, qt.IsNil)
+		c.Assert(challenge.Resends, qt.Equals, want)
+	}
+	// resend runs the resend handler's sequence: claim one of the code's resends, then resend
+	resend := func(token internal.HexBytes, email string) error {
+		return resendTo(csp, token, email, notifications.EmailChallenge)
+	}
+
+	c.Run("parallel guesses through tokens sharing a code are capped", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		const email = "reuse-parallel@example.com"
+		first, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		code := fetchOTPCodeFromEmail(c, email)
+		second, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+
+		const guesses = 4 * MaxChallengeAttempts
+		var wg sync.WaitGroup
+		for i := range guesses {
+			token := first
+			if i%2 == 1 {
+				token = second
+			}
+			wg.Go(func() { _ = csp.VerifyAuthToken(token, "000000") })
+		}
+		wg.Wait()
+		// every attempt is claimed on the shared challenge before it is checked
+		challenge, err := csp.Storage.CSPAuth(first)
+		c.Assert(err, qt.IsNil)
+		c.Assert(challenge.Attempts, qt.Equals, MaxChallengeAttempts)
+		c.Assert(csp.VerifyAuthToken(second, code), qt.ErrorIs, ErrTooManyAttempts)
+	})
+
+	c.Run("resends are counted per code across its tokens", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		const email = "reuse-resend-shared@example.com"
+		first, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		_ = fetchOTPCodeFromEmail(c, email)
+		second, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+
+		setCoolDown(c, time.Millisecond)
+		for i := range MaxChallengeResends {
+			token := first
+			if i%2 == 1 {
+				token = second
+			}
+			time.Sleep(10 * time.Millisecond)
+			c.Assert(resend(token, email), qt.IsNil)
+			_ = fetchOTPCodeFromEmail(c, email)
+		}
+		assertResends(c, first, MaxChallengeResends)
+		// a fresh token for the same code does not bring new resends
+		time.Sleep(10 * time.Millisecond)
+		third, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		// a repeated auth request re-sends through the same resends, now spent
+		assertNoEmail(c, email)
+		time.Sleep(10 * time.Millisecond)
+		c.Assert(resend(third, email), qt.ErrorIs, errors.ErrVerificationMaxAttempts)
+		c.Assert(resend(first, email), qt.ErrorIs, errors.ErrVerificationMaxAttempts)
+	})
+
+	c.Run("resend inside cooldown spends no resend and no daily send", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		const email = "reuse-resend-free@example.com"
+		origDaily := csp.maxDailyChallengeSends
+		csp.maxDailyChallengeSends = 2
+		c.Cleanup(func() { csp.maxDailyChallengeSends = origDaily })
+
+		token, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		code := fetchOTPCodeFromEmail(c, email)
+		for range 2 * MaxChallengeResends {
+			c.Assert(resend(token, email), qt.ErrorIs, errors.ErrAttemptCoolDownTime)
+		}
+		assertResends(c, token, 0)
+		assertNoEmail(c, email)
+
+		// once the cooldown passes, the second send of the day still goes out
+		setCoolDown(c, time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
+		c.Assert(resend(token, email), qt.IsNil)
+		c.Assert(fetchOTPCodeFromEmail(c, email), qt.Equals, code)
+		assertResends(c, token, 1)
+	})
+
+	c.Run("a spent daily send budget still returns a token for the pending code", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		capped, err := New(context.Background(), &Config{
+			DB:                       testDB,
+			MailService:              testMailService,
+			SMSService:               testSMSService,
+			NotificationCoolDownTime: time.Millisecond,
+			NotificationTTL:          time.Hour,
+			MaxDailyChallengeSends:   1,
+			RootKey:                  *testRootKey,
+			SyncDelivery:             true,
+		})
+		c.Assert(err, qt.IsNil)
+		const email = "reuse-daily-cap@example.com"
+		request := func() (internal.HexBytes, error) {
+			return capped.AuthToken(testAnchorID, testUserID, email, notifications.EmailChallenge,
+				apicommon.DefaultLang, testOrgName, testOrgLogo, testAddress.Address())
+		}
+		first, err := request()
+		c.Assert(err, qt.IsNil)
+		code := fetchOTPCodeFromEmail(c, email)
+		time.Sleep(10 * time.Millisecond)
+		// the cooldown passed but the budget is spent: the voter keeps the code they hold
+		dest := DestinationKey(notifications.EmailChallenge, email)
+		c.Assert(capped.ChallengeSendRefusal(testUserID, testAnchorID, dest), qt.IsNil)
+		second, err := request()
+		c.Assert(err, qt.IsNil)
+		c.Assert(second, qt.Not(qt.DeepEquals), first)
+		assertNoEmail(c, email)
+		c.Assert(capped.VerifyAuthToken(second, code), qt.IsNil)
+	})
+
+	c.Run("a code takes a bounded number of extra tokens", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		const email = "reuse-token-cap@example.com"
+		first, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		code := fetchOTPCodeFromEmail(c, email)
+		for range MaxChallengeTokens - 1 {
+			_, err := requestCode(email)
+			c.Assert(err, qt.IsNil)
+		}
+		// past the cap a new code is needed, which the cooldown still spaces; the peek must say so
+		// too, or a caller would spend a certificate code on a request AuthToken then refuses
+		dest := DestinationKey(notifications.EmailChallenge, email)
+		c.Assert(csp.ChallengeSendRefusal(testUserID, testAnchorID, dest), qt.ErrorIs, errors.ErrAttemptCoolDownTime)
+		_, err = requestCode(email)
+		c.Assert(err, qt.ErrorIs, errors.ErrAttemptCoolDownTime)
+
+		setCoolDown(c, time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
+		token, err := requestCode(email)
+		c.Assert(err, qt.IsNil)
+		tokenData, err := csp.Storage.CSPAuth(token)
+		c.Assert(err, qt.IsNil)
+		c.Assert(tokenData.Tokens, qt.HasLen, 1)
+		c.Assert(fetchOTPCodeFromEmail(c, email), qt.Not(qt.Equals), code)
+		// the old code still verifies through its own tokens
+		c.Assert(csp.VerifyAuthToken(first, code), qt.IsNil)
+	})
 }
