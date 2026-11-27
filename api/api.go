@@ -2,7 +2,12 @@
 //
 //	@title						Vocdoni SaaS API
 //	@version					1.0
-//	@description				API for Vocdoni SaaS Backend
+//	@description				API for Vocdoni SaaS Backend.
+//	@description				Scheduled maintenance: while a window announced in the X-Maintenance-Window header and in
+//	@description				GET /info is active, every POST, PUT and DELETE answers 503 with error code 50304 and a
+//	@description				Retry-After header pointing past the end of the window. Login, token refresh, read-only POSTs
+//	@description				(process check, weight and sign-info, census validation, votes/verify) and the support ticket
+//	@description				stay available; POST /oauth/login answers 50304 only when it would sign up a new user.
 //	@termsOfService				http://swagger.io/terms/
 //
 //	@contact.name				API Support
@@ -115,6 +120,9 @@ type Config struct {
 	// Requests without it are refused, so the origin can't be reached around the proxy and its
 	// rate limits (e.g. through the hosting provider's default domain).
 	OriginSecret string
+	// Maintenance, when set, is the scheduled downtime announced on every response and enforced
+	// on writes, see maintenance.
+	Maintenance *MaintenanceWindow
 	// OTPExpiry overrides the validity window for all one-time codes (account
 	// verification, password reset). Zero uses notifications.DefaultOTPExpiry.
 	OTPExpiry time.Duration
@@ -175,6 +183,7 @@ type API struct {
 	csp             *csp.CSP
 	oauthServiceURL string
 	originSecret    string
+	maintenance     *MaintenanceWindow
 	smsStatus       http.HandlerFunc
 	metricsToken    string
 	stripeHandlers  *StripeHandlers
@@ -331,6 +340,7 @@ func New(ctx context.Context, conf *Config) *API {
 		csp:                   conf.CSP,
 		oauthServiceURL:       conf.OAuthServiceURL,
 		originSecret:          conf.OriginSecret,
+		maintenance:           conf.Maintenance,
 		smsStatus:             conf.SMSStatusHandler,
 		metricsToken:          conf.MetricsToken,
 		orgTxLocks:            newOrgTxMutex(),
@@ -429,6 +439,7 @@ func (a *API) initRouter() http.Handler {
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		ExposedHeaders:   []string{maintenanceHeader, "Retry-After"}, // readable by browser clients
 		AllowCredentials: true,
 		MaxAge:           300, // Maximum value not ignored by any of major browsers
 	}).Handler)
@@ -437,6 +448,8 @@ func (a *API) initRouter() http.Handler {
 	if a.originSecret != "" {
 		r.Use(requireOriginSecret(a.originSecret))
 	}
+	// maintenance header before throttle so 429 responses also carry X-Maintenance-Window
+	r.Use(maintenance(a.maintenance, time.Now))
 	r.Use(middleware.Throttle(100))
 	r.Use(middleware.ThrottleBacklog(5000, 40000, 60*time.Second))
 	r.Use(middleware.Timeout(45 * time.Second))
@@ -452,8 +465,16 @@ func (a *API) initRouter() http.Handler {
 		// Don't fail completely, but log the error
 	}
 
+	// handle registers a route. All non-read methods (POST, PUT, DELETE) are wrapped with
+	// maintenanceWriteBlock so a new write route is blocked by default without any explicit
+	// marking. Use handleExempt for the small set of POST routes that must stay reachable
+	// through the window (login and token refresh, read-only POSTs, the support ticket, the
+	// Twilio status callback).
 	handle := func(r chi.Router, method, pattern string, h http.HandlerFunc) {
 		log.Infow("new route", "method", method, "path", pattern)
+		if method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions {
+			h = maintenanceWriteBlock(a.maintenance, time.Now, h)
+		}
 		switch method {
 		case http.MethodGet:
 			r.Get(pattern, h)
@@ -467,6 +488,14 @@ func (a *API) initRouter() http.Handler {
 			log.Errorf("unsupported method %s in api initRouter", method)
 		}
 	}
+	// handleExempt registers a POST route that is exempt from maintenance blocking: login and
+	// token refresh (the OAuth login refuses sign-ups itself), read-only POSTs (check, weight,
+	// sign-info, census validation, votes/verify), the support ticket and the Twilio status
+	// callback, which only updates metrics. TestMaintenanceRouter keeps its own list of them.
+	handleExempt := func(r chi.Router, pattern string, h http.HandlerFunc) {
+		log.Infow("new route", "method", "POST", "path", pattern)
+		r.Post(pattern, h)
+	}
 
 	// protected routes
 	r.Group(func(r chi.Router) {
@@ -476,7 +505,7 @@ func (a *API) initRouter() http.Handler {
 		r.Use(a.authenticator)
 		r.Use(limitBody(maxProtectedBodyBytes))
 
-		handle(r, http.MethodPost, authRefresTokenEndpoint, a.refreshTokenHandler)
+		handleExempt(r, authRefresTokenEndpoint, a.refreshTokenHandler)
 		handle(r, http.MethodGet, authAddressesEndpoint, a.organizationAddressesHandler)
 		handle(r, http.MethodPost, oauthLinkEndpoint, a.oauthLinkHandler)
 		handle(r, http.MethodDelete, oauthUnlinkEndpoint, a.oauthUnlinkHandler)
@@ -504,7 +533,8 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPut, organizationMetaEndpoint, a.updateOrganizationMetaHandler)
 		handle(r, http.MethodGet, organizationMetaEndpoint, a.organizationMetaHandler)
 		handle(r, http.MethodDelete, organizationMetaEndpoint, a.deleteOrganizationMetaHandler)
-		handle(r, http.MethodPost, organizationCreateTicketEndpoint, a.organizationCreateTicket)
+		// support stays reachable: the ticket sends a support email and writes nothing
+		handleExempt(r, organizationCreateTicketEndpoint, a.organizationCreateTicket)
 		handle(r, http.MethodPost, organizationGroupsEndpoint, a.createOrganizationMemberGroupHandler)
 		handle(r, http.MethodGet, organizationGroupsEndpoint, a.organizationMemberGroupsHandler)
 		handle(r, http.MethodGet, organizationGroupEndpoint, a.organizationMemberGroupHandler)
@@ -530,7 +560,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, objectStorageUploadTypedEndpoint, a.objectStorage.UploadImageWithFormHandler)
 		// multi-question voting processes: authoring (the GET reads are public — see below)
 		handle(r, http.MethodPost, processesCreateEndpoint, a.createVotingProcessHandler)
-		handle(r, http.MethodPost, processesCensusValidateEndpoint, a.validateProcessCensusHandler)
+		handleExempt(r, processesCensusValidateEndpoint, a.validateProcessCensusHandler)
 		handle(r, http.MethodPut, processesEndpoint, a.updateVotingProcessHandler)
 		handle(r, http.MethodGet, processesValidateEndpoint, a.validateVotingProcessHandler)
 		handle(r, http.MethodPost, processesPublishEndpoint, a.publishVotingProcessHandler)
@@ -559,14 +589,16 @@ func (a *API) initRouter() http.Handler {
 		})
 		handle(r, http.MethodGet, infoEndpoint, a.InfoHandler)
 		if a.smsStatus != nil {
-			handle(r, http.MethodPost, SMSStatusCallbackRoute, a.smsStatus)
+			// exempt: it writes nothing (signature check and metrics only) and Twilio does not
+			// retry it, so refusing it would just drop the canary's delivery statuses.
+			handleExempt(r, SMSStatusCallbackRoute, a.smsStatus)
 		}
 		if a.metricsToken != "" {
 			handle(r, http.MethodGet, metricsEndpoint, requireBearer(a.metricsToken, promhttp.Handler()).ServeHTTP)
 		}
 
-		handle(r, http.MethodPost, authLoginEndpoint, a.authLoginHandler)
-		handle(r, http.MethodPost, oauthLoginEndpoint, a.oauthLoginHandler)
+		handleExempt(r, authLoginEndpoint, a.authLoginHandler)
+		handleExempt(r, oauthLoginEndpoint, a.oauthLoginHandler)
 		handle(r, http.MethodPost, usersEndpoint, a.registerHandler)
 		handle(r, http.MethodPost, verifyUserEndpoint, a.verifyUserAccountHandler)
 		handle(r, http.MethodGet, verifyUserCodeEndpoint, a.userVerificationCodeInfoHandler)
@@ -579,8 +611,9 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, organizationTypesEndpoint, a.organizationsTypesHandler)
 		handle(r, http.MethodGet, organizationLanguagesEndpoint, a.organizationsLanguagesHandler)
 		handle(r, http.MethodGet, pricingEndpoint, a.pricingHandler)
-		// late-bound: a method value would capture a.stripeHandlers as it is at
-		// router-build time (nil when Stripe init failed or a test installs it later)
+		// late-bound: a.stripeHandlers may still be nil at router-build time. Live Stripe redelivers
+		// a refused webhook for up to 3 days; sandbox (stage) retries only 3 times over a few hours,
+		// so resend those from the dashboard after a long stage window.
 		handle(r, http.MethodPost, paymentsWebhook, func(w http.ResponseWriter, r *http.Request) {
 			a.stripeHandlers.HandleWebhook(w, r)
 		})
@@ -588,7 +621,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, jobStatusEndpoint, a.jobStatusHandler)
 		handle(r, http.MethodPost, voteEndpoint, a.relayVoteHandler)
 		handle(r, http.MethodPost, votesEndpoint, a.relayVotesHandler)
-		handle(r, http.MethodPost, votesVerifyEndpoint, a.verifyVotesHandler)
+		handleExempt(r, votesVerifyEndpoint, a.verifyVotesHandler)
 		// multi-question voting processes: public voter reads + CSP. The process list and single-read
 		// are public for published processes; drafts + per-question eligibility are gated in-handler to
 		// a manager/admin (or a voting:write API key) via optionalManager.
@@ -597,15 +630,15 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, processesQuestionEndpoint, a.votingProcessQuestionHandler)
 		handle(r, http.MethodGet, processesParticipantEndpoint, a.votingProcessParticipantHandler)
 		handle(r, http.MethodGet, processesResultsEndpoint, a.votingProcessResultsHandler)
-		handle(r, http.MethodPost, processesCheckEndpoint, cspHandlers.ProcessCheckHandler)
+		handleExempt(r, processesCheckEndpoint, cspHandlers.ProcessCheckHandler)
 		handle(r, http.MethodPost, processesAuthEndpoint, cspHandlers.ProcessAuthHandler)
 		handle(r, http.MethodPost, processesAuthResendEndpoint, cspHandlers.ProcessAuthResendHandler)
 		handle(r, http.MethodPost, processesSignEndpoint, cspHandlers.ProcessSignHandler)
 		handle(r, http.MethodPost, processesSignBatchEndpoint, cspHandlers.ProcessSignBatchHandler)
 		handle(r, http.MethodPost, processesBlindPointEndpoint, cspHandlers.ProcessBlindPointHandler)
 		handle(r, http.MethodPost, processesBlindSignEndpoint, cspHandlers.ProcessBlindSignHandler)
-		handle(r, http.MethodPost, processesWeightEndpoint, cspHandlers.ProcessWeightHandler)
-		handle(r, http.MethodPost, processesSignInfoEndpoint, cspHandlers.ProcessSignInfoHandler)
+		handleExempt(r, processesWeightEndpoint, cspHandlers.ProcessWeightHandler)
+		handleExempt(r, processesSignInfoEndpoint, cspHandlers.ProcessSignInfoHandler)
 		handle(r, http.MethodPost, certAuthAssertionsEndpoint, cspHandlers.CertAssertionHandler)
 	})
 	a.router = r

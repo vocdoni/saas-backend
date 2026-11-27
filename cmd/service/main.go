@@ -39,6 +39,10 @@ const disableBlindCSPKey = "disable_blindcsp"
 // VOCDONI_CERT_GATEWAY_PUBLIC_KEYS like disableBlindCSPKey.
 const certGatewayPublicKeysKey = "cert_gateway_public_keys"
 
+// maintenanceWindowKey is the flag of the scheduled maintenance window, read from
+// VOCDONI_MAINTENANCE_WINDOW like disableBlindCSPKey.
+const maintenanceWindowKey = "maintenance_window"
+
 // environmentLabels are the deployment environments (VOCDONI_ENVIRONMENT, named as
 // OpenTelemetry's deployment.environment.name) and the name each one shows users;
 // production shows none. The environment only labels things: behaviour belongs to
@@ -115,6 +119,8 @@ func main() {
 	flag.Bool(disableBlindCSPKey, false, "temporarily stop offering anonymous voting (no new anonymous processes, no blind signing)")
 	flag.String(certGatewayPublicKeysKey, "",
 		"certificate gateway public keys, keyId:base64(ed25519 public key) comma-separated; empty turns certificate voter auth off")
+	flag.String(maintenanceWindowKey, "",
+		"scheduled maintenance window <from>/<until> in RFC 3339: announced on every response, writes refused with 503 inside it")
 	// parse flags
 	flag.Parse()
 	// initialize Viper
@@ -224,6 +230,17 @@ func main() {
 		OTPExpiry:           viper.GetDuration("otpExpiry"),
 		OTPCooldown:         viper.GetDuration("otpCooldown"),
 		MetricsToken:        viper.GetString("metricsToken"),
+	}
+
+	if apiConf.Maintenance, err = api.ParseMaintenanceWindow(viper.GetString(maintenanceWindowKey)); err != nil {
+		log.Fatalf("invalid %s: %v", maintenanceWindowKey, err)
+	}
+	if apiConf.Maintenance != nil {
+		if !apiConf.Maintenance.Until.After(time.Now()) {
+			log.Warnw("maintenance window is already in the past and will have no effect", "window", apiConf.Maintenance.String())
+		} else {
+			log.Infow("maintenance window scheduled", "window", apiConf.Maintenance.String())
+		}
 	}
 
 	certGatewayKeys, err := csp.ParseCertGatewayKeys(viper.GetString(certGatewayPublicKeysKey))
@@ -342,6 +359,7 @@ func main() {
 		Account:        acc,
 		Interval:       viper.GetDuration("statusSyncInterval"),
 		ConfirmTimeout: viper.GetDuration("statusSyncConfirmTimeout"),
+		Paused:         apiConf.Maintenance.Active,
 	})
 	apiConf.StatusSyncer = syncer
 	syncer.Start()

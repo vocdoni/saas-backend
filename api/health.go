@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"runtime/debug"
+	"time"
 
 	"github.com/vocdoni/saas-backend/api/apicommon"
 )
@@ -12,6 +13,8 @@ type InfoResponse struct {
 	Version   string `json:"version"`
 	GoVersion string `json:"goVersion"`
 	ChainID   string `json:"chainId"`
+	// Maintenance is the scheduled downtime, present until it ends.
+	Maintenance *MaintenanceWindow `json:"maintenance,omitempty"`
 }
 
 // defaultInfoResponse holds the values returned when build info is unavailable.
@@ -23,7 +26,7 @@ var defaultInfoResponse = InfoResponse{
 // InfoHandler godoc
 //
 //	@Summary		Get service information
-//	@Description	Returns the service version, build information and the Vocdoni chain ID.
+//	@Description	Returns the service version, build information, the Vocdoni chain ID and any scheduled maintenance window.
 //	@Tags			health
 //	@Produce		json
 //	@Success		200	{object}	InfoResponse
@@ -36,6 +39,9 @@ func (a *API) InfoHandler(w http.ResponseWriter, _ *http.Request) {
 	}
 	if a.account != nil {
 		info.ChainID = a.account.ChainID()
+	}
+	if a.maintenance.pending(time.Now()) {
+		info.Maintenance = a.maintenance
 	}
 	apicommon.HTTPWriteJSON(w, info)
 }

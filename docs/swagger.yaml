@@ -6,7 +6,18 @@ definitions:
         type: string
       goVersion:
         type: string
+      maintenance:
+        allOf:
+        - $ref: '#/definitions/api.MaintenanceWindow'
+        description: Maintenance is the scheduled downtime, present until it ends.
       version:
+        type: string
+    type: object
+  api.MaintenanceWindow:
+    properties:
+      from:
+        type: string
+      until:
         type: string
     type: object
   apicommon.APIKeyInfo:
@@ -2774,7 +2785,13 @@ info:
     email: info@vocdoni.io
     name: API Support
     url: https://vocdoni.io
-  description: API for Vocdoni SaaS Backend
+  description: |-
+    API for Vocdoni SaaS Backend.
+    Scheduled maintenance: while a window announced in the X-Maintenance-Window header and in
+    GET /info is active, every POST, PUT and DELETE answers 503 with error code 50304 and a
+    Retry-After header pointing past the end of the window. Login, token refresh, read-only POSTs
+    (process check, weight and sign-info, census validation, votes/verify) and the support ticket
+    stay available; POST /oauth/login answers 50304 only when it would sign up a new user.
   license:
     name: Apache 2.0
     url: http://www.apache.org/licenses/LICENSE-2.0.html
@@ -3008,8 +3025,8 @@ paths:
       - processes
   /info:
     get:
-      description: Returns the service version, build information and the Vocdoni
-        chain ID.
+      description: Returns the service version, build information, the Vocdoni chain
+        ID and any scheduled maintenance window.
       produces:
       - application/json
       responses:

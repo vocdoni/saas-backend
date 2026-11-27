@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -629,4 +630,47 @@ func TestPublishStandsDownWithoutCreditAfterSubmitting(t *testing.T) {
 		found = found || claim.ID == oid
 	}
 	c.Assert(found, qt.IsTrue)
+}
+
+// TestPublishRetryWaitsOutMaintenance: an attempt cut short by a maintenance window spends no retry,
+// and no attempt runs inside the window; the retries resume once it ends.
+func TestPublishRetryWaitsOutMaintenance(t *testing.T) {
+	c := qt.New(t)
+	installFakePaymentGW(t)
+	token := testCreateUser(t, "publishmaint1234")
+	integratorAddr, pid, _ := newFundedManagedDraft(t, token, "prod_test_publish_maintenance")
+	t.Cleanup(func() { testAPI.maintenance = nil })
+
+	var (
+		mu     sync.Mutex
+		window *MaintenanceWindow
+		starts []time.Time
+	)
+	// the first attempt opens a window as the chain halts; every later one fails too, so the job
+	// runs out of retries and shows how many it was allowed
+	attempts := injectPublishFaults(t, func(attempt int32) error {
+		mu.Lock()
+		defer mu.Unlock()
+		now := time.Now()
+		if attempt == 1 {
+			window = &MaintenanceWindow{From: now, Until: now.Add(2 * time.Second)}
+			testAPI.maintenance = window
+			return transient(fmt.Errorf("chain halted for maintenance"))
+		}
+		starts = append(starts, now)
+		return transient(fmt.Errorf("chain unavailable"))
+	})
+
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusFailed)
+	// the attempt the window cut short is not counted: all publishRetryAttempts retries ran after it
+	c.Assert(attempts.Load(), qt.Equals, int32(publishRetryAttempts+2))
+	mu.Lock()
+	defer mu.Unlock()
+	c.Assert(starts, qt.HasLen, publishRetryAttempts+1)
+	for _, at := range starts {
+		c.Assert(at.Before(window.Until), qt.IsFalse, qt.Commentf("attempt at %s, window ends %s", at, window.Until))
+	}
+	// abandoned only once the retries after the window ran out, and credited back then
+	c.Assert(walletBalance(c, integratorAddr), qt.Equals, pricing.Cents(100_000))
 }

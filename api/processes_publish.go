@@ -562,8 +562,10 @@ func (a *API) startProcessPublish(ctx context.Context, t publishTarget) (string,
 // finish schedules the next attempt. The lock is never held across the retry delay, so other
 // publishes and status changes of the organization proceed meanwhile.
 func (pw *publishWorker) submit(orgLock *orgTxLock) {
+	pw.attemptStart = time.Now()
 	if pw.a.enqueueTx(txTask{jobID: pw.jobID, run: func() (*db.JobResult, error) {
 		defer orgLock.Unlock()
+		pw.attemptStart = time.Now()
 		return pw.run()
 	}, record: pw.finish}) {
 		return
@@ -583,27 +585,25 @@ func (pw *publishWorker) retry() {
 
 // finish records one attempt's outcome (it is the attempt's txTask.record, so a panic the worker
 // pool recovers lands here too). Success completes the job. A transient failure with attempts
-// left schedules the next one, the job staying pending and the claim held. Anything else, or the
-// last attempt failing, abandons the publish — crediting the payer's wallet back —
-// and fails the job; a lost claim only fails it, since the process is someone else's now, or, when
-// it went stale under this worker, the stale sweep's (standDown).
+// left schedules the next one, the job staying pending and the claim held; one that touched a
+// maintenance window spends no attempt, since the chain was down on purpose, and is retried after
+// the window. Anything else, or the last attempt failing, abandons the publish — crediting the
+// payer's wallet back — and fails the job; a lost claim only fails it, since the process is
+// someone else's now, or, when it went stale under this worker, the stale sweep's (standDown).
 func (pw *publishWorker) finish(result *db.JobResult, err error) {
 	a := pw.a
 	var te transientPublishError
-	if err != nil && errors.As(err, &te) && pw.attempt < publishRetryAttempts {
-		pw.attempt++
-		delay := publishRetryBackoff << (pw.attempt - 1)
-		log.Warnw("voting process publish failed, retrying", "processId", pw.vp.ID.Hex(),
-			"attempt", pw.attempt, "delay", delay.String(), "error", err)
-		// the job stays held through the backoff, so its heartbeat keeps it from being swept
-		// as interrupted (superviseTxJobs) while no queue holds it
-		a.heldTxJobs.hold(pw.jobID)
-		// and the claim stays fresh through the backoff and the retry's wait for the org tx lock,
-		// or the growth paths would stop answering 409 while the next attempt still mines from
-		// the census stored before them
-		pw.holdClaim()
-		time.AfterFunc(delay, pw.retry)
-		return
+	if err != nil && errors.As(err, &te) {
+		now := time.Now()
+		if a.maintenance.overlaps(pw.attemptStart, now) {
+			pw.scheduleRetry(publishRetryBackoff+max(a.maintenance.Until.Sub(now), 0), err)
+			return
+		}
+		if pw.attempt < publishRetryAttempts {
+			pw.attempt++
+			pw.scheduleRetry(publishRetryBackoff<<(pw.attempt-1), err)
+			return
+		}
 	}
 	// the worker ends here: nothing is left to keep the claim for
 	pw.releaseClaimHold()
@@ -624,6 +624,20 @@ func (pw *publishWorker) finish(result *db.JobResult, err error) {
 	}
 }
 
+// scheduleRetry runs the next attempt after delay, keeping the job pending and the claim held.
+func (pw *publishWorker) scheduleRetry(delay time.Duration, err error) {
+	log.Warnw("voting process publish failed, retrying", "processId", pw.vp.ID.Hex(),
+		"attempt", pw.attempt, "delay", delay.String(), "error", err)
+	// the job stays held through the backoff, so its heartbeat keeps it from being swept
+	// as interrupted (superviseTxJobs) while no queue holds it
+	pw.a.heldTxJobs.hold(pw.jobID)
+	// and the claim stays fresh through the backoff and the retry's wait for the org tx lock,
+	// or the growth paths would stop answering 409 while the next attempt still mines from
+	// the census stored before them
+	pw.holdClaim()
+	time.AfterFunc(delay, pw.retry)
+}
+
 // publishWorker carries the state of an async voting-process publish across the batch +
 // retry rounds executed on the tx worker pool.
 type publishWorker struct {
@@ -638,6 +652,9 @@ type publishWorker struct {
 	jobID     string
 	// attempt counts the retries already scheduled (0 on the first attempt)
 	attempt int
+	// attemptStart is when the current attempt was handed to the queue, then when it started
+	// running; finish spends no attempt on one that touched a maintenance window
+	attemptStart time.Time
 	// owner is the publish-claim token returned by ClaimVotingProcessForPublish: the worker
 	// renews the claim with it while it runs and every state write it does on the process
 	// (clear, publish) is conditional on still holding it.
