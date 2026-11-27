@@ -468,7 +468,8 @@ func (a *API) initRouter() http.Handler {
 	// handle registers a route. All non-read methods (POST, PUT, DELETE) are wrapped with
 	// maintenanceWriteBlock so a new write route is blocked by default without any explicit
 	// marking. Use handleExempt for the small set of POST routes that must stay reachable
-	// through the window (login and token refresh, read-only POSTs, the support ticket).
+	// through the window (login and token refresh, read-only POSTs, the support ticket, the
+	// Twilio status callback).
 	handle := func(r chi.Router, method, pattern string, h http.HandlerFunc) {
 		log.Infow("new route", "method", method, "path", pattern)
 		if method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions {
@@ -489,8 +490,8 @@ func (a *API) initRouter() http.Handler {
 	}
 	// handleExempt registers a POST route that is exempt from maintenance blocking: login and
 	// token refresh (the OAuth login refuses sign-ups itself), read-only POSTs (check, weight,
-	// sign-info, census validation, votes/verify) and the support ticket. Webhooks are writes
-	// and never go here.
+	// sign-info, census validation, votes/verify), the support ticket and the Twilio status
+	// callback, which only updates metrics. TestMaintenanceRouter keeps its own list of them.
 	handleExempt := func(r chi.Router, pattern string, h http.HandlerFunc) {
 		log.Infow("new route", "method", "POST", "path", pattern)
 		r.Post(pattern, h)
@@ -586,9 +587,9 @@ func (a *API) initRouter() http.Handler {
 		})
 		handle(r, http.MethodGet, infoEndpoint, a.InfoHandler)
 		if a.smsStatus != nil {
-			// Twilio does not retry status callbacks: statuses sent during a window are lost,
-			// which is accepted.
-			handle(r, http.MethodPost, SMSStatusCallbackRoute, a.smsStatus)
+			// exempt: it writes nothing (signature check and metrics only) and Twilio does not
+			// retry it, so refusing it would just drop the canary's delivery statuses.
+			handleExempt(r, SMSStatusCallbackRoute, a.smsStatus)
 		}
 		if a.metricsToken != "" {
 			handle(r, http.MethodGet, metricsEndpoint, requireBearer(a.metricsToken, promhttp.Handler()).ServeHTTP)
@@ -608,10 +609,9 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, organizationTypesEndpoint, a.organizationsTypesHandler)
 		handle(r, http.MethodGet, organizationLanguagesEndpoint, a.organizationsLanguagesHandler)
 		handle(r, http.MethodGet, pricingEndpoint, a.pricingHandler)
-		// late-bound: a method value would capture a.stripeHandlers as it is at
-		// router-build time (nil when Stripe init failed or a test installs it later).
-		// Stripe redelivers a refused webhook for up to 3 days, so events sent during a
-		// window are processed after it.
+		// late-bound: a.stripeHandlers may still be nil at router-build time. Live Stripe redelivers
+		// a refused webhook for up to 3 days; sandbox (stage) retries only 3 times over a few hours,
+		// so resend those from the dashboard after a long stage window.
 		handle(r, http.MethodPost, paymentsWebhook, func(w http.ResponseWriter, r *http.Request) {
 			a.stripeHandlers.HandleWebhook(w, r)
 		})

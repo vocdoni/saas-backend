@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
@@ -150,8 +152,8 @@ func TestMaintenanceWriteBlock(t *testing.T) {
 	c.Assert(rec.Code, qt.Equals, http.StatusOK)
 }
 
-// TestMaintenanceRouter builds the real router with a window covering time.Now() and checks which
-// routes it refuses, so a write route registered with handleExempt or outside handle fails here.
+// TestMaintenanceRouter builds the real router with a window covering time.Now(), walks it to check
+// that every write route outside exemptWriteRoutes is refused, then checks sample routes' behavior.
 func TestMaintenanceRouter(t *testing.T) {
 	c := qt.New(t)
 
@@ -189,6 +191,46 @@ func TestMaintenanceRouter(t *testing.T) {
 	}
 	router := a.initRouter()
 
+	// every write route is refused unless listed here, so a new handleExempt route fails until added
+	exemptWriteRoutes := map[string]bool{
+		authRefresTokenEndpoint:          true,
+		organizationCreateTicketEndpoint: true,
+		processesCensusValidateEndpoint:  true,
+		SMSStatusCallbackRoute:           true,
+		authLoginEndpoint:                true,
+		oauthLoginEndpoint:               true,
+		votesVerifyEndpoint:              true,
+		processesCheckEndpoint:           true,
+		processesWeightEndpoint:          true,
+		processesSignInfoEndpoint:        true,
+	}
+	pathParam := regexp.MustCompile(`\{[^}]+\}`)
+	seen := map[string]bool{}
+	writes := 0
+	routes, ok := router.(chi.Routes)
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		if method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions {
+			return nil
+		}
+		if exemptWriteRoutes[route] {
+			seen[route] = true
+			return nil
+		}
+		writes++
+		req := httptest.NewRequest(method, pathParam.ReplaceAllString(route, "0x01"), strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		c.Check(rec.Code, qt.Equals, http.StatusServiceUnavailable, qt.Commentf("%s %s: %s", method, route, rec.Body))
+		return nil
+	}), qt.IsNil)
+	c.Assert(writes > 20, qt.IsTrue, qt.Commentf("walked only %d write routes", writes))
+	for route := range exemptWriteRoutes {
+		c.Check(seen[route], qt.IsTrue, qt.Commentf("exempt route %s is not registered as a write", route))
+	}
+
 	do := func(path, jwt string, body any) *httptest.ResponseRecorder {
 		t.Helper()
 		data, err := json.Marshal(body)
@@ -217,7 +259,6 @@ func TestMaintenanceRouter(t *testing.T) {
 			Email: unknownEmail, Password: testPass, FirstName: "M", LastName: "W",
 		}},
 		{"stripe webhook", paymentsWebhook, "", map[string]any{}},
-		{"sms status callback", SMSStatusCallbackRoute, "", map[string]any{}},
 		{"oauth sign-up", oauthLoginEndpoint, "", &apicommon.OAuthLoginRequest{
 			Email: unknownEmail, Provider: "google", OAuthSignature: "sig", UserOAuthSignature: "user-sig",
 			Address: "0x0000000000000000000000000000000000000002",
@@ -246,6 +287,7 @@ func TestMaintenanceRouter(t *testing.T) {
 			Email: oauthEmail, Provider: "google", OAuthSignature: "sig", UserOAuthSignature: oauthSig,
 		}, http.StatusOK},
 		{"votes verify", votesVerifyEndpoint, "", &apicommon.VerifyVotesRequest{}, http.StatusBadRequest},
+		{"sms status callback", SMSStatusCallbackRoute, "", map[string]any{}, http.StatusOK},
 	}
 	for _, tc := range exempt {
 		rec := do(tc.path, tc.jwt, tc.body)
