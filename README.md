@@ -131,7 +131,7 @@ activate the `with-vocone` profile:
 docker compose --profile with-vocone up
 ```
 
-This builds and runs [vocone](https://github.com/vocdoni/vocdoni-node/tree/main/dockerfiles/vocone) from `../vocdoni-node`, a single-binary replacement for the Vocdoni protocol (gateway, chain, faucet, etc.).
+This builds and runs [vocone](https://github.com/vocdoni/vocdoni-node/tree/main/dockerfiles/vocone) from `../vocdoni-node`, a single-binary replacement for the Vocdoni protocol (gateway, chain, etc.).
 The first build will take a few minutes (Go compilation).
 
 > **Important:** When using this profile, change `VOCDONI_VOCDONIAPI` in your `.env`
@@ -146,13 +146,14 @@ VOCDONI_VOCDONIAPI=http://vocone:9090/v2 \
 
 ### Funding your account on vocone
 
-When using vocone locally, the account derived from your `VOCDONI_PRIVATEKEY` needs tokens. A helper script derives the address and calls the faucet:
+When using vocone locally, the account derived from your `VOCDONI_PRIVATEKEY` must exist on chain with tokens before the backend starts. Vocone funds it at genesis from `VOCONE_FUNDEDACCOUNTS` in your `.env` (`address:balance`):
 
 ```bash
-docker compose --profile with-vocone run --rm --build fundaccount
+cast wallet address --private-key 0x<VOCDONI_PRIVATEKEY>   # or any tool that derives the address
+echo 'VOCONE_FUNDEDACCOUNTS=0x<address>:100000000' >> .env
 ```
 
-This builds the `fundaccount` target from `dev.dockerfile`, reads `VOCDONI_PRIVATEKEY` from your `.env`, derives the Ethereum address, and calls `GET /v2/open/claim/{address}` on the vocone service.
+Genesis funding applies only when the chain is created, so reset the chain after changing it by removing the `vocone_run` volume (e.g. `docker volume rm saas-backend_vocone_run` with the vocone container stopped).
 
 ### Running with multiple profiles
 
@@ -197,9 +198,6 @@ docker compose --profile with-vocone up -d
 
 # Start everything (API + UI + fake SMTP + vocone)
 docker compose --profile with-ui --profile local-smtp --profile with-vocone up
-
-# One-shot: fund your account on vocone
-docker compose --profile with-vocone run --rm --build fundaccount
 
 # View logs (for a specific service)
 docker compose logs -f api

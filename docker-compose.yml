@@ -90,7 +90,9 @@ services:
       VOCONED_BLOCKPERIOD: 5
       VOCONED_BLOCKSIZE: 2000
       VOCONED_LOGLEVEL: debug
-      VOCONED_ENABLEFAUCETWITHAMOUNT: 1000
+      # address:balance list funded at genesis (only when the chain is created); set it in
+      # .env to the address of VOCDONI_PRIVATEKEY so the backend can fund orgs.
+      VOCONED_FUNDEDACCOUNTS: ${VOCONE_FUNDEDACCOUNTS:-}
       VOCONED_CHAINID: dev
       VOCONED_TXCOSTS: 2
       VOCONED_SETTXCOSTS: true
@@ -106,21 +108,6 @@ services:
       interval: 3s
       retries: 10
       start_period: 15s
-
-  fundaccount:
-    profiles:
-      - with-vocone
-    network_mode: "service:vocone"
-    build:
-      context: ./
-      dockerfile: dev.dockerfile
-      target: fundaccount
-    image: saas-backend-fundaccount
-    env_file:
-      - .env
-    depends_on:
-      vocone:
-        condition: service_healthy
 
 volumes:
   mongodb: {}

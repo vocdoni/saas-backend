@@ -31,11 +31,6 @@ FROM base AS localsmtp
 RUN go build -o /usr/local/bin/localsmtp ./cmd/localsmtp/main.go
 CMD ["/usr/local/bin/localsmtp"]
 
-# Fund account target (used for local testing)
-FROM base AS fundaccount
-RUN go build -o /usr/local/bin/fundaccount ./scripts/fundaccount/main.go
-CMD ["/usr/local/bin/fundaccount"]
-
 # CSP login hash repair target (one-shot maintenance; dry run unless --apply)
 FROM base AS repairlogins
 RUN go build -o /usr/local/bin/repairlogins ./scripts/repairlogins/main.go
