@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -45,6 +47,45 @@ func TestSignOutcome(t *testing.T) {
 		// the sanitized message must not echo the raw error text
 		c.Assert(message, qt.Not(qt.Contains), "blip")
 	}
+}
+
+func TestVoterAuthError(t *testing.T) {
+	c := qt.New(t)
+	for _, tc := range []struct {
+		err  error
+		want errors.Error
+	}{
+		{csp.ErrChallengeCodeFailure, errors.ErrChallengeCodeMismatch},
+		{csp.ErrTooManyAttempts, errors.ErrChallengeLocked},
+		{csp.ErrTokenExpired, errors.ErrChallengeExpired},
+		{csp.ErrChallengeConsumed, errors.ErrChallengeExpired},
+		{fmt.Errorf("wrapping: %w", csp.ErrTokenExpired), errors.ErrChallengeExpired},
+		{csp.ErrStorageFailure, errors.ErrInternalStorageError},
+		{csp.ErrNotificationFailure, errors.ErrGenericInternalServerError},
+		{csp.ErrPrepareSignature, errors.ErrGenericInternalServerError},
+		{csp.ErrInvalidAuthToken, errors.ErrUnauthorized},
+		{fmt.Errorf("anything else"), errors.ErrUnauthorized},
+		// API errors pass through untouched
+		{errors.ErrCSPAuthFailed, errors.ErrCSPAuthFailed},
+		{errors.ErrAttemptCoolDownTime.WithData(map[string]any{"coolDownTime": int64(1)}), errors.ErrAttemptCoolDownTime},
+	} {
+		got := voterAuthError(tc.err)
+		c.Assert(got.Code, qt.Equals, tc.want.Code, qt.Commentf("error: %v", tc.err))
+		c.Assert(got.HTTPstatus, qt.Equals, tc.want.HTTPstatus, qt.Commentf("error: %v", tc.err))
+	}
+	// the challenge failures keep the 401 clients already branch on; server failures are 5xx
+	for _, e := range []errors.Error{
+		errors.ErrChallengeCodeMismatch, errors.ErrChallengeLocked, errors.ErrChallengeExpired,
+	} {
+		c.Assert(e.HTTPstatus, qt.Equals, http.StatusUnauthorized)
+	}
+	c.Assert(voterAuthError(csp.ErrStorageFailure).HTTPstatus >= http.StatusInternalServerError, qt.IsTrue)
+	// a consumed code and an expired one answer byte-identical bodies
+	expired, err := json.Marshal(voterAuthError(csp.ErrTokenExpired))
+	c.Assert(err, qt.IsNil)
+	consumed, err := json.Marshal(voterAuthError(fmt.Errorf("verifying: %w", csp.ErrChallengeConsumed)))
+	c.Assert(err, qt.IsNil)
+	c.Assert(string(consumed), qt.Equals, string(expired))
 }
 
 func TestValidateVoterAddress(t *testing.T) {

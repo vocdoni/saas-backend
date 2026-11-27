@@ -44,12 +44,7 @@ func (c *CSPHandlers) handleAuthStep(w http.ResponseWriter, r *http.Request,
 	}
 
 	if err != nil {
-		var apiErr errors.Error
-		if errors.As(err, &apiErr) {
-			apiErr.Write(w)
-			return
-		}
-		errors.ErrUnauthorized.WithErr(err).Write(w)
+		voterAuthError(err).Write(w)
 		return
 	}
 
@@ -570,17 +565,34 @@ func (c *CSPHandlers) authSecondStep(r *http.Request) (internal.HexBytes, error)
 		return nil, errors.ErrInvalidUserData.Withf("challenge solution required")
 	}
 
-	switch err := c.csp.VerifyAuthToken(req.AuthToken, req.AuthData[0]); err {
-	case nil:
-		return req.AuthToken, nil
-	case csp.ErrInvalidAuthToken, csp.ErrInvalidSolution, csp.ErrChallengeCodeFailure,
-		csp.ErrTokenExpired, csp.ErrTooManyAttempts:
-		return nil, errors.ErrUnauthorized.WithErr(err)
-	case csp.ErrUserUnknown:
-		return nil, errors.ErrUserNotFound.WithErr(err)
-	case csp.ErrStorageFailure:
-		return nil, errors.ErrInternalStorageError.WithErr(err)
+	if err := c.csp.VerifyAuthToken(req.AuthToken, req.AuthData[0]); err != nil {
+		return nil, voterAuthError(err)
+	}
+	return req.AuthToken, nil
+}
+
+// voterAuthError is the API error a voter-facing CSP auth call answers for err. API errors pass
+// through; the challenge failures get their own 401 codes, telling a retry with the same token
+// (mismatch) from a restart at step 0, and server failures a 5xx; any other error is a 401.
+func voterAuthError(err error) errors.Error {
+	var apiErr errors.Error
+	if errors.As(err, &apiErr) {
+		return apiErr
+	}
+	switch {
+	case errors.Is(err, csp.ErrChallengeCodeFailure):
+		return errors.ErrChallengeCodeMismatch.WithErr(err)
+	case errors.Is(err, csp.ErrTooManyAttempts):
+		return errors.ErrChallengeLocked.WithErr(err)
+	// a code solved through another token answers as expired, with the same body: telling it
+	// apart would show whoever holds another token of the voter's code that the voter authenticated
+	case errors.Is(err, csp.ErrTokenExpired), errors.Is(err, csp.ErrChallengeConsumed):
+		return errors.ErrChallengeExpired
+	case errors.Is(err, csp.ErrStorageFailure):
+		return errors.ErrInternalStorageError.WithErr(err)
+	case errors.Is(err, csp.ErrNotificationFailure), errors.Is(err, csp.ErrPrepareSignature):
+		return errors.ErrGenericInternalServerError.WithErr(err)
 	default:
-		return nil, errors.ErrGenericInternalServerError.WithErr(err)
+		return errors.ErrUnauthorized.WithErr(err)
 	}
 }

@@ -5596,7 +5596,11 @@ paths:
         milliseconds left.
         - Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
         If valid the token is marked verified and returned. Auth-only censuses may not require
-        a challenge solution.
+        a challenge solution. A wrong code answers 40104 and may be retried with the same token
+        until the code's 5 attempts are spent; then the code answers 40105 (locked). A code past
+        its lifetime, or one already solved through this or another token, answers 40106
+        (expired), and so does a token that is unknown or gone with its expired code; after
+        40105 or 40106 restart at step 0. All three are 401.
         Step 0 returns the same error (40802) whether the login data matches no census participant
         or the contact data does not match an existing one. Failed attempts are capped per UTC hour
         on the process for each submitted set of login and contact fields, and, ten times higher,
@@ -5642,8 +5646,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Invalid authentication data, cooldown not reached, or invalid
-            challenge
+          description: Invalid auth data, cooldown (40103), or challenge code failure
+            (40104-40106)
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
@@ -5651,7 +5655,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
-          description: Internal server error
+          description: Internal error, e.g. storage (50006) or challenge delivery
+            (50002) failure
           schema:
             $ref: '#/definitions/errors.Error'
         "503":
@@ -5677,6 +5682,10 @@ paths:
         member spends one of them too, and starts that contact's cooldown. A send the service
         gives up on before handing it to the email or SMS provider gives back its resend, its
         cooldown and its daily send; one the provider fails keeps them spent.
+        A code that can no longer be sent (expired, locked or solved through another token), or a
+        token that is unknown or gone with its expired code, answers 40106: restart at step 0. A
+        verified token answers 40015, whose data.coolDownTime holds the
+        milliseconds the code still lives.
         For an anonymous census it is refused (400, 40037, "anonymous voting is temporarily unavailable") while the
         service has anonymous voting off.
       parameters:
@@ -5704,8 +5713,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Invalid/expired/locked token, cooldown not reached, foreign
-            token, or contact mismatch
+          description: Invalid or foreign token, unsendable code (40106), cooldown
+            (40103), contact mismatch
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
@@ -5713,7 +5722,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
-          description: Internal server error
+          description: Internal error, e.g. storage (50006) or challenge delivery
+            (50002) failure
           schema:
             $ref: '#/definitions/errors.Error'
         "503":

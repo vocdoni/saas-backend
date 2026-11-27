@@ -379,8 +379,9 @@ func (c *CSP) ClaimChallengeResend(token internal.HexBytes, to string, ctype not
 	}
 	challenge, err := c.Storage.CSPAuth(token)
 	if err != nil {
+		// a token gone with its expired code, or never issued, answers like an expired one
 		if errors.Is(err, db.ErrTokenNotFound) {
-			return nil, ErrInvalidAuthToken
+			return nil, ErrTokenExpired
 		}
 		log.Warnw("error getting token for resend",
 			"token", token,
@@ -500,9 +501,9 @@ func (c *CSP) claimSend(challenge *db.CSPAuth, token internal.HexBytes, dest str
 func (c *CSP) sendRefusal(challenge *db.CSPAuth, dest string) error {
 	if challenge.Verified {
 		// a verified token is always reported as such, regardless of age, so it never
-		// masquerades as merely expired
+		// masquerades as merely expired; coolDownTime is the milliseconds the code still lives
 		left := max(c.notificationTTL-time.Since(challenge.CreatedAt), 0)
-		return errors.ErrUserAlreadyVerified.WithData(map[string]any{"coolDownTime": left.Seconds()})
+		return errors.ErrUserAlreadyVerified.WithData(map[string]any{"coolDownTime": left.Milliseconds()})
 	}
 	// no secret (solved, or never had one), expired or locked: ErrTokenExpired prompts the client
 	// to restart the OTP flow, and a code is never regenerated from an empty secret
@@ -737,16 +738,28 @@ func (c *CSP) VerifyAuthToken(token internal.HexBytes, solution string) error {
 	// get the user data from the token
 	authTokenData, err := c.Storage.CSPAuth(token)
 	if err != nil {
+		// a token gone with its expired code, or never issued, answers like an expired one
+		if errors.Is(err, db.ErrTokenNotFound) {
+			return ErrTokenExpired
+		}
 		log.Warnw("error getting user data by token",
 			"token", token,
 			"error", err)
-		return ErrInvalidAuthToken
+		return ErrStorageFailure
 	}
 	// a code locked by failed attempts has its secret dropped, but still answers as locked
 	locked := authTokenData.Secret == "" && len(authTokenData.VerifiedBy) == 0 &&
 		authTokenData.Attempts >= MaxChallengeAttempts
+	// a code solved through another token answers apart from an expired one, so the client can say why
+	if !authTokenData.Verified && len(authTokenData.VerifiedBy) > 0 {
+		log.Warnw("verification attempted for token whose code another token solved",
+			"userID", authTokenData.UserID,
+			"anchorID", authTokenData.AnchorID,
+			"token", token)
+		return ErrChallengeConsumed
+	}
 	// reject tokens whose code has no secret: auth-only grants, and codes already solved through
-	// this token or another one. An OTP derived from an empty secret would be trivially guessable.
+	// this token. An OTP derived from an empty secret would be trivially guessable.
 	// ErrTokenExpired prompts the client to restart the OTP flow rather than treating it as a hard
 	// failure.
 	if authTokenData.Verified || (authTokenData.Secret == "" && !locked) {
@@ -771,7 +784,7 @@ func (c *CSP) VerifyAuthToken(token internal.HexBytes, solution string) error {
 	recorded, err := c.Storage.IncrementCSPAuthAttempts(token, MaxChallengeAttempts)
 	if errors.Is(err, db.ErrChallengeConsumed) {
 		// a concurrent verification solved the code first
-		return ErrTokenExpired
+		return ErrChallengeConsumed
 	}
 	if err != nil {
 		// fail closed: if we cannot persist the attempt, do not allow the
@@ -802,7 +815,7 @@ func (c *CSP) VerifyAuthToken(token internal.HexBytes, solution string) error {
 	if err := c.Storage.VerifyCSPAuth(token); err != nil {
 		if err == db.ErrChallengeConsumed {
 			// a concurrent verification solved the challenge first
-			return ErrTokenExpired
+			return ErrChallengeConsumed
 		}
 		log.Warnw("error verifying token",
 			"userID", authTokenData.UserID,

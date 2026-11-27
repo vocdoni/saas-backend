@@ -210,7 +210,7 @@ func TestVerifyAuthToken(t *testing.T) {
 
 	c.Run("token not found", func(c *qt.C) {
 		err := csp.VerifyAuthToken([]byte("invalid"), "invalid")
-		c.Assert(err, qt.ErrorIs, ErrInvalidAuthToken)
+		c.Assert(err, qt.ErrorIs, ErrTokenExpired)
 	})
 
 	c.Run("expired OTP", func(c *qt.C) {
@@ -413,7 +413,7 @@ func TestResendChallenge(t *testing.T) {
 
 	c.Run("token not found", func(c *qt.C) {
 		err := resendTo(csp, testToken, testUserEmail, notifications.EmailChallenge)
-		c.Assert(err, qt.ErrorIs, ErrInvalidAuthToken)
+		c.Assert(err, qt.ErrorIs, ErrTokenExpired)
 	})
 
 	c.Run("token already verified", func(c *qt.C) {
@@ -751,7 +751,7 @@ func TestAuthTokenReusesPendingChallenge(t *testing.T) {
 		otherData, err := csp.Storage.CSPAuth(other)
 		c.Assert(err, qt.IsNil)
 		c.Assert(otherData.Verified, qt.IsFalse)
-		c.Assert(csp.VerifyAuthToken(other, code), qt.ErrorIs, ErrTokenExpired)
+		c.Assert(csp.VerifyAuthToken(other, code), qt.ErrorIs, ErrChallengeConsumed)
 	})
 
 	c.Run("attempts are shared by the tokens of a challenge", func(c *qt.C) {
