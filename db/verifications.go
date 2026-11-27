@@ -162,3 +162,35 @@ func (ms *MongoStorage) VerificationCodeTrySend(user *User, t CodeType, cooldown
 	}
 	return false, nil
 }
+
+// InsertVerificationCode inserts a new verification code for the user only if no code of the
+// same (user, type) pair already exists. It returns ErrConflict when a document is already
+// present so the caller can treat the race as a blocked send, and ErrNotFound when the user
+// does not exist.
+func (ms *MongoStorage) InsertVerificationCode(verification *UserVerification) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	if _, err := ms.fetchUserFromDB(ctx, verification.UserID); err != nil {
+		return err
+	}
+	now := time.Now()
+	verification.CreatedAt = now
+	verification.LastSentAt = now
+	verification.Attempts = 0
+	verification.Sends = 1
+	// $setOnInsert only fires when the filter has no match and MongoDB inserts a new document;
+	// when the document already exists the update is a no-op and UpsertedCount stays at 0.
+	result, err := ms.verifications.UpdateOne(ctx,
+		bson.M{"userId": verification.UserID, "type": verification.Type},
+		bson.M{"$setOnInsert": verification},
+		options.UpdateOne().SetUpsert(true))
+	if err != nil {
+		return err
+	}
+	if result.UpsertedCount == 0 {
+		return ErrConflict
+	}
+	return nil
+}

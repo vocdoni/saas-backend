@@ -234,4 +234,45 @@ func TestVerifications(t *testing.T) {
 		_, err = testDB.VerificationCodeCheckAndAddAttempt(user, CodeTypeVerifyAccount, maxAttempts)
 		c.Assert(err, qt.Equals, ErrNotFound)
 	})
+
+	t.Run("TestInsertVerificationCode", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		userID, err := testDB.SetUser(&User{
+			Email:     testUserEmail + "9",
+			Password:  testUserPass,
+			FirstName: testUserFirstName,
+			LastName:  testUserLastName,
+		})
+		c.Assert(err, qt.IsNil)
+		user := &User{ID: userID}
+
+		sealedCode, err := internal.SealToken("testCode", testUserEmail, "mock-app-secret")
+		c.Assert(err, qt.IsNil)
+		exp := time.Now().Add(time.Hour)
+
+		// non-existent user is rejected
+		err = testDB.InsertVerificationCode(testVerification(99999, sealedCode, CodeTypePasswordSetup, exp))
+		c.Assert(err, qt.Equals, ErrNotFound)
+
+		// first insert succeeds; sends counter starts at 1
+		err = testDB.InsertVerificationCode(testVerification(userID, sealedCode, CodeTypePasswordSetup, exp))
+		c.Assert(err, qt.IsNil)
+		stored, err := testDB.UserVerificationCode(user, CodeTypePasswordSetup)
+		c.Assert(err, qt.IsNil)
+		c.Assert(stored.SealedCode, qt.DeepEquals, sealedCode)
+		c.Assert(stored.Sends, qt.Equals, 1)
+
+		// second insert of the same (user, type) returns ErrConflict and leaves the first code intact
+		sealedCode2, err := internal.SealToken("otherCode", testUserEmail, "mock-app-secret")
+		c.Assert(err, qt.IsNil)
+		err = testDB.InsertVerificationCode(testVerification(userID, sealedCode2, CodeTypePasswordSetup, exp))
+		c.Assert(err, qt.Equals, ErrConflict)
+		unchanged, err := testDB.UserVerificationCode(user, CodeTypePasswordSetup)
+		c.Assert(err, qt.IsNil)
+		c.Assert(unchanged.SealedCode, qt.DeepEquals, sealedCode)
+
+		// a different code type for the same user is independent
+		err = testDB.InsertVerificationCode(testVerification(userID, sealedCode, CodeTypePasswordReset, exp))
+		c.Assert(err, qt.IsNil)
+	})
 }

@@ -41,8 +41,8 @@ const certGatewayPublicKeysKey = "cert_gateway_public_keys"
 
 // environmentLabels are the deployment environments (VOCDONI_ENVIRONMENT, named as
 // OpenTelemetry's deployment.environment.name) and the name each one shows users;
-// production shows none. The environment only labels things: behaviour belongs to
-// its own settings, so staging runs what production runs.
+// production shows none. Besides labelling, it gates one setting: VOCDONI_SMSTESTPREFIXES is
+// refused in production, where a phone-derived OTP would be a public credential.
 var environmentLabels = map[string]string{"development": "DEV", "staging": "STG", "production": ""}
 
 // initViper binds the flags and the VOCDONI_<FLAG> environment variables to v.
@@ -119,6 +119,8 @@ func main() {
 	flag.Bool(disableBlindCSPKey, false, "temporarily stop offering anonymous voting (no new anonymous processes, no blind signing)")
 	flag.String(certGatewayPublicKeysKey, "",
 		"certificate gateway public keys, keyId:base64(ed25519 public key) comma-separated; empty turns certificate voter auth off")
+	flag.String("smsTestPrefixes", "",
+		"comma-separated E.164 prefixes for SMS 2FA e2e tests (dev/staging only; refused in production); OTP = last 6 digits of number")
 	// parse flags
 	flag.Parse()
 	// initialize Viper
@@ -182,6 +184,17 @@ func main() {
 		log.Warnw("unknown environment, using production: use development, staging or production",
 			"environment", environment)
 		environment = "production"
+	}
+
+	smsTestPrefixes, err := notifications.ParseSMSTestPrefixes(viper.GetString("smsTestPrefixes"))
+	if err != nil {
+		log.Fatalf("invalid smsTestPrefixes: %v", err)
+	}
+	if len(smsTestPrefixes) > 0 {
+		if environment == "production" {
+			log.Fatalf("VOCDONI_SMSTESTPREFIXES must not be set in production: phone-derived OTP codes are public")
+		}
+		log.Warnw("SMS test prefixes configured", "count", len(smsTestPrefixes), "prefixes", smsTestPrefixes)
 	}
 
 	// Validate Stripe configuration
@@ -252,6 +265,7 @@ func main() {
 		DisableBlindCSP:                viper.GetBool(disableBlindCSPKey),
 		CertGatewayKeys:                certGatewayKeys,
 		VoterRefSecret:                 secret,
+		SMSTestPrefixes:                smsTestPrefixes,
 	}
 
 	// overwrite the email notifications service with the SMTP service if the
@@ -334,6 +348,14 @@ func main() {
 			"verifyService", twilioVerifyServiceSID, "directPrefixes", smsConf.DirectPrefixes, "statusCallback", smsConf.StatusCallbackURL)
 		if smsCanaryNumber != "" {
 			smsCanary = func(ctx context.Context) { sms.RunCanary(ctx, smsCanaryNumber, smsCanaryInterval) }
+		}
+	}
+	// wrap the CSP SMS service with the test-prefix interceptor; leave apiConf.SMSService and the
+	// canary on the real provider so delivery checks still reach a real phone
+	if len(smsTestPrefixes) > 0 {
+		cspConf.SMSService = &notifications.SMSTestPrefixService{
+			Prefixes: smsTestPrefixes,
+			Next:     cspConf.SMSService,
 		}
 	}
 

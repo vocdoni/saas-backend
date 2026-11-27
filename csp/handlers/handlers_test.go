@@ -103,19 +103,217 @@ func TestHandlePhoneContact(t *testing.T) {
 	t.Run(org.Country, func(*testing.T) { test(org, "+34612345601", "+34612345601") })
 }
 
-func TestUnvotableElectionEndDate(t *testing.T) {
+// electionGrid is every question status crossed with the process date situations, each tagged
+// with the reason it must produce. base is the clock the dates are built around, margin the
+// distance kept from every boundary.
+func electionGrid(base time.Time, margin time.Duration) []struct {
+	name   string
+	vp     *db.VotingProcess
+	q      *db.VotingProcessQuestion
+	reason VoteReason
+} {
+	type dates struct {
+		name       string
+		start, end time.Time
+		notStarted bool
+		ended      bool
+	}
+	ds := []dates{
+		{name: "no dates"},
+		{name: "starts at the grace", start: base.Add(startGrace - margin)},
+		{name: "not started", start: base.Add(startGrace + margin), notStarted: true},
+		{name: "ends at the grace", end: base.Add(-endGrace + margin)},
+		{name: "ended", end: base.Add(-endGrace - margin), ended: true},
+	}
+	var out []struct {
+		name   string
+		vp     *db.VotingProcess
+		q      *db.VotingProcessQuestion
+		reason VoteReason
+	}
+	for _, status := range []string{
+		db.QuestionStatusReady, db.QuestionStatusPaused, db.QuestionStatusEnded,
+		db.QuestionStatusResults, db.QuestionStatusCanceled, "", "BOGUS",
+	} {
+		for _, d := range ds {
+			var want VoteReason
+			switch {
+			case status == db.QuestionStatusCanceled:
+				want = VoteReasonCanceled
+			case status == db.QuestionStatusEnded, status == db.QuestionStatusResults, d.ended:
+				want = VoteReasonClosed
+			case d.notStarted:
+				want = VoteReasonNotStarted
+			case status != db.QuestionStatusReady:
+				want = VoteReasonPaused
+			default:
+				want = ""
+			}
+			out = append(out, struct {
+				name   string
+				vp     *db.VotingProcess
+				q      *db.VotingProcessQuestion
+				reason VoteReason
+			}{
+				name:   status + "/" + d.name,
+				vp:     &db.VotingProcess{StartDate: d.start, EndDate: d.end},
+				q:      &db.VotingProcessQuestion{Status: status},
+				reason: want,
+			})
+		}
+	}
+	return out
+}
+
+func TestElectionStateReason(t *testing.T) {
+	now := time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
+	for _, tc := range electionGrid(now, time.Nanosecond) {
+		t.Run(tc.name, func(t *testing.T) {
+			c := qt.New(t)
+			c.Assert(electionStateReason(tc.vp, tc.q, now), qt.Equals, tc.reason)
+		})
+	}
+	// exactly on each grace boundary: the start is already open, the end is already closed
 	c := qt.New(t)
-	q := &db.VotingProcessQuestion{Status: db.QuestionStatusReady}
-	// qt.IsNil rejects a typed-nil *errors.Error (it implements error), so compare the pointer.
-	c.Assert(unvotableElection(&db.VotingProcess{}, q), qt.Equals, (*errors.Error)(nil))
-	c.Assert(unvotableElection(&db.VotingProcess{EndDate: time.Now().Add(time.Hour)}, q),
-		qt.Equals, (*errors.Error)(nil))
-	// within endGrace of the stored end the chain may still be open: signing goes on
-	c.Assert(unvotableElection(&db.VotingProcess{EndDate: time.Now().Add(-time.Second)}, q),
-		qt.Equals, (*errors.Error)(nil))
-	ended := unvotableElection(&db.VotingProcess{EndDate: time.Now().Add(-endGrace - time.Second)}, q)
-	c.Assert(ended, qt.Not(qt.Equals), (*errors.Error)(nil))
-	c.Assert(ended.Error(), qt.Contains, "process has ended")
+	ready := &db.VotingProcessQuestion{Status: db.QuestionStatusReady}
+	c.Assert(electionStateReason(&db.VotingProcess{StartDate: now.Add(startGrace)}, ready, now), qt.Equals, VoteReason(""))
+	c.Assert(electionStateReason(&db.VotingProcess{EndDate: now.Add(-endGrace)}, ready, now), qt.Equals, VoteReasonClosed)
+}
+
+func TestUnvotableElectionMatchesState(t *testing.T) {
+	// unvotableElection reads the clock itself, so keep a margin around every boundary
+	for _, tc := range electionGrid(time.Now(), 5*time.Second) {
+		t.Run(tc.name, func(t *testing.T) {
+			c := qt.New(t)
+			votable := unvotableElection(tc.vp, tc.q) == (*errors.Error)(nil)
+			c.Assert(votable, qt.Equals, electionStateReason(tc.vp, tc.q, time.Now()) == "")
+		})
+	}
+	c := qt.New(t)
+	past, future := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
+	ready := &db.VotingProcessQuestion{Status: db.QuestionStatusReady}
+	paused := &db.VotingProcessQuestion{Status: db.QuestionStatusPaused}
+	for _, tc := range []struct {
+		name string
+		vp   *db.VotingProcess
+		q    *db.VotingProcessQuestion
+		want string
+	}{
+		{"paused and not started", &db.VotingProcess{StartDate: future}, paused, "question is not open for voting"},
+		{"paused and ended", &db.VotingProcess{EndDate: past}, paused, "question is not open for voting"},
+		{"ready and not started", &db.VotingProcess{StartDate: future}, ready, "process has not started yet"},
+		{
+			"ready, future start, past end", &db.VotingProcess{StartDate: future, EndDate: past}, ready,
+			"process has not started yet",
+		},
+		{"ready and ended", &db.VotingProcess{EndDate: past}, ready, "process has ended"},
+	} {
+		err := unvotableElection(tc.vp, tc.q)
+		c.Assert(err, qt.Not(qt.Equals), (*errors.Error)(nil), qt.Commentf(tc.name))
+		c.Assert(err.Error(), qt.Contains, tc.want, qt.Commentf(tc.name))
+	}
+}
+
+func TestSignatureBudgetSpent(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		row       *db.CSPProcess
+		anonymous bool
+		want      bool
+	}{
+		{"nil ecdsa", nil, false, false},
+		{"nil blind", nil, true, false},
+		{"blind unused", &db.CSPProcess{}, true, false},
+		{"blind used", &db.CSPProcess{Used: true}, true, true},
+		{"blind ignores times voted", &db.CSPProcess{TimesVoted: db.MaxCSPSignaturesPerElection}, true, false},
+		{"ecdsa below limit", &db.CSPProcess{TimesVoted: db.MaxCSPSignaturesPerElection - 1}, false, false},
+		{"ecdsa at limit", &db.CSPProcess{TimesVoted: db.MaxCSPSignaturesPerElection}, false, true},
+		{"ecdsa ignores used", &db.CSPProcess{Used: true, TimesVoted: 1}, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			qt.New(t).Assert(signatureBudgetSpent(tc.row, tc.anonymous), qt.Equals, tc.want)
+		})
+	}
+}
+
+func TestVoteReason(t *testing.T) {
+	open := voteReasonInput{inCensus: true, eligible: true, published: true}
+	with := func(f func(*voteReasonInput)) voteReasonInput {
+		in := open
+		f(&in)
+		return in
+	}
+	for _, tc := range []struct {
+		name string
+		in   voteReasonInput
+		want VoteReason
+	}{
+		{"all clear", open, ""},
+		{"not in census", with(func(i *voteReasonInput) { i.inCensus = false }), VoteReasonNotInCensus},
+		{"not eligible", with(func(i *voteReasonInput) { i.eligible = false }), VoteReasonNotEligible},
+		{"zero weight", with(func(i *voteReasonInput) { i.zeroWeight = true }), VoteReasonZeroWeight},
+		{"not published", with(func(i *voteReasonInput) { i.published = false }), VoteReasonNotPublished},
+		{"canceled", with(func(i *voteReasonInput) { i.state = VoteReasonCanceled }), VoteReasonCanceled},
+		{"closed", with(func(i *voteReasonInput) { i.state = VoteReasonClosed }), VoteReasonClosed},
+		{"budget", with(func(i *voteReasonInput) { i.budgetSpent = true }), VoteReasonSignatureLimitReached},
+		{"not started", with(func(i *voteReasonInput) { i.state = VoteReasonNotStarted }), VoteReasonNotStarted},
+		{"paused", with(func(i *voteReasonInput) { i.state = VoteReasonPaused }), VoteReasonPaused},
+		{"unavailable", with(func(i *voteReasonInput) { i.unavailable = true }), VoteReasonUnavailable},
+		{"not eligible beats canceled", with(func(i *voteReasonInput) {
+			i.eligible, i.state = false, VoteReasonCanceled
+		}), VoteReasonNotEligible},
+		{"not in census beats not eligible", with(func(i *voteReasonInput) {
+			i.inCensus, i.eligible = false, false
+		}), VoteReasonNotInCensus},
+		{"canceled beats budget", with(func(i *voteReasonInput) {
+			i.state, i.budgetSpent = VoteReasonCanceled, true
+		}), VoteReasonCanceled},
+		{"budget beats paused", with(func(i *voteReasonInput) {
+			i.state, i.budgetSpent = VoteReasonPaused, true
+		}), VoteReasonSignatureLimitReached},
+		{"budget beats not started", with(func(i *voteReasonInput) {
+			i.state, i.budgetSpent = VoteReasonNotStarted, true
+		}), VoteReasonSignatureLimitReached},
+		{"paused beats unavailable", with(func(i *voteReasonInput) {
+			i.state, i.unavailable = VoteReasonPaused, true
+		}), VoteReasonPaused},
+		{"not published beats paused", with(func(i *voteReasonInput) {
+			i.published, i.state = false, VoteReasonPaused
+		}), VoteReasonNotPublished},
+		{"process ended beats zero weight", with(func(i *voteReasonInput) {
+			i.processEnded, i.zeroWeight = true, true
+		}), VoteReasonClosed},
+		{"process ended beats not published", with(func(i *voteReasonInput) {
+			i.processEnded, i.published = true, false
+		}), VoteReasonClosed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			qt.New(t).Assert(voteReason(tc.in), qt.Equals, tc.want)
+		})
+	}
+}
+
+// TestCanVoteReason pins that reason explains canVote: false gives one of the three eligibility
+// reasons, true never does, so clients can read reason against canVote first, votableNow second.
+func TestCanVoteReason(t *testing.T) {
+	c := qt.New(t)
+	states := []VoteReason{"", VoteReasonCanceled, VoteReasonClosed, VoteReasonNotStarted, VoteReasonPaused}
+	for bits := range 1 << 7 {
+		for _, state := range states {
+			in := voteReasonInput{
+				inCensus: bits&1 != 0, eligible: bits&2 != 0, processEnded: bits&4 != 0, zeroWeight: bits&8 != 0,
+				published: bits&16 != 0, budgetSpent: bits&32 != 0, unavailable: bits&64 != 0, state: state,
+			}
+			reason := voteReason(in)
+			if canVote(in) {
+				c.Assert(reason, qt.Not(qt.Equals), VoteReasonNotInCensus, qt.Commentf("%+v", in))
+				c.Assert(reason, qt.Not(qt.Equals), VoteReasonNotEligible, qt.Commentf("%+v", in))
+				continue
+			}
+			c.Assert([]VoteReason{VoteReasonNotInCensus, VoteReasonNotEligible, VoteReasonClosed},
+				qt.Contains, reason, qt.Commentf("%+v", in))
+		}
+	}
 }
 
 // TestMemberPasswordMatches covers the password check behind auth step 0: it matches the stored

@@ -164,8 +164,11 @@ func (a *API) walletHandler(w http.ResponseWriter, r *http.Request) {
 //	@Description	403 (40181) for a managed organization. 404 (40185) for a row that is not a top-up,
 //	@Description	a row of another wallet or an unknown id (the two are indistinguishable), and a
 //	@Description	top-up whose invoice is not available yet: Stripe attaches and renders it shortly
-//	@Description	after the payment that credited the top-up, so try again in a moment. The file is
-//	@Description	named after the invoice number.
+//	@Description	after the payment that credited the top-up, so try again in a moment. Also 404 for a
+//	@Description	top-up credited for money received whose invoice has not been issued yet (it is
+//	@Description	issued later, up to the 15th of the next month), and for a top-up invoiced outside
+//	@Description	the platform (by hand), which has no invoice to serve. The file
+//	@Description	is named after the invoice number.
 //	@Tags			organizations
 //	@Produce		application/pdf
 //	@Security		BearerAuth
@@ -175,7 +178,7 @@ func (a *API) walletHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		400			{object}	errors.Error	"Invalid row id"
 //	@Failure		401			{object}	errors.Error
 //	@Failure		403			{object}	errors.Error	"Managed organization, or an API key of another organization"
-//	@Failure		404			{object}	errors.Error	"No such movement, or its invoice is not available yet"
+//	@Failure		404			{object}	errors.Error	"No such movement, no invoice yet or not issued yet, or invoiced outside the platform"
 //	@Failure		500			{object}	errors.Error	"Stripe failure"
 //	@Router			/organizations/{orgAddress}/wallet/history/{entryId}/invoice [get]
 func (a *API) walletInvoiceHandler(w http.ResponseWriter, r *http.Request) {
@@ -208,6 +211,14 @@ func (a *API) walletInvoiceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pdf, err := a.paymentGW.TopUpInvoicePDF(entry.IdempotencyKey)
+	if errors.Is(err, stripe.ErrExternalInvoice) {
+		errors.ErrWalletInvoiceNotFound.Withf("this top-up was invoiced outside the platform").Write(w)
+		return
+	}
+	if errors.Is(err, stripe.ErrInvoicePending) {
+		errors.ErrWalletInvoiceNotFound.Withf("the invoice of this top-up has not been issued yet").Write(w)
+		return
+	}
 	if errors.Is(err, stripe.ErrNoInvoice) {
 		errors.ErrWalletInvoiceNotFound.Withf("the invoice of this top-up is not available yet, try again in a moment").Write(w)
 		return

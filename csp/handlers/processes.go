@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	stderrors "errors"
-	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -73,8 +73,40 @@ const startGrace = time.Minute
 const endGrace = time.Minute
 
 // processEnded reports whether the process is past its end (plus endGrace), when it has one.
-func processEnded(vp *db.VotingProcess) bool {
-	return !vp.EndDate.IsZero() && !time.Now().Before(vp.EndDate.Add(endGrace))
+func processEnded(vp *db.VotingProcess, now time.Time) bool {
+	return !vp.EndDate.IsZero() && !now.Before(vp.EndDate.Add(endGrace))
+}
+
+// processNotStarted reports whether the process start (minus startGrace) is still ahead.
+func processNotStarted(vp *db.VotingProcess, now time.Time) bool {
+	// publish always persists a StartDate, while EndDate is optional.
+	return !vp.StartDate.IsZero() && now.Add(startGrace).Before(vp.StartDate)
+}
+
+// knownQuestionStatus reports whether status is one electionStateReason decides on purpose.
+func knownQuestionStatus(status string) bool {
+	switch status {
+	case db.QuestionStatusReady, db.QuestionStatusPaused, db.QuestionStatusEnded,
+		db.QuestionStatusCanceled, db.QuestionStatusResults:
+		return true
+	}
+	return false
+}
+
+// electionStateReason is the single rule for whether a question's election accepts a signature
+// at now, shared by signing and /check. It returns "" when it does.
+func electionStateReason(vp *db.VotingProcess, q *db.VotingProcessQuestion, now time.Time) VoteReason {
+	switch {
+	case q.Status == db.QuestionStatusCanceled:
+		return VoteReasonCanceled
+	case q.Status == db.QuestionStatusEnded, q.Status == db.QuestionStatusResults, processEnded(vp, now):
+		return VoteReasonClosed
+	case processNotStarted(vp, now):
+		return VoteReasonNotStarted
+	case q.Status != db.QuestionStatusReady:
+		return VoteReasonPaused
+	}
+	return ""
 }
 
 // unvotableElection returns the 401 to write when the question's election does not currently
@@ -84,17 +116,75 @@ func processEnded(vp *db.VotingProcess) bool {
 // expiry, so a voter could otherwise bank one against a paused election and spend it the moment the
 // chain opens.
 func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *errors.Error {
-	if q.Status != db.QuestionStatusReady {
+	now := time.Now()
+	if electionStateReason(vp, q, now) == "" {
+		return nil
+	}
+	// messages follow status, start, end order, not /check's precedence, so signing
+	// responses stay unchanged
+	switch {
+	case q.Status != db.QuestionStatusReady:
 		return errors.Ptr(errors.ErrUnauthorized.Withf("question is not open for voting"))
-	}
-	// publish always persists a StartDate, while EndDate is optional.
-	if !vp.StartDate.IsZero() && time.Now().Add(startGrace).Before(vp.StartDate) {
+	case processNotStarted(vp, now):
 		return errors.Ptr(errors.ErrUnauthorized.Withf("process has not started yet"))
-	}
-	if processEnded(vp) {
+	default:
 		return errors.Ptr(errors.ErrUnauthorized.Withf("process has ended"))
 	}
-	return nil
+}
+
+// signatureBudgetSpent reports whether the voter has no signature left for the question: a blind
+// census grants exactly one, an ECDSA one db.MaxCSPSignaturesPerElection.
+func signatureBudgetSpent(row *db.CSPProcess, anonymous bool) bool { //nolint:revive // census mode, not a control flag
+	if row == nil {
+		return false
+	}
+	if anonymous {
+		return row.Used
+	}
+	return row.TimesVoted >= db.MaxCSPSignaturesPerElection
+}
+
+// voteReasonInput is what /check knows about one question for one voter.
+type voteReasonInput struct {
+	inCensus     bool
+	eligible     bool
+	processEnded bool
+	zeroWeight   bool
+	published    bool
+	state        VoteReason // from electionStateReason
+	budgetSpent  bool
+	unavailable  bool
+}
+
+// canVote is /check's canVote. It shares voteReason's first three rules, so whenever it is
+// false the reason explains it: not_in_census, not_eligible or closed.
+func canVote(in voteReasonInput) bool {
+	return in.inCensus && in.eligible && !in.processEnded
+}
+
+// voteReason applies /check's precedence: permanent reasons before temporary ones.
+func voteReason(in voteReasonInput) VoteReason {
+	switch {
+	case !in.inCensus:
+		return VoteReasonNotInCensus
+	case !in.eligible:
+		return VoteReasonNotEligible
+	case in.processEnded:
+		return VoteReasonClosed
+	case in.zeroWeight:
+		return VoteReasonZeroWeight
+	case !in.published:
+		return VoteReasonNotPublished
+	case in.state == VoteReasonCanceled, in.state == VoteReasonClosed:
+		return in.state
+	case in.budgetSpent:
+		return VoteReasonSignatureLimitReached
+	case in.state != "":
+		return in.state
+	case in.unavailable:
+		return VoteReasonUnavailable
+	}
+	return ""
 }
 
 // ProcessAuthHandler godoc
@@ -134,7 +224,7 @@ func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *error
 //	@Param			step		path		string					true	"Authentication step (0 or 1)"
 //	@Param			request		body		handlers.AuthRequest	true	"Step 0 body; step 1 uses AuthChallengeRequest (see description)"
 //	@Success		200			{object}	handlers.AuthResponse
-//	@Failure		400			{object}	errors.Error	"Invalid input data, attempt or send limit (40017), or anonymous voting unavailable"
+//	@Failure		400			{object}	errors.Error	"Bad input, send limit (40017), no anonymous voting, or no SMS/email provider (40025)"
 //	@Failure		401			{object}	errors.Error	"Invalid authentication data, cooldown not reached, or invalid challenge"
 //	@Failure		404			{object}	errors.Error	"Process, census, or organization not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
@@ -177,7 +267,7 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 //	@Param			processId	path		string						true	"Process ID"
 //	@Param			request		body		handlers.AuthResendRequest	true	"Resend request with auth token and contact data"
 //	@Success		200			{object}	handlers.AuthResponse
-//	@Failure		400			{object}	errors.Error	"Malformed body, missing token, invalid contact, verified token, or resend limit (40017)"
+//	@Failure		400			{object}	errors.Error	"Bad body/token/contact, verified token, limit (40017), or no SMS/email provider (40025)"
 //	@Failure		401			{object}	errors.Error	"Invalid/expired token, token not belonging to the process, or contact mismatch"
 //	@Failure		404			{object}	errors.Error	"Census or organization not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
@@ -994,6 +1084,14 @@ func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Reques
 //	@Description	is always false, since the CSP never learns the voting address: hasSigned is the only
 //	@Description	signal. When the chain cannot be asked about a signed question the call fails with 500
 //	@Description	rather than report the vote as missing.
+//	@Description	Per question, canVote means eligible: in the census, in the question's eligibility list,
+//	@Description	and the process has not ended; it ignores pause, start date, weight and signature budget.
+//	@Description	votableNow is true when a sign request made now with this token would pass every
+//	@Description	authorization check; otherwise reason says why. Show a generic message for a reason you do
+//	@Description	not know, and treat an absent votableNow (older backend) as unknown, not false.
+//	@Description	Sign through sign-batch, or blind-point for an anonymous census. A sign
+//	@Description	attempt can still fail for per-attempt outcomes (already_signing, address_mismatch,
+//	@Description	auth_invalid, blind-round errors).
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -1033,6 +1131,7 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 		errors.ErrUnauthorized.WithErr(csp.ErrAuthTokenNotVerified).Write(w)
 		return
 	}
+	now := time.Now()
 	memberID := auth.UserID.String()
 	resp := &ProcessCheckResponse{}
 	if _, err := c.mainDB.CensusParticipant(vp.CensusID.Hex(), memberID); err == nil {
@@ -1041,13 +1140,32 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	if member, err := c.orgMember(vp.OrgAddress, auth); err == nil {
+	member, mErr := c.orgMember(vp.OrgAddress, auth)
+	memberFound := mErr == nil
+	if mErr != nil && !errors.Is(mErr, db.ErrNotFound) && !errors.Is(mErr, db.ErrInvalidData) {
+		errors.ErrGenericInternalServerError.WithErr(mErr).Write(w)
+		return
+	}
+	var zeroWeight, anonymous, unavailable bool
+	if memberFound {
 		census, cErr := c.mainDB.Census(vp.CensusID.Hex())
+		switch {
+		case errors.Is(cErr, db.ErrNotFound), errors.Is(cErr, db.ErrInvalidData):
+			errors.ErrCensusNotFound.WithErr(cErr).Write(w)
+			return
+		case cErr != nil:
+			// a DB hiccup is not "no census": clients must retry, not give up
+			errors.ErrGenericInternalServerError.WithErr(cErr).Write(w)
+			return
+		}
 		weight := uint64(1)
-		if cErr == nil && census.Weighted {
+		if census.Weighted {
 			weight = member.Weight
 		}
 		resp.Weight = weightBytes(weight)
+		zeroWeight = census.Weighted && member.Weight == 0
+		anonymous = census.Anonymous
+		unavailable = c.anonymousCensusRefused(census)
 	}
 	questions, err := c.mainDB.QuestionsByProcess(oid)
 	if err != nil {
@@ -1058,14 +1176,7 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 	rows := make([]*db.CSPProcess, len(questions))
 	for i := range questions {
 		q := &questions[i]
-		resp.Questions[i] = ProcessQuestionStatus{
-			QuestionID: q.ID.Hex(),
-			UpstreamID: q.UpstreamID,
-			// a voter can only vote a question if they are a participant of the process
-			// census AND fall within the question's eligibility subset, and not once the process
-			// has ended (the CSP no longer signs then)
-			CanVote: resp.BelongsToProcess && memberEligibleForQuestion(q, memberID) && !processEnded(vp),
-		}
+		resp.Questions[i] = ProcessQuestionStatus{QuestionID: q.ID.Hex(), UpstreamID: q.UpstreamID}
 		if len(q.UpstreamID) == 0 {
 			continue // question not yet on chain
 		}
@@ -1079,6 +1190,29 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
+	}
+	// an unknown status reads as paused below; warn once per call so it gets noticed
+	if i := slices.IndexFunc(questions, func(q db.VotingProcessQuestion) bool {
+		return len(q.UpstreamID) > 0 && !knownQuestionStatus(q.Status)
+	}); i >= 0 {
+		log.Warnw("unexpected question status", "processId", oid.Hex(),
+			"questionId", questions[i].ID.Hex(), "status", questions[i].Status)
+	}
+	for i := range questions {
+		q := &questions[i]
+		in := voteReasonInput{
+			inCensus:     resp.BelongsToProcess && memberFound,
+			eligible:     memberEligibleForQuestion(q, memberID),
+			processEnded: processEnded(vp, now),
+			zeroWeight:   zeroWeight,
+			published:    len(q.UpstreamID) > 0,
+			state:        electionStateReason(vp, q, now),
+			budgetSpent:  signatureBudgetSpent(rows[i], anonymous),
+			unavailable:  unavailable,
+		}
+		resp.Questions[i].CanVote = canVote(in)
+		resp.Questions[i].Reason = voteReason(in)
+		resp.Questions[i].VotableNow = resp.Questions[i].Reason == ""
 	}
 	// one goroutine per signed question (at most db.MaxBallotsPerBatch); only uncached,
 	// non-blind rows reach the chain, and the lookup bounds node reads across requests. Each
@@ -1127,11 +1261,7 @@ func (c *CSPHandlers) orgMemberFromAuth(
 
 // orgMember resolves the org member referenced by an auth token (member ObjectID hex).
 func (c *CSPHandlers) orgMember(orgAddress common.Address, auth *db.CSPAuth) (*db.OrgMember, error) {
-	oid, err := bson.ObjectIDFromHex(auth.UserID.String())
-	if err != nil {
-		return nil, fmt.Errorf("invalid user ID in token: %w", err)
-	}
-	return c.mainDB.OrgMember(orgAddress, oid.Hex())
+	return c.mainDB.OrgMember(orgAddress, auth.UserID.String())
 }
 
 // orgNameAndLogo returns the organization display name and logo, falling back to defaults.

@@ -192,10 +192,46 @@ type ProcessCheckResponse struct {
 type ProcessQuestionStatus struct {
 	QuestionID string            `json:"questionId"`
 	UpstreamID internal.HexBytes `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
-	CanVote    bool              `json:"canVote"`
-	HasSigned  bool              `json:"hasSigned"`
-	HasVoted   bool              `json:"hasVoted"`
+	// CanVote means eligible: in the census, in the question's eligibility list, and the process
+	// has not ended. It ignores pause, start date, weight and signature budget. When it is false,
+	// Reason is not_in_census, not_eligible or closed.
+	CanVote bool `json:"canVote"`
+	// VotableNow is true when a sign request for this question, made now with this token, would
+	// pass every authorization check the CSP runs; Reason says why not otherwise.
+	VotableNow bool `json:"votableNow"`
+	// Reason is set only when VotableNow is false; the first matching value wins, permanent before temporary.
+	// paused covers an unknown status; closed covers a process past its end. unavailable means anonymous voting
+	// is temporarily off on this server; signature_limit_reached means the voter has no signature left (one for a blind census).
+	Reason    VoteReason `json:"reason,omitempty"`
+	HasSigned bool       `json:"hasSigned"`
+	HasVoted  bool       `json:"hasVoted"`
 }
+
+// VoteReason says why a question cannot be voted right now.
+type VoteReason string
+
+const (
+	// VoteReasonNotInCensus means the voter is not in the process census.
+	VoteReasonNotInCensus VoteReason = "not_in_census"
+	// VoteReasonNotEligible means the question's eligibility list excludes the voter.
+	VoteReasonNotEligible VoteReason = "not_eligible"
+	// VoteReasonZeroWeight means the voter's weight in a weighted census is zero.
+	VoteReasonZeroWeight VoteReason = "zero_weight"
+	// VoteReasonNotPublished means the question is not on chain yet.
+	VoteReasonNotPublished VoteReason = "not_published"
+	// VoteReasonCanceled means the question was canceled.
+	VoteReasonCanceled VoteReason = "canceled"
+	// VoteReasonClosed means the question ended or the process is past its end.
+	VoteReasonClosed VoteReason = "closed"
+	// VoteReasonSignatureLimitReached means the voter spent the question's signature budget.
+	VoteReasonSignatureLimitReached VoteReason = "signature_limit_reached"
+	// VoteReasonNotStarted means the process has not started yet.
+	VoteReasonNotStarted VoteReason = "not_started"
+	// VoteReasonPaused means the question is not open (paused).
+	VoteReasonPaused VoteReason = "paused"
+	// VoteReasonUnavailable means anonymous voting is temporarily switched off on this server.
+	VoteReasonUnavailable VoteReason = "unavailable"
+)
 
 // ConsumedAddressRequest defines the payload for the request to get the
 // if a token was used and which address was used. It includes the

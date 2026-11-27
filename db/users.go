@@ -337,6 +337,43 @@ func (ms *MongoStorage) UpdateUserPassword(userID uint64, hashedPassword string)
 	})
 }
 
+// SetUserInitialPassword method sets the first password of a password-less (OAuth-only) user and, in
+// the same atomic update, bumps the session version. The update only matches while the stored password
+// is still empty, so concurrent setups cannot both win; otherwise it returns ErrConflict.
+func (ms *MongoStorage) SetUserInitialPassword(userID uint64, hashedPassword string) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	// the users schema requires the password field, so password-less accounts store it empty
+	filter := bson.M{"_id": userID, "password": ""}
+	res, err := ms.users.UpdateOne(ctx, filter, bson.M{
+		"$set": bson.M{"password": hashedPassword},
+		"$inc": bson.M{"sessionVersion": 1},
+	})
+	if err != nil {
+		return err
+	}
+	if res.MatchedCount == 0 {
+		return ErrConflict
+	}
+	return nil
+}
+
+// ResetUserPassword method sets the password of the user with the given ID after a mailed reset code
+// was redeemed: the code proved mailbox ownership, so the same atomic update also marks the account
+// verified and bumps the session version, revoking every existing session.
+func (ms *MongoStorage) ResetUserPassword(userID uint64, hashedPassword string) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	return ms.updateUserFields(ctx, userID, bson.M{
+		"$set": bson.M{"password": hashedPassword, "verified": true},
+		"$inc": bson.M{"sessionVersion": 1},
+	})
+}
+
 // UpdateUserEmail method sets the email of the user with the given ID and, in the
 // same atomic update, bumps the session version so every existing JWT session is
 // revoked. It returns ErrAlreadyExists when the email is already taken (unique
