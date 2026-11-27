@@ -742,11 +742,14 @@ func (c *CSP) VerifyAuthToken(token internal.HexBytes, solution string) error {
 			"error", err)
 		return ErrInvalidAuthToken
 	}
+	// a code locked by failed attempts has its secret dropped, but still answers as locked
+	locked := authTokenData.Secret == "" && len(authTokenData.VerifiedBy) == 0 &&
+		authTokenData.Attempts >= MaxChallengeAttempts
 	// reject tokens whose code has no secret: auth-only grants, and codes already solved through
 	// this token or another one. An OTP derived from an empty secret would be trivially guessable.
 	// ErrTokenExpired prompts the client to restart the OTP flow rather than treating it as a hard
 	// failure.
-	if authTokenData.Verified || authTokenData.Secret == "" {
+	if authTokenData.Verified || (authTokenData.Secret == "" && !locked) {
 		log.Warnw("verification attempted for token without challenge secret",
 			"userID", authTokenData.UserID,
 			"anchorID", authTokenData.AnchorID,

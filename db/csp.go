@@ -391,9 +391,10 @@ func (ms *MongoStorage) LastCSPAuth(userID, anchorID internal.HexBytes) (*CSPAut
 }
 
 // VerifyCSPAuth marks the token's code as solved by that token, in one update that also clears the
-// code's secret, so the code cannot be solved again through any of its tokens. A code issued with
-// a secret only verifies while it still has it. It returns ErrChallengeConsumed when the code is
-// already solved, and ErrTokenNotFound when no code has the token.
+// code's secret, so the code cannot be solved again through any of its tokens. Setting verifiedby
+// also takes the code out of the TTL index on unverified codes, so signing never loses it. A code
+// issued with a secret only verifies while it still has it. It returns ErrChallengeConsumed when
+// the code is already solved, and ErrTokenNotFound when no code has the token.
 func (ms *MongoStorage) VerifyCSPAuth(token internal.HexBytes) error {
 	if token == nil {
 		return ErrBadInputs
@@ -428,9 +429,11 @@ func (ms *MongoStorage) VerifyCSPAuth(token internal.HexBytes) error {
 // maxAttempts. It returns recorded=true when the attempt was counted, and
 // recorded=false when the cap had already been reached (no increment performed)
 // — this is done in a single conditional update so concurrent verifications
-// cannot push the counter past maxAttempts. It returns ErrTokenNotFound if the
-// token does not exist and ErrBadInputs if the token is nil. It returns
-// ErrChallengeConsumed when the code was solved meanwhile.
+// cannot push the counter past maxAttempts. The attempt that reaches the cap
+// locks the code and drops its secret in the same update: the caller already
+// holds the secret to check that last attempt, and nothing else needs it. It
+// returns ErrTokenNotFound if the token does not exist and ErrBadInputs if the
+// token is nil. It returns ErrChallengeConsumed when the code was solved meanwhile.
 func (ms *MongoStorage) IncrementCSPAuthAttempts(token internal.HexBytes, maxAttempts int) (recorded bool, err error) {
 	if token == nil {
 		return false, ErrBadInputs
@@ -440,9 +443,13 @@ func (ms *MongoStorage) IncrementCSPAuthAttempts(token internal.HexBytes, maxAtt
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// conditional increment: only bump attempts while still below the cap
+	attempts := bson.M{"$add": bson.A{"$attempts", 1}}
 	res, err := ms.cspTokens.UpdateOne(ctx,
 		bson.M{"tokens.id": token, "secret": bson.M{"$exists": true}, "attempts": bson.M{"$lt": maxAttempts}},
-		bson.M{"$inc": bson.M{"attempts": 1}})
+		mongo.Pipeline{{{Key: "$set", Value: bson.M{
+			"attempts": attempts,
+			"secret":   bson.M{"$cond": bson.A{bson.M{"$gte": bson.A{attempts, maxAttempts}}, "$$REMOVE", "$secret"}},
+		}}}})
 	if err != nil {
 		return false, errors.Join(ErrStoreToken, err)
 	}
@@ -454,7 +461,7 @@ func (ms *MongoStorage) IncrementCSPAuthAttempts(token internal.HexBytes, maxAtt
 	if err != nil {
 		return false, err
 	}
-	if tokenData.Secret == "" {
+	if tokenData.Secret == "" && (len(tokenData.VerifiedBy) > 0 || tokenData.Attempts < maxAttempts) {
 		return false, ErrChallengeConsumed
 	}
 	return false, nil
