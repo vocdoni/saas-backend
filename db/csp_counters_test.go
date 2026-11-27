@@ -26,15 +26,9 @@ func TestCSPCounterWindows(t *testing.T) {
 	c.Assert(currentCSPCounterBucket(CSPCounterAuthFailures, key, now.Add(18*time.Minute)).id,
 		qt.Not(qt.DeepEquals), auth.id)
 
-	// challenge sends stay daily, aligned to midnight UTC
-	c.Assert(CSPCounterWindow(CSPCounterChallengeSends), qt.Equals, 24*time.Hour)
-	sends := currentCSPCounterBucket(CSPCounterChallengeSends, key, now)
-	c.Assert(sends.resetAt.Equal(time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)), qt.IsTrue)
-	c.Assert(sends.expiry.Equal(time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC)), qt.IsTrue)
-	c.Assert(currentCSPCounterBucket(CSPCounterChallengeSends, key, now.Add(2*time.Hour)).id,
-		qt.DeepEquals, sends.id)
-	c.Assert(currentCSPCounterBucket(CSPCounterChallengeSends, key, now.Add(2*time.Hour+18*time.Minute)).id,
-		qt.Not(qt.DeepEquals), sends.id)
+	// every kind is hourly
+	c.Assert(CSPCounterWindow(CSPCounterVoterAuthFailures), qt.Equals, time.Hour)
+	c.Assert(CSPCounterWindow(CSPCounterCertAssertions), qt.Equals, time.Hour)
 }
 
 func TestClaimCSPCounter(t *testing.T) {
@@ -51,11 +45,11 @@ func TestClaimCSPCounter(t *testing.T) {
 	c.Run("bad inputs", func(c *qt.C) {
 		_, err := testDB.ClaimCSPCounter("", key, 3)
 		c.Assert(err, qt.ErrorIs, ErrBadInputs)
-		_, err = testDB.ClaimCSPCounter(CSPCounterChallengeSends, nil, 3)
+		_, err = testDB.ClaimCSPCounter(CSPCounterCertAssertions, nil, 3)
 		c.Assert(err, qt.ErrorIs, ErrBadInputs)
 		_, err = testDB.CSPCounterReached("", key, 3)
 		c.Assert(err, qt.ErrorIs, ErrBadInputs)
-		_, err = testDB.CSPCounterReached(CSPCounterChallengeSends, nil, 3)
+		_, err = testDB.CSPCounterReached(CSPCounterCertAssertions, nil, 3)
 		c.Assert(err, qt.ErrorIs, ErrBadInputs)
 	})
 
@@ -63,32 +57,32 @@ func TestClaimCSPCounter(t *testing.T) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		const maxClaims = 3
 		for range maxClaims {
-			c.Assert(claim(CSPCounterChallengeSends, maxClaims).Granted, qt.IsTrue)
+			c.Assert(claim(CSPCounterCertAssertions, maxClaims).Granted, qt.IsTrue)
 		}
 		// the cap is reached: no more claims in this window, and the refusal says when it resets
-		refused := claim(CSPCounterChallengeSends, maxClaims)
+		refused := claim(CSPCounterCertAssertions, maxClaims)
 		c.Assert(refused.Granted, qt.IsFalse)
 		c.Assert(refused.Claim, qt.HasLen, 0)
 		c.Assert(refused.ResetAt.After(time.Now()), qt.IsTrue)
-		c.Assert(time.Until(refused.ResetAt) <= 24*time.Hour, qt.IsTrue)
-		reached, err := testDB.CSPCounterReached(CSPCounterChallengeSends, key, maxClaims)
+		c.Assert(time.Until(refused.ResetAt) <= time.Hour, qt.IsTrue)
+		reached, err := testDB.CSPCounterReached(CSPCounterCertAssertions, key, maxClaims)
 		c.Assert(err, qt.IsNil)
 		c.Assert(reached, qt.IsTrue)
 		// a higher max still has budget left
-		reached, err = testDB.CSPCounterReached(CSPCounterChallengeSends, key, maxClaims+1)
+		reached, err = testDB.CSPCounterReached(CSPCounterCertAssertions, key, maxClaims+1)
 		c.Assert(err, qt.IsNil)
 		c.Assert(reached, qt.IsFalse)
 	})
 
 	c.Run("kinds and keys are independent", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
-		c.Assert(claim(CSPCounterChallengeSends, 1).Granted, qt.IsTrue)
+		c.Assert(claim(CSPCounterCertAssertions, 1).Granted, qt.IsTrue)
 		// same key, other kind: untouched
 		reached, err := testDB.CSPCounterReached(CSPCounterAuthFailures, key, 1)
 		c.Assert(err, qt.IsNil)
 		c.Assert(reached, qt.IsFalse)
 		// same kind, other key: untouched
-		reached, err = testDB.CSPCounterReached(CSPCounterChallengeSends, []byte("other-key"), 1)
+		reached, err = testDB.CSPCounterReached(CSPCounterCertAssertions, []byte("other-key"), 1)
 		c.Assert(err, qt.IsNil)
 		c.Assert(reached, qt.IsFalse)
 	})
@@ -109,7 +103,7 @@ func TestClaimCSPCounter(t *testing.T) {
 				if i%2 == 1 {
 					storage = other
 				}
-				res, err := storage.ClaimCSPCounter(CSPCounterChallengeSends, key, maxClaims)
+				res, err := storage.ClaimCSPCounter(CSPCounterCertAssertions, key, maxClaims)
 				c.Check(err, qt.IsNil)
 				if res.Granted {
 					granted.Add(1)
@@ -145,15 +139,15 @@ func TestClaimCSPCounter(t *testing.T) {
 	c.Run("non-positive max disables the counter", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		for _, limit := range []int{0, -1} {
-			res := claim(CSPCounterChallengeSends, limit)
+			res := claim(CSPCounterCertAssertions, limit)
 			c.Assert(res.Granted, qt.IsTrue)
 			c.Assert(res.Claim, qt.HasLen, 0)
-			reached, err := testDB.CSPCounterReached(CSPCounterChallengeSends, key, limit)
+			reached, err := testDB.CSPCounterReached(CSPCounterCertAssertions, key, limit)
 			c.Assert(err, qt.IsNil)
 			c.Assert(reached, qt.IsFalse)
 		}
 		// nothing was written while disabled
-		reached, err := testDB.CSPCounterReached(CSPCounterChallengeSends, key, 1)
+		reached, err := testDB.CSPCounterReached(CSPCounterCertAssertions, key, 1)
 		c.Assert(err, qt.IsNil)
 		c.Assert(reached, qt.IsFalse)
 	})

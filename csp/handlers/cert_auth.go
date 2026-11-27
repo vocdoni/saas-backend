@@ -300,7 +300,7 @@ var base64URLVerifier = regexp.MustCompile(`^[A-Za-z0-9_-]{43,128}$`)
 //     spends the code, and sends the voter through the certificate again. The code and verifier
 //     failures answer the bare ErrCSPAuthFailed.
 //   - a refusal the voter can only wait out (the failed-attempt budget, 40017, and for a census
-//     with 2FA the cooldown and the daily send cap AuthToken applies) leaves the code redeemable.
+//     with 2FA the cooldown and the send backoff AuthToken applies) leaves the code redeemable.
 //     The 2FA checks are a peek (csp.ChallengeSendRefusal): AuthToken enforces them again after
 //     the code is consumed, so a send racing in between can still refuse with the code spent.
 //

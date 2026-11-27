@@ -100,7 +100,11 @@ func main() {
 	flag.Duration("otpCooldown", 0, "min wait between notification requests for the same account (0 = default 60s)")
 	// CSP abuse caps (0 = use built-in defaults, negative = disabled)
 	flag.Int("cspMaxDailySends", 0,
-		"max CSP challenges (new tokens + resends) sent per member and process per day (0 = default 10, negative = unlimited)")
+		"max CSP challenges (new tokens + resends) sent per member and process per rolling 24h (0 = default 15, negative = unlimited)")
+	flag.Duration("cspMaxSendBackoff", 0,
+		"max voter-level wait between CSP challenge sends per member and process (0 = default 1h, negative = no voter-level wait)")
+	flag.Duration("cspSendQuietPeriod", 0,
+		"time without CSP challenge sends after which a member's send backoff resets (0 = cspMaxSendBackoff)")
 	flag.Int("cspMaxHourlyAuthFailures", 0,
 		"max failed CSP step-0 logins per submitted login fields and process per hour (0 = default 10, negative = unlimited)")
 	// CSP notification queue tuning (0 = use built-in defaults)
@@ -236,6 +240,8 @@ func main() {
 		NotificationTTL:                viper.GetDuration("otpExpiry"),
 		NotificationCoolDownTime:       viper.GetDuration("otpCooldown"),
 		MaxDailyChallengeSends:         viper.GetInt("cspMaxDailySends"),
+		MaxSendBackoff:                 viper.GetDuration("cspMaxSendBackoff"),
+		SendQuietPeriod:                viper.GetDuration("cspSendQuietPeriod"),
 		MaxHourlyAuthFailures:          viper.GetInt("cspMaxHourlyAuthFailures"),
 		NotificationQueueWorkers:       viper.GetInt("notificationWorkers"),
 		NotificationQueueTTL:           viper.GetDuration("notificationQueueTTL"),

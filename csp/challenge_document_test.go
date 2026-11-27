@@ -24,8 +24,8 @@ import (
 
 // newChallengeCSP returns a CSP on a fresh database with synchronous delivery, the given cooldown
 // and mail service (nil: none), a code TTL one hour longer than the cooldown, so codes are
-// reusable, and the given daily cap (0: the default).
-func newChallengeCSP(c *qt.C, coolDown time.Duration, mail saasNotifications.NotificationService, daily int) *CSP {
+// reusable, and the given send ceiling (0: the default).
+func newChallengeCSP(c *qt.C, coolDown time.Duration, mail saasNotifications.NotificationService, ceiling int) *CSP {
 	c.Helper()
 	testDB, err := db.New(testMongoURI, test.RandomDatabaseName())
 	c.Assert(err, qt.IsNil)
@@ -35,7 +35,7 @@ func newChallengeCSP(c *qt.C, coolDown time.Duration, mail saasNotifications.Not
 		SMSService:               testSMSService,
 		NotificationCoolDownTime: coolDown,
 		NotificationTTL:          coolDown + time.Hour,
-		MaxDailyChallengeSends:   daily,
+		MaxDailyChallengeSends:   ceiling,
 		RootKey:                  *testRootKey,
 		SyncDelivery:             true,
 	})
@@ -62,13 +62,14 @@ func eventually(c *qt.C, cond func() bool) {
 	c.Fatalf("condition not met within 5s")
 }
 
-// dailySendsLeft reports whether the test user can still be sent a challenge today on the test
-// anchor under a cap of max.
-func dailySendsLeft(c *qt.C, csp *CSP, maxSends int) bool {
-	reached, err := csp.Storage.CSPCounterReached(db.CSPCounterChallengeSends,
-		counterKey(testUserID, testAnchorID), maxSends)
+// backoffSends returns the sends the test user's send backoff on the test anchor holds.
+func backoffSends(c *qt.C, csp *CSP) int {
+	backoff, err := csp.Storage.CSPSendBackoff(counterKey(testUserID, testAnchorID))
 	c.Assert(err, qt.IsNil)
-	return !reached
+	if backoff == nil {
+		return 0
+	}
+	return len(backoff.Sends)
 }
 
 func TestDestinationKey(t *testing.T) {
@@ -98,7 +99,7 @@ func (rejectingMailService) SendNotification(context.Context, *saasNotifications
 
 // newRejectingCSP returns a CSP whose mail provider rejects every message and that has no SMS
 // service, with one queue worker so results are settled in the order the sends were pushed.
-func newRejectingCSP(c *qt.C, daily int) *CSP {
+func newRejectingCSP(c *qt.C, ceiling int) *CSP {
 	c.Helper()
 	testDB, err := db.New(testMongoURI, test.RandomDatabaseName())
 	c.Assert(err, qt.IsNil)
@@ -108,7 +109,7 @@ func newRejectingCSP(c *qt.C, daily int) *CSP {
 		NotificationCoolDownTime: time.Hour,
 		NotificationTTL:          2 * time.Hour,
 		NotificationQueueWorkers: 1,
-		MaxDailyChallengeSends:   daily,
+		MaxDailyChallengeSends:   ceiling,
 		RootKey:                  *testRootKey,
 		SyncDelivery:             true,
 	})
@@ -133,7 +134,7 @@ func waitSettled(c *qt.C, csp *CSP) {
 }
 
 // TestChallengeSendRollback checks that a send no provider was called for gives back its claim on
-// the destination, its resend and its daily-cap unit, while one a provider failed keeps them, as
+// the destination, its resend and its send in the backoff, while one a provider failed keeps them, as
 // it may have been delivered (AC2).
 func TestChallengeSendRollback(t *testing.T) {
 	c := qt.New(t)
@@ -147,7 +148,7 @@ func TestChallengeSendRollback(t *testing.T) {
 		settled := func() bool {
 			data, err := csp.Storage.CSPAuth(first)
 			c.Assert(err, qt.IsNil)
-			return len(data.Sends) == 0 && data.Resends == 0 && dailySendsLeft(c, csp, 1)
+			return len(data.Sends) == 0 && data.Resends == 0 && backoffSends(c, csp) == 0
 		}
 		eventually(c, settled)
 
@@ -169,7 +170,7 @@ func TestChallengeSendRollback(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		_, ok := data.Sends[DestinationKey(notifications.EmailChallenge, email)]
 		c.Assert(ok, qt.IsTrue)
-		c.Assert(dailySendsLeft(c, csp, 1), qt.IsFalse)
+		c.Assert(backoffSends(c, csp), qt.Equals, 1)
 	})
 
 	c.Run("resend the provider fails keeps its resend", func(c *qt.C) {
@@ -183,7 +184,7 @@ func TestChallengeSendRollback(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(data.Resends, qt.Equals, 1)
 		c.Assert(data.Sends, qt.HasLen, 2)
-		c.Assert(dailySendsLeft(c, csp, 2), qt.IsFalse)
+		c.Assert(backoffSends(c, csp), qt.Equals, 2)
 	})
 
 	c.Run("resend whose message cannot be built", func(c *qt.C) {
@@ -200,8 +201,8 @@ func TestChallengeSendRollback(t *testing.T) {
 		c.Assert(data.Sends, qt.HasLen, 1)
 		_, ok := data.Sends[DestinationKey("bogus", email)]
 		c.Assert(ok, qt.IsFalse)
-		// one of the two daily sends is left
-		c.Assert(dailySendsLeft(c, csp, 2), qt.IsTrue)
+		// only the first send is held
+		c.Assert(backoffSends(c, csp), qt.Equals, 1)
 	})
 }
 
@@ -451,9 +452,9 @@ func TestChallengeUnsentDestination(t *testing.T) {
 		c.Assert(csp.VerifyAuthToken(second, code), qt.IsNil)
 	})
 
-	c.Run("daily cap spent", func(c *qt.C) {
+	c.Run("send ceiling reached", func(c *qt.C) {
 		csp := newChallengeCSP(c, time.Hour, testMailService, 1)
-		const email = "unsent-daily@example.com"
+		const email = "unsent-ceiling@example.com"
 		first, err := stepZero(csp, email, notifications.EmailChallenge)
 		c.Assert(err, qt.IsNil)
 		_ = fetchOTPCodeFromEmail(c, email)
@@ -467,7 +468,7 @@ func TestChallengeUnsentDestination(t *testing.T) {
 		c.Assert(data.Tokens, qt.HasLen, 1)
 		c.Assert(data.Sends, qt.HasLen, 1)
 
-		// past the cooldown the new code is refused by the cap itself
+		// past the cooldown the new code is refused by the ceiling itself
 		csp.notificationCoolDownTime = time.Millisecond
 		time.Sleep(10 * time.Millisecond)
 		c.Assert(csp.ChallengeSendRefusal(testUserID, testAnchorID, smsDest), qt.ErrorIs, errors.ErrVerificationMaxAttempts)
@@ -526,6 +527,35 @@ func TestClaimSendRereadsThroughRequestingToken(t *testing.T) {
 		_, err = csp.claimSend(challenge, second, dest)
 		c.Assert(err, qt.ErrorIs, errors.ErrUserAlreadyVerified)
 	})
+}
+
+// TestReuseAfterConcurrentSendToDestination checks that a step 0 whose read of the code predates a
+// concurrent send to the same destination returns its token instead of creating a second code.
+func TestReuseAfterConcurrentSendToDestination(t *testing.T) {
+	c := qt.New(t)
+	const first, second = "race-first@example.com", "race-second@example.com"
+	csp := newChallengeCSP(c, time.Hour, testMailService, 0)
+	_, err := stepZero(csp, first, notifications.EmailChallenge)
+	c.Assert(err, qt.IsNil)
+	stale, err := csp.Storage.LastCSPAuth(testUserID, testAnchorID)
+	c.Assert(err, qt.IsNil)
+	// the concurrent request that wins: it sends the code to the second destination
+	_, err = stepZero(csp, second, notifications.EmailChallenge)
+	c.Assert(err, qt.IsNil)
+	c.Assert(backoffSends(c, csp), qt.Equals, 2)
+
+	token, err := csp.reuseChallenge(stale, challengeDelivery{
+		to:    second,
+		ctype: notifications.EmailChallenge,
+		lang:  apicommon.DefaultLang,
+		org:   notifications.OrganizationInfo{Address: testAddress.Address(), Name: testOrgName, Logo: testOrgLogo},
+	})
+	c.Assert(err, qt.IsNil)
+	c.Assert(token, qt.Not(qt.IsNil))
+	last, err := csp.Storage.LastCSPAuth(testUserID, testAnchorID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(last.ID, qt.DeepEquals, stale.ID)
+	c.Assert(backoffSends(c, csp), qt.Equals, 2)
 }
 
 // TestChallengeAboutToExpireIsNotReused checks that a code with less than one cooldown left is not
