@@ -124,6 +124,10 @@ Component packages (each is a focused service composed in `main.go`):
   wires it from the optional `VOCDONI_BACKUPSMTP*` vars to fail over from the primary SMTP relay to a
   backup that shares the same sender identity. The CSP drains email/SMS through
   `csp/notifications.Queue`: a concurrent worker pool (default 16) with a per-provider circuit breaker.
+  `SMSTestPrefixService` (env `VOCDONI_SMSTESTPREFIXES`) is a dev/staging-only wrapper: numbers
+  matching a configured prefix get a fixed OTP (last 6 digits of the number, e.g. `+442079460123` →
+  `"460123"`) without calling Twilio; e2e specs and manual QA use it to pass SMS 2FA. Refused at
+  startup in production. Example prefixes are in `example.env`.
 - **`statussync/`** — enqueue-driven worker reconciling a published question's stored on-chain status
   with the Vochain (no timer sweep). Fed by two triggers: a status change via the API (confirm the tx
   landed) and a read of a process/question (catch direct on-chain changes). Wired in

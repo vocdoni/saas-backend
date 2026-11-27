@@ -91,6 +91,9 @@ type Config struct {
 	NotificationBreakerCooldown    time.Duration
 	SMSService                     saasNotifications.NotificationService
 	MailService                    saasNotifications.NotificationService
+	// SMSTestPrefixes is a list of E.164 number prefixes whose OTP code is derived from the number
+	// itself (last 6 digits) without calling the real SMS provider. Refused in production.
+	SMSTestPrefixes saasNotifications.SMSTestPrefixes
 	// SyncDelivery makes AuthToken and ResendChallenge block until the
 	// challenge notification has actually been delivered, instead of returning as
 	// soon as it is enqueued. It exists to make tests deterministic; leave false
@@ -126,6 +129,10 @@ type CSP struct {
 	blindCSPDisabled         atomic.Bool
 	certGatewayKeys          atomic.Pointer[CertGatewayKeys]
 	voterRefKey              []byte
+	// smsService and mailService are retained to detect unconfigured channels at request time.
+	smsService      saasNotifications.NotificationService
+	mailService     saasNotifications.NotificationService
+	smsTestPrefixes saasNotifications.SMSTestPrefixes
 }
 
 // CertGatewayKeys returns the configured certificate gateway public keys; empty when certificate
@@ -242,6 +249,9 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 		maxHourlyAuthFailures:    maxHourlyAuthFailures,
 		notifySync:               config.SyncDelivery,
 		voterRefKey:              voterRefKey(config.VoterRefSecret),
+		smsService:               config.SMSService,
+		mailService:              config.MailService,
+		smsTestPrefixes:          config.SMSTestPrefixes,
 	}
 	c.blindCSPDisabled.Store(config.DisableBlindCSP)
 	c.SetCertGatewayKeys(config.CertGatewayKeys)

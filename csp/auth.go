@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -16,6 +17,10 @@ import (
 	"github.com/xlzd/gotp"
 	"go.vocdoni.io/dvote/log"
 )
+
+// fixedSecretPrefix marks a stored secret as a fixed test-number OTP whose code is the suffix.
+// A colon cannot appear in a gotp base32 secret (alphabet: A-Z, 2-7), so there is no collision.
+const fixedSecretPrefix = "fixed:"
 
 // AuthToken method generates a new authentication token for a user,
 // anchored to a voting process. It generates a new token, secret and code from the
@@ -38,6 +43,14 @@ func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 		return c.createAuthOnlyToken(anchorID, uID)
 	}
 
+	// refuse before spending cooldown/cap if the requested challenge type has no delivery service
+	if ctype == notifications.SMSChallenge && c.smsService == nil {
+		return nil, errors.ErrNotSupported.Withf("SMS delivery is not configured")
+	}
+	if ctype == notifications.EmailChallenge && c.mailService == nil {
+		return nil, errors.ErrNotSupported.Withf("email delivery is not configured")
+	}
+
 	if err := c.challengeCooldown(uID, anchorID); err != nil {
 		return nil, err
 	}
@@ -57,6 +70,13 @@ func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 	}()
 	// generate a new token, secret and code
 	token, secret, code := c.generateToken()
+	// for SMS test-prefix numbers, replace the HOTP secret/code with the number-derived fixed code
+	if ctype == notifications.SMSChallenge {
+		if fixedCode, ok := c.smsTestPrefixes.Code(to); ok {
+			secret = fixedSecretPrefix + fixedCode
+			code = fixedCode
+		}
+	}
 	// create the new token
 	if err := c.Storage.SetCSPAuth(token, uID, anchorID, secret); err != nil {
 		log.Warnw("error setting new token",
@@ -184,6 +204,14 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 	}
 	if to == "" || ctype == "" {
 		return errors.ErrInvalidData.Withf("missing challenge destination or type")
+	}
+
+	// refuse before any resource is spent if the channel has no delivery service
+	if ctype == notifications.SMSChallenge && c.smsService == nil {
+		return errors.ErrNotSupported.Withf("SMS delivery is not configured")
+	}
+	if ctype == notifications.EmailChallenge && c.mailService == nil {
+		return errors.ErrNotSupported.Withf("email delivery is not configured")
 	}
 
 	// get the user data from the token
@@ -483,14 +511,24 @@ func (*CSP) generateToken() (bToken internal.HexBytes, secret, code string) {
 }
 
 // regenerateTokenCode recomputes the OTP code for a stored secret (used for resend).
+// For fixed test-number secrets (prefixed with fixedSecretPrefix) the code is the suffix.
 func (*CSP) regenerateTokenCode(secret string) (string, error) {
+	if code, ok := strings.CutPrefix(secret, fixedSecretPrefix); ok {
+		return code, nil
+	}
 	return gotp.NewDefaultHOTP(secret).At(0), nil
 }
 
-// verifySolution checks whether solution matches the HOTP code for secret. The
-// comparison is constant-time to avoid leaking the code through timing.
+// verifySolution checks whether solution matches the HOTP code for secret. The comparison is
+// constant-time to avoid leaking the code through timing. Fixed test-number secrets (prefixed with
+// fixedSecretPrefix) are verified against the suffix directly.
 func (*CSP) verifySolution(secret, solution string) bool {
-	code := gotp.NewDefaultHOTP(secret).At(0)
+	var code string
+	if fixed, ok := strings.CutPrefix(secret, fixedSecretPrefix); ok {
+		code = fixed
+	} else {
+		code = gotp.NewDefaultHOTP(secret).At(0)
+	}
 	return subtle.ConstantTimeCompare([]byte(code), []byte(solution)) == 1
 }
 

@@ -5621,8 +5621,8 @@ paths:
           schema:
             $ref: '#/definitions/handlers.AuthResponse'
         "400":
-          description: Invalid input data, attempt or send limit (40017), or anonymous
-            voting unavailable
+          description: Bad input, send limit (40017), no anonymous voting, or no SMS/email
+            provider (40025)
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -5677,8 +5677,8 @@ paths:
           schema:
             $ref: '#/definitions/handlers.AuthResponse'
         "400":
-          description: Malformed body, missing token, invalid contact, verified token,
-            or resend limit (40017)
+          description: Bad body/token/contact, verified token, limit (40017), or no
+            SMS/email provider (40025)
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
