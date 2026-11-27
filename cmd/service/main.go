@@ -17,6 +17,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
@@ -74,6 +75,8 @@ func main() {
 	flag.String("smtpPassword", "", "SMTP password")
 	flag.String("emailFromAddress", "", "Email service from address")
 	flag.String("emailFromName", "Vocdoni", "Email service from name")
+	flag.String("mailAccentColor", mailtemplates.DefaultAccent, "accent colour of the emails (#rrggbb): buttons and links")
+	flag.String("mailAssetsURL", "", "base URL of the logo images the emails link to (default {serverURL}/mail/assets)")
 	// Optional backup SMTP relay used for email failover. It shares the same
 	// sender identity (emailFromAddress/emailFromName); only the relay differs.
 	flag.String("backupSmtpServer", "", "Backup SMTP server (optional; enables email failover)")
@@ -246,6 +249,18 @@ func main() {
 		VoterRefSecret:                 secret,
 	}
 
+	// load and check every email template and language before any service can send one (email
+	// or the OTP SMS, which renders the same templates): a broken template must stop the start-up
+	mailBrand, err := mailtemplates.NewBrand(viper.GetString("mailAccentColor"), server, viper.GetString("mailAssetsURL"))
+	if err != nil {
+		log.Fatalf("invalid mail configuration: %v", err)
+	}
+	if err := mailtemplates.Load(mailBrand); err != nil {
+		log.Fatalf("could not load the email templates: %v", err)
+	}
+	log.Infow("email templates loaded", "templates", len(mailtemplates.All), "languages", len(apicommon.SupportedLangs),
+		"accent", mailBrand.Accent, "assets", mailBrand.AssetsURL)
+
 	// overwrite the email notifications service with the SMTP service if the
 	// required parameters are set and include it in the API configuration
 	if smtpServer != "" {
@@ -285,12 +300,6 @@ func main() {
 				"backup port", backupSMTPPort)
 		}
 		cspConf.MailService = apiConf.MailService
-		// load email templates
-		if err := mailtemplates.Load(); err != nil {
-			log.Fatalf("could not load email templates: %v", err)
-		}
-		log.Infow("email templates loaded",
-			"templates", len(mailtemplates.Available()))
 	} else if backupSMTPServer != "" {
 		// guard against a confusing misconfiguration: a backup relay is useless
 		// without a primary, and the primary block above was skipped.

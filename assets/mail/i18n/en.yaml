@@ -1,0 +1,163 @@
+# English: the source of every other locale. Translators: keep every key, keep each
+# {{.Field}} exactly as written, mark emphasis with *text*, write a literal asterisk as \\*,
+# never write HTML. Strings are double-quoted YAML.
+
+shared:
+  button_fallback: "If the button doesn't work, copy and paste this link into your browser:"
+  code_expires: "Expires in {{.Expiry}}"
+  footer_tagline: "Vocdoni, secure and verifiable digital voting"
+  footer_help: "Need help? Write to"
+
+duration:
+  minute:
+    one: "1 minute"
+    other: "{{.N}} minutes"
+  hour:
+    one: "1 hour"
+    other: "{{.N}} hours"
+  day:
+    one: "1 day"
+    other: "{{.N}} days"
+
+date:
+  format: "{{.Month}} {{.Day}}, {{.Year}}"
+  months: ["January", "February", "March", "April", "May", "June", "July", "August", "September",
+    "October", "November", "December"]
+
+number:
+  group: ","
+  min_grouping: "1"
+
+verification_account:
+  subject: "Verify your Vocdoni account"
+  preheader: "Use code {{.Code}} to activate your account. It expires in {{.Expiry}}."
+  heading: "Confirm your email address"
+  intro: "Thanks for creating a Vocdoni account. Use this code to verify your address:"
+  or_button: "Or verify your account in one click:"
+  button: "Verify account"
+  ignore: "If you didn't create a Vocdoni account, you can safely ignore this email."
+  footer_why: "You're receiving this email because someone registered this address on Vocdoni."
+  plain_code: "Your Vocdoni verification code is: {{.Code}}"
+  plain_link: "Or verify your account with this link:"
+
+forgot_password:
+  subject: "Reset your Vocdoni password"
+  preheader: "Your password reset code expires in {{.Expiry}}."
+  heading: "Reset your password"
+  intro: "We received a request to reset the password of the Vocdoni account linked to *{{.Email}}*. Use this code:"
+  or_button: "Or reset it right here:"
+  button: "Reset password"
+  ignore: "If you didn't ask for this, you can ignore this email: your current password will keep working."
+  footer_why: "You're receiving this email because a password reset was requested for this address."
+  plain_code: "Your Vocdoni password reset code is: {{.Code}}"
+  plain_link: "Or reset it with this link:"
+
+password_setup:
+  subject: "Add a password to your Vocdoni account"
+  preheader: "Confirm it with code {{.Code}}. It expires in {{.Expiry}}."
+  heading: "Add a password"
+  intro: "You asked to add a password to your Vocdoni account, where you now sign in with an external provider. Confirm it with this code:"
+  or_button: "Or set it right here:"
+  button: "Set password"
+  ignore: "If you didn't ask for this, you can ignore this email: no password will be created and you'll keep signing in as usual."
+  footer_why: "You're receiving this email because someone asked to add a password to the account of this address."
+  plain_code: "Your Vocdoni password setup code is: {{.Code}}"
+  plain_link: "Or set it with this link:"
+
+verify_email_change:
+  subject: "Confirm your new email address"
+  preheader: "Confirm the change with code {{.Code}}. It expires in {{.Expiry}}."
+  heading: "Confirm your new address"
+  intro: "You asked for your Vocdoni account to use this address (*{{.Email}}*). Confirm it with this code:"
+  or_button: "Or confirm it in one click:"
+  button: "Confirm address"
+  ignore: "If this wasn't you, you can ignore this email: your account will keep its current address."
+  footer_why: "You're receiving this email because someone entered this address as the new email of a Vocdoni account."
+  plain_code: "Your code to confirm your new email address is: {{.Code}}"
+  plain_link: "Or confirm it with this link:"
+
+invite_admin:
+  subject: "You've been invited to manage {{.Organization}}"
+  subject_no_org: "You've been invited to manage an organization on Vocdoni App"
+  preheader: "Accept the invitation to join the team. It expires in {{.Expiry}}."
+  heading: "You have an invitation"
+  intro: "You've been invited to join the admin team of *{{.Organization}}* on Vocdoni App. You'll be able to manage members, voting processes and results."
+  intro_no_org: "You've been invited to join the admin team of an organization on Vocdoni App. You'll be able to manage members, voting processes and results."
+  button: "Accept invitation"
+  expires_note: "The invitation expires in {{.Expiry}}. If you weren't expecting it, you can ignore this email."
+  footer_why: "You're receiving this email because an organization on Vocdoni App invited this address."
+  plain_link: "Accept the invitation with this link:"
+
+members_import_done:
+  subject_done: "Members import completed at {{.Organization}}"
+  subject_done_no_org: "Members import completed"
+  subject_issues:
+    one: "Members import completed with 1 error at {{.Organization}}"
+    other: "Members import completed with {{.ErrorCount}} errors at {{.Organization}}"
+  subject_issues_no_org:
+    one: "Members import completed with 1 error"
+    other: "Members import completed with {{.ErrorCount}} errors"
+  subject_failed: "No members could be imported at {{.Organization}}"
+  subject_failed_no_org: "No members could be imported"
+  preheader_done:
+    one: "1 member added."
+    other: "{{.Added}} members added."
+  preheader_issues:
+    one: "1 row needs your review."
+    other: "{{.ErrorCount}} rows need your review."
+  preheader_failed: "No member could be added. Check the file format."
+  preheader_empty: "The file had no rows, so no member was added."
+  heading_done: "Import completed"
+  heading_issues: "Import completed with errors"
+  heading_failed: "No members could be imported"
+  greeting: "Hello, {{.UserName}}."
+  greeting_no_name: "Hello."
+  intro_done: "All done! The members import at *{{.Organization}}* has finished and every row was added."
+  intro_done_no_org: "All done! The members import has finished and every row was added."
+  intro_issues: "The members import at *{{.Organization}}* has finished, but some rows could not be imported."
+  intro_issues_no_org: "The members import has finished, but some rows could not be imported."
+  intro_failed: "The members import at *{{.Organization}}* has finished, but no member could be added. Check that the file follows the template and try again."
+  intro_failed_no_org: "The members import has finished, but no member could be added. Check that the file follows the template and try again."
+  intro_empty: "The members import at *{{.Organization}}* has finished, but the file had no rows, so no member was added."
+  intro_empty_no_org: "The members import has finished, but the file had no rows, so no member was added."
+  label_processed: "Members processed"
+  label_added: "Added"
+  label_errors: "Errors"
+  label_completed: "Finished"
+  issues_title: "Rows to review"
+  issues_title_first: "First rows to review"
+  more_issues:
+    one: "and 1 more error"
+    other: "and {{.MoreIssues}} more errors"
+  fix_hint: "Fix these rows in the file and import them again; the rest are already in the member base."
+  button: "Review the member base"
+  footer_why: "You're receiving this email because you manage this organization on Vocdoni App."
+
+support:
+  subject: "New ticket · {{.Type}} · {{.Title}}"
+  preheader: "From {{.Email}} ({{.Organization}})."
+  heading: "New support request"
+  intro: "A ticket was opened from Vocdoni App. The person who opened it is in copy and will get the replies in this thread."
+  label_title: "Title"
+  label_type: "Type"
+  label_user: "User"
+  label_org: "Organization"
+  label_description: "Description"
+  truncated: "Description cut at {{.DescriptionLimit}} characters; the full text is on the ticket."
+  reassure: "If you opened this request, there's nothing else to do: we'll reply in this same thread as soon as we can."
+  footer_why: "This ticket was created from the Vocdoni App support form."
+
+verification_code_otp:
+  subject: "Your code to vote at {{.Organization}}"
+  preheader: "Verification code {{.Code}}. It expires in {{.ExpiryTime}}."
+  heading: "Your code to vote"
+  intro: "*{{.Organization}}* sent you this code to verify your identity before voting:"
+  expires: "Expires in {{.ExpiryTime}}"
+  enter: "Enter it on the voting page to continue."
+  ignore: "If you weren't expecting this code, you can ignore this message: nobody can vote on your behalf without it."
+  footer_why: "You're receiving this message because {{.Organization}} uses this address to verify your identity before voting."
+  footer_secured: "Voting secured by Vocdoni"
+  # also the SMS: one line, at most 64 characters rendered with a 6-digit code and "15 minutes"
+  # (70 minus the "[STG] " label, one UCS-2 segment); it names no organization; no ? ( ) [ ] + * | ^ $
+  # (tests read it as a regular expression)
+  sms: "Code to vote: {{.Code}}. Expires in {{.ExpiryTime}}."

@@ -19,6 +19,7 @@ import (
 // These regexes are used to extract verification codes from emails
 var (
 	verificationCodeRgx *regexp.Regexp
+	emailChangeCodeRgx  *regexp.Regexp
 	verificationLinkRgx *regexp.Regexp
 	passwordResetRgx    *regexp.Regexp
 	passwordSetupRgx    *regexp.Regexp
@@ -28,16 +29,13 @@ func init() {
 	// create a regex to find the verification code in the email
 	codeRgx := fmt.Sprintf(`(.{%d})`, apicommon.VerificationCodeLength*2)
 	// load the email templates
-	if err := mailtemplates.Load(); err != nil {
+	if err := mailtemplates.Load(mailtemplates.DefaultBrand()); err != nil {
 		panic(err)
 	}
 	// wrap the mail template execution to force plain body and set the regex
 	// needle as the verification code
 	testTemplateExec := func(mt mailtemplates.LocalizedTemplate) (*notifications.Notification, error) {
-		n, err := mt.ExecTemplate(struct {
-			Code string
-			Link string
-		}{codeRgx, ""})
+		n, err := mt.ExecTemplate(mailtemplates.CodeData{Code: codeRgx, Expiry: time.Minute})
 		if err != nil {
 			return nil, err
 		}
@@ -54,6 +52,12 @@ func init() {
 	// compile the regex
 	verificationCodeRgx = regexp.MustCompile(strings.Split(verifyNotification.PlainBody, "\n")[0])
 	verificationLinkRgx = regexp.MustCompile(`: (https?://\S+)`)
+	// compose notification with the email-change code regex needle (different first line)
+	emailChangeNotification, err := testTemplateExec(mailtemplates.VerifyEmailChangeNotification.Localized("en"))
+	if err != nil {
+		panic(err)
+	}
+	emailChangeCodeRgx = regexp.MustCompile(strings.Split(emailChangeNotification.PlainBody, "\n")[0])
 	// compose notification with the password reset code regex needle
 	passwordResetNotification, err := testTemplateExec(mailtemplates.PasswordResetNotification.Localized("en"))
 	if err != nil {

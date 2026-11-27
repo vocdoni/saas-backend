@@ -3,9 +3,13 @@ package testutil
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
+	"strings"
 
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
@@ -80,7 +84,8 @@ func (sm *SMTP) FindEmail(ctx context.Context, to string) (string, error) {
 		Items []struct {
 			ID      string `json:"ID"`
 			Content struct {
-				Body string `json:"Body"`
+				Headers map[string][]string `json:"Headers"`
+				Body    string              `json:"Body"`
 			} `json:"Content"`
 		} `json:"items"`
 	}
@@ -92,7 +97,45 @@ func (sm *SMTP) FindEmail(ctx context.Context, to string) (string, error) {
 		return "", io.EOF
 	}
 	match := mailResults.Items[0]
-	return match.Content.Body, sm.deleteMessage(ctx, match.ID)
+	decoded, err := DecodeMessageBody(match.Content.Headers["Content-Type"], match.Content.Body)
+	if err != nil {
+		return "", fmt.Errorf("could not decode message %s: %w", match.ID, err)
+	}
+	return decoded, sm.deleteMessage(ctx, match.ID)
+}
+
+// DecodeMessageBody returns the decoded text of a message body: for a multipart message, every
+// text part (quoted-printable decoded by mime/multipart) in order, joined by a blank line; for a
+// single-part message, the body as is. Line breaks are normalized to "\n" so tests can match the
+// rendered UTF-8 text.
+func DecodeMessageBody(contentType []string, body string) (string, error) {
+	if len(contentType) == 0 {
+		return strings.ReplaceAll(body, "\r\n", "\n"), nil
+	}
+	mediaType, params, err := mime.ParseMediaType(contentType[0])
+	if err != nil {
+		return "", fmt.Errorf("could not parse content type: %w", err)
+	}
+	if !strings.HasPrefix(mediaType, "multipart/") {
+		return strings.ReplaceAll(body, "\r\n", "\n"), nil
+	}
+	reader := multipart.NewReader(strings.NewReader(body), params["boundary"])
+	var parts []string
+	for {
+		part, err := reader.NextPart() // NextPart decodes quoted-printable transparently
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return "", fmt.Errorf("could not read part: %w", err)
+		}
+		content, err := io.ReadAll(part)
+		if err != nil {
+			return "", fmt.Errorf("could not read part content: %w", err)
+		}
+		parts = append(parts, strings.ReplaceAll(string(content), "\r\n", "\n"))
+	}
+	return strings.Join(parts, "\n\n"), nil
 }
 
 // deleteMessage removes a single message from the test inbox by its ID. A blank

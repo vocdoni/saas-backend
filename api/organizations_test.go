@@ -302,7 +302,7 @@ func TestOrganizationCreateTicketHandler(t *testing.T) {
 
 	// Check that cc'ed email arrives correctly to the mailbox
 	mailBody := waitForEmail(t, apicommon.SupportEmail)
-	c.Assert(mailBody, qt.Matches, regexp.MustCompile(`(?i)\s(You have a new support request)\s`))
+	c.Assert(mailBody, qt.Matches, regexp.MustCompile(`New support request`))
 
 	// Test without authentication
 	_, code = testRequest(t, http.MethodPost, "", ticketReq, "organizations", orgAddress.String(), "ticket")

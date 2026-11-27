@@ -1264,14 +1264,14 @@ func (c *CSPHandlers) orgMember(orgAddress common.Address, auth *db.CSPAuth) (*d
 	return c.mainDB.OrgMember(orgAddress, auth.UserID.String())
 }
 
-// orgNameAndLogo returns the organization display name and logo, falling back to defaults.
+// orgNameAndLogo returns the organization display name, DefaultOrgName when it has none, and its
+// logo URL, empty when it has none (the OTP email then shows a monogram; the mail templates show
+// only logos kept in this service's storage).
 func orgNameAndLogo(org *db.Organization) (name, logo string) {
-	name, logo = DefaultOrgName, DefaultOrgLogo
+	name = DefaultOrgName
 	if n := org.DisplayName(); n != "" {
 		name = n
-		if l := org.LogoURL(); l != "" {
-			logo = l
-		}
+		logo = org.LogoURL()
 	}
 	return name, logo
 }

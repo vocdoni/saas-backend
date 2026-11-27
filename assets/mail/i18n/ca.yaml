@@ -1,0 +1,159 @@
+# Català: còpia final de les maquetes aprovades (DESIGN.md), adaptada als casos sense
+# organització, sense nom i als plurals.
+
+shared:
+  button_fallback: "Si el botó no funciona, copia i enganxa aquest enllaç al navegador:"
+  code_expires: "Caduca en {{.Expiry}}"
+  footer_tagline: "Vocdoni, vot digital segur i verificable"
+  footer_help: "Necessites ajuda? Escriu a"
+
+duration:
+  minute:
+    one: "1 minut"
+    other: "{{.N}} minuts"
+  hour:
+    one: "1 hora"
+    other: "{{.N}} hores"
+  day:
+    one: "1 dia"
+    other: "{{.N}} dies"
+
+date:
+  format: "{{.Day}} {{.Month}} de {{.Year}}"
+  months: ["de gener", "de febrer", "de març", "d’abril", "de maig", "de juny", "de juliol", "d’agost",
+    "de setembre", "d’octubre", "de novembre", "de desembre"]
+
+number:
+  group: "."
+  min_grouping: "1"
+
+verification_account:
+  subject: "Verifica el teu compte de Vocdoni"
+  preheader: "Fes servir el codi {{.Code}} per activar el compte. Caduca en {{.Expiry}}."
+  heading: "Confirma la teva adreça de correu"
+  intro: "Gràcies per crear un compte a Vocdoni. Fes servir aquest codi per verificar la teva adreça:"
+  or_button: "O bé verifica el compte amb un sol clic:"
+  button: "Verifica el compte"
+  ignore: "Si no has creat cap compte a Vocdoni, pots ignorar aquest correu sense fer res."
+  footer_why: "Reps aquest correu perquè algú ha registrat aquesta adreça a Vocdoni."
+  plain_code: "El teu codi de verificació de Vocdoni és: {{.Code}}"
+  plain_link: "O bé verifica el compte amb aquest enllaç:"
+
+forgot_password:
+  subject: "Restableix la contrasenya de Vocdoni"
+  preheader: "El teu codi per restablir la contrasenya caduca en {{.Expiry}}."
+  heading: "Restableix la contrasenya"
+  intro: "Hem rebut una sol·licitud per restablir la contrasenya del compte de Vocdoni associat a *{{.Email}}*. Fes servir aquest codi:"
+  or_button: "O restableix-la directament des d’aquí:"
+  button: "Restableix la contrasenya"
+  ignore: "Si no ho has demanat tu, pots ignorar aquest correu: la contrasenya actual continuarà funcionant."
+  footer_why: "Reps aquest correu perquè s’ha demanat un restabliment de contrasenya per a aquesta adreça."
+  plain_code: "El teu codi per restablir la contrasenya de Vocdoni és: {{.Code}}"
+  plain_link: "O restableix-la amb aquest enllaç:"
+
+password_setup:
+  subject: "Afegeix una contrasenya al teu compte de Vocdoni"
+  preheader: "Confirma-ho amb el codi {{.Code}}. Caduca en {{.Expiry}}."
+  heading: "Afegeix una contrasenya"
+  intro: "Has demanat afegir una contrasenya al teu compte de Vocdoni, on ara inicies sessió amb un proveïdor extern. Confirma-ho amb aquest codi:"
+  or_button: "O estableix-la directament des d’aquí:"
+  button: "Estableix la contrasenya"
+  ignore: "Si no ho has demanat tu, pots ignorar aquest correu: no es crearà cap contrasenya i continuaràs iniciant sessió com sempre."
+  footer_why: "Reps aquest correu perquè s’ha demanat afegir una contrasenya al compte d’aquesta adreça."
+  plain_code: "El teu codi per afegir una contrasenya a Vocdoni és: {{.Code}}"
+  plain_link: "O estableix-la amb aquest enllaç:"
+
+verify_email_change:
+  subject: "Confirma la teva nova adreça de correu"
+  preheader: "Confirma el canvi amb el codi {{.Code}}. Caduca en {{.Expiry}}."
+  heading: "Confirma la nova adreça"
+  intro: "Has demanat que el teu compte de Vocdoni passi a fer servir aquesta adreça (*{{.Email}}*). Confirma-la amb aquest codi:"
+  or_button: "O confirma-la amb un sol clic:"
+  button: "Confirma l’adreça"
+  ignore: "Si no has estat tu, pots ignorar aquest correu: el compte continuarà amb l’adreça de sempre."
+  footer_why: "Reps aquest correu perquè algú ha indicat aquesta adreça com a nou correu d’un compte de Vocdoni."
+  plain_code: "El teu codi per confirmar la nova adreça de correu és: {{.Code}}"
+  plain_link: "O confirma-la amb aquest enllaç:"
+
+invite_admin:
+  subject: "T’han convidat a administrar {{.Organization}}"
+  subject_no_org: "T’han convidat a administrar una organització a la Vocdoni App"
+  preheader: "Accepta la invitació per unir-te a l’equip. Caduca en {{.Expiry}}."
+  heading: "Tens una invitació"
+  intro: "T’han convidat a formar part de l’equip d’administració de l’organització *{{.Organization}}* a la Vocdoni App. Hi podràs gestionar els membres, els processos de votació i els resultats."
+  intro_no_org: "T’han convidat a formar part de l’equip d’administració d’una organització a la Vocdoni App. Hi podràs gestionar els membres, els processos de votació i els resultats."
+  button: "Accepta la invitació"
+  expires_note: "La invitació caduca en {{.Expiry}}. Si no l’esperaves, pots ignorar aquest correu."
+  footer_why: "Reps aquest correu perquè una organització de la Vocdoni App ha convidat aquesta adreça."
+  plain_link: "Accepta la invitació amb aquest enllaç:"
+
+members_import_done:
+  subject_done: "Importació de membres completada a {{.Organization}}"
+  subject_done_no_org: "Importació de membres completada"
+  subject_issues:
+    one: "Importació completada amb 1 error a {{.Organization}}"
+    other: "Importació completada amb {{.ErrorCount}} errors a {{.Organization}}"
+  subject_issues_no_org:
+    one: "Importació completada amb 1 error"
+    other: "Importació completada amb {{.ErrorCount}} errors"
+  subject_failed: "La importació de membres no s’ha pogut completar a {{.Organization}}"
+  subject_failed_no_org: "La importació de membres no s’ha pogut completar"
+  preheader_done:
+    one: "1 membre afegit correctament."
+    other: "{{.Added}} membres afegits correctament."
+  preheader_issues:
+    one: "1 fila per revisar."
+    other: "{{.ErrorCount}} files per revisar."
+  preheader_failed: "No s’ha pogut afegir cap registre; revisa el format del fitxer."
+  preheader_empty: "El fitxer no contenia cap fila i no s’ha afegit cap registre."
+  heading_done: "Importació completada"
+  heading_issues: "Importació completada amb errors"
+  heading_failed: "La importació no s’ha pogut completar"
+  greeting: "Hola, {{.UserName}}."
+  greeting_no_name: "Hola."
+  intro_done: "Tot ha anat bé! La importació de membres a *{{.Organization}}* ha acabat i s’han afegit tots els registres."
+  intro_done_no_org: "Tot ha anat bé! La importació de membres ha acabat i s’han afegit tots els registres."
+  intro_issues: "La importació de membres a *{{.Organization}}* ha acabat, però algunes files no s’han pogut importar."
+  intro_issues_no_org: "La importació de membres ha acabat, però algunes files no s’han pogut importar."
+  intro_failed: "La importació de membres a *{{.Organization}}* ha acabat, però no s’ha pogut afegir cap registre. Comprova que el fitxer segueixi la plantilla i torna-ho a provar."
+  intro_failed_no_org: "La importació de membres ha acabat, però no s’ha pogut afegir cap registre. Comprova que el fitxer segueixi la plantilla i torna-ho a provar."
+  intro_empty: "La importació de membres a *{{.Organization}}* ha acabat, però el fitxer no contenia cap fila i no s’ha afegit cap registre."
+  intro_empty_no_org: "La importació de membres ha acabat, però el fitxer no contenia cap fila i no s’ha afegit cap registre."
+  label_processed: "Membres processats"
+  label_added: "Afegits"
+  label_errors: "Errors"
+  label_completed: "Finalitzada"
+  issues_title: "Files que cal revisar"
+  issues_title_first: "Primeres files que cal revisar"
+  more_issues:
+    one: "i 1 error més"
+    other: "i {{.MoreIssues}} errors més"
+  fix_hint: "Corregeix aquestes files al fitxer i torna a importar-les; la resta ja són a la base de membres."
+  button: "Revisa la base de membres"
+  footer_why: "Reps aquest correu perquè administres aquesta organització a la Vocdoni App."
+
+support:
+  subject: "Nou tiquet · {{.Type}} · {{.Title}}"
+  preheader: "De {{.Email}} ({{.Organization}})."
+  heading: "Nova sol·licitud de suport"
+  intro: "S’ha obert un tiquet des de la Vocdoni App. La persona sol·licitant està en còpia i rebrà les respostes d’aquest fil."
+  label_title: "Títol"
+  label_type: "Tipus"
+  label_user: "Usuari"
+  label_org: "Organització"
+  label_description: "Descripció"
+  truncated: "Descripció retallada a {{.DescriptionLimit}} caràcters; el text complet queda al tiquet."
+  reassure: "Si has obert tu aquesta sol·licitud, no cal que facis res més: et respondrem en aquest mateix fil tan aviat com puguem."
+  footer_why: "Aquest tiquet s’ha creat des del formulari de suport de la Vocdoni App."
+
+verification_code_otp:
+  subject: "El teu codi per votar a {{.Organization}}"
+  preheader: "Codi de verificació {{.Code}}. Caduca en {{.ExpiryTime}}."
+  heading: "El teu codi per votar"
+  intro: "*{{.Organization}}* t’envia aquest codi per verificar la teva identitat abans de votar:"
+  expires: "Caduca en {{.ExpiryTime}}"
+  enter: "Introdueix-lo a la pàgina de la votació per continuar."
+  ignore: "Si no esperaves aquest codi, pots ignorar aquest missatge: ningú no pot votar en nom teu sense tenir-lo."
+  footer_why: "Reps aquest missatge perquè {{.Organization}} fa servir aquesta adreça per verificar la teva identitat abans de votar."
+  footer_secured: "Votació protegida amb la tecnologia de Vocdoni"
+  sms: "Codi per votar: {{.Code}}. Caduca en {{.ExpiryTime}}."

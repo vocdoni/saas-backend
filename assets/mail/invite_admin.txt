@@ -1,0 +1,16 @@
+{{define "subject"}}{{if .Organization}}{{.L.Subject "subject"}}{{else}}{{.L.Subject "subject_no_org"}}{{end}}{{end}}
+
+{{define "preheader"}}{{.L.Text "preheader"}}{{end}}
+
+{{define "plain"}}{{.L.Text "heading"}}
+
+{{if .Organization}}{{.L.Text "intro"}}{{else}}{{.L.Text "intro_no_org"}}{{end}}
+{{if .Link}}
+{{.L.Text "plain_link"}} {{.Link}}
+{{end}}
+{{.L.Text "expires_note"}}
+
+--
+{{.L.Text "footer_why"}}
+{{.L.Text "shared.footer_tagline"}} · {{.Brand.SiteURL}}
+{{.L.Text "shared.footer_help"}} {{.Brand.SupportEmail}}{{end}}

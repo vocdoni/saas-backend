@@ -83,7 +83,7 @@ func TestMain(m *testing.M) {
 	}); err != nil {
 		panic(err)
 	}
-	if err := mailtemplates.Load(); err != nil {
+	if err := mailtemplates.Load(mailtemplates.DefaultBrand()); err != nil {
 		panic(err)
 	}
 	m.Run()

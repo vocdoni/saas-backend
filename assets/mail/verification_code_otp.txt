@@ -1,0 +1,6 @@
+{{define "subject"}}{{.L.Subject "subject"}}{{end}}
+
+{{define "preheader"}}{{.L.Text "preheader"}}{{end}}
+
+{{/* the plain text is also the SMS: one line, at most 64 characters rendered (one UCS-2 segment, no organization name) */}}
+{{define "plain"}}{{.L.Text "sms"}}{{end}}

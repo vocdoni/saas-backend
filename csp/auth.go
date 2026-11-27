@@ -77,7 +77,7 @@ func (c *CSP) AuthToken(anchorID, uID internal.HexBytes, to string,
 		Name:    orgName,
 		Logo:    orgLogo,
 	}
-	ch, err := notifications.NewNotificationChallenge(ctype, lang, uID, anchorID, to, code, orgInfo, c.notificationTTL.String())
+	ch, err := notifications.NewNotificationChallenge(ctype, lang, uID, anchorID, to, code, orgInfo, c.notificationTTL)
 	if err != nil {
 		log.Warnw("error composing notification challenge",
 			"userID", uID,
@@ -258,7 +258,7 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 		to,
 		code,
 		orgInfo,
-		remainingTime.String(),
+		remainingTime,
 	)
 	if err != nil {
 		log.Warnw("error composing notification challenge",

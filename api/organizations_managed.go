@@ -122,7 +122,7 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrMalformedBody.Withf("invalid organization type").Write(w)
 		return
 	}
-	if !validateDefaultLang(w, req.DefaultLang) {
+	if !validateDefaultLang(w, &req.DefaultLang) {
 		return
 	}
 	if err := apicommon.ValidateMetaKeys(req.Meta); err != nil {

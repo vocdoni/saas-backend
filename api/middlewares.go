@@ -264,7 +264,8 @@ func (*API) setLang(next http.Handler) http.Handler {
 		ctx := r.Context()
 		// unsupported values are dropped rather than rejected, so a stale client
 		// falls back to the default language instead of failing
-		if lang := r.URL.Query().Get(string(apicommon.LangMetadataKey)); apicommon.IsValidLang(lang) {
+		lang := apicommon.NormalizeLang(r.URL.Query().Get(string(apicommon.LangMetadataKey)))
+		if apicommon.IsValidLang(lang) {
 			ctx = context.WithValue(ctx, apicommon.LangMetadataKey, lang)
 		}
 		next.ServeHTTP(w, r.WithContext(ctx))

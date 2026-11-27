@@ -5,11 +5,14 @@ package smtp
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"mime"
 	"mime/multipart"
+	"mime/quotedprintable"
 	"net"
 	"net/mail"
 	"net/smtp"
@@ -217,6 +220,12 @@ func (se *Email) composeBody(notification *notifications.Notification) ([]byte, 
 		fmt.Fprintf(&headers, "Cc: %s\r\n", cc.String())
 	}
 	fmt.Fprintf(&headers, "Subject: %s\r\n", encodeHeader(notification.Subject))
+	fmt.Fprintf(&headers, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
+	messageID, err := newMessageID(se.config.FromAddress)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Fprintf(&headers, "Message-ID: %s\r\n", messageID)
 	if !notification.EnableTracking {
 		fmt.Fprintf(&headers, "X-SMTPAPI: %s\r\n", disableTrackingFilter)
 	}
@@ -229,21 +238,11 @@ func (se *Email) composeBody(notification *notifications.Notification) ([]byte, 
 	if err := writer.SetBoundary(boundary); err != nil {
 		return nil, fmt.Errorf("could not set boundary: %v", err)
 	}
-	// plain text part
-	textPart, _ := writer.CreatePart(textproto.MIMEHeader{
-		"Content-Type":              {"text/plain; charset=\"UTF-8\""},
-		"Content-Transfer-Encoding": {"7bit"},
-	})
-	if _, err := textPart.Write([]byte(notification.PlainBody)); err != nil {
-		return nil, fmt.Errorf("could not write plain text part: %v", err)
+	if err := writeQuotedPrintablePart(writer, "text/plain", notification.PlainBody); err != nil {
+		return nil, fmt.Errorf("could not write plain text part: %w", err)
 	}
-	// HTML part
-	htmlPart, _ := writer.CreatePart(textproto.MIMEHeader{
-		"Content-Type":              {"text/html; charset=\"UTF-8\""},
-		"Content-Transfer-Encoding": {"7bit"},
-	})
-	if _, err := htmlPart.Write([]byte(notification.Body)); err != nil {
-		return nil, fmt.Errorf("could not write HTML part: %v", err)
+	if err := writeQuotedPrintablePart(writer, "text/html", notification.Body); err != nil {
+		return nil, fmt.Errorf("could not write HTML part: %w", err)
 	}
 	if err := writer.Close(); err != nil {
 		return nil, fmt.Errorf("could not close writer: %v", err)
@@ -253,4 +252,37 @@ func (se *Email) composeBody(notification *notifications.Notification) ([]byte, 
 	email.Write(headers.Bytes())
 	email.Write(body.Bytes())
 	return email.Bytes(), nil
+}
+
+// writeQuotedPrintablePart adds a UTF-8 part of the given media type to w, encoded as
+// quoted-printable so accented text and long lines survive 7-bit relays (RFC 2045).
+func writeQuotedPrintablePart(w *multipart.Writer, mediaType, content string) error {
+	part, err := w.CreatePart(textproto.MIMEHeader{
+		"Content-Type":              {mediaType + "; charset=\"UTF-8\""},
+		"Content-Transfer-Encoding": {"quoted-printable"},
+	})
+	if err != nil {
+		return fmt.Errorf("could not create part: %w", err)
+	}
+	qp := quotedprintable.NewWriter(part)
+	if _, err := qp.Write([]byte(content)); err != nil {
+		return fmt.Errorf("could not encode part: %w", err)
+	}
+	if err := qp.Close(); err != nil {
+		return fmt.Errorf("could not flush part: %w", err)
+	}
+	return nil
+}
+
+// newMessageID returns a unique RFC 5322 Message-ID on the sender's domain.
+func newMessageID(fromAddress string) (string, error) {
+	domain := "localhost"
+	if at := strings.LastIndex(fromAddress, "@"); at >= 0 && at < len(fromAddress)-1 {
+		domain = fromAddress[at+1:]
+	}
+	id := make([]byte, 16)
+	if _, err := rand.Read(id); err != nil {
+		return "", fmt.Errorf("could not generate message id: %w", err)
+	}
+	return fmt.Sprintf("<%s@%s>", hex.EncodeToString(id), domain), nil
 }

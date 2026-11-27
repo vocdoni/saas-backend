@@ -1,0 +1,36 @@
+{{define "header"}}{{template "header_cobrand" .}}{{end}}
+
+{{define "content"}}
+{{- if eq .State "done"}}{{template "heading" (.L.HTML "heading_done")}}
+{{- else if eq .State "issues"}}{{template "heading" (.L.HTML "heading_issues")}}
+{{- else}}{{template "heading" (.L.HTML "heading_failed")}}{{end}}
+{{$greeting := .L.HTML "greeting_no_name"}}{{if .UserName}}{{$greeting = .L.HTML "greeting"}}{{end}}
+{{- $intro := .L.HTML "intro_done_no_org"}}
+{{- if .Organization}}
+{{- if eq .State "done"}}{{$intro = .L.HTML "intro_done"}}
+{{- else if eq .State "issues"}}{{$intro = .L.HTML "intro_issues"}}
+{{- else if eq .State "failed"}}{{$intro = .L.HTML "intro_failed"}}
+{{- else}}{{$intro = .L.HTML "intro_empty"}}{{end}}
+{{- else}}
+{{- if eq .State "issues"}}{{$intro = .L.HTML "intro_issues_no_org"}}
+{{- else if eq .State "failed"}}{{$intro = .L.HTML "intro_failed_no_org"}}
+{{- else if eq .State "empty"}}{{$intro = .L.HTML "intro_empty_no_org"}}{{end}}
+{{- end}}
+{{template "para_pair" (dict "First" $greeting "Second" $intro)}}
+{{template "kv_start"}}
+{{template "kv_row" (dict "Label" (.L.HTML "label_processed") "Value" (.L.V .Total))}}
+{{template "kv_row" (dict "Label" (.L.HTML "label_added") "Value" (.L.V .Added) "Err" (and (eq .Added 0) (gt .Total 0)))}}
+{{template "kv_row" (dict "Label" (.L.HTML "label_errors") "Value" (.L.V .ErrorCount) "Err" (gt .ErrorCount 0))}}
+{{template "kv_row" (dict "Label" (.L.HTML "label_completed") "Value" (.L.V .CompletedAt))}}
+{{template "kv_end"}}
+{{if .Issues}}{{template "notice_start" true}}
+{{- if .MoreIssues}}{{template "notice_title" (dict "Text" (.L.HTML "issues_title_first") "Err" true)}}
+{{- else}}{{template "notice_title" (dict "Text" (.L.HTML "issues_title") "Err" true)}}{{end}}
+{{range .Issues}}{{template "notice_line" .}}
+{{end}}
+{{- if .MoreIssues}}{{template "notice_note" (.L.HTMLn "more_issues" .MoreIssues)}}{{end}}
+{{template "notice_end"}}{{end}}
+{{if eq .State "issues"}}{{template "para_small" (.L.HTML "fix_hint")}}{{end}}
+{{template "actions" (dict "L" .L "Label" (.L.Text "button") "URL" .Link "Brand" .Brand)}}{{end}}
+
+{{define "footer"}}{{template "footer_std" (dict "Why" (.L.HTML "footer_why") "L" .L "Brand" .Brand)}}{{end}}

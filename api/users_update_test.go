@@ -63,7 +63,7 @@ func TestUpdateUserInfo(t *testing.T) {
 
 	// The verification code is delivered to the NEW address, proving mailbox ownership.
 	mailBody := waitForEmail(t, newEmail)
-	mailCode := verificationCodeRgx.FindStringSubmatch(mailBody)
+	mailCode := emailChangeCodeRgx.FindStringSubmatch(mailBody)
 	// The mail uses the email-change template and web app page (which confirms the change from
 	// the signed-in session), not the account-verification one.
 	c.Assert(mailBody, qt.Contains, mailtemplates.VerifyEmailChangeNotification.WebAppURI+"?code=")
@@ -122,7 +122,7 @@ func TestCreatorEmailChangeKeepsSigner(t *testing.T) {
 	newEmail := fmt.Sprintf("creator-%d@test.com", internal.RandomInt(100000000000))
 	res := requestAndParse[apicommon.LoginResponse](t, http.MethodPut, token,
 		&apicommon.UserInfo{Email: newEmail, Password: testPass}, usersMeEndpoint)
-	mailCode := verificationCodeRgx.FindStringSubmatch(waitForEmail(t, newEmail))
+	mailCode := emailChangeCodeRgx.FindStringSubmatch(waitForEmail(t, newEmail))
 	c.Assert(len(mailCode) > 1, qt.IsTrue)
 	requestAndParse[apicommon.LoginResponse](t, http.MethodPost, res.Token,
 		&apicommon.UserVerification{Code: mailCode[1]}, usersMeEmailVerifyEndpoint)

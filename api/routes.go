@@ -1,5 +1,7 @@
 package api
 
+import "github.com/vocdoni/saas-backend/notifications/mailtemplates"
+
 const (
 	// ping route
 	// GET /ping to check the server status
@@ -130,6 +132,8 @@ const (
 	objectStorageUploadTypedEndpoint = "/storage"
 	// GET /storage/{origin}/{filename} to download an image from the object storage
 	objectStorageDownloadTypedEndpoint = "/storage/{objectName}"
+	// GET /mail/assets/{file} to get a Vocdoni logo the emails link to
+	mailAssetsEndpoint = mailtemplates.AssetsRoute
 
 	// POST /vote to relay an already-signed vote (public). The target process is taken
 	// from the signed vote envelope itself, so no process id appears in the path.

@@ -329,7 +329,7 @@ func TestOrganizationMembers(t *testing.T) {
 
 	// Check that the completion email was sent
 	mailBody := waitForEmail(t, user.Email)
-	c.Assert(mailBody, qt.Matches, regexp.MustCompile(`(?i)\s(has been completed)\s`),
+	c.Assert(mailBody, qt.Matches, regexp.MustCompile(`Import completed`),
 		qt.Commentf("mail content does not, got:\n%s", mailBody))
 
 	// Test 5.1: GET /jobs — basic

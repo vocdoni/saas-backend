@@ -1,0 +1,76 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="{{.L.Lang}}" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="format-detection" content="telephone=no,date=no,address=no,email=no,url=no">
+<title>{{.L.Title}}</title>
+{{msoHead}}
+<style type="text/css">
+:root { color-scheme: light dark; supported-color-schemes: light dark; }
+html, body { margin:0 !important; padding:0 !important; height:100% !important; width:100% !important; }
+#outlook a { padding:0; }
+table, td { mso-table-lspace:0pt; mso-table-rspace:0pt; }
+img { -ms-interpolation-mode:bicubic; border:0; line-height:100%; outline:none; text-decoration:none; }
+a[x-apple-data-detectors] { color:inherit !important; text-decoration:none !important; }
+.logo-dark { display:none; }
+@media only screen and (max-width:480px) {
+  .sm-px { padding-left:24px !important; padding-right:24px !important; }
+  .sm-h1 { font-size:22px !important; line-height:28px !important; }
+  .sm-code { font-size:24px !important; letter-spacing:5px !important; }
+}
+@media (prefers-color-scheme: dark) {
+  .bg-page { background-color:#0a0a0a !important; }
+  .card { background-color:#171717 !important; border-color:#262626 !important; }
+  .t1, .code { color:#ededed !important; }
+  .t2 { color:#b4b4b4 !important; }
+  .t3 { color:#999999 !important; }
+  .field { background-color:#0a0a0a !important; border-color:#707070 !important; }
+  .inset { background-color:#0a0a0a !important; border-color:#262626 !important; }
+  .notice-err { background-color:#111111 !important; border-color:#262626 !important; }
+  .kv { border-top-color:#262626 !important; }
+  .link { color:{{.Brand.AccentDark}} !important; }
+  .err { color:#f97770 !important; }
+  .tile { border-color:#262626 !important; }
+  .logo-light { display:none !important; }
+  .logo-dark { display:block !important; max-height:none !important; overflow:visible !important; }
+}
+[data-ogsb] .bg-page { background-color:#0a0a0a !important; }
+[data-ogsb] .card { background-color:#171717 !important; border-color:#262626 !important; }
+[data-ogsb] .field { background-color:#0a0a0a !important; border-color:#707070 !important; }
+[data-ogsb] .inset { background-color:#0a0a0a !important; border-color:#262626 !important; }
+[data-ogsb] .notice-err { background-color:#111111 !important; border-color:#262626 !important; }
+[data-ogsc] .t1, [data-ogsc] .code { color:#ededed !important; }
+[data-ogsc] .t2 { color:#b4b4b4 !important; }
+[data-ogsc] .t3 { color:#999999 !important; }
+[data-ogsc] .link { color:{{.Brand.AccentDark}} !important; }
+[data-ogsc] .err { color:#f97770 !important; }
+[data-ogsc] .kv { border-top-color:#262626 !important; }
+[data-ogsc] .logo-light { display:none !important; }
+[data-ogsc] .logo-dark { display:block !important; max-height:none !important; overflow:visible !important; }
+</style>
+</head>
+<body class="bg-page" style="margin:0;padding:0;word-spacing:normal;background-color:#fafafa;">
+<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">{{.L.Preheader}}{{preheaderPad}}</div>
+<div role="article" aria-roledescription="email" aria-label="{{.L.Title}}" lang="{{.L.Lang}}">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="bg-page" style="background-color:#fafafa;">
+<tr><td align="center" style="padding:0 12px;">
+{{msoIf}}<table role="presentation" width="600" cellpadding="0" cellspacing="0" align="center"><tr><td>{{msoEnd}}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+<tr>{{template "header" .}}</tr>
+<tr><td class="card sm-px" style="background-color:#ffffff;border:1px solid #e5e5e5;border-radius:12px;padding:36px 40px;word-break:break-word;">
+{{template "content" .}}
+</td></tr>
+<tr>{{template "footer" .}}</tr>
+</table>
+{{msoIf}}</td></tr></table>{{msoEnd}}
+</td></tr>
+</table>
+</div>
+</body>
+</html>
+{{end}}

@@ -1,0 +1,18 @@
+{{define "header"}}{{template "header_vocdoni" .Brand}}{{end}}
+
+{{define "content"}}{{template "heading" (.L.HTML "heading")}}
+{{template "para" (.L.HTML "intro")}}
+{{template "kv_start"}}
+{{template "kv_row" (dict "Label" (.L.HTML "label_title") "Value" .Title)}}
+{{template "kv_row" (dict "Label" (.L.HTML "label_type") "Value" .Type)}}
+{{template "kv_row" (dict "Label" (.L.HTML "label_user") "Value" .Email)}}
+{{template "kv_row" (dict "Label" (.L.HTML "label_org") "Value" .Organization)}}
+{{template "kv_end"}}
+{{template "notice_start" false}}
+{{template "notice_title" (dict "Text" (.L.HTML "label_description") "Err" false)}}
+{{template "notice_lines" (.L.Lines .Description)}}
+{{if .Truncated}}{{template "notice_note" (.L.HTML "truncated")}}{{end}}
+{{template "notice_end"}}
+{{template "muted" (dict "Text" (.L.HTML "reassure") "Top" 4)}}{{end}}
+
+{{define "footer"}}{{template "footer_std" (dict "Why" (.L.HTML "footer_why") "L" .L "Brand" .Brand)}}{{end}}

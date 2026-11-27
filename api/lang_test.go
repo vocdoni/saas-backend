@@ -148,9 +148,9 @@ func TestOrgDefaultLangNotifications(t *testing.T) {
 // behalf of the organization, so its language wins over the admin's lang param.
 func TestOrgLangInInvites(t *testing.T) {
 	inviteRegexps := map[string]*regexp.Regexp{
-		"en": regexp.MustCompile(`You have been invited`),
-		"es": regexp.MustCompile(`Has sido invitado`),
-		"ca": regexp.MustCompile(`Has estat convidat`),
+		"en": regexp.MustCompile(`You've been invited`),
+		"es": regexp.MustCompile(`Te han invitado`),
+		"ca": regexp.MustCompile(`T’han convidat`),
 	}
 
 	// set up an organization with catalan as default language
@@ -193,9 +193,9 @@ func TestOrgDefaultLangInMembersImport(t *testing.T) {
 	// the completion email to the admin must be in the org default language
 	assertContentMatches(t, waitForEmail(t, adminEmail), "ca",
 		map[string]*regexp.Regexp{
-			"en": regexp.MustCompile(`has been completed`),
-			"es": regexp.MustCompile(`se ha completado`),
-			"ca": regexp.MustCompile(`s'ha completat`),
+			"en": regexp.MustCompile(`Import completed`),
+			"es": regexp.MustCompile(`Importación completada`),
+			"ca": regexp.MustCompile(`Importació completada`),
 		})
 }
 
@@ -212,4 +212,19 @@ func assertContentMatches(t *testing.T, content, lang string, regexps map[string
 				qt.Commentf("content should not match %s when lang=%s, got:\n%s", re, lang, re.FindAllString(content, -1)))
 		}
 	}
+}
+
+// TestDefaultLangIsNormalized tests that an organization's defaultLang is stored lowercase, so the
+// mail templates find its strings whatever case the client sent.
+func TestDefaultLangIsNormalized(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "superpassword123")
+	orgAddress := testCreateOrganization(t, token)
+	requestAndAssertCode(200, t, "PUT", token, &apicommon.OrganizationInfo{DefaultLang: "PT-BR"},
+		"organizations", orgAddress.String())
+	org := requestAndParse[apicommon.OrganizationInfo](t, "GET", token, nil, "organizations", orgAddress.String())
+	c.Assert(org.DefaultLang, qt.Equals, "pt-br")
+	// an unsupported code is still refused
+	requestAndAssertCode(400, t, "PUT", token, &apicommon.OrganizationInfo{DefaultLang: "xx"},
+		"organizations", orgAddress.String())
 }
